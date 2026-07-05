@@ -86,6 +86,11 @@ check_remote_target() {
   else
     record_warn "v5-linuxcnc-command-gate init script not installed yet"
   fi
+  if remote_check 'test -x /etc/init.d/v5-ui-relay'; then
+    record_ok "board init script installed: /etc/init.d/v5-ui-relay"
+  else
+    record_warn "v5-ui-relay init script not installed yet"
+  fi
 }
 
 check_no_old_source_names() {

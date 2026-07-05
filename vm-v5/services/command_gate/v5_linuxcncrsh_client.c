@@ -306,4 +306,34 @@ V5LinuxcncrshSendStatus v5_linuxcncrsh_send_line(
 
     snprintf(
         hello,
-        sizeo
+        sizeof(hello),
+        "Hello %s %s 1.0\n",
+        v5_linuxcncrsh_password(config),
+        v5_linuxcncrsh_client_name(config));
+    snprintf(command, sizeof(command), "%s\nQuit\n", line);
+
+    if (!v5_linuxcncrsh_send_all(fd, hello) ||
+        !v5_linuxcncrsh_recv_text(fd, ack, sizeof(ack)) ||
+        !v5_linuxcncrsh_send_all(fd, command)) {
+        close(fd);
+        return V5_LINUXCNCRSH_SEND_IO_ERROR;
+    }
+
+    close(fd);
+    return V5_LINUXCNCRSH_SEND_SENT;
+#endif
+}
+
+V5LinuxcncrshSendStatus v5_linuxcncrsh_send_prepared(
+    const V5LinuxcncrshConfig *config,
+    const V5CommandPrepared *prepared,
+    const V5CommandRequest *request)
+{
+    char line[384];
+
+    if (!v5_linuxcncrsh_format_line(prepared, request, line, sizeof(line))) {
+        return V5_LINUXCNCRSH_SEND_INVALID;
+    }
+
+    return v5_linuxcncrsh_send_line(config, line);
+}

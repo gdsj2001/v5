@@ -43,6 +43,7 @@ check_remote_test "v5_linuxcncrsh_probe installed executable" 'test -x /usr/libe
 check_remote_test "v5_linuxcncrsh_golden_run installed executable" 'test -x /usr/libexec/8ax/v5_linuxcncrsh_golden_run'
 check_remote_test "state publisher init installed" 'test -x /etc/init.d/v5-state-publisher'
 check_remote_test "linuxcnc command gate init installed" 'test -x /etc/init.d/v5-linuxcnc-command-gate'
+check_remote_test "v5 ui relay init installed" 'test -x /etc/init.d/v5-ui-relay'
 check_remote_test "v5 linuxcnc ini installed" 'test -r /opt/8ax/v5/linuxcnc/ini/v5_pulse.ini'
 check_remote_test "v5 linuxcnc hal installed" 'test -r /opt/8ax/v5/linuxcnc/hal/v5_pulse.hal'
 check_remote_test "v5 deploy config installed" 'test -r /opt/8ax/v5/config/hardware_profile.json'
@@ -74,12 +75,28 @@ else
   fail_msg "runtime shm exists: $state_path"
 fi
 
-if remote '/usr/libexec/8ax/v5_lvgl_shell >/tmp/v5_lvgl_shell_verify.out 2>&1' >/dev/null 2>&1; then
+if remote '/usr/libexec/8ax/v5_lvgl_shell --once >/tmp/v5_lvgl_shell_verify.out 2>&1' >/dev/null 2>&1; then
   ok "v5_lvgl_shell starts"
   remote 'tail -n 3 /tmp/v5_lvgl_shell_verify.out 2>/dev/null || true' | sed 's/^/INFO ui shell: /'
 else
   fail_msg "v5_lvgl_shell starts"
   remote 'tail -n 20 /tmp/v5_lvgl_shell_verify.out 2>/dev/null || true' | sed 's/^/INFO ui shell: /'
+fi
+
+if remote '/etc/init.d/v5-ui-relay status' >/tmp/v5_ui_relay_status.out 2>&1; then
+  ok "v5-ui-relay init status running"
+  sed 's/^/INFO ui relay init: /' /tmp/v5_ui_relay_status.out
+else
+  fail_msg "v5-ui-relay init status running"
+  sed 's/^/INFO ui relay init: /' /tmp/v5_ui_relay_status.out
+fi
+rm -f /tmp/v5_ui_relay_status.out
+
+if remote 'wget -q -O /tmp/v5_remote_frame_probe.bin http://127.0.0.1:18080/remote/frame/full && test -s /tmp/v5_remote_frame_probe.bin' >/dev/null 2>&1; then
+  ok "v5 remote frame relay full-frame probe: 18080"
+  remote "stat -c 'remote_frame_bytes=%s' /tmp/v5_remote_frame_probe.bin" | sed 's/^/INFO /'
+else
+  fail_msg "v5 remote frame relay full-frame probe: 18080"
 fi
 
 if remote "/etc/init.d/v5-linuxcnc-command-gate status && /usr/libexec/8ax/v5_linuxcncrsh_probe --host 127.0.0.1 --port '$linuxcncrsh_port' --password EMC --timeout-ms 1000 >/tmp/v5_linuxcncrsh_probe.out 2>&1" >/dev/null 2>&1; then

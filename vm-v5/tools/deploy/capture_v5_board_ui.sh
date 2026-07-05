@@ -10,6 +10,7 @@ remote_meta="${V5_REMOTE_UI_META:-/tmp/v5_board_ui.meta}"
 local_out="${V5_UI_SCREENSHOT_OUT:-$repo_root/artifacts/board_ui/v5_board_ui_${stamp}.png}"
 local_raw="${V5_UI_RAW_OUT:-$repo_root/artifacts/board_ui/v5_board_ui_${stamp}.raw}"
 local_meta="${V5_UI_META_OUT:-$repo_root/artifacts/board_ui/v5_board_ui_${stamp}.meta}"
+local_ppm="${V5_UI_PPM_OUT:-$repo_root/artifacts/board_ui/v5_board_ui_${stamp}.ppm}"
 apply=0
 
 for arg in "$@"; do
@@ -72,13 +73,12 @@ $scp_base "$board_ssh:$remote_raw" "$local_raw"
 $scp_base "$board_ssh:$remote_meta" "$local_meta"
 test -s "$local_raw"
 test -s "$local_meta"
-python3 - "$local_raw" "$local_meta" "$local_out" <<'CONVERT_FB_PY'
+python3 - "$local_raw" "$local_meta" "$local_ppm" <<'CONVERT_FB_PY'
 import sys
 from pathlib import Path
-from PIL import Image
 raw_path = Path(sys.argv[1])
 meta_path = Path(sys.argv[2])
-out_path = Path(sys.argv[3])
+ppm_path = Path(sys.argv[3])
 meta = {}
 for line in meta_path.read_text(encoding='utf-8').splitlines():
     if '=' in line:
@@ -88,18 +88,29 @@ width = int(meta['width'])
 height = int(meta['height'])
 stride = int(meta['stride'])
 data = raw_path.read_bytes()
-rows = []
-for y in range(height):
-    row = data[y * stride:y * stride + width * 3]
-    if len(row) != width * 3:
-        raise SystemExit('short framebuffer row')
-    rows.append(row)
-packed = b''.join(rows)
-img = Image.frombytes('RGB', (width, height), packed, 'raw', 'BGR')
-out_path.parent.mkdir(parents=True, exist_ok=True)
-img.save(str(out_path))
+ppm_path.parent.mkdir(parents=True, exist_ok=True)
+with ppm_path.open('wb') as out:
+    out.write(f'P6\n{width} {height}\n255\n'.encode('ascii'))
+    for y in range(height):
+        row = data[y * stride:y * stride + width * 3]
+        if len(row) != width * 3:
+            raise SystemExit('short framebuffer row')
+        rgb = bytearray(len(row))
+        rgb[0::3] = row[2::3]
+        rgb[1::3] = row[1::3]
+        rgb[2::3] = row[0::3]
+        out.write(rgb)
 CONVERT_FB_PY
+test -s "$local_ppm"
+if command -v pnmtopng >/dev/null 2>&1; then
+  pnmtopng "$local_ppm" >"$local_out"
+elif command -v convert >/dev/null 2>&1; then
+  convert "$local_ppm" "$local_out"
+else
+  echo "missing PNG converter: install pnmtopng or ImageMagick convert" >&2
+  exit 6
+fi
 test -s "$local_out"
-rm -f "$local_raw" "$local_meta"
+rm -f "$local_raw" "$local_meta" "$local_ppm"
 printf 'captured board UI frame: %s\n' "$local_out"
 printf 'input: no touch, key, mouse, linuxcncrsh, MDI, start, or motion command was sent\n'

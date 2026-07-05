@@ -30,6 +30,7 @@ cmake-build-*/
 out/
 dist/
 artifacts/
+vm-v5/
 tmp/
 temp/
 

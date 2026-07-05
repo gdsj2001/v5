@@ -23,6 +23,8 @@ typedef struct V5ShellBootReport {
 } V5ShellBootReport;
 
 int v5_ui_shell_bootstrap(V5ShellBootReport *report, const char *project_root);
+int v5_ui_shell_bootstrap_remote(V5ShellBootReport *report, const char *project_root);
+int v5_ui_shell_refresh_once(void);
 
 #ifdef __cplusplus
 }
