@@ -1,0 +1,52 @@
+# OS/editor temporary files
+.DS_Store
+Thumbs.db
+Desktop.ini
+*~
+*.swp
+*.swo
+*.tmp
+*.temp
+*.orig
+
+# Python/runtime caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node/package caches
+node_modules/
+.npm/
+.pnpm-store/
+
+# Build and generated output directories
+build/
+build-*/
+cmake-build-*/
+out/
+dist/
+artifacts/
+tmp/
+temp/
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+
+# Vivado local/generated run output
+.Xil/
+*.jou
+*.str
+*.log
+*.wdb
+*.vcd
+
+# Local-only process/output area
+repo_ignored/
+待做工作/board_power_cycle_last.json
