@@ -23,7 +23,7 @@ remote_check() {
   if [ -z "$board_ssh" ]; then
     return 2
   fi
-  ssh -o BatchMode=yes -o ConnectTimeout=3 -p "$board_ssh_port" "$board_ssh" "$@"
+  ssh -o BatchMode=yes -o LogLevel=ERROR -o ConnectTimeout=3 -p "$board_ssh_port" "$board_ssh" "$@"
 }
 
 check_source_manifest() {
@@ -91,6 +91,11 @@ check_remote_target() {
   else
     record_warn "v5-ui-relay init script not installed yet"
   fi
+  if remote_check 'test -x /etc/init.d/v5-touch-diagnostics'; then
+    record_ok "board init script installed: /etc/init.d/v5-touch-diagnostics"
+  else
+    record_warn "v5-touch-diagnostics init script not installed yet"
+  fi
 }
 
 check_no_old_source_names() {
@@ -116,4 +121,4 @@ fi
 if [ "$warn" -ne 0 ] && [ "$strict_remote" = "1" ]; then
   exit 1
 fi
-say "precheck complete"
+say "p

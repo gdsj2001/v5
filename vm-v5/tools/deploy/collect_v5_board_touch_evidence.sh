@@ -5,8 +5,8 @@ repo_root="${V5_REPO_ROOT:-/root/Desktop/v5}"
 board_ssh="${V5_BOARD_SSH:-}"
 board_ssh_port="${V5_BOARD_SSH_PORT:-22}"
 screenshot_evidence="${V5_UI_SCREENSHOT_EVIDENCE:-}"
-remote_events="${V5_REMOTE_TOUCH_EVENTS:-/run/8ax_v3_product_ui/touch_events.jsonl}"
-remote_enable="${V5_REMOTE_TOUCH_ENABLE:-/run/8ax_v3_product_ui/enable_touch_diagnostics}"
+remote_events="${V5_REMOTE_TOUCH_EVENTS:-/run/8ax_v5_product_ui/touch_events.jsonl}"
+remote_enable="${V5_REMOTE_TOUCH_ENABLE:-/run/8ax_v5_product_ui/enable_touch_diagnostics}"
 calibration_path="${V5_TOUCH_CALIBRATION_PATH:-/opt/8ax/safe_ui/re_touch_calibration.json}"
 old_calibration_path="${V5_OLD_TOUCH_CALIBRATION_PATH:-/opt/8ax/ui/re_touch_calibration.json}"
 local_out="${V5_TOUCH_EVIDENCE_OUT:-$repo_root/artifacts/board_touch/v5_board_touch_$(date -u +%Y%m%dT%H%M%SZ).jsonl}"
@@ -60,15 +60,15 @@ if [ -z "$screenshot_evidence" ] || [ ! -s "$screenshot_evidence" ]; then
   exit 4
 fi
 
-ssh_base="ssh -o BatchMode=yes -o ConnectTimeout=5 -p $board_ssh_port"
-scp_base="scp -q -o BatchMode=yes -o ConnectTimeout=5 -P $board_ssh_port"
+ssh_base="ssh -o BatchMode=yes -o LogLevel=ERROR -o ConnectTimeout=5 -p $board_ssh_port"
+scp_base="scp -q -o BatchMode=yes -o LogLevel=ERROR -o ConnectTimeout=5 -P $board_ssh_port"
 
 if ! $ssh_base "$board_ssh" 'true' >/dev/null 2>&1; then
   echo "cannot connect to board via ssh: $board_ssh port=$board_ssh_port" >&2
   exit 5
 fi
 
-$ssh_base "$board_ssh" "CAL='$calibration_path' OLD='$old_calibration_path' EVENTS='$remote_events' ENABLE='$remote_enable' WAIT='$wait_seconds' sh -s" <<'REMOTE_TOUCH'
+$ssh_base "$board_ssh" "/etc/init.d/v5-touch-diagnostics status >/dev/null && CAL='$calibration_path' OLD='$old_calibration_path' EVENTS='$remote_events' ENABLE='$remote_enable' WAIT='$wait_seconds' sh -s" <<'REMOTE_TOUCH'
 set -eu
 test -r "$CAL"
 if command -v grep >/dev/null 2>&1; then
@@ -86,8 +86,10 @@ if [ -r "$EVENTS" ]; then
 fi
 echo "operator action required: touch the visible target with a real finger within ${WAIT}s" >&2
 sleep "$WAIT"
-test -s "$EVENTS"
-after_lines=$(wc -l < "$EVENTS" 2>/dev/null || echo 0)
+after_lines=0
+if [ -r "$EVENTS" ]; then
+  after_lines=$(wc -l < "$EVENTS" 2>/dev/null || echo 0)
+fi
 if [ "$after_lines" -le "$before_lines" ]; then
   echo "no new touch diagnostics were recorded" >&2
   exit 12
@@ -100,4 +102,4 @@ $ssh_base "$board_ssh" "tail -n 200 '$remote_events'" > "$local_out"
 test -s "$local_out"
 printf 'collected real-finger touch evidence: %s\n' "$local_out"
 printf 'screenshot evidence used: %s\n' "$screenshot_evidence"
-printf 'input: no synthetic touch, key, mouse, linuxcncrsh, MDI, or motion command was sent\n'
+printf 'input: no synthetic touch, key, mouse, linuxcncrsh,

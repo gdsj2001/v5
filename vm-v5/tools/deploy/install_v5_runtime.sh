@@ -44,6 +44,7 @@ if [ "$apply" -eq 1 ]; then
   /etc/init.d/v5-state-publisher restart
   /etc/init.d/v5-linuxcnc-command-gate restart
   /etc/init.d/v5-ui-relay restart
+  /etc/init.d/v5-touch-diagnostics restart
 else
   echo "dry-run only; pass --apply to install files and restart v5 init services"
 fi

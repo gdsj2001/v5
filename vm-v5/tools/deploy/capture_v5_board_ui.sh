@@ -41,8 +41,8 @@ if [ -z "$board_ssh" ]; then
   exit 3
 fi
 
-ssh_base="ssh -o BatchMode=yes -o ConnectTimeout=5 -p $board_ssh_port"
-scp_base="scp -q -o BatchMode=yes -o ConnectTimeout=5 -P $board_ssh_port"
+ssh_base="ssh -o BatchMode=yes -o LogLevel=ERROR -o ConnectTimeout=5 -p $board_ssh_port"
+scp_base="scp -q -o BatchMode=yes -o LogLevel=ERROR -o ConnectTimeout=5 -P $board_ssh_port"
 
 if ! $ssh_base "$board_ssh" 'true' >/dev/null 2>&1; then
   echo "cannot connect to board via ssh: $board_ssh port=$board_ssh_port" >&2
@@ -63,7 +63,7 @@ test -n "$height"
 test -n "$stride"
 rm -f "$RAW" "$META"
 dd if=/dev/fb0 of="$RAW" bs="$stride" count="$height" 2>/tmp/v5_fb_capture_dd.log
-printf 'width=%s\nheight=%s\nbpp=%s\nstride=%s\nformat=bgr24\n' "$width" "$height" "$bpp" "$stride" >"$META"
+printf 'width=%s\nheight=%s\nbpp=%s\nstride=%s\nformat=rgb24\n' "$width" "$height" "$bpp" "$stride" >"$META"
 test -s "$RAW"
 test -s "$META"
 cat "$META"
@@ -95,11 +95,7 @@ with ppm_path.open('wb') as out:
         row = data[y * stride:y * stride + width * 3]
         if len(row) != width * 3:
             raise SystemExit('short framebuffer row')
-        rgb = bytearray(len(row))
-        rgb[0::3] = row[2::3]
-        rgb[1::3] = row[1::3]
-        rgb[2::3] = row[0::3]
-        out.write(rgb)
+        out.write(row)
 CONVERT_FB_PY
 test -s "$local_ppm"
 if command -v pnmtopng >/dev/null 2>&1; then
@@ -113,4 +109,4 @@ fi
 test -s "$local_out"
 rm -f "$local_raw" "$local_meta" "$local_ppm"
 printf 'captured board UI frame: %s\n' "$local_out"
-printf 'input: no touch, key, mouse, linuxcncrsh, MDI, start, or motion command was sent\n'
+printf 'input: no touch, key, mouse, linuxcncrsh, MDI, s

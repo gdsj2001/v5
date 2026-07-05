@@ -35,6 +35,16 @@ def decode_full_frame_packet(packet: bytes) -> tuple[dict[str, Any], bytes]:
     return metadata, payload
 
 
+def validate_expected_size(metadata: dict[str, Any], expected_width: int, expected_height: int) -> None:
+    width = int(metadata["width"])
+    height = int(metadata["height"])
+    if width != expected_width or height != expected_height:
+        raise ValueError(
+            f"remote frame size mismatch: got {width}x{height}, "
+            f"expected {expected_width}x{expected_height}"
+        )
+
+
 def bgra_to_bmp(metadata: dict[str, Any], payload: bytes) -> bytes:
     width = int(metadata["width"])
     height = int(metadata["height"])
@@ -62,10 +72,15 @@ def main() -> int:
     parser.add_argument("--timeout-s", type=float, default=20.0)
     parser.add_argument("--out", required=True, help="Output BMP path.")
     parser.add_argument("--meta-out", default="", help="Optional JSON metadata output path.")
+    parser.add_argument("--expected-width", type=int, default=1024)
+    parser.add_argument("--expected-height", type=int, default=600)
+    parser.add_argument("--allow-any-size", action="store_true", help="Diagnostic only: do not enforce 1024x600.")
     args = parser.parse_args()
 
     packet = capture_packet(args.host, args.port, args.timeout_s)
     metadata, payload = decode_full_frame_packet(packet)
+    if not args.allow_any_size:
+        validate_expected_size(metadata, args.expected_width, args.expected_height)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(bgra_to_bmp(metadata, payload))

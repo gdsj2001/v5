@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-r"""Power-cycle the Z20 board through the USB relay.
+r"""Power-cycle the board through the USB relay.
 
 This helper is intentionally self-contained under this repository's tools
 directory so v5 can be moved without relying on a legacy external tool tree. It
@@ -29,7 +29,7 @@ except ImportError as exc:  # pragma: no cover - host dependency
     raise SystemExit(1) from exc
 
 
-PORT_MAP_PATH = Path(__file__).resolve().with_name("z20_port_map.json")
+PORT_MAP_PATH = Path(__file__).resolve().with_name("v5_port_map.json")
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TEMP_OUTPUT_DIR = PROJECT_ROOT / "repo_ignored" / "temp"
 DEFAULT_JSON_OUT = TEMP_OUTPUT_DIR / "board_power_cycle_last.json"
@@ -123,7 +123,7 @@ def resolve_relay_port(explicit: str | None) -> tuple[str, dict[str, Any]]:
             raise RuntimeError(f"Relay port {explicit} is not present; present={sorted(present)}")
         return explicit, {"source": "explicit", "present": sorted(present)}
     if saved_relay and saved_relay in present:
-        return saved_relay, {"source": "tools/z20_port_map.json", "present": sorted(present), "saved": saved}
+        return saved_relay, {"source": "tools/v5_port_map.json", "present": sorted(present), "saved": saved}
     probes = [probe_relay(port) for port in sorted(present)]
     relay = None
     for probe in sorted(probes, key=lambda item: len(item.get("ok_channels", [])), reverse=True):
@@ -221,7 +221,7 @@ def apply_boot_mode(ser: serial.Serial, mode: str) -> list[dict[str, Any]]:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Power-cycle the board through USB relay CH4.")
-    parser.add_argument("--port", "--relay-port", dest="port", default="", help="Relay COM port. Defaults to tools/z20_port_map.json or auto-discovery.")
+    parser.add_argument("--port", "--relay-port", dest="port", default="", help="Relay COM port. Defaults to tools/v5_port_map.json or auto-discovery.")
     parser.add_argument("--console-port", default="", help="Accepted for compatibility; console logging is handled separately.")
     parser.add_argument("--baud", type=int, default=RELAY_BAUD)
     parser.add_argument("--serial-timeout", type=float, default=0.5)

@@ -3,6 +3,7 @@
 #include "lvgl.h"
 #include "v5_lvgl_headless.h"
 #include "v5_lvgl_remote_display.h"
+#include "v5_lvgl_touch_input.h"
 #include "v5_boot_closure.h"
 #include "v5_main_page.h"
 #include "v5_status_shm.h"
@@ -47,9 +48,10 @@ static int v5_ui_shell_bootstrap_common(V5ShellBootReport *report, const char *p
 
     lv_init();
     if (remote_display) {
-        if (!v5_lvgl_remote_display_setup(800U, 480U)) {
+        if (!v5_lvgl_remote_display_setup(1024U, 600U)) {
             return 1;
         }
+        (void)v5_lvgl_touch_input_setup();
     } else if (!v5_lvgl_headless_display_setup()) {
         return 1;
     }
@@ -92,8 +94,4 @@ int v5_ui_shell_refresh_once(void)
         return 0;
     }
     (void)v5_ui_model_refresh_status_from_shm(&g_model, V5_STATUS_SHM_PATH);
-    (void)v5_main_page_apply_status(&g_main_page, &g_model.status_view);
-    lv_timer_handler();
-    lv_refr_now(0);
-    return 1;
-}
+    (void)v5_main_page_apply_status(&g_main_page, &g_mode

@@ -19,7 +19,7 @@ if [ -z "$board_ssh" ]; then
 fi
 
 remote() {
-  ssh -o BatchMode=yes -o ConnectTimeout=5 -p "$board_ssh_port" "$board_ssh" "$@"
+  ssh -o BatchMode=yes -o LogLevel=ERROR -o ConnectTimeout=5 -p "$board_ssh_port" "$board_ssh" "$@"
 }
 
 if ! remote 'true' >/dev/null 2>&1; then
@@ -39,11 +39,13 @@ check_remote_test() {
 }
 check_remote_test "v5_lvgl_shell installed executable" 'test -x /usr/libexec/8ax/v5_lvgl_shell'
 check_remote_test "v5_state_publisher installed executable" 'test -x /usr/libexec/8ax/v5_state_publisher'
+check_remote_test "v5_touch_diagnostics installed executable" 'test -x /usr/libexec/8ax/v5_touch_diagnostics'
 check_remote_test "v5_linuxcncrsh_probe installed executable" 'test -x /usr/libexec/8ax/v5_linuxcncrsh_probe'
 check_remote_test "v5_linuxcncrsh_golden_run installed executable" 'test -x /usr/libexec/8ax/v5_linuxcncrsh_golden_run'
 check_remote_test "state publisher init installed" 'test -x /etc/init.d/v5-state-publisher'
 check_remote_test "linuxcnc command gate init installed" 'test -x /etc/init.d/v5-linuxcnc-command-gate'
 check_remote_test "v5 ui relay init installed" 'test -x /etc/init.d/v5-ui-relay'
+check_remote_test "v5 touch diagnostics init installed" 'test -x /etc/init.d/v5-touch-diagnostics'
 check_remote_test "v5 linuxcnc ini installed" 'test -r /opt/8ax/v5/linuxcnc/ini/v5_pulse.ini'
 check_remote_test "v5 linuxcnc hal installed" 'test -r /opt/8ax/v5/linuxcnc/hal/v5_pulse.hal'
 check_remote_test "v5 deploy config installed" 'test -r /opt/8ax/v5/config/hardware_profile.json'
@@ -82,6 +84,18 @@ else
   fail_msg "v5_lvgl_shell starts"
   remote 'tail -n 20 /tmp/v5_lvgl_shell_verify.out 2>/dev/null || true' | sed 's/^/INFO ui shell: /'
 fi
+
+if remote '/etc/init.d/v5-touch-diagnostics status' >/tmp/v5_touch_diag_status.out 2>&1; then
+  ok "v5-touch-diagnostics init status running"
+  sed 's/^/INFO touch diagnostics init: /' /tmp/v5_touch_diag_status.out
+else
+  fail_msg "v5-touch-diagnostics init status running"
+  sed 's/^/INFO touch diagnostics init: /' /tmp/v5_touch_diag_status.out
+fi
+rm -f /tmp/v5_touch_diag_status.out
+
+check_remote_test "v5 safe touch calibration readable" 'test -r /opt/8ax/safe_ui/re_touch_calibration.json && grep -q raw-evdev-cal-v2 /opt/8ax/safe_ui/re_touch_calibration.json'
+check_remote_test "retired touch calibration path absent" 'test ! -e /opt/8ax/ui/re_touch_calibration.json'
 
 if remote '/etc/init.d/v5-ui-relay status' >/tmp/v5_ui_relay_status.out 2>&1; then
   ok "v5-ui-relay init status running"
@@ -128,5 +142,4 @@ fi
 if [ "$warn" -ne 0 ]; then
   say "verify complete with warnings"
 else
-  say "verify complete"
-fi
+  say "ve
