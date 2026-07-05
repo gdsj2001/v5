@@ -1,0 +1,14 @@
+# Local VM mount/sync link
+vm-v5
+vm-v5/
+
+# Local outputs
+build/
+artifacts/
+repo_ignored/
+.pytest_cache/
+__pycache__/
+*.pyc
+*.pyo
+*.log
+*.tmp
