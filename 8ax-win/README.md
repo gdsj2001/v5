@@ -1,4 +1,4 @@
-﻿# 8ax Windows Remote UI
+# 8ax Windows Remote UI
 
 Windows lightweight remote display client for the v3 board UI.
 
@@ -16,10 +16,10 @@ Current slice:
 - FPS, frame id, capture/relay state, full/dirty/repair/reject counters, and mapped pointer coordinates.
 - Top-bar board resource diagnostics from `/remote/info`: `cpu0`, `cpu1`, memory, and disk usage.
 - Enlarged operator window with a bottom client-command row.
-- Bottom `读取日志` button requests a read-only board runtime diagnostics snapshot from `/remote/diagnostics` for later troubleshooting.
-- Bottom `传G代码` button opens a local file picker, checks the board program directory for a same-name file, asks before overwrite, and uploads the selected G-code file through `/remote/program/upload` into the board program-open directory.
-- Bottom `打开系统G代码` button opens the board program directory in a local-directory style window backed by `/remote/program/list` and `/remote/program/file`; the operator can refresh, upload, open for edit, save, and delete board G-code files.
-- Bottom `OTA升级` button sends `POST /remote/ota/upgrade` to the board relay. Current board code returns `OTA_NOT_IMPLEMENTED` fail-closed until the board OTA client, Broker action, and VPS package selector exist.
+- Bottom `鐠囪褰囬弮銉ョ箶` button requests a read-only board runtime diagnostics snapshot from `/remote/diagnostics` for later troubleshooting.
+- Bottom `娴肩嚌娴狅絿鐖渀 button opens a local file picker, checks the board program directory for a same-name file, asks before overwrite, and uploads the selected G-code file through `/remote/program/upload` into the board program-open directory.
+- Bottom `閹垫挸绱戠化鑽ょ埠G娴狅絿鐖渀 button opens the board program directory in a local-directory style window backed by `/remote/program/list` and `/remote/program/file`; the operator can refresh, upload, open for edit, save, and delete board G-code files.
+- Bottom `OTA閸楀洨楠嘸 button sends `POST /remote/ota/upgrade` to the board relay. Current board code returns `OTA_NOT_IMPLEMENTED` fail-closed until the board OTA client, Broker action, and VPS package selector exist.
 - Default runtime path: direct/no-argument startup uses the formal board relay at `http://192.168.1.221:18080/` with relay input enabled.
 - Formal relay input path: relay mode sends mouse down/up over `WS /remote/input` and waits for board `pointer_ack`.
 - Local verification console with no external NuGet dependency.
@@ -92,10 +92,10 @@ the Windows client display/input path.
 ## Commands
 
 ```powershell
-dotnet restore D:\re\v3\8ax-win\8ax.WinRemote.sln --ignore-failed-sources
-dotnet build D:\re\v3\8ax-win\8ax.WinRemote.sln --no-restore
-dotnet run --project D:\re\v3\8ax-win\tests\8ax.WinRemote.Tests\8ax.WinRemote.Tests.csproj
-dotnet run --project D:\re\v3\8ax-win\src\8ax.WinRemote\8ax.WinRemote.csproj
+dotnet restore .\8ax.WinRemote.sln --ignore-failed-sources
+dotnet build .\8ax.WinRemote.sln --no-restore
+dotnet run --project .\tests\8ax.WinRemote.Tests\8ax.WinRemote.Tests.csproj
+dotnet run --project .\src\8ax.WinRemote\8ax.WinRemote.csproj
 ```
 
 The verification console starts the local mock relay on a random localhost port and validates the read-only client against `/remote/info`, `/remote/frame/full`, and the WebSocket dirty-rect stream. It also verifies that a deliberately dropped dirty frame triggers full-frame repair.
@@ -103,9 +103,9 @@ The verification console starts the local mock relay on a random localhost port 
 Runtime evidence defaults to `%TEMP%\8ax-win\evidence` and can be redirected:
 
 ```powershell
-D:\re\v3\8ax-win\publish\win-x64\8ax.WinRemote.exe --evidence-dir D:\re\v3\evidence\manual_8ax_win
-D:\re\v3\8ax-win\publish\win-x64\8ax.WinRemote.exe --relay http://192.168.1.221:18080/ --evidence-dir D:\re\v3\evidence\manual_8ax_win
-D:\re\v3\8ax-win\publish\win-x64\8ax.WinRemote.exe --view-only true --evidence-dir D:\re\v3\evidence\manual_8ax_win
+.\publish\win-x64\8ax.WinRemote.exe --evidence-dir .\repo_ignored\evidence\manual_8ax_win
+.\publish\win-x64\8ax.WinRemote.exe --relay http://192.168.1.221:18080/ --evidence-dir .\repo_ignored\evidence\manual_8ax_win
+.\publish\win-x64\8ax.WinRemote.exe --view-only true --evidence-dir .\repo_ignored\evidence\manual_8ax_win
 ```
 
 The client writes:
@@ -117,18 +117,18 @@ win_client_metrics.jsonl
 
 The recorder redacts token, secret, password, and authorization fields.
 
-The bottom `读取日志` button calls the board relay `GET /remote/diagnostics`.
+The bottom `鐠囪褰囬弮銉ョ箶` button calls the board relay `GET /remote/diagnostics`.
 The dialog must default to a concise Chinese diagnostic summary instead of raw
 JSON. The summary shows: diagnostic time/id, overall state, UI service state,
 remote display state, remote input state, state-sync state, command-channel
 state, program-file availability, recent screen refresh, recent input, and
-recent error status. A `详细信息` button may toggle indented, wrapped JSON for
+recent error status. A `鐠囷妇绮忔穱鈩冧紖` button may toggle indented, wrapped JSON for
 maintenance use. Both summary and detail views must redact LinuxCNC/control
 layer names, hardware/resource words, and direct low-level board paths before
 display. The Windows client must not SSH to the board, shell out, read board
 files directly, or use diagnostics data as control truth.
 
-The bottom `传G代码` button opens a local file picker for `.ngc`, `.nc`, `.tap`,
+The bottom `娴肩嚌娴狅絿鐖渀 button opens a local file picker for `.ngc`, `.nc`, `.tap`,
 and `.gcode` files, then sends the selected file body to the board relay
 `POST /remote/program/upload?filename=<name>&overwrite=0`. Before upload the
 client calls `GET /remote/program/file?filename=<name>`; if the board already
@@ -140,7 +140,7 @@ available to the board program list, which refreshes from the same directory.
 Any later program-open/run action must still go through the existing board
 UI/operator command path.
 
-The bottom `打开系统G代码` button opens a local-directory style board program
+The bottom `閹垫挸绱戠化鑽ょ埠G娴狅絿鐖渀 button opens a local-directory style board program
 window. It uses `GET /remote/program/list` to display the current board G-code
 files, `GET /remote/program/file?filename=<name>&content=1` to open a selected
 file for editing, `POST /remote/program/upload?filename=<name>&overwrite=1` to
@@ -149,7 +149,7 @@ filename=<name>` to delete a selected file after confirmation. The dialog is a
 file-management and text-editing surface only; it must not execute G-code or
 send motion/control commands.
 
-The bottom `OTA升级` button calls the board relay `POST /remote/ota/upgrade`.
+The bottom `OTA閸楀洨楠嘸 button calls the board relay `POST /remote/ota/upgrade`.
 WinRemote only sends the request and displays the returned status; it must not
 download OTA packages to Windows, SSH/SFTP to the board, write rootfs/boot env,
 or restart the board. The request declares the fixed package policy
@@ -161,7 +161,7 @@ no job id.
 
 ## Upgrade
 
-The top-bar `升级` button checks these VPS manifests in order:
+The top-bar `閸楀洨楠嘸 button checks these VPS manifests in order:
 
 ```text
 https://license.cjwsjzyy.xyz/8ax-winremote/win-x64/manifest.json
@@ -200,20 +200,21 @@ installation.
 
 The release version passed to `publish_winremote_update.ps1 -Version` is written
 to both `manifest.json` and the generated `8ax.WinRemote.exe` version metadata.
-The `升级` button compares the local executable version with the VPS manifest
+The `閸楀洨楠嘸 button compares the local executable version with the VPS manifest
 version before downloading. If the server version is not newer, the client does
 not download, install, or restart. After a real update is installed, the installer
 must restart `8ax.WinRemote.exe` automatically and write `.update_install.log`.
 On startup the client performs a read-only VPS manifest check. If the server
 version is newer than the local executable, the fixed-size top-bar upgrade button
-shows `有更新`; it must not download or install until the user clicks the button.
+is shown as `鍗囩骇`; it must not download or install until the user clicks the button.
+If no newer server version exists, the top-bar upgrade button is hidden.
 When the local version is already current, the upgrade dialog must say that no
 download, install, or restart is needed; the download/restart warning is only
 shown while an actual update is being prepared or installed.
 
 Do not update the archived installed WinRemote directory by manually copying
 over only one file. Local machines must be updated by launching
-`8ax.WinRemote.exe` and using the top-bar `升级` button, which downloads the
+`8ax.WinRemote.exe` and using the top-bar `閸楀洨楠嘸 button, which downloads the
 single-exe VPS package. The same generated exe can also be sent manually to
 another Windows machine.
 
@@ -228,7 +229,7 @@ Configuration can be supplied with `--config` or by placing `8ax.WinRemote.json`
 ```json
 {
   "relay_url": "http://192.168.1.221:18080/",
-  "evidence_dir": "D:\\re\\v3\\evidence\\manual_8ax_win",
+  "evidence_dir": ".\\repo_ignored\\evidence\\manual_8ax_win",
   "view_only": false,
   "enable_pointer": false,
   "enable_remote_input": true
@@ -236,14 +237,14 @@ Configuration can be supplied with `--config` or by placing `8ax.WinRemote.json`
 ```
 
 ```powershell
-D:\re\v3\8ax-win\publish\win-x64\8ax.WinRemote.exe --config D:\re\v3\8ax-win\8ax.WinRemote.json
+.\publish\win-x64\8ax.WinRemote.exe --config .\8ax.WinRemote.json
 ```
 
 Run the local mock relay and connect the client explicitly:
 
 ```powershell
-dotnet run --project D:\re\v3\8ax-win\tools\mock-relay\8ax.MockRelay.csproj -- --prefix http://127.0.0.1:18080/
-dotnet run --project D:\re\v3\8ax-win\src\8ax.WinRemote\8ax.WinRemote.csproj -- --relay http://127.0.0.1:18080/
+dotnet run --project .\tools\mock-relay\8ax.MockRelay.csproj -- --prefix http://127.0.0.1:18080/
+dotnet run --project .\src\8ax.WinRemote\8ax.WinRemote.csproj -- --relay http://127.0.0.1:18080/
 ```
 
 The board product UI starts the formal relay and relay input by default. Normal
@@ -263,7 +264,7 @@ touch /run/8ax_v3_product_ui/enable_remote_input
 Then connect the Windows client:
 
 ```powershell
-D:\re\v3\8ax-win\publish\win-x64\8ax.WinRemote.exe
+.\publish\win-x64\8ax.WinRemote.exe
 ```
 
 In relay input mode, a normal click sends `down -> up`; holding the left mouse
@@ -287,9 +288,9 @@ The board relay files are:
 ## Release Build
 
 ```powershell
-D:\re\v3\8ax-win\tools\publish_winremote_update.ps1 -Version YYYY.MMDD.HHMM
-D:\re\v3\8ax-win\publish\win-x64\8ax.WinRemote.exe
-D:\re\v3\8ax-win\publish\win-x64\8ax.WinRemote.exe --relay http://127.0.0.1:18080/
+.\tools\publish_winremote_update.ps1 -Version YYYY.MMDD.HHMM
+.\publish\win-x64\8ax.WinRemote.exe
+.\publish\win-x64\8ax.WinRemote.exe --relay http://127.0.0.1:18080/
 ```
 
 Do not hand off a newly generated WinRemote release package unless the publish
@@ -297,7 +298,7 @@ script completed the VPS upload and manifest verification in the same run.
 
 ## Next Steps
 
-Follow `D:\re\v3\AI_并行任务看板.md` and `交接.md`:
+Follow `娴溿倖甯?md` and the active v5 work note:
 
 1. Add automated W3/W4 mock-relay client smoke coverage.
 2. Replace mock relay with a real board `remote_ui_relay` only after B-line source, deployment, and CPU evidence are ready.

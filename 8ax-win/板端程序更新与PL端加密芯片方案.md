@@ -23,14 +23,14 @@
 - WinRemote 通过板端 `remote_ui_relay` 访问 `/remote/info`、`/remote/frame/full`、`/remote/stream`、`/remote/input`。
 - WinRemote 不是第二套控制系统，不应直接执行板端 shell 命令、直接覆盖板端文件、直接读写 LinuxCNC/HAL。
 - 板端 relay 入口和运行状态来自：
-  - `lvgl_app/scripts/v3_remote_ui_relay.py`
-  - `lvgl_app/scripts/re-v3-lvgl-ui.init`
-  - `lvgl_app/scripts/v3_runtime_capability_manifest.py`
+  - `app/src/v5_lvgl_remote_display.c`
+  - `tools/deploy/install_v5_runtime.sh`
+  - `tools/deploy/verify_v5_board_runtime.sh`
 
 现有设备授权相关代码已经有 Device DNA、授权文件、公私钥文件等概念：
 
-- `lvgl_app/scripts/v3_device_dna_register.py`
-- `lvgl_app/scripts/v3_device_authorization_download.py`
+- `services/auth_download/v5_device_dna_register.py`
+- `services/auth_download/v5_device_authorization_download.py`
 
 后期接入加密芯片时，应把这些“设备身份能力”抽象成可替换后端，而不是继续把正式板私钥放在普通文件中。
 

@@ -1,0 +1,205 @@
+<Window x:Class="EightAxis.WinRemote.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="8ax Remote UI"
+        MinHeight="840"
+        MinWidth="1280"
+        Height="920"
+        Width="1440"
+        Background="#111318">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="64" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="36" />
+            <RowDefinition Height="82" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Background="#1D222B" BorderBrush="#2D3440" BorderThickness="0,0,0,1">
+            <Grid Margin="16,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0"
+                           VerticalAlignment="Center"
+                           FontSize="22"
+                           FontWeight="SemiBold"
+                           Foreground="#F2F5F8"
+                           Text="8ax Remote UI" />
+                <Border Grid.Column="1"
+                        Width="560"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Padding="12,5"
+                        Background="#202733"
+                        BorderBrush="#39414D"
+                        BorderThickness="1"
+                        CornerRadius="3">
+                    <TextBlock x:Name="SystemMetricsText"
+                               HorizontalAlignment="Center"
+                               Foreground="#D6E3EF"
+                               FontFamily="Consolas"
+                               FontSize="15"
+                               TextTrimming="CharacterEllipsis">
+                        <Run Text="cpu0 " />
+                        <Run x:Name="Cpu0MetricValue" Text="--%" />
+                        <Run Text="  cpu1 " />
+                        <Run x:Name="Cpu1MetricValue" Text="--%" />
+                        <Run Text="  内存 " />
+                        <Run x:Name="MemoryMetricValue" Text="--%" />
+                        <Run Text="  硬盘 " />
+                        <Run x:Name="DiskMetricValue" Text="--%" />
+                    </TextBlock>
+                </Border>
+                <Grid Grid.Column="2"
+                      HorizontalAlignment="Right"
+                      VerticalAlignment="Center">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="164" />
+                        <ColumnDefinition Width="164" />
+                        <ColumnDefinition Width="76" />
+                    </Grid.ColumnDefinitions>
+                    <Button x:Name="UpgradeButton"
+                            Grid.Column="0"
+                            Width="138"
+                            HorizontalAlignment="Center"
+                            Margin="0"
+                            Padding="28,5"
+                            BorderBrush="#FF1740"
+                            BorderThickness="2"
+                            Background="#1D222B"
+                            Foreground="#FF1740"
+                            FontSize="24"
+                            FontWeight="SemiBold"
+                            Cursor="Hand"
+                            Content="&#21319;&#32423;"
+                            Visibility="Collapsed"
+                            Click="UpgradeButton_OnClick" />
+                    <Border Grid.Column="1" Width="154" HorizontalAlignment="Center" Padding="10,7" Background="#28313D" CornerRadius="3">
+                        <TextBlock x:Name="SourceText" HorizontalAlignment="Center" Foreground="#B9C5D1" FontSize="15" Text="relay stream" TextTrimming="CharacterEllipsis" />
+                    </Border>
+                    <Border Grid.Column="2" Width="154" HorizontalAlignment="Center" Padding="10,7" Background="#28313D" CornerRadius="3">
+                        <TextBlock x:Name="InputModeText" HorizontalAlignment="Center" Foreground="#B9C5D1" FontSize="15" Text="view-only" TextTrimming="CharacterEllipsis" />
+                    </Border>
+                    <Border x:Name="ConnectionBadge" Grid.Column="3" Width="70" HorizontalAlignment="Right" Padding="8,7" Background="#3B2730" CornerRadius="3">
+                        <TextBlock x:Name="ConnectionText" HorizontalAlignment="Center" Foreground="#FFB3B3" FontSize="15" Text="connecting" TextTrimming="CharacterEllipsis" />
+                    </Border>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <Grid x:Name="Viewport"
+              Grid.Row="1"
+              Margin="20"
+              MouseMove="Viewport_OnMouseMove"
+              MouseLeftButtonDown="Viewport_OnMouseLeftButtonDown"
+              MouseLeftButtonUp="Viewport_OnMouseLeftButtonUp"
+              MouseLeave="Viewport_OnMouseLeave">
+            <Border Background="#05070A" BorderBrush="#39414D" BorderThickness="1">
+                <Viewbox Stretch="Uniform">
+                    <Grid Width="1024" Height="600" Background="#05070A">
+                        <Image x:Name="RemoteImage"
+                               Width="1024"
+                               Height="600"
+                               Stretch="Fill"
+                               SnapsToDevicePixels="True" />
+                        <TextBlock x:Name="EmptyStateText"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   Foreground="#8792A0"
+                                   FontSize="20"
+                                   Text="Waiting for 8ax relay..." />
+                    </Grid>
+                </Viewbox>
+            </Border>
+        </Grid>
+
+        <Border Grid.Row="2" Background="#171B22" BorderBrush="#2D3440" BorderThickness="0,1,0,0">
+            <Grid Margin="16,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="StatusText"
+                           Grid.Column="0"
+                           VerticalAlignment="Center"
+                           Foreground="#B7C1CC"
+                           FontFamily="Consolas"
+                           FontSize="13" />
+                <TextBlock x:Name="PointerText"
+                           Grid.Column="1"
+                           VerticalAlignment="Center"
+                           Foreground="#8792A0"
+                           FontFamily="Consolas"
+                           FontSize="13"
+                           Text="pointer: disabled" />
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="3" Background="#05070A" BorderBrush="#2D3440" BorderThickness="0,1,0,0">
+            <StackPanel Orientation="Horizontal" Margin="38,14,0,14">
+                <Button x:Name="ReadLogButton"
+                        Width="142"
+                        Height="52"
+                        Padding="18,6"
+                        BorderBrush="#FF1740"
+                        BorderThickness="2"
+                        Background="#05070A"
+                        Foreground="#FF1740"
+                        FontSize="24"
+                        FontWeight="SemiBold"
+                        Cursor="Hand"
+                        Content="&#35835;&#21462;&#26085;&#24535;"
+                        Click="ReadLogButton_OnClick" />
+                <Button x:Name="UploadGCodeButton"
+                        Width="142"
+                        Height="52"
+                        Margin="34,0,0,0"
+                        Padding="18,6"
+                        BorderBrush="#FF1740"
+                        BorderThickness="2"
+                        Background="#05070A"
+                        Foreground="#FF1740"
+                        FontSize="24"
+                        FontWeight="SemiBold"
+                        Cursor="Hand"
+                        Content="&#20256;G&#20195;&#30721;"
+                        Click="UploadGCodeButton_OnClick" />
+                <Button x:Name="OpenSystemGCodeButton"
+                        Width="180"
+                        Height="52"
+                        Margin="18,0,0,0"
+                        Padding="18,6"
+                        BorderBrush="#FF1740"
+                        BorderThickness="2"
+                        Background="#05070A"
+                        Foreground="#FF1740"
+                        FontSize="22"
+                        FontWeight="SemiBold"
+                        Cursor="Hand"
+                        Content="&#25171;&#24320;&#31995;&#32479;G&#20195;&#30721;"
+                        Click="OpenSystemGCodeButton_OnClick" />
+                <Button x:Name="OtaUpgradeButton"
+                        Width="142"
+                        Height="52"
+                        Margin="18,0,0,0"
+                        Padding="18,6"
+                        BorderBrush="#FF1740"
+                        BorderThickness="2"
+                        Background="#05070A"
+                        Foreground="#FF1740"
+                        FontSize="24"
+                        FontWeight="SemiBold"
+                        Cursor="Hand"
+                        Content="OTA&#21319;&#32423;"
+                        Click="OtaUpgradeButton_OnClick" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

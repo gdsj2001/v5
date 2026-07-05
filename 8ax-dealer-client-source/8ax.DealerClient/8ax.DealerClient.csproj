@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <AssemblyName>8ax.DealerClient</AssemblyName>
+    <RootNamespace>EightAxis.DealerClient</RootNamespace>
+    <CodePage>65001</CodePage>
+    <Version>0.1.15</Version>
+    <FileVersion>0.1.15.0</FileVersion>
+    <AssemblyVersion>0.1.15.0</AssemblyVersion>
+  </PropertyGroup>
+</Project>

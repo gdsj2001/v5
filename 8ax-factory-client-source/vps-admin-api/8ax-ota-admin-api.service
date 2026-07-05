@@ -1,0 +1,22 @@
+[Unit]
+Description=8AX Factory Client OTA/profile admin API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=z20auth
+Group=z20auth
+WorkingDirectory=/opt/8ax-auth/vps-admin-api
+EnvironmentFile=/opt/8ax-auth/secrets/admin-auth.env
+ExecStart=/usr/bin/python3 /opt/8ax-auth/vps-admin-api/vps_ota_admin_api.py --host 127.0.0.1 --port 18081 --storage-root /opt/8ax-auth/storage/ota --static-root /var/www/html/updates/ota --private-root /opt/8ax-auth/storage/private --drive-storage-root /opt/8ax-auth/storage/drive-profiles --drive-static-root /var/www/html/updates/drive-profiles --drive-legacy-static-root /var/www/html/drive-profiles
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/8ax-auth/storage/ota /opt/8ax-auth/storage/private /var/www/html/updates/ota /opt/8ax-auth/storage/drive-profiles /var/www/html/updates/drive-profiles /var/www/html/drive-profiles
+
+[Install]
+WantedBy=multi-user.target

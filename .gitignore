@@ -29,6 +29,8 @@ build-*/
 cmake-build-*/
 out/
 dist/
+**/bin/
+**/obj/
 artifacts/
 vm-v5/
 tmp/
