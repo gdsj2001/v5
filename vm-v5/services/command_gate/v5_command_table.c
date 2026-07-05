@@ -26,4 +26,5 @@ const V5CommandEntry *v5_command_table_entries(size_t *count)
 
 size_t v5_command_table_count(void)
 {
-    return sizeof(kV5Co
+    return sizeof(kV5Commands) / sizeof(kV5Commands[0]);
+}

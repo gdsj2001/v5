@@ -38,4 +38,9 @@ const V5NativeGateEntry *v5_native_gate_registry_find(const char *id)
         return 0;
     }
     for (i = 0; i < v5_native_gate_registry_count(); ++i) {
-        if (strcmp(k_gates[i].i
+        if (strcmp(k_gates[i].id, id) == 0) {
+            return &k_gates[i];
+        }
+    }
+    return 0;
+}

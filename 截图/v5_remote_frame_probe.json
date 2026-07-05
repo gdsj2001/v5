@@ -1,0 +1,7 @@
+{
+  "width": 800,
+  "height": 480,
+  "stride": 3200,
+  "format": "bgra32",
+  "source": "v5_lvgl_shell"
+}

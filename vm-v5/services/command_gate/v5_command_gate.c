@@ -62,4 +62,9 @@ int v5_command_gate_prepare(const V5CommandRequest *request, V5CommandPrepared *
             prepared->name = entries[i].name;
             prepared->owner = entries[i].owner;
             prepared->accepted = 1;
-      
+            return 1;
+        }
+    }
+
+    return 0;
+}

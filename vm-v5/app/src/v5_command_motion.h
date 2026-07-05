@@ -9,4 +9,10 @@ extern "C" {
 
 int v5_command_pause_prepare(V5CommandPrepared *prepared, V5CommandRequest *request);
 int v5_command_home_prepare(V5CommandPrepared *prepared, V5CommandRequest *request);
-int v5_command_resume_prepare(V5Command
+int v5_command_resume_prepare(V5CommandPrepared *prepared, V5CommandRequest *request);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

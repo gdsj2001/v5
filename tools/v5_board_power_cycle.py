@@ -30,6 +30,9 @@ except ImportError as exc:  # pragma: no cover - host dependency
 
 
 PORT_MAP_PATH = Path(__file__).resolve().with_name("z20_port_map.json")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+TEMP_OUTPUT_DIR = PROJECT_ROOT / "repo_ignored" / "temp"
+DEFAULT_JSON_OUT = TEMP_OUTPUT_DIR / "board_power_cycle_last.json"
 RELAY_BAUD = 9600
 RELAY_QUERY_COMMANDS = {
     1: b"\xA0\x01\x05\xA6",
@@ -235,12 +238,28 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--skip-net-check", action="store_true")
     parser.add_argument("--skip-pre-poweroff-sync", action="store_true")
     parser.add_argument("--pre-poweroff-sync-timeout", type=float, default=10.0)
-    parser.add_argument("--json-out", type=Path, default=None)
+    parser.add_argument(
+        "--json-out",
+        type=Path,
+        default=DEFAULT_JSON_OUT,
+        help="Result JSON path. Bare/relative names are written under repo_ignored/temp/.",
+    )
     return parser.parse_args(argv)
+
+
+def resolve_json_out(path: Path | None) -> Path | None:
+    if path is None:
+        return None
+    if path.is_absolute():
+        return path
+    if path.parent == Path("."):
+        return TEMP_OUTPUT_DIR / path.name
+    return PROJECT_ROOT / "repo_ignored" / "temp" / path
 
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
+    json_out = resolve_json_out(args.json_out)
     result: dict[str, Any] = {
         "ok": False,
         "started_at": stamp(),
@@ -288,9 +307,9 @@ def main(argv: list[str]) -> int:
     result["finished_at"] = stamp()
     text = json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True)
     print(text)
-    if args.json_out:
-        args.json_out.parent.mkdir(parents=True, exist_ok=True)
-        args.json_out.write_text(text + "\n", encoding="utf-8")
+    if json_out:
+        json_out.parent.mkdir(parents=True, exist_ok=True)
+        json_out.write_text(text + "\n", encoding="utf-8")
     return 0 if result.get("ok") else 1
 
 

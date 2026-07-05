@@ -17,6 +17,7 @@ add_executable(v5_lvgl_shell
     src/v5_boot_closure.c
     src/v5_coordinate_panel.c
     src/v5_lvgl_headless.c
+    src/v5_lvgl_remote_display.c
     src/v5_main_page.c
     src/v5_main_page_actions.c
     src/v5_parameter_table.c

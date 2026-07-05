@@ -37,4 +37,10 @@ typedef struct V5CommandPrepared {
     int accepted;
 } V5CommandPrepared;
 
-int v5_command_gate_prepare(const V5CommandRequest *request, V5CommandPrepared
+int v5_command_gate_prepare(const V5CommandRequest *request, V5CommandPrepared *prepared);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif
