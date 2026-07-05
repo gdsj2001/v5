@@ -1,0 +1,1352 @@
+{
+    "schema":  "z20_v1_5_board_input_manifest.v1",
+    "generated_at_utc":  "2026-07-01T04:48:06.5616441Z",
+    "project":  "z20_v1_5_hw_project",
+    "board_closure_state":  "local_verified_only",
+    "artifact_paths_are_relative_to":  "new-vivado/z20_v1_5_hw_project",
+    "timing_latest":  {
+                          "timestamp":  "2026-07-01 10:04:04",
+                          "build_status":  "bitstream_generated",
+                          "timing_status":  "timing_met",
+                          "wns":  "0.193",
+                          "tns":  "0.000",
+                          "whs":  "0.034",
+                          "ths":  "0.000",
+                          "impl_status":  "write_bitstream Complete!",
+                          "bit_file":  "z20_v1_5_hw_project.runs/impl_1/system_top.bit"
+                      },
+    "checks":  {
+                   "check_active_xdc":  {
+                                            "script":  "scripts/check_active_xdc.ps1",
+                                            "output":  [
+                                                           "top_module=system_top top_source=rtl\\system_top.v",
+                                                           "active_assignments=180 missing=[] duplicate_ports={} duplicate_pins={}",
+                                                           "unassigned_top_ports_count=0"
+                                                       ],
+                                            "parsed":  {
+                                                           "top_module":  "system_top",
+                                                           "top_source":  "rtl\\system_top.v",
+                                                           "active_assignments":  "180",
+                                                           "missing":  "[]",
+                                                           "duplicate_ports":  "{}",
+                                                           "duplicate_pins":  "{}",
+                                                           "unassigned_top_ports_count":  "0"
+                                                       }
+                                        },
+                   "active_xdc_traceability":  {
+                                                   "script":  "scripts/verify_active_xdc_traceability.ps1",
+                                                   "output":  [
+                                                                  "active_xdc_traceability=ok",
+                                                                  "active_pin_assignments=180",
+                                                                  "traced_assignments=180",
+                                                                  "source_xdc_nets=194",
+                                                                  "timing_exception_lines=11",
+                                                                  "active_xdc_source=../z20-v1_5_20260623.xdc",
+                                                                  "old_project_xdc_dependency=none"
+                                                              ],
+                                                   "parsed":  {
+                                                                  "active_xdc_traceability":  "ok",
+                                                                  "active_pin_assignments":  "180",
+                                                                  "traced_assignments":  "180",
+                                                                  "source_xdc_nets":  "194",
+                                                                  "timing_exception_lines":  "11",
+                                                                  "active_xdc_source":  "../z20-v1_5_20260623.xdc",
+                                                                  "old_project_xdc_dependency":  "none"
+                                                              }
+                                               },
+                   "active_xdc_electrical_contract":  {
+                                                          "script":  "scripts/verify_active_xdc_electrical_contract.ps1",
+                                                          "output":  [
+                                                                         "active_xdc_electrical_contract=ok",
+                                                                         "active_pin_assignments=180",
+                                                                         "iostandard_assignments=180",
+                                                                         "lvcmos33_assignments=180",
+                                                                         "missing_iostandard_assignments=0",
+                                                                         "orphan_iostandard_assignments=0",
+                                                                         "non_lvcmos33_assignments=0",
+                                                                         "duplicate_iostandard_ports=0",
+                                                                         "malformed_iostandard_lines=0"
+                                                                     ],
+                                                          "parsed":  {
+                                                                         "active_xdc_electrical_contract":  "ok",
+                                                                         "active_pin_assignments":  "180",
+                                                                         "iostandard_assignments":  "180",
+                                                                         "lvcmos33_assignments":  "180",
+                                                                         "missing_iostandard_assignments":  "0",
+                                                                         "orphan_iostandard_assignments":  "0",
+                                                                         "non_lvcmos33_assignments":  "0",
+                                                                         "duplicate_iostandard_ports":  "0",
+                                                                         "malformed_iostandard_lines":  "0"
+                                                                     }
+                                                      },
+                   "vivado_xsa_cleanliness":  {
+                                                  "script":  "scripts/verify_vivado_xsa_cleanliness.ps1",
+                                                  "output":  [
+                                                                 "vivado_xsa_cleanliness=ok",
+                                                                 "active_constraints_loaded=mapped_only",
+                                                                 "truth_source_xdc_loaded=no",
+                                                                 "old_project_xdc_loaded=no",
+                                                                 "truth_source_xdc_parse_count=0",
+                                                                 "old_project_xdc_parse_count=0",
+                                                                 "vivado_warning_lines=457",
+                                                                 "vivado_critical_warnings=0",
+                                                                 "vivado_errors=0",
+                                                                 "drc_blocking_rules=0",
+                                                                 "drc_warning_rules=1",
+                                                                 "drc_allowed_warning_rules=RTSTAT-10",
+                                                                 "timing_timestamp=2026-07-01 10:04:04",
+                                                                 "build_status=bitstream_generated",
+                                                                 "timing_status=timing_met",
+                                                                 "timing_wns=0.193",
+                                                                 "timing_whs=0.034",
+                                                                 "timing_margin_policy=timing_met_required_wns_0p100_advisory",
+                                                                 "timing_margin_target_wns=0.100",
+                                                                 "timing_margin_target_status=advisory_met",
+                                                                 "bitstream_artifact=current",
+                                                                 "xsa_artifact=current"
+                                                             ],
+                                                  "parsed":  {
+                                                                 "vivado_xsa_cleanliness":  "ok",
+                                                                 "active_constraints_loaded":  "mapped_only",
+                                                                 "truth_source_xdc_loaded":  "no",
+                                                                 "old_project_xdc_loaded":  "no",
+                                                                 "truth_source_xdc_parse_count":  "0",
+                                                                 "old_project_xdc_parse_count":  "0",
+                                                                 "vivado_warning_lines":  "457",
+                                                                 "vivado_critical_warnings":  "0",
+                                                                 "vivado_errors":  "0",
+                                                                 "drc_blocking_rules":  "0",
+                                                                 "drc_warning_rules":  "1",
+                                                                 "drc_allowed_warning_rules":  "RTSTAT-10",
+                                                                 "timing_timestamp":  "2026-07-01 10:04:04",
+                                                                 "build_status":  "bitstream_generated",
+                                                                 "timing_status":  "timing_met",
+                                                                 "timing_wns":  "0.193",
+                                                                 "timing_whs":  "0.034",
+                                                                 "timing_margin_policy":  "timing_met_required_wns_0p100_advisory",
+                                                                 "timing_margin_target_wns":  "0.100",
+                                                                 "timing_margin_target_status":  "advisory_met",
+                                                                 "bitstream_artifact":  "current",
+                                                                 "xsa_artifact":  "current"
+                                                             }
+                                              },
+                   "hardware_abi_header":  {
+                                               "script":  "scripts/export_hardware_abi_header.ps1",
+                                               "output":  [
+                                                              "hardware_abi_header=ok",
+                                                              "mode=write",
+                                                              "output=board_inputs/v3_hardware_abi.h",
+                                                              "xsa=board_inputs/system.xsa",
+                                                              "blocks=3",
+                                                              "step_ip_base=0x43CB0000",
+                                                              "step_ip_range=0x00010000",
+                                                              "pl_estop_base=0x41260000",
+                                                              "pl_estop_range=0x00010000",
+                                                              "io_owner_base=0x41270000",
+                                                              "io_owner_range=0x00010000",
+                                                              "step_ip_global_registers=17",
+                                                              "step_ip_axis_registers=8",
+                                                              "step_ip_debug_registers=2",
+                                                              "step_ip_live_registers=6",
+                                                              "pl_estop_registers=9",
+                                                              "io_owner_registers=14"
+                                                          ],
+                                               "parsed":  {
+                                                              "hardware_abi_header":  "ok",
+                                                              "mode":  "write",
+                                                              "output":  "board_inputs/v3_hardware_abi.h",
+                                                              "xsa":  "board_inputs/system.xsa",
+                                                              "blocks":  "3",
+                                                              "step_ip_base":  "0x43CB0000",
+                                                              "step_ip_range":  "0x00010000",
+                                                              "pl_estop_base":  "0x41260000",
+                                                              "pl_estop_range":  "0x00010000",
+                                                              "io_owner_base":  "0x41270000",
+                                                              "io_owner_range":  "0x00010000",
+                                                              "step_ip_global_registers":  "17",
+                                                              "step_ip_axis_registers":  "8",
+                                                              "step_ip_debug_registers":  "2",
+                                                              "step_ip_live_registers":  "6",
+                                                              "pl_estop_registers":  "9",
+                                                              "io_owner_registers":  "14"
+                                                          }
+                                           },
+                   "hardware_abi_header_verify":  {
+                                                      "script":  "scripts/verify_hardware_abi_header.ps1",
+                                                      "output":  [
+                                                                     "hardware_abi_header=ok",
+                                                                     "mode=check",
+                                                                     "output=board_inputs/v3_hardware_abi.h",
+                                                                     "xsa=board_inputs/system.xsa",
+                                                                     "blocks=3",
+                                                                     "step_ip_base=0x43CB0000",
+                                                                     "step_ip_range=0x00010000",
+                                                                     "pl_estop_base=0x41260000",
+                                                                     "pl_estop_range=0x00010000",
+                                                                     "io_owner_base=0x41270000",
+                                                                     "io_owner_range=0x00010000",
+                                                                     "step_ip_global_registers=17",
+                                                                     "step_ip_axis_registers=8",
+                                                                     "step_ip_debug_registers=2",
+                                                                     "step_ip_live_registers=6",
+                                                                     "pl_estop_registers=9",
+                                                                     "io_owner_registers=14"
+                                                                 ],
+                                                      "parsed":  {
+                                                                     "hardware_abi_header":  "ok",
+                                                                     "mode":  "check",
+                                                                     "output":  "board_inputs/v3_hardware_abi.h",
+                                                                     "xsa":  "board_inputs/system.xsa",
+                                                                     "blocks":  "3",
+                                                                     "step_ip_base":  "0x43CB0000",
+                                                                     "step_ip_range":  "0x00010000",
+                                                                     "pl_estop_base":  "0x41260000",
+                                                                     "pl_estop_range":  "0x00010000",
+                                                                     "io_owner_base":  "0x41270000",
+                                                                     "io_owner_range":  "0x00010000",
+                                                                     "step_ip_global_registers":  "17",
+                                                                     "step_ip_axis_registers":  "8",
+                                                                     "step_ip_debug_registers":  "2",
+                                                                     "step_ip_live_registers":  "6",
+                                                                     "pl_estop_registers":  "9",
+                                                                     "io_owner_registers":  "14"
+                                                                 }
+                                                  },
+                   "driver_contract":  {
+                                           "script":  "scripts/export_driver_contract.ps1",
+                                           "output":  [
+                                                          "driver_contract=ok",
+                                                          "mode=write",
+                                                          "header=board_inputs/z20_v1_5_hardware_abi.h",
+                                                          "dtsi=board_inputs/z20_v1_5_axi_lite.dtsi",
+                                                          "xsa=board_inputs/system.xsa",
+                                                          "blocks=3",
+                                                          "pl_estop_irq_f2p_bit=14",
+                                                          "pl_estop_irq_gic_spi_cell=43",
+                                                          "step_ip_base=0x43CB0000",
+                                                          "step_ip_range=0x00010000",
+                                                          "pl_estop_base=0x41260000",
+                                                          "pl_estop_range=0x00010000",
+                                                          "io_owner_base=0x41270000",
+                                                          "io_owner_range=0x00010000",
+                                                          "step_ip_global_registers=17",
+                                                          "step_ip_axis_registers=8",
+                                                          "step_ip_debug_registers=2",
+                                                          "step_ip_live_registers=6",
+                                                          "pl_estop_registers=9",
+                                                          "io_owner_registers=14"
+                                                      ],
+                                           "parsed":  {
+                                                          "driver_contract":  "ok",
+                                                          "mode":  "write",
+                                                          "header":  "board_inputs/z20_v1_5_hardware_abi.h",
+                                                          "dtsi":  "board_inputs/z20_v1_5_axi_lite.dtsi",
+                                                          "xsa":  "board_inputs/system.xsa",
+                                                          "blocks":  "3",
+                                                          "pl_estop_irq_f2p_bit":  "14",
+                                                          "pl_estop_irq_gic_spi_cell":  "43",
+                                                          "step_ip_base":  "0x43CB0000",
+                                                          "step_ip_range":  "0x00010000",
+                                                          "pl_estop_base":  "0x41260000",
+                                                          "pl_estop_range":  "0x00010000",
+                                                          "io_owner_base":  "0x41270000",
+                                                          "io_owner_range":  "0x00010000",
+                                                          "step_ip_global_registers":  "17",
+                                                          "step_ip_axis_registers":  "8",
+                                                          "step_ip_debug_registers":  "2",
+                                                          "step_ip_live_registers":  "6",
+                                                          "pl_estop_registers":  "9",
+                                                          "io_owner_registers":  "14"
+                                                      }
+                                       },
+                   "driver_contract_verify":  {
+                                                  "script":  "scripts/verify_driver_contract.ps1",
+                                                  "output":  [
+                                                                 "driver_contract=ok",
+                                                                 "mode=check",
+                                                                 "header=board_inputs/z20_v1_5_hardware_abi.h",
+                                                                 "dtsi=board_inputs/z20_v1_5_axi_lite.dtsi",
+                                                                 "xsa=board_inputs/system.xsa",
+                                                                 "blocks=3",
+                                                                 "pl_estop_irq_f2p_bit=14",
+                                                                 "pl_estop_irq_gic_spi_cell=43",
+                                                                 "step_ip_base=0x43CB0000",
+                                                                 "step_ip_range=0x00010000",
+                                                                 "pl_estop_base=0x41260000",
+                                                                 "pl_estop_range=0x00010000",
+                                                                 "io_owner_base=0x41270000",
+                                                                 "io_owner_range=0x00010000",
+                                                                 "step_ip_global_registers=17",
+                                                                 "step_ip_axis_registers=8",
+                                                                 "step_ip_debug_registers=2",
+                                                                 "step_ip_live_registers=6",
+                                                                 "pl_estop_registers=9",
+                                                                 "io_owner_registers=14"
+                                                             ],
+                                                  "parsed":  {
+                                                                 "driver_contract":  "ok",
+                                                                 "mode":  "check",
+                                                                 "header":  "board_inputs/z20_v1_5_hardware_abi.h",
+                                                                 "dtsi":  "board_inputs/z20_v1_5_axi_lite.dtsi",
+                                                                 "xsa":  "board_inputs/system.xsa",
+                                                                 "blocks":  "3",
+                                                                 "pl_estop_irq_f2p_bit":  "14",
+                                                                 "pl_estop_irq_gic_spi_cell":  "43",
+                                                                 "step_ip_base":  "0x43CB0000",
+                                                                 "step_ip_range":  "0x00010000",
+                                                                 "pl_estop_base":  "0x41260000",
+                                                                 "pl_estop_range":  "0x00010000",
+                                                                 "io_owner_base":  "0x41270000",
+                                                                 "io_owner_range":  "0x00010000",
+                                                                 "step_ip_global_registers":  "17",
+                                                                 "step_ip_axis_registers":  "8",
+                                                                 "step_ip_debug_registers":  "2",
+                                                                 "step_ip_live_registers":  "6",
+                                                                 "pl_estop_registers":  "9",
+                                                                 "io_owner_registers":  "14"
+                                                             }
+                                              },
+                   "vivado_warning_summary":  {
+                                                  "script":  "scripts/export_vivado_warning_summary.ps1",
+                                                  "output":  [
+                                                                 "vivado_warning_summary=classified",
+                                                                 "vivado_warning_summary_csv=docs/vivado_warning_summary.csv",
+                                                                 "vivado_warning_summary_md=docs/vivado_warning_summary.md",
+                                                                 "vivado_warning_lines=457",
+                                                                 "vivado_warning_codes=17",
+                                                                 "unexpected_warning_codes=0",
+                                                                 "constraint_truth_warning_lines=0",
+                                                                 "retired_hdmi_warning_lines=0",
+                                                                 "warning_summary_boundary=known_noncritical_warning_classes"
+                                                             ],
+                                                  "parsed":  {
+                                                                 "vivado_warning_summary":  "classified",
+                                                                 "vivado_warning_summary_csv":  "docs/vivado_warning_summary.csv",
+                                                                 "vivado_warning_summary_md":  "docs/vivado_warning_summary.md",
+                                                                 "vivado_warning_lines":  "457",
+                                                                 "vivado_warning_codes":  "17",
+                                                                 "unexpected_warning_codes":  "0",
+                                                                 "constraint_truth_warning_lines":  "0",
+                                                                 "retired_hdmi_warning_lines":  "0",
+                                                                 "warning_summary_boundary":  "known_noncritical_warning_classes"
+                                                             }
+                                              },
+                   "vivado_warning_summary_verify":  {
+                                                         "script":  "scripts/verify_vivado_warning_summary.ps1",
+                                                         "output":  [
+                                                                        "vivado_warning_summary_verify=ok",
+                                                                        "vivado_warning_lines=457",
+                                                                        "vivado_warning_codes=17",
+                                                                        "unexpected_warning_codes=0",
+                                                                        "constraint_truth_warning_lines=0",
+                                                                        "retired_hdmi_warning_lines=0",
+                                                                        "warning_summary_boundary=known_noncritical_warning_classes"
+                                                                    ],
+                                                         "parsed":  {
+                                                                        "vivado_warning_summary_verify":  "ok",
+                                                                        "vivado_warning_lines":  "457",
+                                                                        "vivado_warning_codes":  "17",
+                                                                        "unexpected_warning_codes":  "0",
+                                                                        "constraint_truth_warning_lines":  "0",
+                                                                        "retired_hdmi_warning_lines":  "0",
+                                                                        "warning_summary_boundary":  "known_noncritical_warning_classes"
+                                                                    }
+                                                     },
+                   "project_independence":  {
+                                                "script":  "scripts/verify_project_independence.ps1",
+                                                "output":  [
+                                                               "project_independence=ok",
+                                                               "project_path_relative=ok",
+                                                               "active_xdc_source=constraints/z20_v1_5_active_mapped.xdc",
+                                                               "source_files_scanned=196",
+                                                               "dependency_files_scanned=180"
+                                                           ],
+                                                "parsed":  {
+                                                               "project_independence":  "ok",
+                                                               "project_path_relative":  "ok",
+                                                               "active_xdc_source":  "constraints/z20_v1_5_active_mapped.xdc",
+                                                               "source_files_scanned":  "196",
+                                                               "dependency_files_scanned":  "180"
+                                                           }
+                                            },
+                   "project_portability":  {
+                                               "script":  "scripts/verify_project_portability.ps1",
+                                               "output":  [
+                                                              "project_portability=ok",
+                                                              "absolute_path_scan=ok",
+                                                              "old_project_dependency=ok",
+                                                              "manifest_relative_paths=ok",
+                                                              "manifest_artifact_paths=23",
+                                                              "tmp_files=0",
+                                                              "text_files_scanned=292",
+                                                              "dependency_files_scanned=265"
+                                                          ],
+                                               "parsed":  {
+                                                              "project_portability":  "ok",
+                                                              "absolute_path_scan":  "ok",
+                                                              "old_project_dependency":  "ok",
+                                                              "manifest_relative_paths":  "ok",
+                                                              "manifest_artifact_paths":  "23",
+                                                              "tmp_files":  "0",
+                                                              "text_files_scanned":  "292",
+                                                              "dependency_files_scanned":  "265"
+                                                          }
+                                           },
+                   "adc_mapping":  {
+                                       "script":  "scripts/verify_adc_spi_mapping.ps1",
+                                       "output":  [
+                                                      "adc_mapping=ok",
+                                                      "adc_owner=XADC_VP_VN_ONE_CHANNEL",
+                                                      "adc_channel_count=1",
+                                                      "adc_xadc_pins=L11,M12",
+                                                      "adc_spi_mapping=retired",
+                                                      "adc_spi_pins=none",
+                                                      "adc_spi_top_ports=retired",
+                                                      "xadc_one_channel_adc=enabled",
+                                                      "xadc_two_channel_adc=not_used",
+                                                      "legacy_fpga1_io12_spare_constraints=source_restored_active_unassigned",
+                                                      "active_adc_spi_assignments=0",
+                                                      "active_xadc_assignments=0"
+                                                  ],
+                                       "parsed":  {
+                                                      "adc_mapping":  "ok",
+                                                      "adc_owner":  "XADC_VP_VN_ONE_CHANNEL",
+                                                      "adc_channel_count":  "1",
+                                                      "adc_xadc_pins":  "L11,M12",
+                                                      "adc_spi_mapping":  "retired",
+                                                      "adc_spi_pins":  "none",
+                                                      "adc_spi_top_ports":  "retired",
+                                                      "xadc_one_channel_adc":  "enabled",
+                                                      "xadc_two_channel_adc":  "not_used",
+                                                      "legacy_fpga1_io12_spare_constraints":  "source_restored_active_unassigned",
+                                                      "active_adc_spi_assignments":  "0",
+                                                      "active_xadc_assignments":  "0"
+                                                  }
+                                   },
+                   "legacy_axis_adc_boundary":  {
+                                                    "script":  "scripts/verify_no_legacy_axis_adc_boundary.ps1",
+                                                    "output":  [
+                                                                   "legacy_axis_adc_boundary=retired",
+                                                                   "wrapper_axis_boundary=current_8bit",
+                                                                   "bd_adc_spi_external_boundary=retired",
+                                                                   "axis_functional_completion=vivado_io_owner_connected",
+                                                                   "axis_motion_owner=step_ip_8axis_stepdir_encoder_direct",
+                                                                   "axis_ena_owner=z20_v15_io_owner_axi_lite",
+                                                                   "axis_78_encoder_processing=connected_to_step_ip",
+                                                                   "di_mpg_alarm_processing=z20_v15_io_owner_input_registers",
+                                                                   "do_pwm_normal_owner=z20_v15_io_owner_do_pwm",
+                                                                   "rs485_boundary=exported_ps_uart1_emio",
+                                                                   "touch_int_rst_boundary=z20_v15_io_owner_tp_int_rst"
+                                                               ],
+                                                    "parsed":  {
+                                                                   "legacy_axis_adc_boundary":  "retired",
+                                                                   "wrapper_axis_boundary":  "current_8bit",
+                                                                   "bd_adc_spi_external_boundary":  "retired",
+                                                                   "axis_functional_completion":  "vivado_io_owner_connected",
+                                                                   "axis_motion_owner":  "step_ip_8axis_stepdir_encoder_direct",
+                                                                   "axis_ena_owner":  "z20_v15_io_owner_axi_lite",
+                                                                   "axis_78_encoder_processing":  "connected_to_step_ip",
+                                                                   "di_mpg_alarm_processing":  "z20_v15_io_owner_input_registers",
+                                                                   "do_pwm_normal_owner":  "z20_v15_io_owner_do_pwm",
+                                                                   "rs485_boundary":  "exported_ps_uart1_emio",
+                                                                   "touch_int_rst_boundary":  "z20_v15_io_owner_tp_int_rst"
+                                                               }
+                                                },
+                   "z20_v15_io_owner_sim":  {
+                                                "script":  "scripts/verify_z20_v15_io_owner_sim.ps1",
+                                                "output":  [
+                                                               "z20_v15_io_owner_sim=ok",
+                                                               "z20_v15_io_owner_axi_lite_tb=pass",
+                                                               "sim_outputs=persistent_none"
+                                                           ],
+                                                "parsed":  {
+                                                               "z20_v15_io_owner_sim":  "ok",
+                                                               "z20_v15_io_owner_axi_lite_tb":  "pass",
+                                                               "sim_outputs":  "persistent_none"
+                                                           }
+                                            },
+                   "pl_estop_sim":  {
+                                        "script":  "scripts/verify_pl_estop_sim.ps1",
+                                        "output":  [
+                                                       "pl_estop_sim=ok",
+                                                       "pl_estop_core_tb=pass",
+                                                       "pl_estop_axi_lite_tb=pass",
+                                                       "sim_tool=icarus_verilog",
+                                                       "sim_outputs=persistent_none"
+                                                   ],
+                                        "parsed":  {
+                                                       "pl_estop_sim":  "ok",
+                                                       "pl_estop_core_tb":  "pass",
+                                                       "pl_estop_axi_lite_tb":  "pass",
+                                                       "sim_tool":  "icarus_verilog",
+                                                       "sim_outputs":  "persistent_none"
+                                                   }
+                                    },
+                   "pl_estop_timing_params":  {
+                                                  "script":  "scripts/verify_pl_estop_timing_params.ps1",
+                                                  "output":  [
+                                                                 "pl_estop_timing_params=ok",
+                                                                 "clock_hz=100000000",
+                                                                 "debounce_ms=10",
+                                                                 "debounce_cycles=1000000",
+                                                                 "brake_lead_us=50",
+                                                                 "brake_cycles=5000",
+                                                                 "axis_count=8",
+                                                                 "z_axis_index=2",
+                                                                 "bd_axi_freq_hz=100000000",
+                                                                 "bd_clock_net=processing_system7_0_FCLK_CLK0",
+                                                                 "register_timing_exposed=yes",
+                                                                 "register_axis_config_exposed=yes"
+                                                             ],
+                                                  "parsed":  {
+                                                                 "pl_estop_timing_params":  "ok",
+                                                                 "clock_hz":  "100000000",
+                                                                 "debounce_ms":  "10",
+                                                                 "debounce_cycles":  "1000000",
+                                                                 "brake_lead_us":  "50",
+                                                                 "brake_cycles":  "5000",
+                                                                 "axis_count":  "8",
+                                                                 "z_axis_index":  "2",
+                                                                 "bd_axi_freq_hz":  "100000000",
+                                                                 "bd_clock_net":  "processing_system7_0_FCLK_CLK0",
+                                                                 "register_timing_exposed":  "yes",
+                                                                 "register_axis_config_exposed":  "yes"
+                                                             }
+                                              },
+                   "pl_estop_safety_boundary":  {
+                                                    "script":  "scripts/verify_pl_estop_safety_boundary.ps1",
+                                                    "output":  [
+                                                                   "pl_estop_safety_boundary=ok",
+                                                                   "do_pwm_gate=top_hard_gate_local_unverified",
+                                                                   "bus_tx_gate=top_rgmii_tx_gate_local_unverified",
+                                                                   "pl_estop_axi_observation=top_estop_input_local_unverified",
+                                                                   "gmii_pre_oddr_patch_flow=ok",
+                                                                   "status_bits=ok",
+                                                                   "bd_placeholder_connections=ok",
+                                                                   "active_do_pwm_pin_assignments=16",
+                                                                   "active_estop_input_pin_assignments=1",
+                                                                   "active_pending_wiring_pin_assignments=0",
+                                                                   "active_estop_gate_output_ports=0"
+                                                               ],
+                                                    "parsed":  {
+                                                                   "pl_estop_safety_boundary":  "ok",
+                                                                   "do_pwm_gate":  "top_hard_gate_local_unverified",
+                                                                   "bus_tx_gate":  "top_rgmii_tx_gate_local_unverified",
+                                                                   "pl_estop_axi_observation":  "top_estop_input_local_unverified",
+                                                                   "gmii_pre_oddr_patch_flow":  "ok",
+                                                                   "status_bits":  "ok",
+                                                                   "bd_placeholder_connections":  "ok",
+                                                                   "active_do_pwm_pin_assignments":  "16",
+                                                                   "active_estop_input_pin_assignments":  "1",
+                                                                   "active_pending_wiring_pin_assignments":  "0",
+                                                                   "active_estop_gate_output_ports":  "0"
+                                                               }
+                                                },
+                   "pl_estop_output_shutdown_contract":  {
+                                                             "script":  "scripts/verify_pl_estop_output_shutdown_contract.ps1",
+                                                             "output":  [
+                                                                            "pl_estop_output_shutdown_contract=code_review_only",
+                                                                            "do_pwm_contract=ok",
+                                                                            "bus_tx_contract=ok",
+                                                                            "bus_gate_owner=ps_gem1_emio_rgmii_local_verified",
+                                                                            "bus_gate_transport=EtherCAT over PS GEM1/EMIO",
+                                                                            "bus_gate_before_gmii2rgmii=ok",
+                                                                            "bus_gate_board_evidence=pending",
+                                                                            "do_pwm_wiring_rows=16",
+                                                                            "do_pwm_pending_rows=0",
+                                                                            "bus_tx_wiring_rows=2",
+                                                                            "bus_tx_pending_rows=0",
+                                                                            "board_test_bv09=pending",
+                                                                            "board_test_bv10=pending",
+                                                                            "board_test_bv11=pending",
+                                                                            "board_test_bv12=pending",
+                                                                            "active_do_pwm_pin_assignments=16",
+                                                                            "active_bus_tx_pin_assignments=0",
+                                                                            "active_output_gate_ports=0"
+                                                                        ],
+                                                             "parsed":  {
+                                                                            "pl_estop_output_shutdown_contract":  "code_review_only",
+                                                                            "do_pwm_contract":  "ok",
+                                                                            "bus_tx_contract":  "ok",
+                                                                            "bus_gate_owner":  "ps_gem1_emio_rgmii_local_verified",
+                                                                            "bus_gate_transport":  "EtherCAT over PS GEM1/EMIO",
+                                                                            "bus_gate_before_gmii2rgmii":  "ok",
+                                                                            "bus_gate_board_evidence":  "pending",
+                                                                            "do_pwm_wiring_rows":  "16",
+                                                                            "do_pwm_pending_rows":  "0",
+                                                                            "bus_tx_wiring_rows":  "2",
+                                                                            "bus_tx_pending_rows":  "0",
+                                                                            "board_test_bv09":  "pending",
+                                                                            "board_test_bv10":  "pending",
+                                                                            "board_test_bv11":  "pending",
+                                                                            "board_test_bv12":  "pending",
+                                                                            "active_do_pwm_pin_assignments":  "16",
+                                                                            "active_bus_tx_pin_assignments":  "0",
+                                                                            "active_output_gate_ports":  "0"
+                                                                        }
+                                                         },
+                   "pl_estop_bus_gate_owner":  {
+                                                   "script":  "scripts/verify_pl_estop_bus_gate_owner.ps1",
+                                                   "output":  [
+                                                                  "pl_estop_bus_gate_owner=ps_gem1_emio_rgmii_local_verified",
+                                                                  "production_profile=ethercat",
+                                                                  "production_transport=EtherCAT over PS GEM1/EMIO",
+                                                                  "bd_enet1_emio=enabled",
+                                                                  "bd_ps_gem1_to_gmii2rgmii=ok",
+                                                                  "gate_inserted_before_gmii2rgmii=ok",
+                                                                  "tx_en_gated=yes",
+                                                                  "txd_forced_idle_zero=yes",
+                                                                  "tx_er_forced_idle_zero=yes",
+                                                                  "rx_path_preserved_by_design=yes",
+                                                                  "mdio_path_preserved_by_design=yes",
+                                                                  "link_reset_power_gate=not_used",
+                                                                  "queue_flush_owner=pl_no_fifo_ps_queue_board_evidence_required",
+                                                                  "board_tests_required=BV10,BV11,BV12",
+                                                                  "board_evidence_state=pending"
+                                                              ],
+                                                   "parsed":  {
+                                                                  "pl_estop_bus_gate_owner":  "ps_gem1_emio_rgmii_local_verified",
+                                                                  "production_profile":  "ethercat",
+                                                                  "production_transport":  "EtherCAT over PS GEM1/EMIO",
+                                                                  "bd_enet1_emio":  "enabled",
+                                                                  "bd_ps_gem1_to_gmii2rgmii":  "ok",
+                                                                  "gate_inserted_before_gmii2rgmii":  "ok",
+                                                                  "tx_en_gated":  "yes",
+                                                                  "txd_forced_idle_zero":  "yes",
+                                                                  "tx_er_forced_idle_zero":  "yes",
+                                                                  "rx_path_preserved_by_design":  "yes",
+                                                                  "mdio_path_preserved_by_design":  "yes",
+                                                                  "link_reset_power_gate":  "not_used",
+                                                                  "queue_flush_owner":  "pl_no_fifo_ps_queue_board_evidence_required",
+                                                                  "board_tests_required":  "BV10,BV11,BV12",
+                                                                  "board_evidence_state":  "pending"
+                                                              }
+                                               },
+                   "pl_estop_register_map":  {
+                                                 "script":  "scripts/verify_pl_estop_register_map.ps1",
+                                                 "output":  [
+                                                                "pl_estop_register_map=ok",
+                                                                "register_map=board_inputs/pl_estop_register_map.md",
+                                                                "rtl_source=rtl/pl_estop_axi_lite.v",
+                                                                "registers=9",
+                                                                "status_bits=9",
+                                                                "control_bits=2",
+                                                                "base_address=0x41260000",
+                                                                "irq_route=xlconcat_0/In14",
+                                                                "abi_version=0x00010001"
+                                                            ],
+                                                 "parsed":  {
+                                                                "pl_estop_register_map":  "ok",
+                                                                "register_map":  "board_inputs/pl_estop_register_map.md",
+                                                                "rtl_source":  "rtl/pl_estop_axi_lite.v",
+                                                                "registers":  "9",
+                                                                "status_bits":  "9",
+                                                                "control_bits":  "2",
+                                                                "base_address":  "0x41260000",
+                                                                "irq_route":  "xlconcat_0/In14",
+                                                                "abi_version":  "0x00010001"
+                                                            }
+                                             },
+                   "pl_estop_wiring_evidence":  {
+                                                    "script":  "scripts/verify_pl_estop_wiring_evidence.ps1",
+                                                    "output":  [
+                                                                   "pl_estop_wiring_evidence=not_ready",
+                                                                   "ready_for_real_pins=no",
+                                                                   "board_evidence_ready=no",
+                                                                   "required_rows=22",
+                                                                   "ready_rows=19",
+                                                                   "pending_rows=3",
+                                                                   "do_pwm_ready_rows=16",
+                                                                   "bus_tx_ready_rows=2",
+                                                                   "verified_wiring_evidence_files=0",
+                                                                   "board_verified_evidence_contract=md_non_placeholder",
+                                                                   "board_verified_attachment_contract=project_relative_existing_files"
+                                                               ],
+                                                    "parsed":  {
+                                                                   "pl_estop_wiring_evidence":  "not_ready",
+                                                                   "ready_for_real_pins":  "no",
+                                                                   "board_evidence_ready":  "no",
+                                                                   "required_rows":  "22",
+                                                                   "ready_rows":  "19",
+                                                                   "pending_rows":  "3",
+                                                                   "do_pwm_ready_rows":  "16",
+                                                                   "bus_tx_ready_rows":  "2",
+                                                                   "verified_wiring_evidence_files":  "0",
+                                                                   "board_verified_evidence_contract":  "md_non_placeholder",
+                                                                   "board_verified_attachment_contract":  "project_relative_existing_files"
+                                                               }
+                                                },
+                   "pl_estop_board_validation":  {
+                                                     "script":  "scripts/verify_pl_estop_board_validation.ps1",
+                                                     "output":  [
+                                                                    "pl_estop_board_validation=not_ready",
+                                                                    "board_validation_ready=no",
+                                                                    "required_tests=14",
+                                                                    "verified_tests=0",
+                                                                    "pending_tests=14",
+                                                                    "verified_evidence_files=0",
+                                                                    "board_verified_evidence_contract=md_non_placeholder",
+                                                                    "board_verified_attachment_contract=project_relative_existing_files"
+                                                                ],
+                                                     "parsed":  {
+                                                                    "pl_estop_board_validation":  "not_ready",
+                                                                    "board_validation_ready":  "no",
+                                                                    "required_tests":  "14",
+                                                                    "verified_tests":  "0",
+                                                                    "pending_tests":  "14",
+                                                                    "verified_evidence_files":  "0",
+                                                                    "board_verified_evidence_contract":  "md_non_placeholder",
+                                                                    "board_verified_attachment_contract":  "project_relative_existing_files"
+                                                                }
+                                                 },
+                   "pl_estop_evidence_gap":  {
+                                                 "script":  "scripts/export_pl_estop_evidence_gap.ps1",
+                                                 "output":  [
+                                                                "pl_estop_evidence_gap=open",
+                                                                "evidence_gap_report=docs/pl_estop_evidence_gap.md",
+                                                                "wiring_pending_rows=3",
+                                                                "board_pending_tests=14",
+                                                                "wiring_ready_rows=19",
+                                                                "board_verified_tests=0"
+                                                            ],
+                                                 "parsed":  {
+                                                                "pl_estop_evidence_gap":  "open",
+                                                                "evidence_gap_report":  "docs/pl_estop_evidence_gap.md",
+                                                                "wiring_pending_rows":  "3",
+                                                                "board_pending_tests":  "14",
+                                                                "wiring_ready_rows":  "19",
+                                                                "board_verified_tests":  "0"
+                                                            }
+                                             },
+                   "pl_estop_hardware_evidence_request":  {
+                                                              "script":  "scripts/export_pl_estop_hardware_evidence_request.ps1",
+                                                              "output":  [
+                                                                             "pl_estop_hardware_evidence_request=open",
+                                                                             "hardware_evidence_request_report=docs/pl_estop_hardware_evidence_request.md",
+                                                                             "wiring_request_items=3",
+                                                                             "board_request_items=14",
+                                                                             "do_pwm_request_items=0",
+                                                                             "bus_tx_request_items=0"
+                                                                         ],
+                                                              "parsed":  {
+                                                                             "pl_estop_hardware_evidence_request":  "open",
+                                                                             "hardware_evidence_request_report":  "docs/pl_estop_hardware_evidence_request.md",
+                                                                             "wiring_request_items":  "3",
+                                                                             "board_request_items":  "14",
+                                                                             "do_pwm_request_items":  "0",
+                                                                             "bus_tx_request_items":  "0"
+                                                                         }
+                                                          },
+                   "pl_estop_hardware_evidence_request_verify":  {
+                                                                     "script":  "scripts/verify_pl_estop_hardware_evidence_request.ps1",
+                                                                     "output":  [
+                                                                                    "pl_estop_hardware_evidence_request_verify=ok",
+                                                                                    "hardware_evidence_request_report=docs/pl_estop_hardware_evidence_request.md",
+                                                                                    "hardware_evidence_request_state=open",
+                                                                                    "wiring_request_items=3",
+                                                                                    "board_request_items=14",
+                                                                                    "do_pwm_request_items=0",
+                                                                                    "bus_tx_request_items=0"
+                                                                                ],
+                                                                     "parsed":  {
+                                                                                    "pl_estop_hardware_evidence_request_verify":  "ok",
+                                                                                    "hardware_evidence_request_report":  "docs/pl_estop_hardware_evidence_request.md",
+                                                                                    "hardware_evidence_request_state":  "open",
+                                                                                    "wiring_request_items":  "3",
+                                                                                    "board_request_items":  "14",
+                                                                                    "do_pwm_request_items":  "0",
+                                                                                    "bus_tx_request_items":  "0"
+                                                                                }
+                                                                 },
+                   "pl_estop_field_packet":  {
+                                                 "script":  "scripts/export_pl_estop_field_packet.ps1",
+                                                 "output":  [
+                                                                "pl_estop_field_packet=open",
+                                                                "field_packet_report=docs/pl_estop_field_packet.md",
+                                                                "wiring_rows=22",
+                                                                "board_tests=14",
+                                                                "do_pwm_rows=16",
+                                                                "bus_tx_rows=2"
+                                                            ],
+                                                 "parsed":  {
+                                                                "pl_estop_field_packet":  "open",
+                                                                "field_packet_report":  "docs/pl_estop_field_packet.md",
+                                                                "wiring_rows":  "22",
+                                                                "board_tests":  "14",
+                                                                "do_pwm_rows":  "16",
+                                                                "bus_tx_rows":  "2"
+                                                            }
+                                             },
+                   "pl_estop_field_packet_verify":  {
+                                                        "script":  "scripts/verify_pl_estop_field_packet.ps1",
+                                                        "output":  [
+                                                                       "pl_estop_field_packet_verify=ok",
+                                                                       "field_packet_report=docs/pl_estop_field_packet.md",
+                                                                       "field_packet_state=open",
+                                                                       "wiring_rows=22",
+                                                                       "board_tests=14",
+                                                                       "do_pwm_rows=16",
+                                                                       "bus_tx_rows=2"
+                                                                   ],
+                                                        "parsed":  {
+                                                                       "pl_estop_field_packet_verify":  "ok",
+                                                                       "field_packet_report":  "docs/pl_estop_field_packet.md",
+                                                                       "field_packet_state":  "open",
+                                                                       "wiring_rows":  "22",
+                                                                       "board_tests":  "14",
+                                                                       "do_pwm_rows":  "16",
+                                                                       "bus_tx_rows":  "2"
+                                                                   }
+                                                    },
+                   "pl_estop_field_runbook":  {
+                                                  "script":  "scripts/verify_pl_estop_field_runbook.ps1",
+                                                  "output":  [
+                                                                 "pl_estop_field_runbook_verify=ok",
+                                                                 "field_runbook_state=open",
+                                                                 "field_runbook=docs/pl_estop_field_execution_runbook.md"
+                                                             ],
+                                                  "parsed":  {
+                                                                 "pl_estop_field_runbook_verify":  "ok",
+                                                                 "field_runbook_state":  "open",
+                                                                 "field_runbook":  "docs/pl_estop_field_execution_runbook.md"
+                                                             }
+                                              },
+                   "pl_estop_evidence_templates":  {
+                                                       "script":  "scripts/export_pl_estop_evidence_templates.ps1",
+                                                       "output":  [
+                                                                      "pl_estop_evidence_templates=open",
+                                                                      "evidence_templates_report=docs/pl_estop_evidence_record_templates.md",
+                                                                      "wiring_templates=22",
+                                                                      "board_validation_templates=14",
+                                                                      "do_pwm_templates=16",
+                                                                      "bus_tx_templates=2",
+                                                                      "board_verified_template_records=0"
+                                                                  ],
+                                                       "parsed":  {
+                                                                      "pl_estop_evidence_templates":  "open",
+                                                                      "evidence_templates_report":  "docs/pl_estop_evidence_record_templates.md",
+                                                                      "wiring_templates":  "22",
+                                                                      "board_validation_templates":  "14",
+                                                                      "do_pwm_templates":  "16",
+                                                                      "bus_tx_templates":  "2",
+                                                                      "board_verified_template_records":  "0"
+                                                                  }
+                                                   },
+                   "pl_estop_evidence_templates_verify":  {
+                                                              "script":  "scripts/verify_pl_estop_evidence_templates.ps1",
+                                                              "output":  [
+                                                                             "pl_estop_evidence_templates_verify=ok",
+                                                                             "evidence_templates_report=docs/pl_estop_evidence_record_templates.md",
+                                                                             "template_state=open",
+                                                                             "wiring_templates=22",
+                                                                             "board_validation_templates=14",
+                                                                             "do_pwm_templates=16",
+                                                                             "bus_tx_templates=2",
+                                                                             "board_verified_template_records=0"
+                                                                         ],
+                                                              "parsed":  {
+                                                                             "pl_estop_evidence_templates_verify":  "ok",
+                                                                             "evidence_templates_report":  "docs/pl_estop_evidence_record_templates.md",
+                                                                             "template_state":  "open",
+                                                                             "wiring_templates":  "22",
+                                                                             "board_validation_templates":  "14",
+                                                                             "do_pwm_templates":  "16",
+                                                                             "bus_tx_templates":  "2",
+                                                                             "board_verified_template_records":  "0"
+                                                                         }
+                                                          },
+                   "pl_estop_evidence_root":  {
+                                                  "script":  "scripts/verify_pl_estop_evidence_root.ps1",
+                                                  "output":  [
+                                                                 "pl_estop_evidence_root_verify=ok",
+                                                                 "evidence_root=docs/evidence/pl_estop",
+                                                                 "evidence_root_files=1",
+                                                                 "evidence_root_md_files=1",
+                                                                 "referenced_board_verified_evidence_paths=0",
+                                                                 "board_verified_records=0",
+                                                                 "orphan_board_verified_records=0"
+                                                             ],
+                                                  "parsed":  {
+                                                                 "pl_estop_evidence_root_verify":  "ok",
+                                                                 "evidence_root":  "docs/evidence/pl_estop",
+                                                                 "evidence_root_files":  "1",
+                                                                 "evidence_root_md_files":  "1",
+                                                                 "referenced_board_verified_evidence_paths":  "0",
+                                                                 "board_verified_records":  "0",
+                                                                 "orphan_board_verified_records":  "0"
+                                                             }
+                                              },
+                   "pl_estop_field_intake":  {
+                                                 "script":  "scripts/verify_pl_estop_field_intake.ps1",
+                                                 "output":  [
+                                                                "pl_estop_field_intake=not_ready",
+                                                                "field_intake_structural_contract=ok",
+                                                                "field_intake_blockers=wiring_not_ready_for_real_pins,wiring_board_evidence_not_ready,board_validation_not_ready",
+                                                                "hardware_evidence_request_verify=ok",
+                                                                "field_packet_verify=ok",
+                                                                "field_runbook_verify=ok",
+                                                                "field_runbook_state=open",
+                                                                "evidence_templates_verify=ok",
+                                                                "board_verified_template_records=0",
+                                                                "evidence_root_verify=ok",
+                                                                "orphan_board_verified_records=0",
+                                                                "pl_estop_wiring_evidence=not_ready",
+                                                                "ready_for_real_pins=no",
+                                                                "board_evidence_ready=no",
+                                                                "do_pwm_ready_rows=16",
+                                                                "bus_tx_ready_rows=2",
+                                                                "verified_wiring_evidence_files=0",
+                                                                "pl_estop_board_validation=not_ready",
+                                                                "board_validation_ready=no",
+                                                                "verified_board_validation_evidence_files=0",
+                                                                "board_verified_evidence_contract=md_non_placeholder",
+                                                                "board_verified_attachment_contract=project_relative_existing_files",
+                                                                "pl_estop_safety_boundary=ok",
+                                                                "active_pending_wiring_pin_assignments=0",
+                                                                "active_estop_gate_output_ports=0"
+                                                            ],
+                                                 "parsed":  {
+                                                                "pl_estop_field_intake":  "not_ready",
+                                                                "field_intake_structural_contract":  "ok",
+                                                                "field_intake_blockers":  "wiring_not_ready_for_real_pins,wiring_board_evidence_not_ready,board_validation_not_ready",
+                                                                "hardware_evidence_request_verify":  "ok",
+                                                                "field_packet_verify":  "ok",
+                                                                "field_runbook_verify":  "ok",
+                                                                "field_runbook_state":  "open",
+                                                                "evidence_templates_verify":  "ok",
+                                                                "board_verified_template_records":  "0",
+                                                                "evidence_root_verify":  "ok",
+                                                                "orphan_board_verified_records":  "0",
+                                                                "pl_estop_wiring_evidence":  "not_ready",
+                                                                "ready_for_real_pins":  "no",
+                                                                "board_evidence_ready":  "no",
+                                                                "do_pwm_ready_rows":  "16",
+                                                                "bus_tx_ready_rows":  "2",
+                                                                "verified_wiring_evidence_files":  "0",
+                                                                "pl_estop_board_validation":  "not_ready",
+                                                                "board_validation_ready":  "no",
+                                                                "verified_board_validation_evidence_files":  "0",
+                                                                "board_verified_evidence_contract":  "md_non_placeholder",
+                                                                "board_verified_attachment_contract":  "project_relative_existing_files",
+                                                                "pl_estop_safety_boundary":  "ok",
+                                                                "active_pending_wiring_pin_assignments":  "0",
+                                                                "active_estop_gate_output_ports":  "0"
+                                                            }
+                                             },
+                   "pl_estop_real_pin_promotion_gate":  {
+                                                            "script":  "scripts/verify_pl_estop_real_pin_promotion_gate.ps1",
+                                                            "output":  [
+                                                                           "pl_estop_real_pin_promotion_gate=local_hard_gate_promoted",
+                                                                           "active_promoted_wiring_assignments=17",
+                                                                           "active_promoted_do_pwm_assignments=16",
+                                                                           "active_promoted_estop_input_assignments=1",
+                                                                           "active_promoted_bus_tx_assignments=0",
+                                                                           "active_estop_gate_output_ports=0",
+                                                                           "promotion_requires_e11=no",
+                                                                           "local_hard_gate_promoted=yes",
+                                                                           "e11_rtl_xdc_ready=no",
+                                                                           "a11_board_validation_ready=no"
+                                                                       ],
+                                                            "parsed":  {
+                                                                           "pl_estop_real_pin_promotion_gate":  "local_hard_gate_promoted",
+                                                                           "active_promoted_wiring_assignments":  "17",
+                                                                           "active_promoted_do_pwm_assignments":  "16",
+                                                                           "active_promoted_estop_input_assignments":  "1",
+                                                                           "active_promoted_bus_tx_assignments":  "0",
+                                                                           "active_estop_gate_output_ports":  "0",
+                                                                           "promotion_requires_e11":  "no",
+                                                                           "local_hard_gate_promoted":  "yes",
+                                                                           "e11_rtl_xdc_ready":  "no",
+                                                                           "a11_board_validation_ready":  "no"
+                                                                       }
+                                                        },
+                   "pl_estop_readiness":  {
+                                              "script":  "scripts/verify_pl_estop_readiness.ps1",
+                                              "output":  [
+                                                             "pl_estop_readiness=not_ready",
+                                                             "e11_rtl_xdc_ready=no",
+                                                             "a11_board_validation_ready=no",
+                                                             "readiness_blockers=pl_estop_wiring_evidence_not_ready,pl_estop_board_evidence_not_ready,pl_estop_board_validation_not_ready",
+                                                             "project_independence=ok",
+                                                             "unassigned_top_ports_count=0",
+                                                             "remaining_drc_rows=0",
+                                                             "active_pin_conflicts=0",
+                                                             "pl_estop_safety_boundary=ok",
+                                                             "pl_estop_hardware_evidence_request_verify=ok",
+                                                             "hardware_evidence_request_state=open",
+                                                             "pl_estop_evidence_templates_verify=ok",
+                                                             "evidence_templates_state=open",
+                                                             "board_verified_template_records=0",
+                                                             "pl_estop_field_runbook_verify=ok",
+                                                             "field_runbook_state=open",
+                                                             "pl_estop_field_intake=not_ready",
+                                                             "field_intake_structural_contract=ok",
+                                                             "pl_estop_wiring_evidence=not_ready",
+                                                             "pl_estop_board_validation=not_ready",
+                                                             "ready_for_real_pins=no",
+                                                             "board_evidence_ready=no",
+                                                             "board_validation_ready=no"
+                                                         ],
+                                              "parsed":  {
+                                                             "pl_estop_readiness":  "not_ready",
+                                                             "e11_rtl_xdc_ready":  "no",
+                                                             "a11_board_validation_ready":  "no",
+                                                             "readiness_blockers":  "pl_estop_wiring_evidence_not_ready,pl_estop_board_evidence_not_ready,pl_estop_board_validation_not_ready",
+                                                             "project_independence":  "ok",
+                                                             "unassigned_top_ports_count":  "0",
+                                                             "remaining_drc_rows":  "0",
+                                                             "active_pin_conflicts":  "0",
+                                                             "pl_estop_safety_boundary":  "ok",
+                                                             "pl_estop_hardware_evidence_request_verify":  "ok",
+                                                             "hardware_evidence_request_state":  "open",
+                                                             "pl_estop_evidence_templates_verify":  "ok",
+                                                             "evidence_templates_state":  "open",
+                                                             "board_verified_template_records":  "0",
+                                                             "pl_estop_field_runbook_verify":  "ok",
+                                                             "field_runbook_state":  "open",
+                                                             "pl_estop_field_intake":  "not_ready",
+                                                             "field_intake_structural_contract":  "ok",
+                                                             "pl_estop_wiring_evidence":  "not_ready",
+                                                             "pl_estop_board_validation":  "not_ready",
+                                                             "ready_for_real_pins":  "no",
+                                                             "board_evidence_ready":  "no",
+                                                             "board_validation_ready":  "no"
+                                                         }
+                                          },
+                   "board_input_handoff":  {
+                                               "script":  "scripts/export_board_input_handoff.ps1",
+                                               "output":  [
+                                                              "board_input_handoff=local_verified_only",
+                                                              "board_input_handoff_readme=board_inputs/README.md",
+                                                              "board_input_handoff_software_handoff=board_inputs/software_handoff.md",
+                                                              "board_input_handoff_hardware_abi_header=board_inputs/v3_hardware_abi.h",
+                                                              "board_input_handoff_hardware_abi_header_verify=ok",
+                                                              "board_input_handoff_driver_contract_header=board_inputs/z20_v1_5_hardware_abi.h",
+                                                              "board_input_handoff_driver_contract_dtsi=board_inputs/z20_v1_5_axi_lite.dtsi",
+                                                              "board_input_handoff_driver_contract_verify=ok",
+                                                              "board_input_handoff_register_map=board_inputs/pl_estop_register_map.md",
+                                                              "board_input_handoff_io_owner_register_map=docs/io_owner_register_map.md",
+                                                              "board_input_handoff_register_map_verify=ok",
+                                                              "board_input_handoff_active_xdc_traceability=ok",
+                                                              "board_input_handoff_active_xdc_electrical_contract=ok",
+                                                              "board_input_handoff_vivado_xsa_cleanliness=ok",
+                                                              "board_input_handoff_vivado_warning_summary=classified",
+                                                              "board_input_handoff_vivado_warning_summary_verify=ok",
+                                                              "board_input_handoff_legacy_axis_adc_boundary=retired",
+                                                              "board_input_handoff_wrapper_axis_boundary=current_8bit",
+                                                              "board_input_handoff_axis_functional_completion=vivado_io_owner_connected",
+                                                              "board_input_handoff_z20_v15_io_owner_sim=ok",
+                                                              "board_input_handoff_readiness=not_ready",
+                                                              "board_input_handoff_pl_estop_sim=ok",
+                                                              "board_input_handoff_timing_params=ok",
+                                                              "board_input_handoff_request_verify=ok",
+                                                              "board_input_handoff_field_packet_verify=ok",
+                                                              "board_input_handoff_field_runbook_verify=ok",
+                                                              "board_input_handoff_evidence_templates_verify=ok",
+                                                              "board_input_handoff_evidence_root_verify=ok",
+                                                              "board_input_handoff_field_intake=not_ready",
+                                                              "board_input_handoff_field_intake_contract=ok",
+                                                              "board_input_handoff_real_pin_promotion_gate=local_hard_gate_promoted",
+                                                              "board_input_handoff_output_shutdown_contract=code_review_only"
+                                                          ],
+                                               "parsed":  {
+                                                              "board_input_handoff":  "local_verified_only",
+                                                              "board_input_handoff_readme":  "board_inputs/README.md",
+                                                              "board_input_handoff_software_handoff":  "board_inputs/software_handoff.md",
+                                                              "board_input_handoff_hardware_abi_header":  "board_inputs/v3_hardware_abi.h",
+                                                              "board_input_handoff_hardware_abi_header_verify":  "ok",
+                                                              "board_input_handoff_driver_contract_header":  "board_inputs/z20_v1_5_hardware_abi.h",
+                                                              "board_input_handoff_driver_contract_dtsi":  "board_inputs/z20_v1_5_axi_lite.dtsi",
+                                                              "board_input_handoff_driver_contract_verify":  "ok",
+                                                              "board_input_handoff_register_map":  "board_inputs/pl_estop_register_map.md",
+                                                              "board_input_handoff_io_owner_register_map":  "docs/io_owner_register_map.md",
+                                                              "board_input_handoff_register_map_verify":  "ok",
+                                                              "board_input_handoff_active_xdc_traceability":  "ok",
+                                                              "board_input_handoff_active_xdc_electrical_contract":  "ok",
+                                                              "board_input_handoff_vivado_xsa_cleanliness":  "ok",
+                                                              "board_input_handoff_vivado_warning_summary":  "classified",
+                                                              "board_input_handoff_vivado_warning_summary_verify":  "ok",
+                                                              "board_input_handoff_legacy_axis_adc_boundary":  "retired",
+                                                              "board_input_handoff_wrapper_axis_boundary":  "current_8bit",
+                                                              "board_input_handoff_axis_functional_completion":  "vivado_io_owner_connected",
+                                                              "board_input_handoff_z20_v15_io_owner_sim":  "ok",
+                                                              "board_input_handoff_readiness":  "not_ready",
+                                                              "board_input_handoff_pl_estop_sim":  "ok",
+                                                              "board_input_handoff_timing_params":  "ok",
+                                                              "board_input_handoff_request_verify":  "ok",
+                                                              "board_input_handoff_field_packet_verify":  "ok",
+                                                              "board_input_handoff_field_runbook_verify":  "ok",
+                                                              "board_input_handoff_evidence_templates_verify":  "ok",
+                                                              "board_input_handoff_evidence_root_verify":  "ok",
+                                                              "board_input_handoff_field_intake":  "not_ready",
+                                                              "board_input_handoff_field_intake_contract":  "ok",
+                                                              "board_input_handoff_real_pin_promotion_gate":  "local_hard_gate_promoted",
+                                                              "board_input_handoff_output_shutdown_contract":  "code_review_only"
+                                                          }
+                                           },
+                   "board_input_handoff_verify":  {
+                                                      "script":  "scripts/verify_board_input_handoff.ps1",
+                                                      "output":  [
+                                                                     "board_input_handoff_verify=ok",
+                                                                     "board_input_handoff_readme=board_inputs/README.md",
+                                                                     "board_input_handoff_software_handoff=board_inputs/software_handoff.md",
+                                                                     "board_input_handoff_hardware_abi_header=board_inputs/v3_hardware_abi.h",
+                                                                     "board_input_handoff_hardware_abi_header_verify=ok",
+                                                                     "board_input_handoff_driver_contract_header=board_inputs/z20_v1_5_hardware_abi.h",
+                                                                     "board_input_handoff_driver_contract_dtsi=board_inputs/z20_v1_5_axi_lite.dtsi",
+                                                                     "board_input_handoff_driver_contract_verify=ok",
+                                                                     "board_input_handoff_register_map=board_inputs/pl_estop_register_map.md",
+                                                                     "board_input_handoff_io_owner_register_map=docs/io_owner_register_map.md",
+                                                                     "board_input_handoff_register_map_verify=ok",
+                                                                     "board_input_handoff_state=local_verified_only",
+                                                                     "board_input_handoff_active_xdc_traceability=ok",
+                                                                     "board_input_handoff_active_xdc_electrical_contract=ok",
+                                                                     "board_input_handoff_vivado_xsa_cleanliness=ok",
+                                                                     "board_input_handoff_vivado_warning_summary=classified",
+                                                                     "board_input_handoff_vivado_warning_summary_verify=ok",
+                                                                     "board_input_handoff_legacy_axis_adc_boundary=retired",
+                                                                     "board_input_handoff_wrapper_axis_boundary=current_8bit",
+                                                                     "board_input_handoff_axis_functional_completion=vivado_io_owner_connected",
+                                                                     "board_input_handoff_z20_v15_io_owner_sim=ok",
+                                                                     "board_input_handoff_readiness=not_ready",
+                                                                     "board_input_handoff_pl_estop_sim=ok",
+                                                                     "board_input_handoff_timing_params=ok",
+                                                                     "board_input_handoff_request_verify=ok",
+                                                                     "board_input_handoff_field_packet_verify=ok",
+                                                                     "board_input_handoff_field_runbook_verify=ok",
+                                                                     "board_input_handoff_evidence_templates_verify=ok",
+                                                                     "board_input_handoff_evidence_root_verify=ok",
+                                                                     "board_input_handoff_field_intake=not_ready",
+                                                                     "board_input_handoff_field_intake_contract=ok",
+                                                                     "board_input_handoff_real_pin_promotion_gate=local_hard_gate_promoted",
+                                                                     "board_input_handoff_output_shutdown_contract=code_review_only",
+                                                                     "board_input_handoff_bus_gate_owner=ps_gem1_emio_rgmii_local_verified",
+                                                                     "board_input_handoff_bus_gate_board_evidence=pending"
+                                                                 ],
+                                                      "parsed":  {
+                                                                     "board_input_handoff_verify":  "ok",
+                                                                     "board_input_handoff_readme":  "board_inputs/README.md",
+                                                                     "board_input_handoff_software_handoff":  "board_inputs/software_handoff.md",
+                                                                     "board_input_handoff_hardware_abi_header":  "board_inputs/v3_hardware_abi.h",
+                                                                     "board_input_handoff_hardware_abi_header_verify":  "ok",
+                                                                     "board_input_handoff_driver_contract_header":  "board_inputs/z20_v1_5_hardware_abi.h",
+                                                                     "board_input_handoff_driver_contract_dtsi":  "board_inputs/z20_v1_5_axi_lite.dtsi",
+                                                                     "board_input_handoff_driver_contract_verify":  "ok",
+                                                                     "board_input_handoff_register_map":  "board_inputs/pl_estop_register_map.md",
+                                                                     "board_input_handoff_io_owner_register_map":  "docs/io_owner_register_map.md",
+                                                                     "board_input_handoff_register_map_verify":  "ok",
+                                                                     "board_input_handoff_state":  "local_verified_only",
+                                                                     "board_input_handoff_active_xdc_traceability":  "ok",
+                                                                     "board_input_handoff_active_xdc_electrical_contract":  "ok",
+                                                                     "board_input_handoff_vivado_xsa_cleanliness":  "ok",
+                                                                     "board_input_handoff_vivado_warning_summary":  "classified",
+                                                                     "board_input_handoff_vivado_warning_summary_verify":  "ok",
+                                                                     "board_input_handoff_legacy_axis_adc_boundary":  "retired",
+                                                                     "board_input_handoff_wrapper_axis_boundary":  "current_8bit",
+                                                                     "board_input_handoff_axis_functional_completion":  "vivado_io_owner_connected",
+                                                                     "board_input_handoff_z20_v15_io_owner_sim":  "ok",
+                                                                     "board_input_handoff_readiness":  "not_ready",
+                                                                     "board_input_handoff_pl_estop_sim":  "ok",
+                                                                     "board_input_handoff_timing_params":  "ok",
+                                                                     "board_input_handoff_request_verify":  "ok",
+                                                                     "board_input_handoff_field_packet_verify":  "ok",
+                                                                     "board_input_handoff_field_runbook_verify":  "ok",
+                                                                     "board_input_handoff_evidence_templates_verify":  "ok",
+                                                                     "board_input_handoff_evidence_root_verify":  "ok",
+                                                                     "board_input_handoff_field_intake":  "not_ready",
+                                                                     "board_input_handoff_field_intake_contract":  "ok",
+                                                                     "board_input_handoff_real_pin_promotion_gate":  "local_hard_gate_promoted",
+                                                                     "board_input_handoff_output_shutdown_contract":  "code_review_only",
+                                                                     "board_input_handoff_bus_gate_owner":  "ps_gem1_emio_rgmii_local_verified",
+                                                                     "board_input_handoff_bus_gate_board_evidence":  "pending"
+                                                                 }
+                                                  },
+                   "verify_remaining_drc_ports":  {
+                                                      "script":  "scripts/verify_remaining_drc_ports.ps1",
+                                                      "output":  [
+                                                                     "csv_rows=0",
+                                                                     "check_active_unassigned_ports=0",
+                                                                     "csv_matches_check_active=yes",
+                                                                     "required_columns=present",
+                                                                     "closure_blockers=",
+                                                                     "active_pin_conflicts=0"
+                                                                 ],
+                                                      "parsed":  {
+                                                                     "csv_rows":  "0",
+                                                                     "check_active_unassigned_ports":  "0",
+                                                                     "csv_matches_check_active":  "yes",
+                                                                     "required_columns":  "present",
+                                                                     "closure_blockers":  "",
+                                                                     "active_pin_conflicts":  "0"
+                                                                 }
+                                                  },
+                   "export_active_pin_conflicts":  {
+                                                       "script":  "scripts/export_active_pin_conflicts.ps1",
+                                                       "output":  [
+                                                                      "active_pin_conflicts=0",
+                                                                      "report=docs\\active_pin_conflicts.md"
+                                                                  ],
+                                                       "parsed":  {
+                                                                      "active_pin_conflicts":  "0",
+                                                                      "report":  "docs\\active_pin_conflicts.md"
+                                                                  }
+                                                   }
+               },
+    "artifacts":  [
+                      {
+                          "path":  "z20_v1_5_hw_project.runs/impl_1/system_top.bit",
+                          "bytes":  4045670,
+                          "last_write_time_utc":  "2026-07-01T02:03:21.0861028Z",
+                          "sha256":  "cf84bf001dac2a3ee92ea79f316e4b9e02f46dd57835d0a3cc25d150138914d6"
+                      },
+                      {
+                          "path":  "board_inputs/system.xsa",
+                          "bytes":  1144361,
+                          "last_write_time_utc":  "2026-07-01T02:05:26.1159814Z",
+                          "sha256":  "61ce7bd06c67d6f1611f72a855c761133340df6efd253b617d87364fceeb95cc"
+                      },
+                      {
+                          "path":  "constraints/z20_v1_5_active_mapped.xdc",
+                          "bytes":  38143,
+                          "last_write_time_utc":  "2026-07-01T00:29:21.1755294Z",
+                          "sha256":  "83174b9f49eb21906b644dadaed4f5abfa82c64499359e99447b871e3141bd94"
+                      },
+                      {
+                          "path":  "docs/pl_estop_wiring_evidence.csv",
+                          "bytes":  9779,
+                          "last_write_time_utc":  "2026-07-01T00:50:16.6184879Z",
+                          "sha256":  "99750abbb9f66450274c359c4239f815bf05e7e7dcd2bf26366dcf25d7d39d05"
+                      },
+                      {
+                          "path":  "docs/pl_estop_board_validation_evidence.csv",
+                          "bytes":  3885,
+                          "last_write_time_utc":  "2026-06-29T16:21:31.1707893Z",
+                          "sha256":  "70b93d3fa9f64d97a51197ee8e1846d555e98dc2428895dc337a2ee7bd1f6124"
+                      },
+                      {
+                          "path":  "docs/pl_estop_evidence_gap.md",
+                          "bytes":  5103,
+                          "last_write_time_utc":  "2026-07-01T04:45:54.9380379Z",
+                          "sha256":  "32e665be02196ec4e4817774333d6883c47eddf8c72c5350ea33b6a95d91f0d7"
+                      },
+                      {
+                          "path":  "docs/pl_estop_hardware_evidence_request.md",
+                          "bytes":  7433,
+                          "last_write_time_utc":  "2026-07-01T04:45:55.3256570Z",
+                          "sha256":  "c6e10e13878b2a33bdcb84ac98aa3d625d462afa41b7cae3839f53cbc4713497"
+                      },
+                      {
+                          "path":  "docs/pl_estop_field_packet.md",
+                          "bytes":  15905,
+                          "last_write_time_utc":  "2026-07-01T04:46:55.1667690Z",
+                          "sha256":  "af5b0ad01a63cc5c7f979caaf4e0d5d20bd893444c3450ca14ee4307e286bc93"
+                      },
+                      {
+                          "path":  "docs/pl_estop_field_execution_runbook.md",
+                          "bytes":  5044,
+                          "last_write_time_utc":  "2026-06-30T12:19:39.4400164Z",
+                          "sha256":  "23005c987e0ffbc124f379dc1c71416844391ac8000a1572b322267ef67b968b"
+                      },
+                      {
+                          "path":  "docs/pl_estop_evidence_record_templates.md",
+                          "bytes":  11090,
+                          "last_write_time_utc":  "2026-07-01T04:46:56.5806536Z",
+                          "sha256":  "28a75ffa9eba4b8d8c9056dbc724971dcb4eb9f4cf3bcb4a6706f4e6d9ce21f1"
+                      },
+                      {
+                          "path":  "docs/vivado_warning_summary.csv",
+                          "bytes":  8566,
+                          "last_write_time_utc":  "2026-07-01T04:46:33.5650651Z",
+                          "sha256":  "85ef4c6866908cbc2e818eca765fc726bcae6548db9b3a0b38d1a4a9d1f2ae76"
+                      },
+                      {
+                          "path":  "docs/vivado_warning_summary.md",
+                          "bytes":  2955,
+                          "last_write_time_utc":  "2026-07-01T04:46:33.5808175Z",
+                          "sha256":  "0327cc96be8e31148c11daa0468db6afa87b99ca624d060376fd88005fc4b7ac"
+                      },
+                      {
+                          "path":  "docs/evidence/pl_estop/README.md",
+                          "bytes":  2116,
+                          "last_write_time_utc":  "2026-06-29T19:24:54.5933745Z",
+                          "sha256":  "9ca1468651b9b314be395e915fecae17ead958b3f9da35edc85057ea190095af"
+                      },
+                      {
+                          "path":  "board_inputs/README.md",
+                          "bytes":  12077,
+                          "last_write_time_utc":  "2026-07-01T04:47:17.9139414Z",
+                          "sha256":  "2780ba50973d578308d1338b136edabaa779031547f9c9f7336c6179548412ea"
+                      },
+                      {
+                          "path":  "board_inputs/software_handoff.md",
+                          "bytes":  9456,
+                          "last_write_time_utc":  "2026-07-01T04:28:27.5517162Z",
+                          "sha256":  "7b3abe12524da5f03cab8884a8afa645ce0ff48c7e644a2141537fa18820f84f"
+                      },
+                      {
+                          "path":  "board_inputs/v3_hardware_abi.h",
+                          "bytes":  10306,
+                          "last_write_time_utc":  "2026-07-01T04:46:32.1479268Z",
+                          "sha256":  "fbd565074753f4622667ddc09f9bd5f245d6199cab3c7b76a12b65c5da32776f"
+                      },
+                      {
+                          "path":  "board_inputs/z20_v1_5_hardware_abi.h",
+                          "bytes":  10338,
+                          "last_write_time_utc":  "2026-07-01T04:46:32.7378506Z",
+                          "sha256":  "135cdd2a4359dd096ea53121eadbf2f5dcff8ac45a4c0b94e08d2427a2117ca6"
+                      },
+                      {
+                          "path":  "board_inputs/z20_v1_5_axi_lite.dtsi",
+                          "bytes":  938,
+                          "last_write_time_utc":  "2026-07-01T04:46:32.7394160Z",
+                          "sha256":  "aff297499a5657b2df3c6690306d2fa6a38ef1c565b1338ad25550fdb8402d2f"
+                      },
+                      {
+                          "path":  "board_inputs/pl_estop_register_map.md",
+                          "bytes":  4832,
+                          "last_write_time_utc":  "2026-06-30T15:34:53.2868667Z",
+                          "sha256":  "d5be4b333537df188f0f3404a0605b5b112f8bd0229b5637b8597ec97ee4dd68"
+                      },
+                      {
+                          "path":  "docs/io_owner_register_map.md",
+                          "bytes":  6931,
+                          "last_write_time_utc":  "2026-07-01T04:42:46.9937855Z",
+                          "sha256":  "dcabbf54e645d503f13f51bf974550baf1151b96060ee500a2368fe16a3964f2"
+                      },
+                      {
+                          "path":  "z20_v1_5_hw_project.xpr",
+                          "bytes":  36446,
+                          "last_write_time_utc":  "2026-07-01T02:06:01.3413530Z",
+                          "sha256":  "34e50d34ad8fb1554575757fe4b99aa9a302735360011827e097e7bad66f30b5"
+                      },
+                      {
+                          "path":  "z20_v1_5_hw_project.runs/impl_1/system_top_drc_routed.rpt",
+                          "bytes":  4846,
+                          "last_write_time_utc":  "2026-07-01T02:05:58.1330039Z",
+                          "sha256":  "f10b2a5e8cbb40183bb136fa26dc98cf6018e7a78423adebfc001819ac9328a0"
+                      },
+                      {
+                          "path":  "artifacts/vivado/timing_history.csv",
+                          "bytes":  12960,
+                          "last_write_time_utc":  "2026-07-01T02:04:04.7864845Z",
+                          "sha256":  "93d7174b42cf0dab5bc9cee6d9270217d6761b9addc874b9dcec0d6a653a4a7f"
+                      }
+                  ],
+    "safety_boundaries":  {
+                              "real_estop_input":  "active_xdc_top_input_local_hard_gate_unverified",
+                              "real_sto_brake_axis_outputs":  "not_connected",
+                              "real_do_pwm_outputs":  "active_xdc_forced_off_local_unverified",
+                              "real_bus_tx_or_driver_enable":  "ps_gem1_emio_rgmii_tx_local_gate_board_evidence_required",
+                              "legacy_axis_adc_boundary":  "retired_external_boundary_only",
+                              "axis_functional_completion":  "vivado_io_owner_connected",
+                              "axis_ena_owner":  "z20_v15_io_owner_axi_lite",
+                              "axis_78_encoder_processing":  "connected_to_step_ip",
+                              "di_mpg_alarm_processing":  "z20_v15_io_owner_input_registers",
+                              "do_pwm_normal_owner":  "z20_v15_io_owner_do_pwm",
+                              "rs485_boundary":  "exported_ps_uart1_emio",
+                              "touch_int_rst_boundary":  "z20_v15_io_owner_tp_int_rst",
+                              "pl_estop_wiring_evidence":  "not_ready",
+                              "board_deploy":  "not_run",
+                              "board_safety_validation":  "not_run"
+                          }
+}

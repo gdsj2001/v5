@@ -1,0 +1,29 @@
+/*
+ * Auto-generated AXI-Lite device-tree fragment for Z20 v1.5.
+ * Generator: new-vivado/z20_v1_5_hw_project/scripts/generate_driver_contract.py
+ * Source XSA: new-vivado/z20_v1_5_hw_project/board_inputs/system.xsa
+ *
+ * Intended target: PetaLinux system-user.dtsi with an existing &amba_pl node.
+ */
+
+&amba_pl {
+    z20_step_ip: step-ip@43cb0000 {
+        compatible = "re,z20-v1.5-step-ip", "re,v3-step-ip";
+        reg = <0x43cb0000 0x00010000>;
+        status = "okay";
+    };
+
+    z20_pl_estop: pl-estop@41260000 {
+        compatible = "re,z20-v1.5-pl-estop", "re,pl-estop";
+        reg = <0x41260000 0x00010000>;
+        interrupt-parent = <&intc>;
+        interrupts = <0 43 4>; /* IRQ_F2P[14], GIC SPI 75, level-high */
+        status = "okay";
+    };
+
+    z20_io_owner: io-owner@41270000 {
+        compatible = "re,z20-v1.5-io-owner", "re,z20-io-owner";
+        reg = <0x41270000 0x00010000>;
+        status = "okay";
+    };
+};
