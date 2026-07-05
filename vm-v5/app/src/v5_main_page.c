@@ -107,19 +107,37 @@ int v5_main_page_create(V5MainPage *page, lv_obj_t *parent)
     page->mcs_marker_label = make_label(page->root, 500, 408, 90, "MCS --");
     page->cmd_marker_label = make_label(page->root, 610, 408, 90, "CMD --");
 
-    make_button(page, 18, 280, 88, 34, V5_MAIN_PAGE_ACTION_START);
-    make_button(page, 112, 280, 88, 34, V5_MAIN_PAGE_ACTION_PAUSE);
-    make_button(page, 206, 280, 88, 34, V5_MAIN_PAGE_ACTION_RESUME);
-    make_button(page, 300, 280, 88, 34, V5_MAIN_PAGE_ACTION_ESTOP_FORCE);
-    make_button(page, 394, 280, 102, 34, V5_MAIN_PAGE_ACTION_ESTOP_RESET);
-    make_button(page, 18, 322, 64, 32, V5_MAIN_PAGE_ACTION_WCS_G54);
-    make_button(page, 88, 322, 64, 32, V5_MAIN_PAGE_ACTION_WCS_G55);
-    make_button(page, 158, 322, 86, 32, V5_MAIN_PAGE_ACTION_WORK_ZERO_X);
-    make_button(page, 250, 322, 96, 32, V5_MAIN_PAGE_ACTION_G92_CLEAR);
-    make_button(page, 18, 362, 92, 32, V5_MAIN_PAGE_ACTION_RTCP_ON);
-    make_button(page, 116, 362, 92, 32, V5_MAIN_PAGE_ACTION_RTCP_OFF);
-    make_button(page, 214, 362, 88, 32, V5_MAIN_PAGE_ACTION_FEED_OVERRIDE_100);
-    make_button(page, 308, 362, 88, 32, V5_MAIN_PAGE_ACTION_SPINDLE_OVERRIDE_100);
+    make_button(page, 18, 270, 78, 32, V5_MAIN_PAGE_ACTION_START);
+    make_button(page, 102, 270, 78, 32, V5_MAIN_PAGE_ACTION_PAUSE);
+    make_button(page, 186, 270, 78, 32, V5_MAIN_PAGE_ACTION_RESUME);
+    make_button(page, 270, 270, 78, 32, V5_MAIN_PAGE_ACTION_HOME);
+    make_button(page, 354, 270, 78, 32, V5_MAIN_PAGE_ACTION_ESTOP_FORCE);
+    make_button(page, 438, 270, 102, 32, V5_MAIN_PAGE_ACTION_ESTOP_RESET);
+
+    make_button(page, 18, 310, 60, 30, V5_MAIN_PAGE_ACTION_WCS_G54);
+    make_button(page, 84, 310, 60, 30, V5_MAIN_PAGE_ACTION_WCS_G55);
+    make_button(page, 150, 310, 60, 30, V5_MAIN_PAGE_ACTION_WCS_G56);
+    make_button(page, 216, 310, 60, 30, V5_MAIN_PAGE_ACTION_WCS_G57);
+    make_button(page, 282, 310, 60, 30, V5_MAIN_PAGE_ACTION_WCS_G58);
+    make_button(page, 348, 310, 60, 30, V5_MAIN_PAGE_ACTION_WCS_G59);
+    make_button(page, 414, 310, 66, 30, V5_MAIN_PAGE_ACTION_WCS_G591);
+    make_button(page, 486, 310, 66, 30, V5_MAIN_PAGE_ACTION_WCS_G592);
+    make_button(page, 558, 310, 66, 30, V5_MAIN_PAGE_ACTION_WCS_G593);
+
+    make_button(page, 18, 350, 86, 30, V5_MAIN_PAGE_ACTION_WORK_ZERO_X);
+    make_button(page, 110, 350, 94, 30, V5_MAIN_PAGE_ACTION_G92_CLEAR);
+    make_button(page, 210, 350, 88, 30, V5_MAIN_PAGE_ACTION_RTCP_ON);
+    make_button(page, 304, 350, 88, 30, V5_MAIN_PAGE_ACTION_RTCP_OFF);
+    make_button(page, 398, 350, 82, 30, V5_MAIN_PAGE_ACTION_FEED_OVERRIDE_100);
+    make_button(page, 486, 350, 82, 30, V5_MAIN_PAGE_ACTION_SPINDLE_OVERRIDE_100);
+
+    make_button(page, 18, 390, 58, 30, V5_MAIN_PAGE_ACTION_JOG_STEP_1);
+    make_button(page, 82, 390, 58, 30, V5_MAIN_PAGE_ACTION_JOG_STEP_10);
+    make_button(page, 146, 390, 64, 30, V5_MAIN_PAGE_ACTION_JOG_STEP_100);
+    make_button(page, 220, 390, 54, 30, V5_MAIN_PAGE_ACTION_VIEW_XY);
+    make_button(page, 280, 390, 54, 30, V5_MAIN_PAGE_ACTION_VIEW_XZ);
+    make_button(page, 340, 390, 54, 30, V5_MAIN_PAGE_ACTION_VIEW_YZ);
+    make_button(page, 400, 390, 54, 30, V5_MAIN_PAGE_ACTION_VIEW_3D);
     return page->button_count == V5_MAIN_PAGE_BUTTON_COUNT;
 }
 

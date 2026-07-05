@@ -6,10 +6,12 @@ extern "C" {
 #endif
 
 typedef enum V5CommandKind {
+    V5_COMMAND_UI_LOCAL = 0,
     V5_COMMAND_PROGRAM_OPEN = 1,
     V5_COMMAND_START,
     V5_COMMAND_PAUSE,
     V5_COMMAND_RESUME,
+    V5_COMMAND_HOME,
     V5_COMMAND_ESTOP_FORCE,
     V5_COMMAND_ESTOP_RESET,
     V5_COMMAND_WCS_SELECT,
@@ -35,10 +37,4 @@ typedef struct V5CommandPrepared {
     int accepted;
 } V5CommandPrepared;
 
-int v5_command_gate_prepare(const V5CommandRequest *request, V5CommandPrepared *prepared);
-
-#ifdef __cplusplus
-}
-#endif
-
-#endif
+int v5_command_gate_prepare(const V5CommandRequest *request, V5CommandPrepared

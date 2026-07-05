@@ -5,6 +5,7 @@ static const V5CommandEntry kV5Commands[] = {
     {"start", "native_linuxcncrsh"},
     {"pause", "native_linuxcncrsh"},
     {"resume", "native_linuxcncrsh"},
+    {"home", "native_linuxcncrsh"},
     {"estop_force", "native_safety"},
     {"estop_reset", "native_safety"},
     {"wcs_select", "native_linuxcncrsh"},
@@ -25,5 +26,4 @@ const V5CommandEntry *v5_command_table_entries(size_t *count)
 
 size_t v5_command_table_count(void)
 {
-    return sizeof(kV5Commands) / sizeof(kV5Commands[0]);
-}
+    return sizeof(kV5Co

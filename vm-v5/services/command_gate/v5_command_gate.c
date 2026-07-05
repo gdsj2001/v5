@@ -15,6 +15,8 @@ static const char *v5_command_gate_name_for_kind(V5CommandKind kind)
         return "pause";
     case V5_COMMAND_RESUME:
         return "resume";
+    case V5_COMMAND_HOME:
+        return "home";
     case V5_COMMAND_ESTOP_FORCE:
         return "estop_force";
     case V5_COMMAND_ESTOP_RESET:
@@ -60,9 +62,4 @@ int v5_command_gate_prepare(const V5CommandRequest *request, V5CommandPrepared *
             prepared->name = entries[i].name;
             prepared->owner = entries[i].owner;
             prepared->accepted = 1;
-            return 1;
-        }
-    }
-
-    return 0;
-}
+      

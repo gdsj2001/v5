@@ -45,6 +45,9 @@ int main(void)
     if (!check_simple("resume", "Set Resume", v5_command_resume_prepare)) {
         return 2;
     }
+    if (!check_simple("home", "Set Home -1", v5_command_home_prepare)) {
+        return 12;
+    }
     if (!check_simple("estop", "Set Estop", v5_command_estop_force_prepare)) {
         return 3;
     }
@@ -57,6 +60,10 @@ int main(void)
     if (!v5_command_wcs_select_prepare(1, &prepared, &request) ||
         !expect_line("wcs", "Set MDI G55", &prepared, &request)) {
         return 6;
+    }
+    if (!v5_command_wcs_select_prepare(8, &prepared, &request) ||
+        !expect_line("wcs_g593", "Set MDI G59.3", &prepared, &request)) {
+        return 13;
     }
     if (!v5_command_work_zero_prepare(1, 'X', &prepared, &request) ||
         !expect_line("work_zero", "Set MDI G10 L20 P2 X0", &prepared, &request)) {

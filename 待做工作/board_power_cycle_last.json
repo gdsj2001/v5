@@ -1,0 +1,100 @@
+{
+  "boot_mode": "none",
+  "finished_at": "2026-07-05T11:35:02+0800",
+  "network": {
+    "attempts": 7,
+    "elapsed_s": 24.078,
+    "ok": true
+  },
+  "ok": true,
+  "port_meta": {
+    "present": [
+      "COM3",
+      "COM4"
+    ],
+    "saved": {
+      "console_baud": 115200,
+      "console_port": "COM4",
+      "ports": [
+        {
+          "description": "USB-SERIAL CH340 (COM3)",
+          "device": "COM3",
+          "hwid": "USB VID:PID=1A86:7523 SER= LOCATION=1-9"
+        },
+        {
+          "description": "USB-SERIAL CH340 (COM4)",
+          "device": "COM4",
+          "hwid": "USB VID:PID=1A86:7523 SER= LOCATION=1-3"
+        }
+      ],
+      "relay_baud": 9600,
+      "relay_port": "COM3",
+      "relay_probes": [
+        {
+          "is_relay": true,
+          "ok_channels": [
+            1,
+            2,
+            3,
+            4
+          ],
+          "port": "COM3",
+          "responses": {
+            "1": "a0 01 00 a1",
+            "2": "a0 02 00 a2",
+            "3": "a0 03 00 a3",
+            "4": "a0 04 00 a4"
+          }
+        },
+        {
+          "is_relay": false,
+          "ok_channels": [],
+          "port": "COM4",
+          "responses": {
+            "1": "",
+            "2": "",
+            "3": "",
+            "4": ""
+          }
+        }
+      ],
+      "role_confidence": "relay-query-and-single-remaining-console",
+      "updated_at": "2026-06-09 11:21:19"
+    },
+    "source": "tools/z20_port_map.json"
+  },
+  "power_off_seconds": 2.0,
+  "pre_poweroff_sync": {
+    "args": [
+      "ssh",
+      "-o",
+      "ConnectTimeout=5",
+      "z20-board",
+      "sync"
+    ],
+    "returncode": 255,
+    "stdout_tail": "ssh: connect to host 192.168.1.221 port 22: Connection timed out\n"
+  },
+  "relay_channel": 4,
+  "relay_port": "COM3",
+  "relay_steps": [
+    {
+      "channel": 4,
+      "payload": "a0 04 03 a7",
+      "state": "on",
+      "wall": "2026-07-05T11:34:34+0800"
+    },
+    {
+      "channel": 4,
+      "payload": "a0 04 02 a6",
+      "state": "off",
+      "wall": "2026-07-05T11:34:36+0800"
+    }
+  ],
+  "ssh": {
+    "attempts": 1,
+    "elapsed_s": 0.469,
+    "ok": true
+  },
+  "started_at": "2026-07-05T11:34:29+0800"
+}

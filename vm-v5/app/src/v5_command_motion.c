@@ -25,7 +25,9 @@ int v5_command_pause_prepare(V5CommandPrepared *prepared, V5CommandRequest *requ
     return v5_command_motion_prepare(V5_COMMAND_PAUSE, prepared, request);
 }
 
-int v5_command_resume_prepare(V5CommandPrepared *prepared, V5CommandRequest *request)
+int v5_command_home_prepare(V5CommandPrepared *prepared, V5CommandRequest *request)
 {
-    return v5_command_motion_prepare(V5_COMMAND_RESUME, prepared, request);
+    return v5_command_motion_prepare(V5_COMMAND_HOME, prepared, request);
 }
+
+int

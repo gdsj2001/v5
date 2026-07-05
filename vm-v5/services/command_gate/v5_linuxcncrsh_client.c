@@ -45,6 +45,7 @@ int v5_linuxcncrsh_format_line(
     size_t out_size)
 {
     int rc;
+    static const char *wcs_codes[] = {"G54", "G55", "G56", "G57", "G58", "G59", "G59.1", "G59.2", "G59.3"};
 
     if (!prepared || !request || !out || out_size == 0U || !prepared->accepted) {
         return 0;
@@ -63,6 +64,9 @@ int v5_linuxcncrsh_format_line(
     case V5_COMMAND_RESUME:
         rc = snprintf(out, out_size, "Set Resume");
         return v5_linuxcncrsh_format_ok(rc, out_size);
+    case V5_COMMAND_HOME:
+        rc = snprintf(out, out_size, "Set Home -1");
+        return v5_linuxcncrsh_format_ok(rc, out_size);
     case V5_COMMAND_PAUSE:
         rc = snprintf(out, out_size, "Set Pause");
         return v5_linuxcncrsh_format_ok(rc, out_size);
@@ -76,7 +80,7 @@ int v5_linuxcncrsh_format_line(
         if (request->index_value < 0 || request->index_value > 8) {
             return 0;
         }
-        rc = snprintf(out, out_size, "Set MDI G%d", 54 + request->index_value);
+        rc = snprintf(out, out_size, "Set MDI %s", wcs_codes[request->index_value]);
         return v5_linuxcncrsh_format_ok(rc, out_size);
     case V5_COMMAND_WORK_ZERO:
         if (!request->text_value || !request->text_value[0]) {
@@ -293,14 +297,4 @@ V5LinuxcncrshSendStatus v5_linuxcncrsh_send_line(
 
 V5LinuxcncrshSendStatus v5_linuxcncrsh_send_prepared(
     const V5LinuxcncrshConfig *config,
-    const V5CommandPrepared *prepared,
-    const V5CommandRequest *request)
-{
-    char line[384];
-
-    if (!v5_linuxcncrsh_format_line(prepared, request, line, sizeof(line))) {
-        return V5_LINUXCNCRSH_SEND_INVALID;
-    }
-
-    return v5_linuxcncrsh_send_line(config, line);
-}
+    const V5CommandPrepared *prepa

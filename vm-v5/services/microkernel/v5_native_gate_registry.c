@@ -6,6 +6,7 @@ static const V5NativeGateEntry k_gates[] = {
     {"program_start", V5_NATIVE_GATE_RUN_CONTROL, "native_linuxcncrsh", "Set Run"},
     {"program_pause", V5_NATIVE_GATE_RUN_CONTROL, "native_linuxcncrsh", "Set Pause"},
     {"program_resume", V5_NATIVE_GATE_RUN_CONTROL, "native_linuxcncrsh", "Set Resume"},
+    {"home", V5_NATIVE_GATE_RUN_CONTROL, "native_linuxcncrsh", "Set Home -1"},
     {"wcs_select", V5_NATIVE_GATE_COORDINATE_SYSTEM, "native_linuxcncrsh", "Set MDI G5x"},
     {"work_zero", V5_NATIVE_GATE_COORDINATE_SYSTEM, "native_linuxcncrsh", "Set MDI G10 L20"},
     {"g92_clear", V5_NATIVE_GATE_COORDINATE_SYSTEM, "native_linuxcncrsh", "Set MDI G92.1"},
@@ -37,9 +38,4 @@ const V5NativeGateEntry *v5_native_gate_registry_find(const char *id)
         return 0;
     }
     for (i = 0; i < v5_native_gate_registry_count(); ++i) {
-        if (strcmp(k_gates[i].id, id) == 0) {
-            return &k_gates[i];
-        }
-    }
-    return 0;
-}
+        if (strcmp(k_gates[i].i

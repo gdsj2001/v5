@@ -9,6 +9,26 @@ static int same_text(const char *left, const char *right)
     return left && right && strcmp(left, right) == 0;
 }
 
+static int expect_local(
+    V5MainPage *page,
+    V5MainPageActionKind action,
+    const char *name,
+    double axis_value)
+{
+    V5MainPageActionReport report;
+    if (!v5_main_page_trigger_action(page, action, &report)) {
+        return 0;
+    }
+    if (!report.prepared || !report.local_only || report.request.kind != V5_COMMAND_UI_LOCAL ||
+        report.command.kind != V5_COMMAND_UI_LOCAL) {
+        return 0;
+    }
+    if (!same_text(report.command.name, name) || !same_text(report.command.owner, "ui_local")) {
+        return 0;
+    }
+    return report.command.accepted && report.request.axis_value == axis_value;
+}
+
 static int expect(
     V5MainPage *page,
     V5MainPageActionKind action,
@@ -98,6 +118,10 @@ int main(void)
         v5_program_controller_destroy(&controller);
         return 5;
     }
+    if (!expect(&page, V5_MAIN_PAGE_ACTION_HOME, V5_COMMAND_HOME, "home", "native_linuxcncrsh", 0, 0, 0)) {
+        v5_program_controller_destroy(&controller);
+        return 20;
+    }
     if (!expect(&page, V5_MAIN_PAGE_ACTION_ESTOP_FORCE, V5_COMMAND_ESTOP_FORCE, "estop_force", "native_safety", 0, 0, 0)) {
         v5_program_controller_destroy(&controller);
         return 6;
@@ -113,6 +137,16 @@ int main(void)
     if (!expect(&page, V5_MAIN_PAGE_ACTION_WCS_G55, V5_COMMAND_WCS_SELECT, "wcs_select", "native_linuxcncrsh", 1, 0, 0)) {
         v5_program_controller_destroy(&controller);
         return 9;
+    }
+    if (!expect(&page, V5_MAIN_PAGE_ACTION_WCS_G56, V5_COMMAND_WCS_SELECT, "wcs_select", "native_linuxcncrsh", 2, 0, 0) ||
+        !expect(&page, V5_MAIN_PAGE_ACTION_WCS_G57, V5_COMMAND_WCS_SELECT, "wcs_select", "native_linuxcncrsh", 3, 0, 0) ||
+        !expect(&page, V5_MAIN_PAGE_ACTION_WCS_G58, V5_COMMAND_WCS_SELECT, "wcs_select", "native_linuxcncrsh", 4, 0, 0) ||
+        !expect(&page, V5_MAIN_PAGE_ACTION_WCS_G59, V5_COMMAND_WCS_SELECT, "wcs_select", "native_linuxcncrsh", 5, 0, 0) ||
+        !expect(&page, V5_MAIN_PAGE_ACTION_WCS_G591, V5_COMMAND_WCS_SELECT, "wcs_select", "native_linuxcncrsh", 6, 0, 0) ||
+        !expect(&page, V5_MAIN_PAGE_ACTION_WCS_G592, V5_COMMAND_WCS_SELECT, "wcs_select", "native_linuxcncrsh", 7, 0, 0) ||
+        !expect(&page, V5_MAIN_PAGE_ACTION_WCS_G593, V5_COMMAND_WCS_SELECT, "wcs_select", "native_linuxcncrsh", 8, 0, 0)) {
+        v5_program_controller_destroy(&controller);
+        return 21;
     }
     if (!expect(&page, V5_MAIN_PAGE_ACTION_WORK_ZERO_X, V5_COMMAND_WORK_ZERO, "work_zero", "native_linuxcncrsh", 2, 0, "X")) {
         v5_program_controller_destroy(&controller);
@@ -137,6 +171,16 @@ int main(void)
     if (!expect(&page, V5_MAIN_PAGE_ACTION_SPINDLE_OVERRIDE_100, V5_COMMAND_SPINDLE_OVERRIDE_SET, "spindle_override_set", "native_linuxcncrsh", 100, 0, 0)) {
         v5_program_controller_destroy(&controller);
         return 15;
+    }
+    if (!expect_local(&page, V5_MAIN_PAGE_ACTION_JOG_STEP_1, "jog_step", 1.0) ||
+        !expect_local(&page, V5_MAIN_PAGE_ACTION_JOG_STEP_10, "jog_step", 10.0) ||
+        !expect_local(&page, V5_MAIN_PAGE_ACTION_JOG_STEP_100, "jog_step", 100.0) ||
+        !expect_local(&page, V5_MAIN_PAGE_ACTION_VIEW_XY, "view_xy", 0.0) ||
+        !expect_local(&page, V5_MAIN_PAGE_ACTION_VIEW_XZ, "view_xz", 0.0) ||
+        !expect_local(&page, V5_MAIN_PAGE_ACTION_VIEW_YZ, "view_yz", 0.0) ||
+        !expect_local(&page, V5_MAIN_PAGE_ACTION_VIEW_3D, "view_3d", 0.0)) {
+        v5_program_controller_destroy(&controller);
+        return 22;
     }
 
     printf("v5 main page actions: buttons=%u open_generation=%u start=%s last=%s owner=%s\n", page.button_count, page.last_program_open.generation, "start", page.last_action.command.name, page.last_action.command.owner);
