@@ -54,6 +54,10 @@ add_executable(v5_state_publisher
 
 target_link_libraries(v5_state_publisher PRIVATE v5_status_shm_projection)
 
+add_executable(v5_touch_diagnostics
+    ../services/ui/v5_touch_diagnostics.c
+)
+
 add_library(v5_command_gate_core STATIC
     src/v5_parameter_table.c
     ../services/command_gate/v5_command_gate.c
