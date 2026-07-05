@@ -1,0 +1,81 @@
+#!/bin/sh
+set -eu
+
+DAEMON=/usr/libexec/8ax/v5_state_publisher
+PIDFILE=/run/8ax/v5_state_publisher.pid
+LOGFILE=/run/8ax/v5_state_publisher.log
+STATUS_PATH=${V5_STATUS_SHM_PATH:-/dev/shm/v3_status_shm}
+INTERVAL_MS=${V5_STATE_PUBLISHER_INTERVAL_MS:-30}
+
+is_running() {
+  [ -r "$PIDFILE" ] || return 1
+  pid=$(cat "$PIDFILE" 2>/dev/null || true)
+  [ -n "$pid" ] || return 1
+  kill -0 "$pid" 2>/dev/null
+}
+
+start_service() {
+  if is_running; then
+    echo "v5_state_publisher already running pid=$(cat "$PIDFILE")"
+    return 0
+  fi
+  test -x "$DAEMON"
+  mkdir -p /run/8ax
+  rm -f "$PIDFILE"
+  setsid "$DAEMON" --path "$STATUS_PATH" --interval-ms "$INTERVAL_MS" >>"$LOGFILE" 2>&1 &
+  echo "$!" >"$PIDFILE"
+  sleep 1
+  if is_running; then
+    echo "v5_state_publisher started pid=$(cat "$PIDFILE") path=$STATUS_PATH interval_ms=$INTERVAL_MS"
+    return 0
+  fi
+  echo "v5_state_publisher failed to start" >&2
+  tail -n 20 "$LOGFILE" 2>/dev/null || true
+  return 1
+}
+
+stop_service() {
+  if ! is_running; then
+    rm -f "$PIDFILE"
+    echo "v5_state_publisher not running"
+    return 0
+  fi
+  pid=$(cat "$PIDFILE")
+  kill "$pid" 2>/dev/null || true
+  i=0
+  while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 50 ]; do
+    i=$((i + 1))
+    sleep 0.1
+  done
+  if kill -0 "$pid" 2>/dev/null; then
+    echo "v5_state_publisher did not stop pid=$pid" >&2
+    return 1
+  fi
+  rm -f "$PIDFILE"
+  echo "v5_state_publisher stopped pid=$pid"
+}
+
+case "${1:-}" in
+  start)
+    start_service
+    ;;
+  stop)
+    stop_service
+    ;;
+  restart)
+    stop_service
+    start_service
+    ;;
+  status)
+    if is_running; then
+      echo "v5_state_publisher running pid=$(cat "$PIDFILE")"
+    else
+      echo "v5_state_publisher not running"
+      exit 1
+    fi
+    ;;
+  *)
+    echo "usage: $0 {start|stop|restart|status}" >&2
+    exit 2
+    ;;
+esac
