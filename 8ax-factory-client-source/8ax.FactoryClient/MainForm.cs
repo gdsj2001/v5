@@ -8,6 +8,7 @@ internal sealed class MainForm : Form
     private TextBox _serverUrl = null!;
     private TextBox _adminUser = null!;
     private TextBox _adminPassword = null!;
+    private TextBox _factoryAuthPrivateKey = null!;
     private ListView _dealers = null!;
     private ListView _dealerUsers = null!;
     private DataGridView _devices = null!;
@@ -104,8 +105,9 @@ internal sealed class MainForm : Form
         _serverUrl = new TextBox { Dock = DockStyle.Fill };
         _adminUser = new TextBox { Dock = DockStyle.Fill };
         _adminPassword = new TextBox { Dock = DockStyle.Fill, UseSystemPasswordChar = true };
+        _factoryAuthPrivateKey = new TextBox { Dock = DockStyle.Fill };
 
-        var form = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 8, RowCount = 2 };
+        var form = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 8, RowCount = 3 };
         form.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 72));
         form.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 35));
         form.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 86));
@@ -114,6 +116,7 @@ internal sealed class MainForm : Form
         form.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40));
         form.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
         form.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
+        form.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         form.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         form.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
@@ -132,6 +135,15 @@ internal sealed class MainForm : Form
         load.Click += async (_, _) => await RunGuarded(LoadDealersAsync);
         form.Controls.Add(health, 6, 1);
         form.Controls.Add(load, 7, 1);
+        form.Controls.Add(new Label { Text = "授权私钥", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 2);
+        form.Controls.Add(_factoryAuthPrivateKey, 1, 2);
+        form.SetColumnSpan(_factoryAuthPrivateKey, 5);
+        var chooseKey = new Button { Text = "选择私钥", Dock = DockStyle.Fill, MinimumSize = new Size(0, 32) };
+        chooseKey.Click += (_, _) => ChooseFactoryAuthPrivateKey();
+        var resetKey = new Button { Text = "默认路径", Dock = DockStyle.Fill, MinimumSize = new Size(0, 32) };
+        resetKey.Click += (_, _) => _factoryAuthPrivateKey.Text = LocalSettings.DefaultFactoryDeviceAuthPrivateKeyPath;
+        form.Controls.Add(chooseKey, 6, 2);
+        form.Controls.Add(resetKey, 7, 2);
         panel.Controls.Add(form, 0, 1);
 
         return panel;
@@ -406,6 +418,7 @@ internal sealed class MainForm : Form
         _serverUrl.Text = _settings.ServerUrl;
         _adminUser.Text = _settings.AdminUsername;
         _adminPassword.Text = LocalSettings.DefaultAdminPassword;
+        _factoryAuthPrivateKey.Text = _settings.FactoryDeviceAuthPrivateKeyPath;
         Log("厂家授权控制台启动。");
     }
 
@@ -413,11 +426,43 @@ internal sealed class MainForm : Form
     {
         _settings.ServerUrl = string.IsNullOrWhiteSpace(_serverUrl.Text) ? LocalSettings.PrimaryServerUrl : _serverUrl.Text.Trim();
         _settings.AdminUsername = _adminUser.Text.Trim();
+        _settings.FactoryDeviceAuthPrivateKeyPath = NormalizeFactoryAuthPrivateKeyPath(_factoryAuthPrivateKey.Text);
+        _factoryAuthPrivateKey.Text = _settings.FactoryDeviceAuthPrivateKeyPath;
         _settings.Save();
 
         _api.BaseUrl = _settings.ServerUrl;
         _api.AdminUsername = _settings.AdminUsername;
         _api.AdminPassword = _adminPassword.Text;
+    }
+
+    private void ChooseFactoryAuthPrivateKey()
+    {
+        using var dialog = new OpenFileDialog
+        {
+            Title = "选择工厂授权私钥",
+            Filter = "PEM 私钥 (*.pem)|*.pem|所有文件 (*.*)|*.*",
+            CheckFileExists = true,
+            Multiselect = false,
+        };
+        var current = NormalizeFactoryAuthPrivateKeyPath(_factoryAuthPrivateKey.Text);
+        var currentDir = Path.GetDirectoryName(current);
+        if (!string.IsNullOrWhiteSpace(currentDir) && Directory.Exists(currentDir))
+        {
+            dialog.InitialDirectory = currentDir;
+        }
+        if (dialog.ShowDialog(this) == DialogResult.OK)
+        {
+            _factoryAuthPrivateKey.Text = dialog.FileName;
+            ApplySettings();
+        }
+    }
+
+    private static string NormalizeFactoryAuthPrivateKeyPath(string? value)
+    {
+        var path = string.IsNullOrWhiteSpace(value)
+            ? LocalSettings.DefaultFactoryDeviceAuthPrivateKeyPath
+            : Environment.ExpandEnvironmentVariables(value.Trim());
+        return Path.GetFullPath(path);
     }
 
     private async Task CheckHealthAsync()
@@ -715,10 +760,12 @@ internal sealed class MainForm : Form
             return;
         }
 
-        var privateKeyPath = Path.Combine(AppContext.BaseDirectory, "factory-device-auth-private.pem");
+        var privateKeyPath = _settings.FactoryDeviceAuthPrivateKeyPath;
         if (!File.Exists(privateKeyPath))
         {
-            var message = $"缺少工厂授权私钥文件：{privateKeyPath}";
+            var message =
+                $"缺少工厂授权私钥文件：{privateKeyPath}\n\n" +
+                "请点击顶部“选择私钥”，选择本机 factory-device-auth-private.pem 后重试。";
             Log(message);
             ShowDeviceAuthorizationMessage("授权生成失败", message, MessageBoxIcon.Error);
             return;

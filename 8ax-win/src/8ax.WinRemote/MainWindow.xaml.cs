@@ -1157,7 +1157,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task SendRelayPointerAsync(string phase, RemotePoint remote)
+    private async Task SendRelayPointerAsync(string phase, RemotePoint remote, bool allowReconnectRetry = true)
     {
         RemoteRelayClient? client = _activeRelayClient;
         if (client is null || !_relayInputReady)
@@ -1219,12 +1219,8 @@ public partial class MainWindow : Window
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !_shutdown.IsCancellationRequested)
         {
-            if (String.Equals(phase, "down", StringComparison.OrdinalIgnoreCase))
-            {
-                _awaitingRelayPointerFeedback = false;
-                _relayPointerIsDown = false;
-            }
-            PointerText.Text = $"relay input failed: {Compact(ex.Message)}";
+            _relayInputReady = false;
+            InputModeText.Text = PointerInputModeText;
             _evidence.RecordEvent("relay_pointer_failed", new Dictionary<string, object?>
             {
                 ["session_id"] = _relaySessionId,
@@ -1234,6 +1230,34 @@ public partial class MainWindow : Window
                 ["y"] = remote.Y,
                 ["message"] = ex.Message,
             });
+
+            if (allowReconnectRetry && String.Equals(phase, "down", StringComparison.OrdinalIgnoreCase))
+            {
+                PointerText.Text = "relay input reconnecting";
+                _evidence.RecordEvent("relay_pointer_reconnect_retry_started", new Dictionary<string, object?>
+                {
+                    ["session_id"] = _relaySessionId,
+                    ["failed_seq"] = seq,
+                    ["phase"] = phase,
+                    ["x"] = remote.X,
+                    ["y"] = remote.Y,
+                });
+                if (await EnsureRelayInputReadyAsync())
+                {
+                    _relayPointerIsDown = true;
+                    _lastRelayPoint = remote;
+                    _haveLastRelayPoint = true;
+                    await SendRelayPointerAsync(phase, remote, allowReconnectRetry: false);
+                    return;
+                }
+            }
+
+            if (String.Equals(phase, "down", StringComparison.OrdinalIgnoreCase))
+            {
+                _awaitingRelayPointerFeedback = false;
+                _relayPointerIsDown = false;
+            }
+            PointerText.Text = $"relay input failed: {Compact(ex.Message)}";
         }
     }
 

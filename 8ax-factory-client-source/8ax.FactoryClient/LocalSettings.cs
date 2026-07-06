@@ -9,6 +9,21 @@ internal sealed class LocalSettings
 
     public string ServerUrl { get; set; } = PrimaryServerUrl;
     public string AdminUsername { get; set; } = "admin";
+    public string FactoryDeviceAuthPrivateKeyPath { get; set; } = DefaultFactoryDeviceAuthPrivateKeyPath;
+
+    public static string DefaultFactoryDeviceAuthPrivateKeyPath
+    {
+        get
+        {
+            var dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "8ax",
+                "FactoryClient",
+                "secrets");
+            Directory.CreateDirectory(dir);
+            return Path.Combine(dir, "factory-device-auth-private.pem");
+        }
+    }
 
     private static string SettingsPath
     {
@@ -38,6 +53,10 @@ internal sealed class LocalSettings
             if (string.IsNullOrWhiteSpace(value.ServerUrl))
             {
                 value.ServerUrl = PrimaryServerUrl;
+            }
+            if (string.IsNullOrWhiteSpace(value.FactoryDeviceAuthPrivateKeyPath))
+            {
+                value.FactoryDeviceAuthPrivateKeyPath = DefaultFactoryDeviceAuthPrivateKeyPath;
             }
             return value;
         }

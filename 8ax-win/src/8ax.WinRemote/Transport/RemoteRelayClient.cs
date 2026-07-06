@@ -251,6 +251,11 @@ public sealed class RemoteRelayClient : IRemoteTransport, IDisposable
 
             return response;
         }
+        catch
+        {
+            ResetInputSocketLocked();
+            throw;
+        }
         finally
         {
             _inputGate.Release();
@@ -259,9 +264,16 @@ public sealed class RemoteRelayClient : IRemoteTransport, IDisposable
 
     public void Dispose()
     {
-        _inputSocket?.Dispose();
+        ResetInputSocketLocked();
         _inputGate.Dispose();
         _httpClient.Dispose();
+    }
+
+    private void ResetInputSocketLocked()
+    {
+        _inputSocket?.Dispose();
+        _inputSocket = null;
+        _inputSessionId = null;
     }
 
     private static Uri ToWebSocketUri(Uri uri)

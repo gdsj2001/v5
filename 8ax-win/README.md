@@ -35,6 +35,7 @@ WebSocket, and the board relay injects them into the original board UI event
 chain.
 
 Relay input is the formal input path. It works with a board relay reporting `view_only=false`. The client sends `control_request`, then `pointer_event` down/up messages, records `pointer_ack`, and measures the first dirty-rect feedback after a down event as `relay_pointer_feedback`. If the stream connected while the board was temporarily `view_only`, the next operator click must retry `control_request` before giving up.
+If a cached relay input WebSocket is closed or stale when an operator presses the mouse, WinRemote must discard that socket, request control again, and retry the same mouse-down once. Move and release events must not be blindly reordered or replayed after a failed send.
 
 When relay stream and relay input are connected, the top-right connection badge
 must stay in the live/connected state. The client must not show or schedule

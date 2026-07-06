@@ -44,6 +44,7 @@ VerifyUpdateDefaults();
 VerifyRelayReconnectContract();
 VerifyRelayPollingFallbackContract();
 VerifyRelayInputRetryContract();
+VerifyRelayInputStaleSocketRecoveryContract();
 VerifySystemMetricsTopBarContract();
 VerifyWinRemoteBoardTimeSyncContract();
 VerifyUpgradeProgressContract();
@@ -414,6 +415,19 @@ static void VerifyRelayInputRetryContract()
     Require(true, source.Contains("relay_input_retry_ready", StringComparison.Ordinal), "relay input retry ready evidence exists");
     Require(true, source.Contains("bool enabled = await EnsureRelayInputReadyAsync()", StringComparison.Ordinal), "mouse down retries relay input before dropping click");
     Require(true, source.Contains("_relayInputEnsureActive", StringComparison.Ordinal), "relay input retry is gated");
+}
+
+static void VerifyRelayInputStaleSocketRecoveryContract()
+{
+    string winRoot = FindWinRemoteRoot(AppContext.BaseDirectory);
+    string mainWindow = ReadWinRemoteFile(winRoot, "src", "8ax.WinRemote", "MainWindow.xaml.cs");
+    string relayClient = ReadWinRemoteFile(winRoot, "src", "8ax.WinRemote", "Transport", "RemoteRelayClient.cs");
+    Require(true, relayClient.Contains("ResetInputSocketLocked", StringComparison.Ordinal), "stale relay input socket is reset after pointer failure");
+    Require(true, relayClient.Contains("catch", StringComparison.Ordinal) && relayClient.Contains("ResetInputSocketLocked();", StringComparison.Ordinal), "pointer send failure discards cached input socket");
+    Require(true, mainWindow.Contains("relay_pointer_reconnect_retry_started", StringComparison.Ordinal), "mouse down records reconnect retry evidence");
+    Require(true, mainWindow.Contains("allowReconnectRetry: false", StringComparison.Ordinal), "mouse down reconnect retry is bounded to one retry");
+    Require(true, mainWindow.Contains("_relayInputReady = false", StringComparison.Ordinal), "pointer failure clears relay input ready state");
+    Require(true, mainWindow.Contains("if (await EnsureRelayInputReadyAsync())", StringComparison.Ordinal), "mouse down retry reacquires relay input grant");
 }
 
 static void VerifySystemMetricsTopBarContract()

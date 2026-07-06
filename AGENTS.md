@@ -9,9 +9,11 @@ RULE_SOURCE=AGENTS.md
 READ_ORDER:
 1. Latest user message in this chat.
 2. `AGENTS.md` top rules and the matching section below.
-3. `功能/需求真源索引.md` to find the single `REQ-*` owner.
-4. The one indexed owner document under `功能/`.
-5. Relevant work note under `待做工作/`, then `git status` and focused diff.
+3. If the user message is a feature requirement, first check `功能/需求真源索引.md` and the corresponding document under `功能/` for an existing record.
+4. If the feature requirement is recorded but conflicts with the latest user message, update the indexed `功能/` owner first; if it is not recorded, add or assign the `REQ-*` entry and owner document under `功能/` first.
+5. `功能/需求真源索引.md` to find the single `REQ-*` owner.
+6. The one indexed owner document under `功能/`.
+7. Relevant work note under `待做工作/`, then `git status` and focused diff.
 
 ONE_SENTENCE_MODEL:
 - `功能/` owns settled product truth.
@@ -30,6 +32,7 @@ FEATURE_OWNER_SUPREMACY:
 - Highest product truth is `功能/需求真源索引.md` plus the single owner document named there.
 - If code, tests, notes, AGENTS wording, or old chat conflicts with the indexed owner, treat the non-owner text as stale.
 - Latest explicit user feedback is requirement-change input; settle it into the indexed owner before implementation.
+- For any feature requirement proposed by the user, AI must first check the corresponding `功能/` record. If a record exists and is inconsistent, update that owner before source/config/tests/backlog; if no record exists, record it by adding or assigning the `REQ-*` entry and owner document under `功能/` before implementation.
 
 DELETE_FIRST_NO_FALLBACK:
 - First cleanup action is deleting unsupported forked, legacy, duplicate, bypass, shadow, fallback, split-brain, or AI-made paths.
@@ -78,7 +81,7 @@ PATH_AND_DOC_CONSTANTS:
 1a. Only real owner-approved product/process branches may remain. Delete AI-made branches that do not correspond to an actual supported runtime, board, VM, VPS, safety, LinuxCNC/HAL, microkernel, or operator workflow; migrate any still-used dependency to the real flow before deletion.
 2. Classify every slice before editing: P0 for native/SHM/State Publisher/Broker control/motion/safety/parameters/wcheckpoint/segment boundary/stillness/fallback survivors; P1 for ordinary product behavior, non-motion UI, feature docs, local refactors, and non-realtime config; P2 only for spelling, comments, formatting, links, test names, and non-semantic annotation/import compatibility.
 3. If uncertain, choose the higher class. If a P1/P2 slice touches ownership, ABI/schema, resident daemon lifecycle, control IPC, native helper allowlists, board-visible behavior, or fallback policy, escalate immediately.
-4. `功能/` files are mandatory settled product memory and the highest product requirement source. Work notes may describe active tasks and evidence, but behavior, runtime truth, owner boundaries, and acceptance conditions must obey `功能/需求真源索引.md` and the indexed `功能/` owner; behavior or requirement changes update that owner first, using `功能/需求真源索引.md` only to find or assign the single `REQ-*` owner before source/config/tests/backlog.
+4. `功能/` files are mandatory settled product memory and the highest product requirement source. Work notes may describe active tasks and evidence, but behavior, runtime truth, owner boundaries, and acceptance conditions must obey `功能/需求真源索引.md` and the indexed `功能/` owner. For any user-proposed feature requirement, AI must first check whether the corresponding `功能/` document already records it; if recorded but inconsistent, update the owner first; if unrecorded, add or assign the `REQ-*` and owner record first. Behavior or requirement changes update that owner before source/config/tests/backlog.
 5. Runtime truth has one owner. UI and Broker may display/request/consume typed state, but must not invent native, microkernel, SHM, parameter, motion, safety, wcheckpoint, segment boundary, or stillness truth.
 6. Finish status must be honest: use `source_only` for source/doc-only work, `local_verified_only` for local gates without board proof, `board_verified` only after the original board/operator/motion path is proven, and `blocked` only for a real blocker with the next acceptance condition recorded.
 7. In parallel AI work, do not take over another active owner/card or broad shared ABI/lifecycle file. If a shared file must change, make the smallest patch and state which owner semantics were not changed.
@@ -130,6 +133,7 @@ REQUIREMENT_ID_RULE:
 - `功能/需求真源索引.md` is the index for cross-feature and fast-changing product requirements.
 - Current high-volatility entries include `REQ-DOC-SINGLE-SOURCE`, `REQ-PARAM-MEMORY-LIGHTWEIGHT-SAVE`, `REQ-NATIVE-OWNER-FIRST`, `REQ-SETTINGS-RUNTIME-DRIVE-ONLY`, `REQ-SCALE-CHAIN-HISTORY-POLLUTION`, `REQ-LINUXCNC-COMMAND-GATE`, `REQ-G92-NATIVE-RUNTIME`, `REQ-WCS-NATIVE-OWNER`, `REQ-ROTARY-UNWRAP-ABSOLUTE-PROOF`, `REQ-ROTARY-REBASE-NATIVE-GATE`, and `REQ-RTCP-G53-NATIVE-ACTUAL`.
 - Every volatile requirement must have one `REQ-*` entry and one owner document. Change that owner document when the requirement changes; do not chase every non-owner feature doc just to restate the same policy.
+- User-proposed feature requirements must not be implemented from chat alone. First search the relevant `功能/` owner path through this index; when the requirement is missing, create or assign the `REQ-*` record and owner document before source/config/tests/backlog changes.
 - Non-owner docs should cite the relevant `REQ-*` IDs and keep only local implementation detail, owner cards, field mappings, and verification requirements.
 - If copied text in a non-owner doc conflicts with the indexed owner, the copied text is stale. Update the owner requirement first, then implementation; update references only when missing or actively misleading.
 - New or edited feature docs that mention native owner, `settings_runtime.json`, G92, WCS, RTCP/G53, rotary unwrap/checkpoint, or LinuxCNC command gate must cite the corresponding `REQ-*` entry.
@@ -229,10 +233,11 @@ ARCH_EXCEPTION_RULE=Temporary diagnostic exceptions must stay outside product so
 BEFORE_EDIT:
 1. Read AGENTS.md
 2. Run git status/diff for relevant paths
-3. Find relevant existing doc under 功能/ when behavior changes
-4. If the latest explicit user feedback conflicts with any project doc/rule/test/code comment/old AI note: treat the old project text as stale, edit the conflicting doc/rule first, then source/config
-5. Backup edited files to repo_ignored/<short_task>/backup/
-6. Do not create or update process files (`process.md` or `过程.md`)
+3. For user-proposed feature requirements, check `功能/需求真源索引.md` and the corresponding `功能/` owner before implementation.
+4. If the requirement already exists but differs from the latest user message, update the indexed `功能/` owner first; if it does not exist, record it by adding or assigning the `REQ-*` and owner document first.
+5. If the latest explicit user feedback conflicts with any project doc/rule/test/code comment/old AI note: treat the old project text as stale, edit the conflicting doc/rule first, then source/config
+6. Backup edited files to repo_ignored/<short_task>/backup/
+7. Do not create or update process files (`process.md` or `过程.md`)
 
 PROCESS_FILE_DISABLED:
 - Do not create or update `process.md`, `过程.md`, or equivalent per-task process markdown.

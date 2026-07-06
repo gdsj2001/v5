@@ -8,7 +8,8 @@
 
 ## AI 阅读入口
 
-- 本文同样遵守 `功能/0开机参数入内存.md` 的最高启动内存架构：linuxcncrsh/native gate、UI 控制入口、allowed helper 表、动作登记表和状态 provider 必须随产品自写运行闭包开机进入 RAM；运行期控制热路径不得临时扫描 helper、懒导入脚本、按文件名执行未登记程序或用旧 wrapper 兜底。
+- 启动内存/热路径通用规则：见 `REQ-PARAM-MEMORY-LIGHTWEIGHT-SAVE` / `功能/0开机参数入内存.md`，本文只保留 native helper 特有边界。
+- native helper 特有边界：linuxcncrsh/native gate、UI 控制入口、allowed helper 表、动作登记表和状态 provider 必须随产品自写运行闭包开机进入 RAM；运行期控制热路径不得临时扫描 helper、懒导入脚本、按文件名执行未登记程序或用旧 wrapper 兜底。
 - 修改 helper 白名单时只允许收缩到微内核/native owner 明确需要的长驻 gate 或诊断入口；已退役 helper 不得以 renamed wrapper、环境变量、测试入口或 VM 打包校验形式保留。
 
 ---
@@ -30,7 +31,7 @@
 
 | 通道 / Helper 例外 | 源码路径 | 状态 | 最终要求 |
 | --- | --- | --- | --- |
-| **linuxcncrsh native command gate** | [v3_product_native_run.c](file:///d:/v3/lvgl_app/src/v3_product_native_run.c) | **[CANONICAL] 唯一标准控制路径** | **保留并作为唯一合规网关**。UI C 进程直接握住此长连接 Socket 端口发送 `SET Open`、`SET Run`、`SET Mode`，不进行任何前置 logical precheck，机床动作由微内核硬安全直接拦截或放行。 |
+| **linuxcncrsh native command gate** | VM 真源 `/root/Desktop/v5/services/command_gate/v5_command_gate.c`、`v5_linuxcncrsh_client.c`、`v5_native_gate_registry.c` 及 UI 侧 `app/src/v5_command_*.c` | **[CANONICAL] 唯一标准控制路径** | **保留并作为唯一合规网关**。UI C 进程通过当前 v5 native command gate 发送 `SET Open`、`SET Run`、`SET Mode` 等极简控制报文，不进行任何前置 logical precheck，机床动作由微内核硬安全直接拦截或放行。旧 v3 native run 源码只能作只读历史参考，不再作为产品 owner。 |
 | **HAL safety helper** | `lvgl_app/native/re_hal_safety_helper.c` | **[FORBIDDEN] 禁止** | **不得恢复**。UI 不得通过外部程序拉取 `cia402.N.stat-op-enabled` 等状态。使能与驱动运行证据只能来自登记的微内核/native 状态直连读取；SHM 只作允许显示投影。 |
 | **HAL select helper** | `lvgl_app/native/re_hal_select_helper.c` | **[FORBIDDEN] 禁止** | **不得恢复**。RTCP/switchkins 的 ON/OFF 状态直接作为运行期 actual，由 UI 发送原生 MDI/命令驱动微内核内部切换，禁止外部引脚写盘与 helper 中转。 |
 | **backend realtime cleanup** | `lvgl_app/scripts/re-v3-8ax-backend-lifecycle.inc.sh` | **[INTERNAL] 后端自用** | 仅作为后台系统拉起前的 LinuxCNC 进程及实时层脏状态自愈清理使用，禁止向 UI 进程或普通控制热路径暴露任何接口。 |

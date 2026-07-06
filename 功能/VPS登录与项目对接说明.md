@@ -4,8 +4,8 @@
 
 ## AI 阅读入口
 
-- 本文同样遵守 `功能/0开机参数入内存.md` 的最高启动内存架构：LinuxCNC/微内核、UI 和产品自写运行代码闭包开机全量入 RAM；运行期热路径不得临时读盘、懒导入、扫描目录、读取旧 JSON/result 或用 SHM 显示投影冒充 owner 真源。
--  先读 `REQ-DRIVE-PROFILE-AUTH-CHAIN`；涉及控制链、WCS 或参数真源时回到对应 REQ owner。
+- 启动内存/热路径通用规则：见 `REQ-PARAM-MEMORY-LIGHTWEIGHT-SAVE` / `功能/0开机参数入内存.md`，本文只保留本功能特有边界。
+- 先读 `REQ-DRIVE-PROFILE-AUTH-CHAIN`；涉及控制链、WCS 或参数真源时回到对应 REQ owner。
 - 不得为客户、驱动、收费档位或现场临时需求 fork 板端产品代码；下载状态、诊断快照和 public fallback 不能冒充 private 授权成功。
 
 
@@ -144,18 +144,26 @@ it.cjwsjzyy.xyz
 
 ## 7. VPS 数据
 
+工厂设备授权签名密钥：
+
+- 当前 Windows 人工保管目录是 `D:\授权私钥`，只记录路径，不复制私钥内容。
+- Factory Client 顶部 `授权私钥` 字段应选择 `D:\授权私钥\factory-device-auth-private.pem`。
+- 同目录公钥文件为 `D:\授权私钥\device_auth_public.pem` 和 `D:\授权私钥\factory-device-auth-public.pem`；当前公钥文件 SHA256 为 `5608ee95805979e3a9936a5803716fd65afeb8b64fc72e56acb0dcfc8835ac1f`。
+- 按当前 v5/VPS 代码口径，VPS 存储和发布路径使用 `/opt/8ax-auth/...`；板端验签公钥位置是 `/etc/6x-cnc/device_auth_public.pem`。VPS 端签名私钥/公钥若由运维部署在 secrets/public 目录，必须落在当前 8ax-auth 部署树下，不再把旧 z20-auth 部署树作为产品路径。
+- 私钥不得提交进 Git、不得打进 Factory Client exe、不得写入截图或过程日志；更换密钥后必须重新生成并上传设备授权文件，再让板端执行 `下载授权` 验签闭环。
+
 关键目录：
 
 ```text
 /opt/8ax-auth/storage/drive-profiles/public/driver_profile_map.json
-/opt/8ax-auth/storage/private/<vps_distribution_id>/device_authorization.json
-/opt/8ax-auth/storage/private/<vps_distribution_id>/driver_profile_map.json
+/opt/8ax-auth/storage/private/<vpsDistributionId>-<pl_dna_hash>/device_authorization.json
+/opt/8ax-auth/storage/private/<vpsDistributionId>-<pl_dna_hash>/driver_profile_map.json
 /var/www/html/drive-profiles/public/driver_profile_map.json
 /var/www/html/updates/drive-profiles/public/driver_profile_map.json
 /opt/8ax-auth/storage/ota/public/<product>/<channel>/manifest.json
-/opt/8ax-auth/storage/private/<vps_distribution_id>/ota/<product>/<channel>/manifest.json
+/opt/8ax-auth/storage/private/<vpsDistributionId>-<pl_dna_hash>/ota/<product>/<channel>/manifest.json
 /var/www/html/updates/ota/public/<product>/<channel>/manifest.json
-/var/www/html/updates/ota/private/<vps_distribution_id>/ota/<product>/<channel>/manifest.json
+/var/www/html/updates/ota/private/<vpsDistributionId>-<pl_dna_hash>/ota/<product>/<channel>/manifest.json
 ```
 
 板端正式 API 入口来自 endpoint 配置的主域名和备用域名，不是 IP 直连或单一域名。
@@ -176,7 +184,7 @@ it.cjwsjzyy.xyz
 - VPS 必须先验证本次提交的设备公钥：公钥必须可解析、hash 必须与 `device_public_key_sha256` 一致，且满足 VPS 设备登记策略；公钥验证不通过时不得登记 DNA、不得生成或返回新 ID、不得创建 private folder。
 - 公钥验证通过后，VPS 才允许规范化 PL DNA、计算/冻结 6 位 `vpsDistributionId`、记录数据库并创建 private folder。若同一 PL DNA 已经登记，VPS 不得重新生成 ID，不得覆盖既有绑定，必须直接返回已保存的 6 位 `vpsDistributionId` 给板端；必要时只按 VPS 公钥策略更新或确认该设备公钥记录。
 - VPS 必须在数据库中记录 6 位分发 ID、PL DNA hash、公钥 hash/公钥记录之间的绑定关系，并创建 `/opt/8ax-auth/storage/private/<vpsDistributionId>-<pl_dna_hash>/`。VPS 返回给板端的登记结果只需要暴露 `vpsDistributionId` 和校验状态；不得要求板端保存或使用 id-dna folder 作为下载 URL。
-- 板端必须从 VPS 返回值回读该 ID，不得在本地按 DNA 自行生成最终 ID；回读成功后本地登记状态只允许保存 `vpsDistributionId`、登记结果码和公钥摘要，不允许保存 raw PL DNA、DNA hash、`pl_dna_hash` 或 id-dna folder。写入成功后设置页顶部只显示该 6 位 ID 和登记状态，不显示本机码片段或 DNA hash，便于人工核对且不暴露 DNA。`DNA_REGISTER_UPLOADED_PENDING_AUTH` 表示 VPS 已验证公钥、保存设备绑定并创建 private folder、板端已保存本地 ID 状态，只是授权文件等待工厂端生成/上传；不得当作登记失败。
+- 板端必须从 VPS 返回值回读该 ID，不得在本地按 DNA 自行生成最终 ID；回读成功后本地登记状态只允许保存 `vpsDistributionId`、登记结果码和公钥摘要，不允许保存 raw PL DNA、DNA hash、`pl_dna_hash` 或 id-dna folder。写入成功后设置页顶部只显示该 6 位 ID，不显示 `已登记` 等状态后缀、本机码片段或 DNA hash；没有合法 6 位 ID 时同一 ID 位置显示 `未登记`，便于人工核对且不暴露 DNA。`DNA_REGISTER_UPLOADED_PENDING_AUTH` 表示 VPS 已验证公钥、保存设备绑定并创建 private folder、板端已保存本地 ID 状态，只是授权文件等待工厂端生成/上传；不得当作登记失败。
 - 如果 VPS 未返回 6 位 ID、ID 与 DNA hash 关系无法确认、或本地状态文件写入失败，`登记本机码` 必须 fail-closed；不得显示本地推导 ID，也不得允许后续授权/服务器下载把旧 ID 当作当前 ID。
 
 板端设置页 `下载授权` 与 `服务器下载` 链路：
@@ -213,11 +221,11 @@ OTA package 规则：
 
 | 范围 | owner |
 | --- | --- |
-| remote relay | `lvgl_app/scripts/v3_remote_ui_relay.py`、`8ax-win/tools/v3_remote_ui_relay.py` |
+| remote relay | 当前 v5 板端运行真源在 VM `/root/Desktop/v5` 的 `app/src/v5_remote_*`、`services/ui/*` 和对应部署 manifest；旧 `v3_remote_ui_relay.py` 只作历史参考，不作为产品 owner |
 | remote input | board `remote_input.sock` framed JSON |
-| 驱动 profile 下载/上传 | `lvgl_app/scripts/v3_drive_profile_download.py`、`tools/v3_drive_profile_upload_vps.py` |
+| 驱动 profile 下载/上传 | 当前板端下载真源为 `/root/Desktop/v5/services/auth_download/v5_drive_profile_download.py`、`services/drive_profile/v5_settings_actiond.py`、`services/drive_profile/v5_drive_bus_action.py`；发布输入以当前 Factory Client/VPS admin API 和 `config/drive-profiles/*` 的 intended remote path 为准 |
 | Factory Client 管理界面 | `8ax-factory-client-source/8ax.FactoryClient`；界面字段和窗口/DPI 细则见 `8ax-factory-client-source/README.md` |
-| 板端 OTA relay/action/client | `lvgl_app/scripts/v3_remote_ui_relay.py` 当前只提供 fail-closed `/remote/ota/upgrade`；Command Broker/product action 和后续 OTA client 按 `待做工作/板端升级.md` 推进，未实现前必须 fail-closed |
+| 板端 OTA relay/action/client | 按当前 v5 代码现状和 `待做工作/板端升级.md` 推进；未实现前必须 fail-closed，不再把旧 v3 relay 写成当前 owner |
 
 
 ## 9. 核对项

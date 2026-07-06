@@ -3,7 +3,7 @@ namespace EightAxis.FactoryClient;
 internal static class ClientInfo
 {
     public const string Version = "0.1.12";
-    public const string Build = "2026.07.03.005";
+    public const string Build = "2026.07.05.006";
 }
 
 internal sealed record HealthResponse(
