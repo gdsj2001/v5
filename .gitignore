@@ -23,6 +23,9 @@ node_modules/
 .npm/
 .pnpm-store/
 
+# IDE local state
+.vs/
+
 # Build and generated output directories
 build/
 build-*/
@@ -35,6 +38,7 @@ artifacts/
 vm-v5/
 tmp/
 temp/
+logs/
 
 # CMake generated files
 CMakeFiles/
@@ -52,3 +56,6 @@ compile_commands.json
 
 # Local-only process/output area
 repo_ignored/
+
+# Operator/automation screenshots and captured frames
+截图/
