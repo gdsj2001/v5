@@ -77,13 +77,13 @@ try
     if (exitCode == 0)
     {
         Console.ForegroundColor = ConsoleColor.Green;
-        Console.WriteLine("Backup and git push finished.");
+        Console.WriteLine("Git push and backup finished.");
         Console.ResetColor();
     }
     else
     {
         Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine($"Backup or git push failed with exit code {exitCode}.");
+        Console.WriteLine($"Git push or backup failed with exit code {exitCode}.");
         Console.ResetColor();
     }
 

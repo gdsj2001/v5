@@ -527,17 +527,17 @@ function Invoke-GitPushRepo([string]$Repo, [string]$Remote, [string]$Branch, [sw
 
 $resolvedRepoRoot = Resolve-V5RepoRoot $RepoRoot
 
-Write-Host "=== Backup v5 to NAS and push v5 to git ==="
+Write-Host "=== Push v5 to git and backup v5 to NAS ==="
 Write-Host "Version: 20260707-mainline"
 Write-Host "Repo:    $resolvedRepoRoot"
 Write-Host "Excludes: .git, repo_ignored, cache, temporary, generated build/run outputs, packages, and proof files"
 Write-Host ""
 Write-Host "Scope: Windows v5 source truth only"
-Write-Host "NAS target: \\$NasHost\$NasShareName\v5"
 Write-Host "Git target: $GitRemote/$GitBranch"
+Write-Host "NAS target: \\$NasHost\$NasShareName\v5"
 
-Invoke-NasMirrorBackup -SourceRoot $resolvedRepoRoot -HostName $NasHost -ShareName $NasShareName -TimeoutSeconds $NasProbeTimeoutSeconds -DryRun:$NasDryRun
 Invoke-GitPushRepo -Repo $resolvedRepoRoot -Remote $GitRemote -Branch $GitBranch -DryRun:$GitDryRun
+Invoke-NasMirrorBackup -SourceRoot $resolvedRepoRoot -HostName $NasHost -ShareName $NasShareName -TimeoutSeconds $NasProbeTimeoutSeconds -DryRun:$NasDryRun
 
 Write-Host ""
 Write-Host "All done."
