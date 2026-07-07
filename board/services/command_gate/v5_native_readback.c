@@ -28,6 +28,8 @@ void v5_native_readback_set_unavailable(V5NativeReadback *readback, const char *
     readback->interpreter_state_available = 0;
     readback->interpreter_idle_available = 0;
     readback->interpreter_idle = 0;
+    readback->homed_available = 0;
+    readback->all_homed = 0;
     readback->safety_estop_available = 0;
     readback->machine_enable_available = 0;
     readback->modal_actual_available = 0;
@@ -203,6 +205,15 @@ void v5_native_readback_set_interpreter_idle(V5NativeReadback *readback, int idl
     readback->interpreter_idle = idle ? 1 : 0;
 }
 
+void v5_native_readback_set_all_homed(V5NativeReadback *readback, int all_homed)
+{
+    if (!readback) {
+        return;
+    }
+    readback->homed_available = 1;
+    readback->all_homed = all_homed ? 1 : 0;
+}
+
 void v5_native_readback_set_safety_estop(V5NativeReadback *readback, int active)
 {
     if (!readback) {
@@ -292,6 +303,11 @@ int v5_native_readback_interpreter_known(const V5NativeReadback *readback)
 int v5_native_readback_interpreter_idle_known(const V5NativeReadback *readback)
 {
     return readback && readback->interpreter_idle_available;
+}
+
+int v5_native_readback_all_homed_known(const V5NativeReadback *readback)
+{
+    return readback && readback->homed_available;
 }
 
 int v5_native_readback_safety_estop_known(const V5NativeReadback *readback)

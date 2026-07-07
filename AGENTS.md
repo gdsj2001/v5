@@ -49,7 +49,8 @@ FILE_PLACEMENT:
 SOURCE_TRUTH:
 - Do not use `D:\v3` as live source; it is frozen read-only reference only.
 - New v5 maintainable entries must use v5 names, not new `z20_*` names. Existing hardware hostnames/SSH aliases may appear only as external facts.
-- Do not create Windows/VM source mirrors. Runtime source edits belong in `D:\v5\board`; VM copies are generated build staging only and must be replaced from `D:\v5\board`, not edited as truth.
+- Windows local `D:\v5` is the source truth. Runtime source edits belong in `D:\v5\board`; docs and Windows/Vivado owners stay under `D:\v5`. The VM v5 directory is a generated copy only, must not be edited directly, and must be refreshed immediately after local Windows source changes before VM build/deploy work.
+- Use `D:\v5\board\tools\sync_win_source_to_vm.py` as the canonical one-way sync tool from Windows truth to the VM v5 copy. The tool performs manifest-based incremental overwrite: normal runs transfer only changed/deleted local truth, and the default remote drift check re-hashes VM copy files so any manual VM edit is overwritten by the Windows truth without a full resend. Do not create or edit VM source mirrors by hand.
 - Do not install, enable, or use WSL on Windows for this project. When Linux userspace/tooling is required, sync `D:\v5\board` to the existing VM staging/build workspace and run the VM toolchain there.
 
 BOARD_UNREACHABLE_RECOVERY:
@@ -190,18 +191,20 @@ RISK_GRADED_EXECUTION_RULE:
 - P1 medium-risk slices include ordinary product behavior, non-motion UI behavior, feature documentation, local refactors, non-realtime configuration, and tests that can affect a supported runtime path but do not change P0 ownership or safety semantics. P1 requires the relevant owner document when behavior changes, scoped no-fallback cleanup for touched paths, targeted compile/unit/contract tests, and honest `local_verified_only` if board gates are not run.
 - P2 low-risk slices include spelling, comments, formatting, markdown link fixes, test name cleanup, and source annotation/import compatibility changes that do not alter runtime semantics, public contracts, owners, schemas, generated ABI, deployment, or board-visible behavior. P2 uses status/diff review, backup before edit, `git diff --check`, and the smallest syntax/import/focused gate that can catch breakage from the touched file; it must not expand into full VM/board/motion gates unless the change is reclassified.
 - Low-risk changes must not update high-volatility owner requirements, SHM schemas, native helper allowlists, resident daemon lifecycle, product control IPC, or fallback policy text as a side effect. If those files must change, the slice is not P2.
-- Board/operator/motion verification is mandatory only for P0/P1 slices whose behavior is board-visible or motion-capable. Do not require board gates for P2 cleanup or doc/rule-only edits unless the edit itself changes a board-visible requirement.
+- Board/operator/motion verification is mandatory for P0/P1 slices whose behavior is board-visible or motion-capable. Any board program change that enters the board artifact or affects board runtime behavior under `D:\v5\board` requires full current board-source build, board deploy, and original UI/operator/control path closure before pass/fixed/verified language. Do not require board gates for P2 cleanup or doc/rule-only edits unless the edit itself changes a board-visible requirement.
 
 FINISH_LINE_MATRIX:
 - doc_or_rule_only: update requested document/rule -> run text sanity such as `git diff --check` -> final may say doc/rule updated when the edited text is internally consistent.
 - non_board_local_code: update doc first if behavior changed -> edit source/config -> run targeted compile/unit/contract/static gates -> final status `local_verified_only` unless board closure also ran.
-- board_visible_function_code: update doc first if behavior changed -> edit source/config in the owning truth location -> build full current RUNTIME_SOURCE_ROOT when runtime is involved -> deploy canonical artifact -> trigger the original UI/operator path automatically -> collect the minimal verification outputs needed for the claim -> final status `board_verified` only after the verification actually ran.
+- board_program_change: update doc first if behavior changed -> edit board source/config/script/service/deploy files in the owning truth location -> run focused local gates -> configure and build the full current board source from the Windows truth synchronized into the VM build directory -> deploy canonical artifact to the board -> restart/reload the affected board runtime closure -> trigger the original UI/operator/control path automatically -> collect deployment identity and behavior evidence -> final status `board_verified` only after the verification actually ran.
+- board_visible_function_code: update doc first if behavior changed -> edit source/config in the owning truth location -> build full current board source when runtime is involved -> deploy canonical artifact -> trigger the original UI/operator path automatically -> collect the minimal verification outputs needed for the claim -> final status `board_verified` only after the verification actually ran.
 - motion_capable_code: complete board_visible_function_code plus `nc/cc.ngc` golden motion run result; no golden loop means no pass/fixed/done claim.
 - blocked_or_unsafe: keep source state honest -> record exact blocker and missing test in final reply -> final status `blocked` or `source_only`; never claim fixed/done/verified. Do not append/update LEGACY_FILE unless the user explicitly asks for a persistent blocker record.
 DO_NOT_STOP_AT:
 - source edits only
 - docs/rules/legacy records only
 - local compile/unit/mock tests only when board closure is required
+- touched-target or partial VM build when a board program change requires full board-source build
 - direct UDS diagnostics when the user-facing defect is a UI button/operator path
 - replacing the reported failure with a new popup/error/guard/disabled-state instead of fixing the requested behavior
 - keeping an existing popup/error/guard/disabled-state on the reported path after implementation work claims the behavior is supported
@@ -473,15 +476,15 @@ WIN_CLIENT=8ax-win
 VM_SSH_TARGET=z20-vm
 VM_PATH_USER=root
 RUNTIME_SOURCE_ROOT=D:\v5\board
-VM_SYNC_SOURCE_ROOT=/root/Desktop/v5_build/source
+VM_SYNC_SOURCE_ROOT=/root/Desktop/v5
 VM_BUILD_ROOT=/root/Desktop/v5_build/build
 ARCHIVE_ROOT=repo_ignored
 
 VM_ACCESS:
 - Preferred target for Linux build/deploy execution is the existing VM MCP access; use the existing SSH alias only as fallback when MCP is unavailable or insufficient. Do not invent credentials or require a different user unless that is already configured.
-- Before any VM build, first confirm `RUNTIME_SOURCE_ROOT` exists on Windows, then sync it one-way into `VM_SYNC_SOURCE_ROOT`; probe the VM staging path with `test -d /root/Desktop/v5_build/source && readlink -f /root/Desktop/v5_build/source` through VM MCP first, then the existing SSH alias if MCP cannot provide the probe.
+- Before any VM build, first confirm `RUNTIME_SOURCE_ROOT` exists on Windows, then sync Windows `D:\v5` one-way into `VM_SYNC_SOURCE_ROOT` with `D:\v5\board\tools\sync_win_source_to_vm.py`; use the default remote drift check unless there is a measured reason to pass `--skip-remote-drift-check`. Probe the VM copy path with `test -d /root/Desktop/v5 && readlink -f /root/Desktop/v5` through VM MCP first, then the existing SSH alias if MCP cannot provide the probe.
 - If MCP and SSH alias are unavailable, use the existing VM console/hypervisor network setup or documented `vm-bak/` recovery notes; do not install/enable WSL as a workaround
-- Treat `RUNTIME_SOURCE_ROOT` as the canonical Linux/native/LVGL/runtime-service and project-tool source. Treat Windows `PROJECT_ROOT` as the canonical Markdown, screenshot, and Windows/Vivado source. VM staging/build directories are generated from `RUNTIME_SOURCE_ROOT` and must not be edited or treated as source truth.
+- Treat Windows `PROJECT_ROOT`/`RUNTIME_SOURCE_ROOT` as the canonical source. Treat VM `VM_SYNC_SOURCE_ROOT` as a generated copy refreshed from Windows before build/deploy. VM copies and build directories must not be edited or treated as source truth.
 
 ## P1_FEATURE_DOCS
 

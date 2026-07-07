@@ -26,6 +26,23 @@ static int check_apply(const char *field, const char *value)
     return 1;
 }
 
+static int check_native_g53_field(const char *field)
+{
+    const V5ParameterField *entry = v5_parameter_table_find(field);
+    if (!entry) {
+        fprintf(stderr, "missing G53 field owner: %s\n", field);
+        return 0;
+    }
+    if (entry->owner != V5_PARAMETER_OWNER_KINEMATICS_NATIVE ||
+        entry->readback != V5_PARAMETER_READBACK_NATIVE_API ||
+        !entry->restart_required ||
+        entry->drive_only_allowed) {
+        fprintf(stderr, "wrong G53 field owner: %s\n", field);
+        return 0;
+    }
+    return 1;
+}
+
 int main(void)
 {
     size_t count = v5_parameter_table_count();
@@ -42,6 +59,12 @@ int main(void)
             wcs_field->readback != V5_PARAMETER_READBACK_NATIVE_API) {
             return 12;
         }
+    }
+    if (!check_native_g53_field("G53_A_Y") ||
+        !check_native_g53_field("G53_A_Z") ||
+        !check_native_g53_field("G53_C_X") ||
+        !check_native_g53_field("G53_C_Y")) {
+        return 15;
     }
     if (!check_apply("axis_X_max_velocity", "10000")) {
         return 3;

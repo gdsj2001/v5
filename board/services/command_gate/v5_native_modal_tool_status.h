@@ -29,7 +29,9 @@ int v5_native_modal_tool_status_write_ex(
     int tool_length_valid,
     double tool_length_mm,
     int interpreter_idle_valid,
-    int interpreter_idle);
+    int interpreter_idle,
+    int all_homed_valid,
+    int all_homed);
 
 #ifdef __cplusplus
 }

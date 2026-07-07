@@ -103,6 +103,7 @@ int main(void)
     unsigned int fit_generation_after_program;
     lv_point_t gesture_start[2];
     lv_point_t gesture_move[2];
+    V5MainPageActionReport view_report;
     int gesture_changed = 0;
 
     lv_init();
@@ -116,6 +117,10 @@ int main(void)
     }
     if (!v5_main_page_create(&page, screen)) {
         return 2;
+    }
+    if (lv_obj_get_style_line_width(page.trajectory_line, 0) != 2 ||
+        lv_obj_get_style_line_width(page.toolpath_line_segments[1], 0) != 2) {
+        return 33;
     }
     if (page.trajectory_point_count != 0u ||
         !lv_obj_has_flag(page.trajectory_line, LV_OBJ_FLAG_HIDDEN) ||
@@ -139,6 +144,12 @@ int main(void)
         !lv_obj_has_flag(page.toolpath_a_label, LV_OBJ_FLAG_HIDDEN) ||
         !lv_obj_has_flag(page.toolpath_c_label, LV_OBJ_FLAG_HIDDEN)) {
         return 19;
+    }
+    if (!lv_label_get_text(page.toolpath_summary_label) ||
+        strcmp(lv_label_get_text(page.toolpath_summary_label), "") != 0 ||
+        !lv_label_get_text(page.toolpath_detail_label) ||
+        strcmp(lv_label_get_text(page.toolpath_detail_label), "") != 0) {
+        return 35;
     }
     if (line_cross_abs(page.toolpath_wcs_axis_points[0], page.toolpath_mcs_axis_points[0]) > 250L ||
         line_cross_abs(page.toolpath_wcs_axis_points[1], page.toolpath_mcs_axis_points[1]) > 250L ||
@@ -197,10 +208,10 @@ int main(void)
         const double c_dy = (-sin(a_rad) * y_dy) + (cos(a_rad) * z_dy);
         lv_point_t fixed_wcs_origin[5];
         memcpy(fixed_wcs_origin, page.toolpath_wcs_origin_points, sizeof(fixed_wcs_origin));
-        double a_start_world[V5_STATUS_AXIS_COUNT] = {-40.0, 20.0, -50.0, 0.0, 0.0};
-        double a_end_world[V5_STATUS_AXIS_COUNT] = {40.0, 20.0, -50.0, 0.0, 0.0};
-        double c_start_world[V5_STATUS_AXIS_COUNT] = {50.0, 20.0 + (sin(a_rad) * 40.0), -(cos(a_rad) * 40.0), 0.0, 0.0};
-        double c_end_world[V5_STATUS_AXIS_COUNT] = {50.0, 20.0 - (sin(a_rad) * 40.0), cos(a_rad) * 40.0, 0.0, 0.0};
+        double a_start_world[V5_STATUS_AXIS_COUNT] = {-30.0, 20.0, -50.0, 0.0, 0.0};
+        double a_end_world[V5_STATUS_AXIS_COUNT] = {50.0, 20.0, -50.0, 0.0, 0.0};
+        double c_start_world[V5_STATUS_AXIS_COUNT] = {50.0, 20.0 + (sin(a_rad) * 40.0), 8.0 - (cos(a_rad) * 40.0), 0.0, 0.0};
+        double c_end_world[V5_STATUS_AXIS_COUNT] = {50.0, 20.0 - (sin(a_rad) * 40.0), 8.0 + (cos(a_rad) * 40.0), 0.0, 0.0};
         V5ToolpathScreenPoint a_start_expected;
         V5ToolpathScreenPoint a_end_expected;
         V5ToolpathScreenPoint c_start_expected;
@@ -250,6 +261,12 @@ int main(void)
     }
     if (!modal_text || strcmp(modal_text, "当前模态\nT7\nL123.456\nG0\nG17\nG21\nG40\nG49\nG54\nG64\nG80\nG90\nG94\nG97") != 0) {
         return 13;
+    }
+    if (!lv_label_get_text(page.toolpath_summary_label) ||
+        strcmp(lv_label_get_text(page.toolpath_summary_label), "G53 A 10.00,20.00,-50.00  C 50.00,20.00,8.00") != 0 ||
+        !lv_label_get_text(page.toolpath_detail_label) ||
+        strcmp(lv_label_get_text(page.toolpath_detail_label), "G54偏置 X10.00 Y12.00 Z8.00 A0.00 C0.00") != 0) {
+        return 36;
     }
     if (!lv_label_get_text(page.axis_labels[3]) || strcmp(lv_label_get_text(page.axis_labels[3]), "A") != 0 ||
         !lv_label_get_text(page.axis_labels[4]) || strcmp(lv_label_get_text(page.axis_labels[4]), "C") != 0 ||
@@ -316,6 +333,8 @@ int main(void)
             fabs(page.toolpath_program_wcs_offset[0] - 10.0) > 0.0005 ||
             fabs(page.toolpath_program_wcs_offset[1] - 12.0) > 0.0005 ||
             fabs(page.toolpath_program_wcs_offset[2] - 8.0) > 0.0005 ||
+            page.toolpath_fit.bounds.max_u < 40.0 ||
+            page.toolpath_fit.bounds.min_v > -80.0 ||
             !project_expected(&page, program_first_world, &program_first_expected) ||
             point_delta_abs(&page.trajectory_points[0], &program_first_expected) > 4L ||
             (long)max_x - (long)min_x < 80L || (long)max_y - (long)min_y < 80L) {
@@ -359,7 +378,17 @@ int main(void)
         v5_program_controller_destroy(&controller);
         return 17;
     }
-    if (!v5_main_page_handle_touch_points(&page, 0, 0, 0, &gesture_changed)) {
+    page.toolpath_manual_rotate_deg = 31.0;
+    page.toolpath_gesture_active_count = 2;
+    memset(&view_report, 0, sizeof(view_report));
+    if (!v5_main_page_trigger_action(&page, V5_MAIN_PAGE_ACTION_VIEW_XY, &view_report) ||
+        page.view_plane != V5_TOOLPATH_DISPLAY_XY ||
+        fabs(page.toolpath_manual_rotate_deg) > 1.0e-9 ||
+        page.toolpath_gesture_active_count != 0) {
+        v5_program_controller_destroy(&controller);
+        return 34;
+    }
+    if (v5_main_page_handle_touch_points(&page, 0, 0, 0, &gesture_changed)) {
         v5_program_controller_destroy(&controller);
         return 18;
     }

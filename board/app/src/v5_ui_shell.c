@@ -95,10 +95,22 @@ static void shell_format_program_date(time_t when, char *out, size_t out_cap);
 static lv_color_t shell_rgb(uint8_t r, uint8_t g, uint8_t b);
 static unsigned long long shell_monotonic_ns(void);
 static int shell_toolpath_touch_points(const lv_point_t *points, int count, int pressed, int *changed, void *user_data);
+static void shell_update_top_status_label(void);
 
-#define V5_NATIVE_READBACK_MIN_NS 1000000000ULL
+#define V5_UI_DYNAMIC_REFRESH_NS 33333333ULL
+#define V5_UI_BUTTON_REFRESH_NS 100000000ULL
+#define V5_UI_ESTOP_REFRESH_NS 100000000ULL
+#define V5_UI_SLOW_REFRESH_NS 200000000ULL
+#define V5_NATIVE_READBACK_MIN_NS 200000000ULL
+#define V5_SAFETY_READBACK_MIN_NS 100000000ULL
+#define V5_SAFETY_READBACK_TIMEOUT_MS 80U
 
 static unsigned long long g_native_readback_last_probe_ns;
+static unsigned long long g_safety_readback_last_probe_ns;
+static unsigned long long g_ui_dynamic_last_refresh_ns;
+static unsigned long long g_ui_button_last_refresh_ns;
+static unsigned long long g_ui_estop_last_refresh_ns;
+static unsigned long long g_ui_slow_last_refresh_ns;
 
 static int shell_refresh_native_readback(int force)
 {
@@ -107,10 +119,7 @@ static int shell_refresh_native_readback(int force)
     V5NativeReadback wcs_readback;
     V5NativeReadback g53_geometry_readback;
     V5NativeReadback modal_tool_readback;
-    V5CommandGateResult gate_result;
     unsigned long long now;
-    int estop_ok;
-    int machine_ok;
 
     now = shell_monotonic_ns();
     if (!force && g_native_readback_last_probe_ns != 0ULL &&
@@ -119,7 +128,7 @@ static int shell_refresh_native_readback(int force)
     }
     g_native_readback_last_probe_ns = now;
 
-    v5_native_readback_init(&readback);
+    readback = g_main_page.native_readback;
     v5_native_readback_init(&rtcp_readback);
     v5_native_readback_init(&wcs_readback);
     v5_native_readback_init(&g53_geometry_readback);
@@ -165,10 +174,34 @@ static int shell_refresh_native_readback(int force)
         if (v5_native_readback_interpreter_idle_known(&modal_tool_readback)) {
             v5_native_readback_set_interpreter_idle(&readback, modal_tool_readback.interpreter_idle);
         }
+        if (v5_native_readback_all_homed_known(&modal_tool_readback)) {
+            v5_native_readback_set_all_homed(&readback, modal_tool_readback.all_homed);
+        }
     }
 
+    v5_main_page_set_native_readback(&g_main_page, &readback);
+    shell_update_top_status_label();
+    return 1;
+}
+
+static int shell_refresh_safety_readback(int force)
+{
+    V5NativeReadback readback;
+    V5CommandGateResult gate_result;
+    unsigned long long now;
+    int estop_ok;
+    int machine_ok;
+
+    now = shell_monotonic_ns();
+    if (!force && g_safety_readback_last_probe_ns != 0ULL &&
+        now - g_safety_readback_last_probe_ns < V5_SAFETY_READBACK_MIN_NS) {
+        return 1;
+    }
+    g_safety_readback_last_probe_ns = now;
+
+    readback = g_main_page.native_readback;
     v5_command_gate_result_init(&gate_result);
-    (void)v5_command_gate_probe_safety(&gate_result, force ? 1000U : 500U);
+    (void)v5_command_gate_probe_safety(&gate_result, force ? 1000U : V5_SAFETY_READBACK_TIMEOUT_MS);
     estop_ok = gate_result.safety_estop_known;
     machine_ok = gate_result.machine_enable_known;
     if (estop_ok) {
@@ -177,8 +210,12 @@ static int shell_refresh_native_readback(int force)
     if (machine_ok) {
         v5_native_readback_set_machine_enabled(&readback, gate_result.machine_enabled);
     }
-    v5_main_page_set_native_readback(&g_main_page, &readback);
-    return (estop_ok || machine_ok) ? 1 : 0;
+    if (estop_ok || machine_ok) {
+        v5_main_page_set_native_readback(&g_main_page, &readback);
+        shell_update_top_status_label();
+        return 1;
+    }
+    return 0;
 }
 
 
@@ -187,6 +224,7 @@ static void shell_refresh_native_readback_for_action(void *user_data, V5MainPage
     int reset_semantics;
     (void)user_data;
     if (action == V5_MAIN_PAGE_ACTION_ESTOP_FORCE) {
+        (void)shell_refresh_safety_readback(1);
         reset_semantics =
             (v5_native_readback_safety_estop_known(&g_main_page.native_readback) &&
              g_main_page.native_readback.safety_estop_active) ||
@@ -197,6 +235,7 @@ static void shell_refresh_native_readback_for_action(void *user_data, V5MainPage
         }
     }
     (void)shell_refresh_native_readback(1);
+    (void)shell_refresh_safety_readback(1);
 }
 
 static int shell_toolpath_touch_points(const lv_point_t *points, int count, int pressed, int *changed, void *user_data)
@@ -212,8 +251,8 @@ static int shell_toolpath_touch_points(const lv_point_t *points, int count, int 
     }
     consumed = v5_main_page_handle_touch_points(&g_main_page, points, count, pressed, &local_changed);
     if (local_changed) {
-        (void)v5_main_page_apply_status(&g_main_page, &g_model.status_view);
-        lv_refr_now(0);
+        (void)v5_main_page_apply_status_flags(&g_main_page, &g_model.status_view, V5_MAIN_PAGE_REFRESH_DYNAMIC);
+        lv_timer_handler();
         if (changed) {
             *changed = 1;
         }
@@ -267,6 +306,23 @@ static void shell_create_top_status_layer(lv_obj_t *screen)
     lv_obj_set_style_text_align(g_top_status_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(g_top_status_label, lv_color_make(255, 86, 86), 0);
     lv_label_set_long_mode(g_top_status_label, LV_LABEL_LONG_CLIP);
+    lv_label_set_text(g_top_status_label, "未回零: 开机后需回零一次");
+}
+
+static void shell_update_top_status_label(void)
+{
+    if (!g_top_status_label) {
+        return;
+    }
+    lv_obj_set_style_text_color(g_top_status_label, lv_color_make(255, 86, 86), 0);
+    if (!v5_native_readback_all_homed_known(&g_main_page.native_readback)) {
+        lv_label_set_text(g_top_status_label, "回零状态未知");
+        return;
+    }
+    if (g_main_page.native_readback.all_homed) {
+        lv_label_set_text(g_top_status_label, "");
+        return;
+    }
     lv_label_set_text(g_top_status_label, "未回零: 开机后需回零一次");
 }
 
@@ -1183,7 +1239,6 @@ static void shell_navigate(void *user_data, V5MainPageActionKind action)
     if (page == V5_SHELL_PAGE_MAIN) {
         if (g_main_cache_dirty) {
             lv_timer_handler();
-            lv_refr_now(0);
             v5_lvgl_remote_display_render_now();
             cache_ok = v5_lvgl_remote_display_cache_capture(V5_REMOTE_DISPLAY_CACHE_MAIN);
             g_main_cache_dirty = 0;
@@ -1280,6 +1335,7 @@ static int v5_ui_shell_bootstrap_common(V5ShellBootReport *report, const char *p
         v5_main_page_set_navigation_callback(&g_main_page, shell_navigate, 0);
         v5_main_page_set_native_readback_refresh_callback(&g_main_page, shell_refresh_native_readback_for_action, 0);
         (void)shell_refresh_native_readback(1);
+        (void)shell_refresh_safety_readback(1);
     }
     if (settings_page_created) {
         v5_settings_page_set_navigation_callback(&g_settings_page, shell_navigate, 0);
@@ -1296,7 +1352,6 @@ static int v5_ui_shell_bootstrap_common(V5ShellBootReport *report, const char *p
         (void)v5_settings_page_apply_status(&g_settings_page, &g_model.status_view);
     }
     lv_timer_handler();
-    lv_refr_now(0);
     (void)v5_lvgl_remote_display_cache_capture(V5_REMOTE_DISPLAY_CACHE_MAIN);
     if (settings_page_created && main_page_created) {
         shell_hide_all_pages();
@@ -1305,7 +1360,6 @@ static int v5_ui_shell_bootstrap_common(V5ShellBootReport *report, const char *p
             lv_obj_add_flag(g_top_status_layer, LV_OBJ_FLAG_HIDDEN);
         }
         lv_timer_handler();
-        lv_refr_now(0);
         (void)v5_lvgl_remote_display_cache_capture(V5_REMOTE_DISPLAY_CACHE_SETTINGS);
         shell_hide_all_pages();
         lv_obj_clear_flag(g_shell_pages[V5_SHELL_PAGE_MAIN], LV_OBJ_FLAG_HIDDEN);
@@ -1329,17 +1383,49 @@ int v5_ui_shell_bootstrap_remote(V5ShellBootReport *report, const char *project_
     return v5_ui_shell_bootstrap_common(report, project_root, 1);
 }
 
+static int shell_refresh_due(unsigned long long now, unsigned long long *last, unsigned long long period_ns)
+{
+    if (!last || period_ns == 0ULL) {
+        return 0;
+    }
+    if (*last == 0ULL || now < *last || now - *last >= period_ns) {
+        *last = now;
+        return 1;
+    }
+    return 0;
+}
+
 int v5_ui_shell_refresh_once(void)
 {
+    unsigned long long now;
+    unsigned int flags = 0U;
+
     if (!g_ui_ready || !g_main_page.root) {
         return 0;
     }
-    (void)v5_ui_model_refresh_status_from_shm(&g_model, V5_STATUS_SHM_PATH);
-    (void)shell_refresh_native_readback(0);
-    (void)v5_main_page_apply_status(&g_main_page, &g_model.status_view);
-    (void)v5_settings_page_apply_status(&g_settings_page, &g_model.status_view);
+    now = shell_monotonic_ns();
+    if (shell_refresh_due(now, &g_ui_dynamic_last_refresh_ns, V5_UI_DYNAMIC_REFRESH_NS)) {
+        (void)v5_ui_model_refresh_status_from_shm(&g_model, V5_STATUS_SHM_PATH);
+        flags |= V5_MAIN_PAGE_REFRESH_DYNAMIC;
+    }
+    if (shell_refresh_due(now, &g_ui_estop_last_refresh_ns, V5_UI_ESTOP_REFRESH_NS)) {
+        (void)shell_refresh_safety_readback(0);
+        flags |= V5_MAIN_PAGE_REFRESH_ESTOP;
+    }
+    if (shell_refresh_due(now, &g_ui_button_last_refresh_ns, V5_UI_BUTTON_REFRESH_NS)) {
+        flags |= V5_MAIN_PAGE_REFRESH_BUTTONS;
+    }
+    if (shell_refresh_due(now, &g_ui_slow_last_refresh_ns, V5_UI_SLOW_REFRESH_NS)) {
+        (void)shell_refresh_native_readback(0);
+        flags |= V5_MAIN_PAGE_REFRESH_SLOW;
+    }
+    if (flags != 0U) {
+        (void)v5_main_page_apply_status_flags(&g_main_page, &g_model.status_view, flags);
+        if ((flags & V5_MAIN_PAGE_REFRESH_DYNAMIC) != 0U) {
+            (void)v5_settings_page_apply_status(&g_settings_page, &g_model.status_view);
+        }
+    }
     lv_timer_handler();
-    lv_refr_now(0);
     return 1;
 }
 

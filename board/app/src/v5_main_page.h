@@ -22,6 +22,18 @@ extern "C" {
 #define V5_MAIN_PAGE_TOOLPATH_DRAW_SEGMENTS 16u
 #define V5_MAIN_PAGE_TOOLPATH_SEGMENT_POINT_COUNT 64u
 
+enum {
+    V5_MAIN_PAGE_REFRESH_DYNAMIC = 1u << 0,
+    V5_MAIN_PAGE_REFRESH_BUTTONS = 1u << 1,
+    V5_MAIN_PAGE_REFRESH_ESTOP = 1u << 2,
+    V5_MAIN_PAGE_REFRESH_SLOW = 1u << 3,
+    V5_MAIN_PAGE_REFRESH_ALL =
+        V5_MAIN_PAGE_REFRESH_DYNAMIC |
+        V5_MAIN_PAGE_REFRESH_BUTTONS |
+        V5_MAIN_PAGE_REFRESH_ESTOP |
+        V5_MAIN_PAGE_REFRESH_SLOW
+};
+
 typedef void (*V5UiNavigationCallback)(void *user_data, V5MainPageActionKind action);
 typedef void (*V5MainPageNativeReadbackRefreshCallback)(void *user_data, V5MainPageActionKind action);
 
@@ -134,6 +146,7 @@ typedef struct V5MainPage {
 void v5_main_page_init(V5MainPage *page);
 int v5_main_page_create(V5MainPage *page, lv_obj_t *parent);
 int v5_main_page_apply_status(V5MainPage *page, const V5UiStatusView *status);
+int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *status, unsigned int refresh_flags);
 int v5_main_page_handle_touch_points(V5MainPage *page, const lv_point_t *points, int count, int pressed, int *changed);
 void v5_main_page_bind_program_controller(V5MainPage *page, V5ProgramController *controller);
 void v5_main_page_set_command_execution_enabled(V5MainPage *page, int enabled);

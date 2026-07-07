@@ -78,7 +78,6 @@ static void pump_lvgl(unsigned int ms)
     do {
         lv_tick_inc(10);
         lv_timer_handler();
-        lv_refr_now(0);
         elapsed += 10;
     } while (elapsed < ms);
 }

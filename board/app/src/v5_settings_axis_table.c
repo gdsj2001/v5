@@ -41,6 +41,9 @@ static const V5SettingsAxisRowSpec kAxisRows[] = {
 #define V5_SLAVE_OPTION_MAX 32U
 #define V5_SLAVE_OPTION_CAP 128U
 #define V5_DROPDOWN_OPTIONS_CAP 1024U
+#define V5_RESIDENT_PARAMETER_MAX_ROWS 192U
+#define V5_RESIDENT_PARAMETER_KEY_CAP 96U
+#define V5_RESIDENT_PARAMETER_VALUE_CAP 512U
 
 typedef struct V5AxisIniRow {
     int axis_seen;
@@ -60,6 +63,12 @@ typedef struct V5AxisIniRow {
     char home_search_vel[24];
     char backlash[24];
 } V5AxisIniRow;
+
+typedef struct V5ResidentParameterRow {
+    char axis[V5_RESIDENT_PARAMETER_KEY_CAP];
+    char field[V5_RESIDENT_PARAMETER_KEY_CAP];
+    char value[V5_RESIDENT_PARAMETER_VALUE_CAP];
+} V5ResidentParameterRow;
 
 static char g_values[V5_AXIS_TABLE_MAX_ROWS][V5_AXIS_TABLE_MAX_COLS][V5_AXIS_VALUE_CAP];
 static unsigned char g_value_real[V5_AXIS_TABLE_MAX_ROWS][V5_AXIS_TABLE_MAX_COLS];
@@ -361,27 +370,106 @@ static int resident_parameter_table_read_axis(V5SettingsParameterDiskTable table
     return found && out[0];
 }
 
-static int resident_parameter_table_append_write(V5SettingsParameterDiskTable table,
+static int resident_parameter_table_append_rewrite_line(char *out,
+                                                        size_t out_cap,
+                                                        size_t *used,
+                                                        const char *axis,
+                                                        const char *field_key,
+                                                        const char *value)
+{
+    int n;
+    if (!out || out_cap == 0U || !used || !axis || !field_key || !value || *used >= out_cap) {
+        return 0;
+    }
+    n = snprintf(out + *used, out_cap - *used, "%s\t%s\t%s\n", axis, field_key, value);
+    if (n <= 0 || (size_t)n >= out_cap - *used) return 0;
+    *used += (size_t)n;
+    return 1;
+}
+
+static int resident_parameter_table_upsert_write(V5SettingsParameterDiskTable table,
                                                  const char *axis,
                                                  const char *field_key,
                                                  const char *value)
 {
     char *text_blob = resident_parameter_table_text(table);
-    size_t len;
+    V5ResidentParameterRow *rows;
+    char *rewritten;
+    const char *cursor;
+    char line[1024];
+    size_t count = 0U;
+    size_t i;
+    size_t used = 0U;
+    int found = 0;
+    int ok = 0;
     int n;
-    if (!text_blob || !axis || !axis[0] || !field_key || !field_key[0] || !value || !value[0]) {
+    if (!text_blob || !text_blob[0] || !axis || !axis[0] || !field_key || !field_key[0] || !value || !value[0]) {
         return 0;
     }
-    len = strlen(text_blob);
-    if (len == 0U) {
-        n = snprintf(text_blob, V5_BOOT_CLOSURE_TEXT_CAP, "# schema=v5.settings.parameter_table.tsv.v1\n");
-        if (n <= 0 || (size_t)n >= V5_BOOT_CLOSURE_TEXT_CAP) return 0;
-        len = (size_t)n;
-    }
-    n = snprintf(text_blob + len, V5_BOOT_CLOSURE_TEXT_CAP - len, "%s\t%s\t%s\n", axis, field_key, value);
-    return n > 0 && (size_t)n < V5_BOOT_CLOSURE_TEXT_CAP - len;
-}
+    rows = (V5ResidentParameterRow *)calloc(V5_RESIDENT_PARAMETER_MAX_ROWS, sizeof(*rows));
+    rewritten = (char *)malloc(V5_BOOT_CLOSURE_TEXT_CAP);
+    if (!rows || !rewritten) goto done;
 
+    cursor = text_blob;
+    while (next_text_line(&cursor, line, sizeof(line))) {
+        char *line_axis;
+        char *line_field;
+        char *line_value;
+        int is_target;
+        int replaced = 0;
+        trim_in_place(line);
+        if (!line[0] || line[0] == '#') continue;
+        line_axis = line;
+        line_field = strchr(line_axis, '\t');
+        if (!line_field) continue;
+        *line_field++ = '\0';
+        line_value = strchr(line_field, '\t');
+        if (!line_value) continue;
+        *line_value++ = '\0';
+        if (strchr(line_value, '\t')) continue;
+        trim_in_place(line_axis);
+        trim_in_place(line_field);
+        trim_in_place(line_value);
+        if (!line_axis[0] || !line_field[0] || !line_value[0]) continue;
+        is_target = (strcmp(line_axis, axis) == 0 && strcmp(line_field, field_key) == 0);
+        for (i = 0U; i < count; ++i) {
+            if (strcmp(rows[i].axis, line_axis) == 0 && strcmp(rows[i].field, line_field) == 0) {
+                snprintf(rows[i].value, sizeof(rows[i].value), "%s", is_target ? value : line_value);
+                replaced = 1;
+                break;
+            }
+        }
+        if (is_target) found = 1;
+        if (replaced) continue;
+        if (count >= V5_RESIDENT_PARAMETER_MAX_ROWS) continue;
+        snprintf(rows[count].axis, sizeof(rows[count].axis), "%s", line_axis);
+        snprintf(rows[count].field, sizeof(rows[count].field), "%s", line_field);
+        snprintf(rows[count].value, sizeof(rows[count].value), "%s", is_target ? value : line_value);
+        ++count;
+    }
+    if (!found) goto done;
+
+    n = snprintf(rewritten, V5_BOOT_CLOSURE_TEXT_CAP, "# schema=v5.settings.parameter_table.tsv.v1\n");
+    if (n <= 0 || (size_t)n >= V5_BOOT_CLOSURE_TEXT_CAP) goto done;
+    used = (size_t)n;
+    for (i = 0U; i < count; ++i) {
+        if (!resident_parameter_table_append_rewrite_line(rewritten,
+                                                          V5_BOOT_CLOSURE_TEXT_CAP,
+                                                          &used,
+                                                          rows[i].axis,
+                                                          rows[i].field,
+                                                          rows[i].value)) {
+            goto done;
+        }
+    }
+    memcpy(text_blob, rewritten, used + 1U);
+    ok = 1;
+
+done:
+    free(rewritten);
+    free(rows);
+    return ok;
+}
 
 static int row_index_for_axis_name(const char *axis)
 {
@@ -1376,7 +1464,7 @@ int v5_settings_axis_table_commit_g53_value(unsigned int row, unsigned int col, 
         table = g53_disk_table(row, col);
         if (table == V5_SETTINGS_PARAMETER_DISK_NONE) return 0;
         ok = v5_settings_parameter_store_write_axis(g_project_root, table, "G53", key, value);
-        ok = ok && resident_parameter_table_append_write(table, "G53", key, value);
+        ok = ok && resident_parameter_table_upsert_write(table, "G53", key, value);
         ok = ok && resident_parameter_table_read_axis(table, "G53", key, readback, sizeof(readback));
         ok = ok && strings_equal_numeric_ok(readback, value);
     }

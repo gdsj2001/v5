@@ -8,6 +8,7 @@ static const V5MicrokernelManifestEntry k_manifest[] = {
     {"linuxcnc_executable", "linuxcnc/runtime/linuxcnc", V5_MICROKERNEL_MANIFEST_RUNTIME_OWNER, 1, "microkernel"},
     {"rtapi_modules", "linuxcnc/runtime/rtapi_modules", V5_MICROKERNEL_MANIFEST_RUNTIME_OWNER, 1, "microkernel"},
     {"kinematics_component", "linuxcnc/runtime/kinematics", V5_MICROKERNEL_MANIFEST_RUNTIME_OWNER, 1, "microkernel"},
+    {"g53_geometry_parameter_memory", "microkernel/native/kinematics.g53_geometry", V5_MICROKERNEL_MANIFEST_RUNTIME_OWNER, 1, "microkernel"},
     {"parameter_file", "linuxcnc/runtime/var/linuxcnc.var", V5_MICROKERNEL_MANIFEST_FILE, 1, "microkernel"},
     {"tool_table", "linuxcnc/runtime/var/tool.tbl", V5_MICROKERNEL_MANIFEST_FILE, 1, "microkernel"},
     {"native_gate_registry", "services/microkernel/v5_native_gate_registry.c", V5_MICROKERNEL_MANIFEST_NATIVE_API, 1, "native_gate"},

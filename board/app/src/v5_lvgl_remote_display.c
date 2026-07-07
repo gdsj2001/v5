@@ -255,7 +255,6 @@ int v5_lvgl_remote_display_setup(unsigned int width, unsigned int height)
 void v5_lvgl_remote_display_render_now(void)
 {
     lv_timer_handler();
-    lv_refr_now(0);
 }
 
 int v5_lvgl_remote_display_cache_capture(unsigned int slot)

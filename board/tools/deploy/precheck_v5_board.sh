@@ -73,7 +73,7 @@ check_remote_target() {
     fi
   done
 
-  remote_check 'ps w 2>/dev/null | grep -E "v5_state_publisher|v5_rtcp_status_publisher|v5_wcs_status_publisher|v5_lvgl_shell|linuxcncrsh|linuxcncsvr|milltask" | grep -v grep || true' |
+  remote_check 'ps w 2>/dev/null | grep -E "v5_state_publisher|v5_rtcp_status_publisher|v5_g53_geometry_memory_owner|v5_wcs_status_publisher|v5_lvgl_shell|linuxcncrsh|linuxcncsvr|milltask" | grep -v grep || true' |
     sed 's/^/INFO board process: /'
 
   if remote_check 'test -x /etc/init.d/v5-state-publisher'; then
@@ -85,6 +85,11 @@ check_remote_target() {
     record_ok "board init script installed: /etc/init.d/v5-rtcp-status-publisher"
   else
     record_warn "v5-rtcp-status-publisher init script not installed yet"
+  fi
+  if remote_check 'test -x /etc/init.d/v5-g53-geometry-memory-owner'; then
+    record_ok "board init script installed: /etc/init.d/v5-g53-geometry-memory-owner"
+  else
+    record_warn "v5-g53-geometry-memory-owner init script not installed yet"
   fi
   if remote_check 'test -x /etc/init.d/v5-wcs-status-publisher'; then
     record_ok "board init script installed: /etc/init.d/v5-wcs-status-publisher"

@@ -44,6 +44,14 @@ RUN_DIR = Path("/run/8ax_v5_product_ui")
 SOCKET_PATH = RUN_DIR / "settings_actiond.sock"
 EVENT_LOG = RUN_DIR / "settings_actiond_events.jsonl"
 DRIVE_TIMEOUT_S = 8.0
+DRIVE_ACTION_TIMEOUTS: Dict[str, float] = {
+    "scan": 20.0,
+    "read": 45.0,
+    "fault-reset": 45.0,
+    "factory-reset": 90.0,
+    "set-drive": 180.0,
+    "axis-zero": 20.0,
+}
 MAX_ACTIOND_REQUEST_BYTES = 4096
 MAX_ACTIOND_RESULT_BYTES = 65536
 MAX_ACTIOND_EVENT_BYTES = 8192
@@ -361,6 +369,10 @@ def run_auth_action(action: str, spec: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
+def drive_timeout_for_action(drive_action: str) -> float:
+    return DRIVE_ACTION_TIMEOUTS.get(str(drive_action or ""), DRIVE_TIMEOUT_S)
+
+
 def run_action(action: str, run_id: str, request: Optional[Dict[str, Any]] = None) -> None:
     spec = ACTIONS.get(action)
     if not spec:
@@ -372,7 +384,8 @@ def run_action(action: str, run_id: str, request: Optional[Dict[str, Any]] = Non
     append_event({"event": "started", "action": action, "run_id": run_id, "owner": spec.get("owner", ""), "result_path": str(result_path)})
     try:
         if spec.get("handler") == "drive":
-            result = v5_drive_bus_action.run_action(str(spec.get("drive_action", "")), DRIVE_TIMEOUT_S, True, request or {"action": action})
+            drive_action = str(spec.get("drive_action", ""))
+            result = v5_drive_bus_action.run_action(drive_action, drive_timeout_for_action(drive_action), True, request or {"action": action})
             if action == "settings_axis_zero" and bool(result.get("ok")):
                 reload_result = reload_position_publisher()
                 result["position_publisher_reload"] = reload_result

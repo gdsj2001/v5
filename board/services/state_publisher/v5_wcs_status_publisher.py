@@ -29,7 +29,7 @@ POSITION_MAGIC = 0x56504F53
 MODAL_TOOL_MAGIC = 0x564D544C
 WCS_VERSION = 2
 POSITION_STATUS_VERSION = 2
-MODAL_TOOL_VERSION = 2
+MODAL_TOOL_VERSION = 3
 WCS_COUNT = 9
 WCS_AXIS_COUNT = 5
 WCS_TABLE_VALUE_COUNT = WCS_COUNT * WCS_AXIS_COUNT
@@ -39,7 +39,7 @@ WCS_PARAM_BASES = (5221, 5241, 5261, 5281, 5301, 5321, 5341, 5361, 5381)
 WCS_PARAM_AXIS_OFFSETS = (0, 1, 2, 3, 5)
 BLOCK_STRUCT = struct.Struct('<IIIIiIIIIIQ' + ('d' * WCS_TABLE_VALUE_COUNT) + 'II')
 POSITION_BLOCK_STRUCT = struct.Struct('<IIIIIIQ' + ('d' * (POSITION_AXIS_COUNT * 2)) + ('d' * 4) + 'II')
-MODAL_TOOL_BLOCK_STRUCT = struct.Struct('<IIIIIIIIiIQ128sdII')
+MODAL_TOOL_BLOCK_STRUCT = struct.Struct('<IIIIIIIIiIQ128sdIIII')
 DEFAULT_PATH = '/dev/shm/v5_native_wcs_status.bin'
 DEFAULT_POSITION_PATH = '/dev/shm/v5_native_position_status.bin'
 DEFAULT_MODAL_TOOL_PATH = '/dev/shm/v5_native_modal_tool_status.bin'
@@ -417,7 +417,9 @@ def write_modal_tool_status(
     tool_length_valid: int,
     tool_length_mm: float,
     interpreter_idle_valid: int = 0,
-    interpreter_idle: int = 0) -> None:
+    interpreter_idle: int = 0,
+    all_homed_valid: int = 0,
+    all_homed: int = 0) -> None:
     modal_text = modal if modal and modal != 'UNAVAILABLE' else ''
     tool_valid = tool_number is not None and int(tool_number) >= 0
     tool_no = int(tool_number) if tool_valid else -1
@@ -425,20 +427,22 @@ def write_modal_tool_status(
     length_value = float(tool_length_mm) if length_valid else 0.0
     idle_valid = 1 if interpreter_idle_valid else 0
     idle_value = 1 if idle_valid and interpreter_idle else 0
+    homed_valid = 1 if all_homed_valid else 0
+    homed_value = 1 if homed_valid and all_homed else 0
     modal_bytes = modal_text.encode('utf-8', errors='replace')[:127]
     modal_bytes = modal_bytes + (b'\0' * (128 - len(modal_bytes)))
-    valid = 1 if modal_text or tool_valid or idle_valid else 0
+    valid = 1 if modal_text or tool_valid or idle_valid or homed_valid else 0
     monotonic_ns = time.monotonic_ns()
     prefix = struct.pack(
-        '<IIIIIIIIiIQ128sd',
+        '<IIIIIIIIiIQ128sdII',
         MODAL_TOOL_MAGIC, MODAL_TOOL_VERSION, MODAL_TOOL_BLOCK_STRUCT.size, valid,
         1 if modal_text else 0, 1 if tool_valid else 0, length_valid, idle_valid,
-        tool_no, idle_value, monotonic_ns, modal_bytes, length_value)
+        tool_no, idle_value, monotonic_ns, modal_bytes, length_value, homed_valid, homed_value)
     crc = crc32_like(prefix)
     payload = MODAL_TOOL_BLOCK_STRUCT.pack(
         MODAL_TOOL_MAGIC, MODAL_TOOL_VERSION, MODAL_TOOL_BLOCK_STRUCT.size, valid,
         1 if modal_text else 0, 1 if tool_valid else 0, length_valid, idle_valid,
-        tool_no, idle_value, monotonic_ns, modal_bytes, length_value, crc, 0)
+        tool_no, idle_value, monotonic_ns, modal_bytes, length_value, homed_valid, homed_value, crc, 0)
     atomic_write(path, payload)
 
 
@@ -448,6 +452,19 @@ def interpreter_idle_from_stat(stat, idle_value):
     except Exception:
         return 0, 0
     return 1, 1 if idle_value is not None and state == int(idle_value) else 0
+
+
+def all_homed_from_stat(stat):
+    homed = getattr(stat, 'homed', None)
+    if homed is None:
+        return 0, 0
+    try:
+        values = [int(v) for v in list(homed)[:POSITION_AXIS_COUNT]]
+    except Exception:
+        return 0, 0
+    if len(values) < POSITION_AXIS_COUNT:
+        return 0, 0
+    return 1, 1 if all(value != 0 for value in values) else 0
 
 
 def first_spindle(stat):
@@ -542,9 +559,19 @@ def poll_once(
     tool_number = current_tool_number(stat)
     tool_length_valid, tool_length_mm = current_tool_length(stat, tool_number, t0_tool_holder_length_mm)
     idle_valid, idle_value = interpreter_idle_from_stat(stat, interpreter_idle_value)
+    all_homed_valid, all_homed = all_homed_from_stat(stat)
     write_status(path, valid, wcs_index, table, table_valid, resident_wcs.epoch)
     write_position_status(position_path, stat)
-    write_modal_tool_status(modal_tool_path, modal, tool_number, tool_length_valid, tool_length_mm, idle_valid, idle_value)
+    write_modal_tool_status(
+        modal_tool_path,
+        modal,
+        tool_number,
+        tool_length_valid,
+        tool_length_mm,
+        idle_valid,
+        idle_value,
+        all_homed_valid,
+        all_homed)
     return valid if table_valid else 0, wcs_index if table_valid else -1
 
 
@@ -571,7 +598,7 @@ def main() -> int:
         write_status(args.path, valid, wcs_index, mock_wcs_table(wcs_index, parse_offsets(args.mock_offsets)), 1 if valid else 0, 1)
         if args.mock_mcs:
             write_mock_position_status(args.position_path, parse_offsets(args.mock_mcs), parse_offsets(args.mock_cmd_mcs))
-        write_modal_tool_status(args.modal_tool_path, 'G0 G17 G21 G40 G49 G54 G64 G80 G90 G94 G97', 0, 1, args.t0_tool_holder_length_mm, 1, 1)
+        write_modal_tool_status(args.modal_tool_path, 'G0 G17 G21 G40 G49 G54 G64 G80 G90 G94 G97', 0, 1, args.t0_tool_holder_length_mm, 1, 1, 1, 1)
         print(f'v5_wcs_status_publisher mock valid={valid} wcs_index={wcs_index} path={args.path} position_path={args.position_path} modal_tool_path={args.modal_tool_path}')
         return 0
 

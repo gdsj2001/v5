@@ -3,6 +3,7 @@
 #include "v5_native_status_api.h"
 
 #include <stdio.h>
+#include <string.h>
 
 static int require_gate(const char *id)
 {
@@ -11,6 +12,21 @@ static int require_gate(const char *id)
         return 1;
     }
     return 0;
+}
+
+static int require_manifest(const char *id)
+{
+    const V5MicrokernelManifestEntry *entries;
+    size_t count;
+    size_t i;
+    entries = v5_microkernel_manifest_entries(&count);
+    for (i = 0; i < count; ++i) {
+        if (entries[i].id && strcmp(entries[i].id, id) == 0) {
+            return 0;
+        }
+    }
+    fprintf(stderr, "missing microkernel manifest entry: %s\n", id);
+    return 1;
 }
 
 static int require_status(const char *id)
@@ -50,10 +66,12 @@ int main(void)
     rc |= require_gate("estop_force");
     rc |= require_gate("feed_override_set");
     rc |= require_gate("settings_apply");
+    rc |= require_manifest("g53_geometry_parameter_memory");
     rc |= require_status("active_wcs");
     rc |= require_status("wcs_offsets");
     rc |= require_status("g92_offset");
     rc |= require_status("rtcp_actual");
+    rc |= require_status("g53_geometry");
     rc |= require_status("rotary_logical_abs_counts64");
     rc |= require_status("rotary_runtime_window_counts");
     rc |= require_status("safety_estop");

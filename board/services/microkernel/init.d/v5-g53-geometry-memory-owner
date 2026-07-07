@@ -1,0 +1,97 @@
+#!/bin/sh
+set -eu
+
+LD_BIND_NOW=1
+export LD_BIND_NOW
+ulimit -l unlimited 2>/dev/null || true
+
+DAEMON=/usr/libexec/8ax/v5_g53_geometry_memory_owner.py
+PIDFILE=/run/8ax/v5_g53_geometry_memory_owner.pid
+LOGFILE=/run/8ax/v5_g53_geometry_memory_owner.log
+STATUS_PATH=${V5_G53_GEOMETRY_STATUS_PATH:-/dev/shm/v5_native_g53_geometry_status.bin}
+LINUXCNC_INI=${V5_LINUXCNC_INI:-/opt/8ax/v5/linuxcnc/ini/v5_bus.ini}
+INTERVAL_MS=${V5_G53_GEOMETRY_INTERVAL_MS:-100}
+
+is_running() {
+  [ -r "$PIDFILE" ] || return 1
+  pid=$(cat "$PIDFILE" 2>/dev/null || true)
+  [ -n "$pid" ] || return 1
+  kill -0 "$pid" 2>/dev/null
+}
+
+set_non_microkernel_affinity() {
+  pid="$1"
+  [ -n "$pid" ] || return 0
+  command -v taskset >/dev/null 2>&1 || return 0
+  if grep -qw 1 /sys/devices/system/cpu/online 2>/dev/null || grep -q '0-1' /sys/devices/system/cpu/online 2>/dev/null; then
+    taskset -pc 1 "$pid" >>"$LOGFILE" 2>&1 || true
+  fi
+}
+
+start_service() {
+  if is_running; then
+    echo "v5_g53_geometry_memory_owner already running pid=$(cat "$PIDFILE")"
+    return 0
+  fi
+  test -x "$DAEMON"
+  test -r "$LINUXCNC_INI"
+  mkdir -p /run/8ax "$(dirname "$STATUS_PATH")"
+  rm -f "$PIDFILE" "$STATUS_PATH"
+  setsid "$DAEMON" --path "$STATUS_PATH" --ini "$LINUXCNC_INI" --interval-ms "$INTERVAL_MS" >>"$LOGFILE" 2>&1 &
+  echo "$!" >"$PIDFILE"
+  sleep 1
+  if is_running && [ -s "$STATUS_PATH" ]; then
+    set_non_microkernel_affinity "$(cat "$PIDFILE")"
+    echo "v5_g53_geometry_memory_owner started pid=$(cat "$PIDFILE") path=$STATUS_PATH ini=$LINUXCNC_INI interval_ms=$INTERVAL_MS"
+    return 0
+  fi
+  echo "v5_g53_geometry_memory_owner failed to start" >&2
+  tail -n 20 "$LOGFILE" 2>/dev/null || true
+  return 1
+}
+
+stop_service() {
+  if ! is_running; then
+    rm -f "$PIDFILE"
+    echo "v5_g53_geometry_memory_owner not running"
+    return 0
+  fi
+  pid=$(cat "$PIDFILE")
+  kill "$pid" 2>/dev/null || true
+  i=0
+  while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 50 ]; do
+    i=$((i + 1))
+    sleep 0.1
+  done
+  if kill -0 "$pid" 2>/dev/null; then
+    echo "v5_g53_geometry_memory_owner did not stop pid=$pid" >&2
+    return 1
+  fi
+  rm -f "$PIDFILE"
+  echo "v5_g53_geometry_memory_owner stopped pid=$pid"
+}
+
+case "${1:-}" in
+  start)
+    start_service
+    ;;
+  stop)
+    stop_service
+    ;;
+  restart)
+    stop_service
+    start_service
+    ;;
+  status)
+    if is_running; then
+      echo "v5_g53_geometry_memory_owner running pid=$(cat "$PIDFILE")"
+    else
+      echo "v5_g53_geometry_memory_owner not running"
+      exit 1
+    fi
+    ;;
+  *)
+    echo "usage: $0 {start|stop|restart|status}" >&2
+    exit 2
+    ;;
+esac

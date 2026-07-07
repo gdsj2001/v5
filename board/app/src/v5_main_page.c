@@ -23,6 +23,7 @@
 #define V5_TOOLPATH_GESTURE_LEFT_INSET 132
 #define V5_TOOLPATH_GESTURE_RIGHT_INSET 64
 #define V5_TOOLPATH_GESTURE_BOTTOM_INSET 58
+#define V5_TOOLPATH_PROGRAM_LINE_WIDTH 2
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -204,15 +205,22 @@ static void main_page_fit_expand_world_point(V5ToolpathDisplayFit *fit, const do
     if (v > fit->bounds.max_v) fit->bounds.max_v = v;
 }
 
+static int main_page_tool_length_mm(const V5MainPage *page, double *out);
+
 static int main_page_g53_ac_center_world(const V5MainPage *page, unsigned int index, double center[V5_STATUS_AXIS_COUNT])
 {
     const double *source;
+    const double *active_offsets;
     unsigned int native_center;
     unsigned int i;
     if (!page || !center) {
         return 0;
     }
     if (index > 1U) {
+        return 0;
+    }
+    active_offsets = v5_native_readback_active_wcs_offsets(&page->native_readback);
+    if (!active_offsets || !isfinite(active_offsets[0]) || !isfinite(active_offsets[2])) {
         return 0;
     }
     native_center = index == 0U ? V5_NATIVE_READBACK_G53_CENTER_A : V5_NATIVE_READBACK_G53_CENTER_C;
@@ -227,6 +235,11 @@ static int main_page_g53_ac_center_world(const V5MainPage *page, unsigned int in
             return 0;
         }
         center[i] = source[i];
+    }
+    if (index == 0U) {
+        center[0] = active_offsets[0];
+    } else {
+        center[2] = active_offsets[2];
     }
     return 1;
 }
@@ -288,6 +301,45 @@ static void main_page_expand_static_geometry_fit(V5MainPage *page, const V5UiSta
         point[2] = c_center[2] + c_vec_z;
         main_page_fit_expand_world_point(&page->toolpath_fit, point);
     }
+}
+
+static void main_page_expand_visible_toolpath_fit(V5MainPage *page, const V5UiStatusView *status)
+{
+    double origin[V5_STATUS_AXIS_COUNT] = {0.0, 0.0, 0.0, 0.0, 0.0};
+    double x_axis[V5_STATUS_AXIS_COUNT] = {40.0, 0.0, 0.0, 0.0, 0.0};
+    double y_axis[V5_STATUS_AXIS_COUNT] = {0.0, 40.0, 0.0, 0.0, 0.0};
+    double z_axis[V5_STATUS_AXIS_COUNT] = {0.0, 0.0, 40.0, 0.0, 0.0};
+    double tool_len = 0.0;
+
+    if (!page || !page->toolpath_fit.valid) {
+        return;
+    }
+
+    main_page_fit_expand_world_point(&page->toolpath_fit, origin);
+    main_page_fit_expand_world_point(&page->toolpath_fit, x_axis);
+    main_page_fit_expand_world_point(&page->toolpath_fit, y_axis);
+    main_page_fit_expand_world_point(&page->toolpath_fit, z_axis);
+
+    if (status && (status->valid_mask & V5_STATUS_VALID_MCS) != 0U && main_page_axis_values_finite(status->mcs)) {
+        double holder_end[V5_STATUS_AXIS_COUNT];
+        main_page_fit_expand_world_point(&page->toolpath_fit, status->mcs);
+        if (main_page_tool_length_mm(page, &tool_len) && fabs(tool_len) > 1.0e-9) {
+            memcpy(holder_end, status->mcs, sizeof(holder_end));
+            holder_end[2] -= tool_len;
+            main_page_fit_expand_world_point(&page->toolpath_fit, holder_end);
+        }
+    }
+
+    if (status && (status->valid_mask & V5_STATUS_VALID_CMD_MCS) != 0U && main_page_axis_values_finite(status->cmd_mcs)) {
+        double cmd_tip[V5_STATUS_AXIS_COUNT];
+        memcpy(cmd_tip, status->cmd_mcs, sizeof(cmd_tip));
+        if (main_page_tool_length_mm(page, &tool_len) && fabs(tool_len) > 1.0e-9) {
+            cmd_tip[2] -= tool_len;
+        }
+        main_page_fit_expand_world_point(&page->toolpath_fit, cmd_tip);
+    }
+
+    main_page_expand_static_geometry_fit(page, status);
 }
 
 static double monotonic_seconds(void)
@@ -406,6 +458,77 @@ static void format_main_page_wcs_coordinate(char *out, size_t out_size, const V5
         value = 0.0;
     }
     snprintf(out, out_size, "%+010.3f", value);
+}
+
+static int format_toolpath_g53_ac_text(char *out, size_t out_size, const V5NativeReadback *readback)
+{
+    const double *a_center;
+    const double *c_center;
+    const double *active_offsets;
+    if (!out || out_size == 0U || !readback) {
+        return 0;
+    }
+    a_center = v5_native_readback_g53_center(readback, V5_NATIVE_READBACK_G53_CENTER_A);
+    c_center = v5_native_readback_g53_center(readback, V5_NATIVE_READBACK_G53_CENTER_C);
+    active_offsets = v5_native_readback_active_wcs_offsets(readback);
+    if (!a_center || !c_center ||
+        !isfinite(a_center[0]) || !isfinite(a_center[1]) || !isfinite(a_center[2]) ||
+        !isfinite(c_center[0]) || !isfinite(c_center[1]) || !isfinite(c_center[2]) ||
+        !active_offsets || !isfinite(active_offsets[0]) || !isfinite(active_offsets[2])) {
+        return 0;
+    }
+    snprintf(
+        out,
+        out_size,
+        "G53 A %.2f,%.2f,%.2f  C %.2f,%.2f,%.2f",
+        active_offsets[0],
+        a_center[1],
+        a_center[2],
+        c_center[0],
+        c_center[1],
+        active_offsets[2]);
+    return 1;
+}
+
+static int format_toolpath_wcs_offset_text(char *out, size_t out_size, const V5NativeReadback *readback)
+{
+    const double *offsets;
+    if (!out || out_size == 0U || !readback) {
+        return 0;
+    }
+    offsets = v5_native_readback_active_wcs_offsets(readback);
+    if (!offsets ||
+        !isfinite(offsets[0]) || !isfinite(offsets[1]) || !isfinite(offsets[2]) ||
+        !isfinite(offsets[3]) || !isfinite(offsets[4])) {
+        return 0;
+    }
+    snprintf(
+        out,
+        out_size,
+        "%s偏置 X%.2f Y%.2f Z%.2f A%.2f C%.2f",
+        main_page_wcs_code(readback),
+        offsets[0],
+        offsets[1],
+        offsets[2],
+        offsets[3],
+        offsets[4]);
+    return 1;
+}
+
+static void update_toolpath_status_text(V5MainPage *page)
+{
+    char text[128];
+    if (!page) {
+        return;
+    }
+    if (page->toolpath_summary_label &&
+        format_toolpath_g53_ac_text(text, sizeof(text), &page->native_readback)) {
+        lv_label_set_text(page->toolpath_summary_label, text);
+    }
+    if (page->toolpath_detail_label &&
+        format_toolpath_wcs_offset_text(text, sizeof(text), &page->native_readback)) {
+        lv_label_set_text(page->toolpath_detail_label, text);
+    }
 }
 
 static void update_main_page_wcs_header(V5MainPage *page)
@@ -1086,6 +1209,17 @@ static void mark_toolpath_static_dirty(V5MainPage *page)
     v5_toolpath_display_fit_init(&page->toolpath_fit);
 }
 
+static void reset_toolpath_view_rotation(V5MainPage *page)
+{
+    if (!page) {
+        return;
+    }
+    page->toolpath_gesture_active_count = 0;
+    page->toolpath_gesture_last_distance = 0.0;
+    page->toolpath_gesture_last_angle_deg = 0.0;
+    page->toolpath_manual_rotate_deg = 0.0;
+}
+
 static void set_toolpath_program_line(
     V5MainPage *page,
     const V5ToolpathScreenPoint *screen_points,
@@ -1685,14 +1819,19 @@ int v5_main_page_create(V5MainPage *page, lv_obj_t *parent)
                 1);
         }
     }
-    page->trajectory_line = make_toolpath_v3_line(page->toolpath_clip_layer, 255, 214, 64, 3);
+    page->trajectory_line = make_toolpath_v3_line(page->toolpath_clip_layer, 255, 214, 64, V5_TOOLPATH_PROGRAM_LINE_WIDTH);
     page->toolpath_line_segments[0] = page->trajectory_line;
     for (i = 1U; i < V5_MAIN_PAGE_TOOLPATH_DRAW_SEGMENTS; ++i) {
-        page->toolpath_line_segments[i] = make_toolpath_v3_line(page->toolpath_clip_layer, 255, 214, 64, 3);
+        page->toolpath_line_segments[i] = make_toolpath_v3_line(
+            page->toolpath_clip_layer,
+            255,
+            214,
+            64,
+            V5_TOOLPATH_PROGRAM_LINE_WIDTH);
     }
     page->toolpath_holder_line = make_toolpath_v3_line(page->toolpath_clip_layer, 96, 176, 255, 5);
-    page->toolpath_summary_label = make_label_ex(page->root, 12, 391, 310, 20, "", 68, 221, 144, LV_TEXT_ALIGN_LEFT);
-    page->toolpath_detail_label = make_label_ex(page->root, 12, 414, 310, 20, "", 86, 204, 252, LV_TEXT_ALIGN_LEFT);
+    page->toolpath_summary_label = make_label_ex(page->root, 12, 401, 374, 18, "", 68, 221, 144, LV_TEXT_ALIGN_LEFT);
+    page->toolpath_detail_label = make_label_ex(page->root, 12, 420, 374, 18, "", 86, 204, 252, LV_TEXT_ALIGN_LEFT);
     page->toolpath_view_label = make_label_ex(page->root, 18, 358, 260, 24, "", 86, 204, 252, LV_TEXT_ALIGN_LEFT);
     page->toolpath_a_label = make_label_ex(page->root, 132, 162, 24, 22, "A", 255, 113, 118, LV_TEXT_ALIGN_CENTER);
     page->toolpath_c_label = make_label_ex(page->root, 160, 162, 20, 22, "C", 120, 240, 255, LV_TEXT_ALIGN_CENTER);
@@ -1785,7 +1924,7 @@ int v5_main_page_create(V5MainPage *page, lv_obj_t *parent)
     return page->button_count == V5_MAIN_PAGE_BUTTON_COUNT;
 }
 
-int v5_main_page_apply_status(V5MainPage *page, const V5UiStatusView *status)
+int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *status, unsigned int refresh_flags)
 {
     V5CoordinatePanelSnapshot panel;
     V5ToolpathDisplaySnapshot dynamic_display;
@@ -1799,6 +1938,8 @@ int v5_main_page_apply_status(V5MainPage *page, const V5UiStatusView *status)
     int program_wcs_changed = 0;
     int program_fit_dirty = 0;
     int program_projection_dirty = 0;
+    int static_toolpath_due = 0;
+    int runtime_has_program = runtime && v5_program_runtime_has_open_program(runtime);
     unsigned int i;
 
     if (!page || !page->root) {
@@ -1808,10 +1949,13 @@ int v5_main_page_apply_status(V5MainPage *page, const V5UiStatusView *status)
     if (status) {
         page->last_status = *status;
     }
+    if (refresh_flags == 0U) {
+        return 1;
+    }
 
-    v5_coordinate_panel_from_status(status, &panel);
-    update_main_page_wcs_header(page);
-    for (i = 0; i < V5_MAIN_PAGE_AXIS_COUNT; ++i) {
+    if ((refresh_flags & V5_MAIN_PAGE_REFRESH_DYNAMIC) != 0U) {
+        v5_coordinate_panel_from_status(status, &panel);
+        for (i = 0; i < V5_MAIN_PAGE_AXIS_COUNT; ++i) {
         if (page->axis_labels[i]) {
             char axis[2] = {panel.lines[i].axis ? panel.lines[i].axis : '-', '\0'};
             lv_label_set_text(page->axis_labels[i], axis);
@@ -1829,30 +1973,43 @@ int v5_main_page_apply_status(V5MainPage *page, const V5UiStatusView *status)
             snprintf(error_text, sizeof(error_text), "%c: %s", panel.lines[i].axis ? panel.lines[i].axis : '-', panel.lines[i].following_error_text);
             lv_label_set_text(page->error_labels[i], error_text);
         }
+        }
+        refresh_main_coordinate_digits(page);
+        lv_label_set_text(page->spindle_speed_label, panel.spindle_speed_text);
+        lv_label_set_text(page->linear_velocity_label, panel.linear_velocity_text);
+        lv_label_set_text(page->feed_override_label, panel.feed_override_text);
+        lv_label_set_text(page->spindle_override_label, panel.spindle_override_text);
     }
-    refresh_main_coordinate_digits(page);
-    format_main_page_modal(modal_display_text, sizeof(modal_display_text), &page->native_readback);
-    lv_label_set_text(page->modal_label, modal_display_text);
-    lv_label_set_text(page->spindle_speed_label, panel.spindle_speed_text);
-    lv_label_set_text(page->linear_velocity_label, panel.linear_velocity_text);
-    lv_label_set_text(page->feed_override_label, panel.feed_override_text);
-    lv_label_set_text(page->spindle_override_label, panel.spindle_override_text);
-    if (page->cpu0_label && page->cpu1_label) {
+
+    if ((refresh_flags & V5_MAIN_PAGE_REFRESH_SLOW) != 0U) {
+        update_main_page_wcs_header(page);
+        update_toolpath_status_text(page);
+        format_main_page_modal(modal_display_text, sizeof(modal_display_text), &page->native_readback);
+        lv_label_set_text(page->modal_label, modal_display_text);
+        if (page->cpu0_label && page->cpu1_label) {
         char cpu0_text[24];
         char cpu1_text[24];
         v5_remote_metrics_display_text(cpu0_text, sizeof(cpu0_text), cpu1_text, sizeof(cpu1_text));
         lv_label_set_text(page->cpu0_label, cpu0_text);
         lv_label_set_text(page->cpu1_label, cpu1_text);
+        }
     }
+
+    if ((refresh_flags & V5_MAIN_PAGE_REFRESH_DYNAMIC) != 0U) {
+    static_toolpath_due =
+        ((refresh_flags & V5_MAIN_PAGE_REFRESH_SLOW) != 0U) ||
+        (runtime_has_program && !page->toolpath_program_visible) ||
+        !page->toolpath_fit.valid ||
+        page->toolpath_program_view_generation != page->toolpath_view_generation;
 
     if (!page->toolpath_fit.valid && status) {
         if (v5_toolpath_display_fit_from_status(status, page->view_plane, &page->toolpath_fit)) {
-            main_page_expand_static_geometry_fit(page, status);
+            main_page_expand_visible_toolpath_fit(page, status);
             page->toolpath_static_cache_misses += 1U;
         }
     }
 
-    if (runtime && v5_program_runtime_has_open_program(runtime)) {
+    if (static_toolpath_due && runtime_has_program) {
         runtime_generation = v5_program_runtime_loaded_epoch(runtime);
         if (status) {
             preview_status = *status;
@@ -1894,6 +2051,9 @@ int v5_main_page_apply_status(V5MainPage *page, const V5UiStatusView *status)
                     preview_count,
                     page->view_plane,
                     &page->toolpath_fit)) {
+                if (program_fit_dirty) {
+                    main_page_expand_visible_toolpath_fit(page, status);
+                }
                 unsigned int projected_count = v5_toolpath_display_project_points_with_fit(
                     page->toolpath_program_points,
                     preview_count,
@@ -1926,7 +2086,7 @@ int v5_main_page_apply_status(V5MainPage *page, const V5UiStatusView *status)
         } else {
             hide_toolpath_program_line(page);
         }
-    } else {
+    } else if (static_toolpath_due) {
         hide_toolpath_program_line(page);
         page->toolpath_program_generation = 0U;
         page->toolpath_program_view_generation = 0U;
@@ -1954,8 +2114,21 @@ int v5_main_page_apply_status(V5MainPage *page, const V5UiStatusView *status)
     if (!dynamic_display.mcs_valid) {
         draw_toolpath_boot_scaffold(page);
     }
+    }
+
+    if ((refresh_flags & V5_MAIN_PAGE_REFRESH_BUTTONS) != 0U) {
+        update_toolpath_view_button_visuals(page);
+    }
+    if ((refresh_flags & V5_MAIN_PAGE_REFRESH_ESTOP) != 0U) {
+        update_estop_button_text(page);
+    }
 
     return 1;
+}
+
+int v5_main_page_apply_status(V5MainPage *page, const V5UiStatusView *status)
+{
+    return v5_main_page_apply_status_flags(page, status, V5_MAIN_PAGE_REFRESH_ALL);
 }
 
 int v5_main_page_handle_touch_points(V5MainPage *page, const lv_point_t *points, int count, int pressed, int *changed)
@@ -2153,6 +2326,7 @@ void v5_main_page_set_native_readback(V5MainPage *page, const V5NativeReadback *
     }
     update_estop_button_text(page);
     update_main_page_wcs_header(page);
+    update_toolpath_status_text(page);
 }
 
 void v5_main_page_set_navigation_callback(V5MainPage *page, V5UiNavigationCallback cb, void *user_data)
@@ -2394,18 +2568,22 @@ static void apply_local_action_state(V5MainPage *page, const V5MainPageActionRep
         break;
     case V5_MAIN_PAGE_ACTION_VIEW_XY:
         page->view_plane = V5_TOOLPATH_DISPLAY_XY;
+        reset_toolpath_view_rotation(page);
         mark_toolpath_static_dirty(page);
         break;
     case V5_MAIN_PAGE_ACTION_VIEW_XZ:
         page->view_plane = V5_TOOLPATH_DISPLAY_XZ;
+        reset_toolpath_view_rotation(page);
         mark_toolpath_static_dirty(page);
         break;
     case V5_MAIN_PAGE_ACTION_VIEW_YZ:
         page->view_plane = V5_TOOLPATH_DISPLAY_YZ;
+        reset_toolpath_view_rotation(page);
         mark_toolpath_static_dirty(page);
         break;
     case V5_MAIN_PAGE_ACTION_VIEW_3D:
         page->view_plane = V5_TOOLPATH_DISPLAY_3D;
+        reset_toolpath_view_rotation(page);
         mark_toolpath_static_dirty(page);
         break;
     default:

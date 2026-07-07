@@ -8,7 +8,7 @@
 #include <time.h>
 
 #define V5_MODAL_TOOL_MAGIC 0x564D544Cu
-#define V5_MODAL_TOOL_VERSION 2u
+#define V5_MODAL_TOOL_VERSION 3u
 
 typedef struct V5NativeModalToolStatusBlock {
     uint32_t magic;
@@ -24,6 +24,8 @@ typedef struct V5NativeModalToolStatusBlock {
     uint64_t monotonic_ns;
     char modal_text[V5_NATIVE_MODAL_TOOL_STATUS_TEXT_CAP];
     double tool_length_mm;
+    uint32_t all_homed_valid;
+    uint32_t all_homed;
     uint32_t crc32;
     uint32_t reserved3;
 } V5NativeModalToolStatusBlock;
@@ -110,8 +112,12 @@ int v5_native_modal_tool_status_read(const char *path, unsigned int max_age_ms, 
     if (block.interpreter_idle_valid) {
         v5_native_readback_set_interpreter_idle(readback, block.interpreter_idle != 0U);
     }
+    if (block.all_homed_valid) {
+        v5_native_readback_set_all_homed(readback, block.all_homed != 0U);
+    }
     return v5_native_readback_modal_known(readback) || v5_native_readback_tool_known(readback) ||
-           v5_native_readback_interpreter_idle_known(readback);
+           v5_native_readback_interpreter_idle_known(readback) ||
+           v5_native_readback_all_homed_known(readback);
 }
 
 int v5_native_modal_tool_status_write_ex(
@@ -123,7 +129,9 @@ int v5_native_modal_tool_status_write_ex(
     int tool_length_valid,
     double tool_length_mm,
     int interpreter_idle_valid,
-    int interpreter_idle)
+    int interpreter_idle,
+    int all_homed_valid,
+    int all_homed)
 {
     FILE *fp;
     V5NativeModalToolStatusBlock block;
@@ -142,6 +150,8 @@ int v5_native_modal_tool_status_write_ex(
     block.tool_length_mm = block.tool_length_valid ? tool_length_mm : 0.0;
     block.interpreter_idle_valid = (valid && interpreter_idle_valid) ? 1U : 0U;
     block.interpreter_idle = (block.interpreter_idle_valid && interpreter_idle) ? 1U : 0U;
+    block.all_homed_valid = (valid && all_homed_valid) ? 1U : 0U;
+    block.all_homed = (block.all_homed_valid && all_homed) ? 1U : 0U;
     if (block.modal_valid) {
         modal_len = strlen(modal_text);
         if (modal_len >= sizeof(block.modal_text)) {
@@ -179,6 +189,8 @@ int v5_native_modal_tool_status_write(
         tool_number,
         tool_length_valid,
         tool_length_mm,
+        0,
+        0,
         0,
         0);
 }

@@ -33,6 +33,8 @@ typedef struct V5NativeReadback {
     int interpreter_paused;
     int interpreter_idle_available;
     int interpreter_idle;
+    int homed_available;
+    int all_homed;
     int safety_estop_available;
     int safety_estop_active;
     int machine_enable_available;
@@ -72,6 +74,7 @@ void v5_native_readback_set_g53_geometry(
 const double *v5_native_readback_g53_center(const V5NativeReadback *readback, unsigned int center_index);
 void v5_native_readback_set_interpreter_paused(V5NativeReadback *readback, int paused);
 void v5_native_readback_set_interpreter_idle(V5NativeReadback *readback, int idle);
+void v5_native_readback_set_all_homed(V5NativeReadback *readback, int all_homed);
 void v5_native_readback_set_safety_estop(V5NativeReadback *readback, int active);
 void v5_native_readback_set_machine_enabled(V5NativeReadback *readback, int enabled);
 void v5_native_readback_set_modal_actual(V5NativeReadback *readback, const char *modal_text);
@@ -87,6 +90,7 @@ int v5_native_readback_wcs_table_known(const V5NativeReadback *readback);
 int v5_native_readback_g53_geometry_known(const V5NativeReadback *readback);
 int v5_native_readback_interpreter_known(const V5NativeReadback *readback);
 int v5_native_readback_interpreter_idle_known(const V5NativeReadback *readback);
+int v5_native_readback_all_homed_known(const V5NativeReadback *readback);
 int v5_native_readback_safety_estop_known(const V5NativeReadback *readback);
 int v5_native_readback_machine_enable_known(const V5NativeReadback *readback);
 int v5_native_readback_modal_known(const V5NativeReadback *readback);

@@ -12,6 +12,7 @@ static const V5NativeStatusEntry k_status_entries[] = {
     {"current_tool", V5_NATIVE_STATUS_LINUXCNC, "linuxcnc/native/status.current_tool", 0},
     {"tool_length", V5_NATIVE_STATUS_LINUXCNC, "linuxcnc/native/status.tool_length", 0},
     {"rtcp_actual", V5_NATIVE_STATUS_KINEMATICS, "linuxcnc/native/kinematics.rtcp_actual", 0},
+    {"g53_geometry", V5_NATIVE_STATUS_KINEMATICS, "microkernel/native/kinematics.g53_geometry", 0},
     {"mode_switch_actual", V5_NATIVE_STATUS_HAL, "hal/native/mode_switch_actual", 0},
     {"rotary_logical_abs_counts64", V5_NATIVE_STATUS_ROTARY_WINDOW, "microkernel/native/rotary.logical_abs_counts64", 0},
     {"rotary_runtime_window_counts", V5_NATIVE_STATUS_ROTARY_WINDOW, "microkernel/native/rotary.runtime_window_counts", 0},

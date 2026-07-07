@@ -7,7 +7,7 @@
 #include <unistd.h>
 
 #define V5_STORE_MAX_ROWS 192U
-#define V5_STORE_TEXT_CAP 96U
+#define V5_STORE_TEXT_CAP 512U
 #define V5_STORE_PATH_CAP 512U
 
 typedef struct V5StoreRow {
@@ -58,13 +58,13 @@ static void trim_newline(char *text)
 static int load_rows(const char *path, V5StoreRow *rows, size_t *count)
 {
     FILE *fp;
-    char line[320];
+    char line[1024];
     size_t n = 0U;
     if (!rows || !count) return 0;
     *count = 0U;
     fp = fopen(path, "rb");
     if (!fp) return 1;
-    while (fgets(line, sizeof(line), fp) && n < V5_STORE_MAX_ROWS) {
+    while (fgets(line, sizeof(line), fp)) {
         char *axis;
         char *field;
         char *value;
@@ -77,6 +77,19 @@ static int load_rows(const char *path, V5StoreRow *rows, size_t *count)
         if (!value) continue;
         *value++ = '\0';
         if (!axis[0] || !field[0] || !value[0]) continue;
+        {
+            size_t i;
+            int updated = 0;
+            for (i = 0U; i < n; ++i) {
+                if (strcmp(rows[i].axis, axis) == 0 && strcmp(rows[i].field, field) == 0) {
+                    snprintf(rows[i].value, sizeof(rows[i].value), "%s", value);
+                    updated = 1;
+                    break;
+                }
+            }
+            if (updated) continue;
+        }
+        if (n >= V5_STORE_MAX_ROWS) continue;
         snprintf(rows[n].axis, sizeof(rows[n].axis), "%s", axis);
         snprintf(rows[n].field, sizeof(rows[n].field), "%s", field);
         snprintf(rows[n].value, sizeof(rows[n].value), "%s", value);
@@ -110,6 +123,7 @@ int v5_settings_parameter_store_read_axis(
         if (strcmp(rows[i].axis, axis) == 0 && strcmp(rows[i].field, field_key) == 0) {
             snprintf(out, out_cap, "%s", rows[i].value);
             found = 1;
+            break;
         }
     }
     return found && out[0];
@@ -140,15 +154,10 @@ int v5_settings_parameter_store_write_axis(
         if (strcmp(rows[i].axis, axis) == 0 && strcmp(rows[i].field, field_key) == 0) {
             snprintf(rows[i].value, sizeof(rows[i].value), "%s", value);
             updated = 1;
+            break;
         }
     }
-    if (!updated) {
-        if (count >= V5_STORE_MAX_ROWS) return 0;
-        snprintf(rows[count].axis, sizeof(rows[count].axis), "%s", axis);
-        snprintf(rows[count].field, sizeof(rows[count].field), "%s", field_key);
-        snprintf(rows[count].value, sizeof(rows[count].value), "%s", value);
-        ++count;
-    }
+    if (!updated) return 0;
     if (snprintf(tmp, sizeof(tmp), "%s.tmp", path) >= (int)sizeof(tmp)) return 0;
     fp = fopen(tmp, "wb");
     if (!fp) return 0;

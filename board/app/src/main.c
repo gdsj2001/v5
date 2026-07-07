@@ -10,6 +10,8 @@
 #include <string.h>
 #include <unistd.h>
 
+#define V5_UI_SHELL_LOOP_MS 10U
+
 static volatile sig_atomic_t g_stop_requested;
 
 static void on_signal(int signo)
@@ -91,9 +93,9 @@ int main(int argc, char **argv)
     printf("v5 UI remote relay listening: port=%u path=/remote/frame/full format=bgra32\n", (unsigned int)port);
     fflush(stdout);
     while (!g_stop_requested) {
-        lv_tick_inc(30);
+        lv_tick_inc(V5_UI_SHELL_LOOP_MS);
         (void)v5_ui_shell_refresh_once();
-        if (!v5_remote_frame_poll(port, 30U)) {
+        if (!v5_remote_frame_poll(port, V5_UI_SHELL_LOOP_MS)) {
             fprintf(stderr, "v5 UI remote relay failed on port %u\n", (unsigned int)port);
             return 1;
         }

@@ -40,6 +40,7 @@ check_remote_test() {
 check_remote_test "v5_lvgl_shell installed executable" 'test -x /usr/libexec/8ax/v5_lvgl_shell'
 check_remote_test "v5_state_publisher installed executable" 'test -x /usr/libexec/8ax/v5_state_publisher'
 check_remote_test "v5_rtcp_status_publisher installed executable" 'test -x /usr/libexec/8ax/v5_rtcp_status_publisher.py'
+check_remote_test "v5_g53_geometry_memory_owner installed executable" 'test -x /usr/libexec/8ax/v5_g53_geometry_memory_owner.py'
 check_remote_test "v5_wcs_status_publisher installed executable" 'test -x /usr/libexec/8ax/v5_wcs_status_publisher.py'
 check_remote_test "v5_touch_diagnostics installed executable" 'test -x /usr/libexec/8ax/v5_touch_diagnostics'
 check_remote_test "v5_linuxcncrsh_probe installed executable" 'test -x /usr/libexec/8ax/v5_linuxcncrsh_probe'
@@ -47,6 +48,7 @@ check_remote_test "v5_command_gate_server installed executable" 'test -x /usr/li
 check_remote_test "v5_linuxcncrsh_golden_run installed executable" 'test -x /usr/libexec/8ax/v5_linuxcncrsh_golden_run'
 check_remote_test "state publisher init installed" 'test -x /etc/init.d/v5-state-publisher'
 check_remote_test "rtcp status publisher init installed" 'test -x /etc/init.d/v5-rtcp-status-publisher'
+check_remote_test "g53 geometry memory owner init installed" 'test -x /etc/init.d/v5-g53-geometry-memory-owner'
 check_remote_test "wcs status publisher init installed" 'test -x /etc/init.d/v5-wcs-status-publisher'
 check_remote_test "linuxcnc command gate init installed" 'test -x /etc/init.d/v5-linuxcnc-command-gate'
 check_remote_test "v5 ui relay init installed" 'test -x /etc/init.d/v5-ui-relay'
@@ -87,6 +89,25 @@ fi
 
 check_remote_test "retired /run RTCP v3 snapshot absent" 'test ! -e /run/8ax_v5_product_ui/v3_native_rtcp_status.bin'
 
+if remote '/etc/init.d/v5-g53-geometry-memory-owner status' >/tmp/v5_g53_geometry_memory_owner_status.out 2>&1; then
+  ok "v5-g53-geometry-memory-owner init status running"
+  sed 's/^/INFO g53 geometry memory owner init: /' /tmp/v5_g53_geometry_memory_owner_status.out
+else
+  fail_msg "v5-g53-geometry-memory-owner init status running"
+  sed 's/^/INFO g53 geometry memory owner init: /' /tmp/v5_g53_geometry_memory_owner_status.out
+fi
+rm -f /tmp/v5_g53_geometry_memory_owner_status.out
+
+g53_block_check='import configparser,math,struct,sys; ini="/opt/8ax/v5/linuxcnc/ini/v5_bus.ini"; cp=configparser.ConfigParser(); cp.optionxform=str; cp.read(ini, encoding="utf-8"); exp=[0.0,cp.getfloat("RTCP","G53_A_Y"),cp.getfloat("RTCP","G53_A_Z"),cp.getfloat("RTCP","G53_B_X"),0.0,cp.getfloat("RTCP","G53_B_Z"),cp.getfloat("RTCP","G53_C_X"),cp.getfloat("RTCP","G53_C_Y"),0.0]; p="/dev/shm/v5_native_g53_geometry_status.bin"; fmt=struct.Struct("<IIIIIIIIQ"+("d"*9)+"II"); v=fmt.unpack(open(p,"rb").read(fmt.size)); got=list(v[9:18]); sys.exit(0 if v[1]==1 and v[3]==1 and v[4]==3 and v[5]==3 and v[6] and all(math.isfinite(x) for x in got) and all(abs(a-b)<1e-9 for a,b in zip(got,exp)) else 1)'
+g53_block_info='import struct; p="/dev/shm/v5_native_g53_geometry_status.bin"; fmt=struct.Struct("<IIIIIIIIQ"+("d"*9)+"II"); v=fmt.unpack(open(p,"rb").read(fmt.size)); c=list(v[9:18]); print("g53_block version=%d valid=%d centers=%dx%d epoch=%d A=%.3f,%.3f,%.3f C=%.3f,%.3f,%.3f" % (v[1],v[3],v[4],v[5],v[6],c[0],c[1],c[2],c[6],c[7],c[8]))'
+if remote "/usr/libexec/8ax/v5_g53_geometry_memory_owner.py --once --path /dev/shm/v5_native_g53_geometry_status.bin --ini /opt/8ax/v5/linuxcnc/ini/v5_bus.ini >/tmp/v5_g53_geometry_memory_owner_once.out 2>&1 && test -s /dev/shm/v5_native_g53_geometry_status.bin && /usr/bin/python3 -c '$g53_block_check'" >/dev/null 2>&1; then
+  ok "g53 geometry memory owner one-shot loads RTCP G53 into native memory"
+  remote "tail -n 3 /tmp/v5_g53_geometry_memory_owner_once.out 2>/dev/null || true; /usr/bin/python3 -c '$g53_block_info' 2>/dev/null || true" | sed 's/^/INFO g53 geometry memory owner: /'
+else
+  fail_msg "g53 geometry memory owner one-shot loads RTCP G53 into native memory"
+  remote 'tail -n 10 /tmp/v5_g53_geometry_memory_owner_once.out 2>/dev/null || true; ls -l /dev/shm/v5_native_g53_geometry_status.bin 2>/dev/null || true' | sed 's/^/INFO g53 geometry memory owner: /'
+fi
+
 if remote '/etc/init.d/v5-wcs-status-publisher status' >/tmp/v5_wcs_status_publisher_status.out 2>&1; then
   ok "v5-wcs-status-publisher init status running"
   sed 's/^/INFO wcs status publisher init: /' /tmp/v5_wcs_status_publisher_status.out
@@ -109,6 +130,7 @@ fi
 check_remote_test "retired /run WCS v3 snapshot absent" 'test ! -e /run/8ax_v5_product_ui/v3_native_wcs_status.bin'
 check_remote_test "retired /run native position/modal snapshots absent" 'test ! -e /run/8ax_v5_product_ui/v3_native_position_status.bin && test ! -e /run/8ax_v5_product_ui/v3_native_modal_tool_status.bin'
 check_remote_test "registered native position/modal blocks in dev shm" 'test -s /dev/shm/v5_native_position_status.bin && test -s /dev/shm/v5_native_modal_tool_status.bin'
+check_remote_test "registered native G53 geometry block in dev shm" 'test -s /dev/shm/v5_native_g53_geometry_status.bin'
 
 if remote "/usr/libexec/8ax/v5_state_publisher --path /dev/shm/v5_verify_state_publisher --once >/tmp/v5_verify_state_publisher.out 2>&1 && test -s /dev/shm/v5_verify_state_publisher && rm -f /dev/shm/v5_verify_state_publisher" >/dev/null 2>&1; then
   ok "state publisher one-shot writes shm"
@@ -205,7 +227,7 @@ else
   warn_msg "input event devices not visible; touch evidence still missing"
 fi
 
-remote 'ps w 2>/dev/null | grep -E "v5_state_publisher|v5_rtcp_status_publisher|v5_wcs_status_publisher|v5_lvgl_shell|linuxcncrsh|linuxcncsvr|milltask" | grep -v grep || true' |
+remote 'ps w 2>/dev/null | grep -E "v5_state_publisher|v5_rtcp_status_publisher|v5_g53_geometry_memory_owner|v5_wcs_status_publisher|v5_lvgl_shell|linuxcncrsh|linuxcncsvr|milltask" | grep -v grep || true' |
   sed 's/^/INFO process: /'
 
 if [ "$fail" -ne 0 ]; then

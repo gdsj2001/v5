@@ -4,6 +4,12 @@ set -eu
 repo_root="${V5_REPO_ROOT:-/root/Desktop/v5}"
 manifest="${1:-$repo_root/config/deploy/v5_runtime_deploy_manifest.tsv}"
 apply=0
+project_root="$repo_root"
+case "$project_root" in
+  */board) project_root="${project_root%/board}" ;;
+  *\\board) project_root="${project_root%\\board}" ;;
+esac
+parameter_table_backup_dir="${V5_PARAMETER_TABLE_BACKUP_DIR:-$project_root/bak}"
 
 if [ "${2:-}" = "--apply" ]; then
   apply=1
@@ -17,6 +23,95 @@ if [ ! -r "$manifest" ]; then
   echo "missing deploy manifest: $manifest" >&2
   exit 2
 fi
+
+merge_runtime_seed_tsv() {
+  source_path="$1"
+  destination="$2"
+  mode="$3"
+  if [ ! -e "$destination" ]; then
+    install -d "$(dirname "$destination")"
+    install -m "$mode" "$source_path" "$destination"
+    return
+  fi
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "python3 required to merge runtime seed table: $destination" >&2
+    exit 5
+  fi
+  install -d "$(dirname "$destination")"
+  source_path="$source_path" destination="$destination" mode="$mode" parameter_table_backup_dir="$parameter_table_backup_dir" python3 - <<'PY'
+import os
+import shutil
+import time
+from pathlib import Path
+
+src = Path(os.environ["source_path"])
+dst = Path(os.environ["destination"])
+mode = int(os.environ["mode"], 8)
+backup_dir = Path(os.environ["parameter_table_backup_dir"])
+
+
+def read_text(path, strict):
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        if strict:
+            raise
+        return ""
+
+
+def read_rows(path, strict):
+    rows = []
+    seen = set()
+    for line_no, line in enumerate(read_text(path, strict).splitlines(), 1):
+        if not line or line.startswith("#"):
+            continue
+        parts = [part.strip() for part in line.split("\t")]
+        if len(parts) != 3 or not parts[0] or not parts[1] or not parts[2]:
+            if strict:
+                raise SystemExit("bad local parameter table row: %s:%d" % (path, line_no))
+            continue
+        key = (parts[0], parts[1])
+        if strict and key in seen:
+            raise SystemExit("duplicate local parameter key: %s:%d %s/%s" % (path, line_no, key[0], key[1]))
+        seen.add(key)
+        rows.append((key[0], key[1], parts[2]))
+    if strict and not rows:
+        raise SystemExit("empty local parameter table: %s" % path)
+    return rows
+
+
+local_rows = read_rows(src, True)
+local_keys = {(axis, field) for axis, field, _ in local_rows}
+board_values = {}
+for axis, field, value in read_rows(dst, False):
+    if (axis, field) in local_keys:
+        board_values[(axis, field)] = value
+
+lines = ["# schema=v5.settings.parameter_table.tsv.v1"]
+for axis, field, default in local_rows:
+    lines.append("%s\t%s\t%s" % (axis, field, board_values.get((axis, field), default)))
+expected_text = "\n".join(lines) + "\n"
+
+tmp = dst.with_name(dst.name + ".tmp")
+stamp = time.strftime("%Y%m%dT%H%M%S")
+backup_dir.mkdir(parents=True, exist_ok=True)
+backup = backup_dir / ("%s.bak.%s" % (dst.name, stamp))
+if backup.exists():
+    backup = backup_dir / ("%s.bak.%s.%s" % (dst.name, stamp, os.getpid()))
+shutil.copy2(dst, backup)
+tmp.write_text(expected_text, encoding="utf-8")
+os.chmod(tmp, mode)
+os.replace(tmp, dst)
+actual_text = dst.read_text(encoding="utf-8")
+actual_rows = read_rows(dst, True)
+actual_keys = [(axis, field) for axis, field, _ in actual_rows]
+expected_keys = [(axis, field) for axis, field, _ in local_rows]
+if actual_text != expected_text or actual_keys != expected_keys:
+    shutil.copy2(backup, dst)
+    raise SystemExit("merged parameter table validation failed; restored backup: %s" % backup)
+print("merged runtime seed table %s -> %s rows=%d kept=%d backup=%s format=ok" % (src, dst, len(local_rows), len(board_values), backup))
+PY
+}
 
 tab=$(printf '\t')
 while IFS="$tab" read -r kind source destination mode extra; do
@@ -32,8 +127,21 @@ while IFS="$tab" read -r kind source destination mode extra; do
     echo "missing deploy source: $source_path" >&2
     exit 4
   fi
+  if [ "$kind" = "runtime_seed_merge" ]; then
+    case "$source:$destination:$mode" in
+      "config/settings/self_parameter_table.tsv:/opt/8ax/v5/config/settings/self_parameter_table.tsv:0644") ;;
+      *)
+        echo "runtime_seed_merge is only allowed for self_parameter_table.tsv: $source -> $destination mode=$mode" >&2
+        exit 6
+        ;;
+    esac
+  fi
   if [ "$apply" -eq 0 ]; then
     printf 'deploy %s %s -> %s mode=%s\n' "$kind" "$source_path" "$destination" "$mode"
+    continue
+  fi
+  if [ "$kind" = "runtime_seed_merge" ]; then
+    merge_runtime_seed_tsv "$source_path" "$destination" "$mode"
     continue
   fi
   if [ "$kind" = "runtime_seed" ] && [ -e "$destination" ]; then
@@ -65,12 +173,13 @@ enable_boot_service() {
 
 enable_boot_services() {
   enable_boot_service v5-linuxcnc-command-gate 91 19
-  enable_boot_service v5-rtcp-status-publisher 92 18
-  enable_boot_service v5-wcs-status-publisher 93 17
-  enable_boot_service v5-state-publisher 94 16
-  enable_boot_service v5-ui-relay 95 15
-  enable_boot_service v5-settings-actiond 96 14
-  enable_boot_service v5-touch-diagnostics 97 13
+  enable_boot_service v5-g53-geometry-memory-owner 92 18
+  enable_boot_service v5-rtcp-status-publisher 93 17
+  enable_boot_service v5-wcs-status-publisher 94 16
+  enable_boot_service v5-state-publisher 95 15
+  enable_boot_service v5-ui-relay 96 14
+  enable_boot_service v5-settings-actiond 97 13
+  enable_boot_service v5-touch-diagnostics 98 12
 }
 
 cleanup_retired_runtime_files() {
@@ -123,6 +232,7 @@ if [ "$apply" -eq 1 ]; then
   cleanup_retired_runtime_files
   install_runtime_drive_profiles
   /etc/init.d/v5-linuxcnc-command-gate restart
+  /etc/init.d/v5-g53-geometry-memory-owner restart
   /etc/init.d/v5-rtcp-status-publisher restart
   /etc/init.d/v5-wcs-status-publisher restart
   /etc/init.d/v5-state-publisher restart

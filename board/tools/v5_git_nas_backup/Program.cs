@@ -1,0 +1,110 @@
+using System.Diagnostics;
+using System.Reflection;
+
+const string ResourceName = "v5_git_nas_backup.ps1";
+
+static int Fail(string message)
+{
+    Console.ForegroundColor = ConsoleColor.Red;
+    Console.WriteLine("ERROR: " + message);
+    Console.ResetColor();
+    WaitBeforeExit();
+    return 1;
+}
+
+static void WaitBeforeExit()
+{
+    if (Environment.GetEnvironmentVariable("V5_GIT_NAS_BACKUP_NO_PAUSE") == "1")
+    {
+        return;
+    }
+
+    Console.WriteLine();
+    Console.Write("Press any key to close...");
+    Console.ReadKey(intercept: true);
+    Console.WriteLine();
+}
+
+Console.OutputEncoding = System.Text.Encoding.UTF8;
+Console.InputEncoding = System.Text.Encoding.UTF8;
+Console.Title = "v5 Git + NAS Backup";
+
+var assembly = Assembly.GetExecutingAssembly();
+await using var resource = assembly.GetManifestResourceStream(ResourceName);
+if (resource is null)
+{
+    return Fail("Embedded backup script was not found.");
+}
+
+var tempDir = Path.Combine(Path.GetTempPath(), "v5_git_nas_backup");
+Directory.CreateDirectory(tempDir);
+var tempScript = Path.Combine(tempDir, $"v5_git_nas_backup_{Guid.NewGuid():N}.ps1");
+
+try
+{
+    await using (var output = File.Create(tempScript))
+    {
+        await resource.CopyToAsync(output);
+    }
+
+    var psi = new ProcessStartInfo
+    {
+        FileName = "powershell.exe",
+        UseShellExecute = false,
+        RedirectStandardOutput = false,
+        RedirectStandardError = false,
+    };
+    psi.ArgumentList.Add("-NoProfile");
+    psi.ArgumentList.Add("-ExecutionPolicy");
+    psi.ArgumentList.Add("Bypass");
+    psi.ArgumentList.Add("-File");
+    psi.ArgumentList.Add(tempScript);
+    foreach (var arg in args)
+    {
+        psi.ArgumentList.Add(arg);
+    }
+
+    using var process = Process.Start(psi);
+    if (process is null)
+    {
+        return Fail("Could not start powershell.exe.");
+    }
+
+    await process.WaitForExitAsync();
+    var exitCode = process.ExitCode;
+
+    Console.WriteLine();
+    if (exitCode == 0)
+    {
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine("Backup and git push finished.");
+        Console.ResetColor();
+    }
+    else
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"Backup or git push failed with exit code {exitCode}.");
+        Console.ResetColor();
+    }
+
+    WaitBeforeExit();
+    return exitCode;
+}
+catch (Exception ex)
+{
+    return Fail(ex.Message);
+}
+finally
+{
+    try
+    {
+        if (File.Exists(tempScript))
+        {
+            File.Delete(tempScript);
+        }
+    }
+    catch
+    {
+        // Best-effort cleanup only.
+    }
+}

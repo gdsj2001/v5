@@ -17,7 +17,9 @@ def ssh(host, command):
 
 
 def scp_from(host, remote, local):
-    subprocess.run(["scp", f"{host}:{remote}", str(local)], check=True)
+    local_path = Path(local)
+    with local_path.open("wb") as fp:
+        subprocess.run(["ssh", host, f"cat {remote!r}"], check=True, stdout=fp)
 
 
 def count_remote_lines(host, path):

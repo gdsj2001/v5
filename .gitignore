@@ -41,6 +41,7 @@ temp/
 **/temp/
 logs/
 **/logs/
+bak/
 
 # CMake generated files
 CMakeFiles/
@@ -63,6 +64,8 @@ vivado_hw_project/**/NA/
 *.vcd
 
 # Project-local temporary area
+repo_ignored/
+**/repo_ignored/
 repo_ignored/temp/
 repo_ignored/**/temp/
 
