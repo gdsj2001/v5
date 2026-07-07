@@ -178,7 +178,7 @@ it.cjwsjzyy.xyz
 - VPS 首次登记设备 PL DNA 时生成该 ID；生成后必须保存到 VPS 数据库，后续重新登记、刷新列表、客户端升级或算法实现调整都不得改变已保存 ID。
 - 生成输入是规范化后的 PL DNA；当前候选算法沿用 VPS 端 `_pl_dna_short_device_id` 口径：对规范化 PL DNA 的大写字符串计算 SHA256，取 digest 前 8 字节 big-endian 后对 `1000000` 取模，并格式化为 6 位数字。
 - VPS 得到候选 ID 后必须和已保存设备 ID 对比：同一 PL DNA 已有保存 ID 时返回原保存 ID；候选 ID 被其它 DNA 占用时，不得覆盖、不允许重复，必须按同一算法加稳定 salt/counter 继续寻找未占用 6 位 ID 并保存，或 fail-closed 返回明确 collision 错误。
-- `/api/v1/admin/devices` 必须返回字段 `vpsDistributionId`；现阶段它可等于已保存的 6 位 `devices.device_id`，但语义是“VPS 分发并冻结的显示 ID”，不是客户端本地序号。
+- `/api/v1/admin/devices` 和板端登记接口必须返回 canonical 字段 `vpsDistributionId`；该值就是 VPS 原样分发并冻结的 6 位显示 ID，由 VPS 端负责生成、冲突处理、保存和准确返回。板端、Factory Client、UI 和下载链路不得用 `device_id`、`vps_distribution_id`、DNA hash、本地算法或旧状态字段推导、替换或格式化显示 ID；若 VPS 没有返回合法 `vpsDistributionId`，客户端必须按登记失败处理。
 - VPS 端设备 private 根目录统一使用 `/opt/8ax-auth/storage/private/<vpsDistributionId>-<pl_dna_hash>/`。`vpsDistributionId` 必须是 VPS 已保存的 6 位分发 ID；`pl_dna_hash` 是该 ID 绑定的 PL DNA hash。这个 id-dna folder 只允许作为 VPS 服务端内部存储路径和数据管理字段，不得暴露给板端 URL、UI、日志或下载接口。Factory Client 发布 private profile 或 private OTA 时必须同时提交 `vpsDistributionId` 和 `pl_dna_hash` 供 VPS 校验，VPS 写入路径只能使用校验通过后的 id-dna folder，不得写入 hash-only 或旧 ID-only 目录。
 - Factory Client 管理界面可以显示 `vpsDistributionId`、`dna_binding=server_verified`、scope、SHA 和服务端返回摘要，但不得在预览、发布结果、日志或弹窗中原样显示 private `targetRel`、`private_folder`、`<vpsDistributionId>-<pl_dna_hash>`、hash-only 目录或旧 ID-only 目录；private 目标只能显示为当前设备 private profile/OTA 已由服务端校验。
 - VPS `/api/v1/admin/devices` 必须返回 `authorizationStatus`。对应 id-dna private 目录里还没有 `device_authorization.json` 时返回 `pending_factory_authorization`；存在授权文件时返回 `authorized`。Factory Client 设备 DNA 表必须把 `pending_factory_authorization` 行显示为红色，提醒还没人工确认授权。
@@ -188,9 +188,9 @@ it.cjwsjzyy.xyz
 - 点击 `登记本机码` 后，板端必须读取本机 PL DNA，同时提交设备公钥（至少包含 `device_public_key_pem` 和 `device_public_key_sha256`）到 VPS 登记接口；VPS 是 `vpsDistributionId` 的唯一生成和保存 owner。
 - VPS 必须先验证本次提交的设备公钥：公钥必须可解析、hash 必须与 `device_public_key_sha256` 一致，且满足 VPS 设备登记策略；公钥验证不通过时不得登记 DNA、不得生成或返回新 ID、不得创建 private folder。
 - 公钥验证通过后，VPS 才允许规范化 PL DNA、计算/冻结 6 位 `vpsDistributionId`、记录数据库并创建 private folder。若同一 PL DNA 已经登记，VPS 不得重新生成 ID，不得覆盖既有绑定，必须直接返回已保存的 6 位 `vpsDistributionId` 给板端；必要时只按 VPS 公钥策略更新或确认该设备公钥记录。
-- VPS 必须在数据库中记录 6 位分发 ID、PL DNA hash、公钥 hash/公钥记录之间的绑定关系，并创建 `/opt/8ax-auth/storage/private/<vpsDistributionId>-<pl_dna_hash>/`。VPS 返回给板端的登记结果只需要暴露 `vpsDistributionId` 和校验状态；不得要求板端保存或使用 id-dna folder 作为下载 URL。
-- 板端必须从 VPS 返回值回读该 ID，不得在本地按 DNA 自行生成最终 ID；回读成功后本地登记状态只允许保存 `vpsDistributionId`、登记结果码和公钥摘要，不允许保存 raw PL DNA、DNA hash、`pl_dna_hash` 或 id-dna folder。写入成功后设置页顶部只显示该 6 位 ID，不显示 `已登记` 等状态后缀、本机码片段或 DNA hash；没有合法 6 位 ID 时同一 ID 位置显示 `未登记`，便于人工核对且不暴露 DNA。`DNA_REGISTER_UPLOADED_PENDING_AUTH` 表示 VPS 已验证公钥、保存设备绑定并创建 private folder、板端已保存本地 ID 状态，只是授权文件等待工厂端生成/上传；不得当作登记失败。
-- 如果 VPS 未返回 6 位 ID、ID 与 DNA hash 关系无法确认、或本地状态文件写入失败，`登记本机码` 必须 fail-closed；不得显示本地推导 ID，也不得允许后续授权/服务器下载把旧 ID 当作当前 ID。
+- VPS 必须在数据库中记录 6 位分发 ID、PL DNA hash、公钥 hash/公钥记录之间的绑定关系，并创建 `/opt/8ax-auth/storage/private/<vpsDistributionId>-<pl_dna_hash>/`。VPS 返回给板端的登记结果只需要暴露 canonical `vpsDistributionId` 和校验状态；不得要求板端保存或使用 id-dna folder 作为下载 URL。
+- 板端必须从 VPS 响应的 `vpsDistributionId` 字段原样回读该 ID，不得在本地按 DNA 自行生成最终 ID，不得从 `device_id`、`vps_distribution_id`、旧状态文件或授权文件里回退推断显示 ID。回读成功后本地登记状态只允许保存该 VPS 原样返回的 `vpsDistributionId`、登记结果码和公钥摘要，不允许保存 raw PL DNA、DNA hash、`pl_dna_hash` 或 id-dna folder。写入成功后设置页顶部只显示该 6 位 ID，不显示 `已登记` 等状态后缀、本机码片段或 DNA hash；没有合法 `vpsDistributionId` 时同一 ID 位置显示 `未登记`，便于人工核对且不暴露 DNA。`DNA_REGISTER_UPLOADED_PENDING_AUTH` 表示 VPS 已验证公钥、保存设备绑定并创建 private folder、板端已保存本地 ID 状态，只是授权文件等待工厂端生成/上传；不得当作登记失败。
+- 如果 VPS 未返回 canonical `vpsDistributionId`、ID 与 DNA hash 关系无法确认、或本地状态文件写入失败，`登记本机码` 必须 fail-closed；不得显示本地推导 ID，也不得允许后续授权/服务器下载把旧 ID 当作当前 ID。
 
 板端设置页 `下载授权` 与 `服务器下载` 链路：
 
