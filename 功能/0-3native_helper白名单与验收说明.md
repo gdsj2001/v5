@@ -8,7 +8,7 @@
 
 ## AI 阅读入口
 
-- 启动内存/热路径通用规则：见 `REQ-PARAM-MEMORY-LIGHTWEIGHT-SAVE` / `功能/0开机参数入内存.md`，本文只保留 native helper 特有边界。
+- 启动内存/热路径通用规则：见 `REQ-PARAM-MEMORY-LIGHTWEIGHT-SAVE` / `功能/0-1开机参数入内存.md`，本文只保留 native helper 特有边界。
 - native helper 特有边界：linuxcncrsh/native gate、UI 控制入口、allowed helper 表、动作登记表和状态 provider 必须随产品自写运行闭包开机进入 RAM；运行期控制热路径不得临时扫描 helper、懒导入脚本、按文件名执行未登记程序或用旧 wrapper 兜底。
 - 修改 helper 白名单时只允许收缩到微内核/native owner 明确需要的长驻 gate 或诊断入口；已退役 helper 不得以 renamed wrapper、环境变量、测试入口或 VM 打包校验形式保留。
 

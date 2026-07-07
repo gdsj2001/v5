@@ -55,7 +55,7 @@ BOARD_UNREACHABLE_RECOVERY:
 - Open COM monitoring when available, run VM truth tool `/root/Desktop/v5/tools/v5_board_power_cycle.py`, then re-probe board readiness and record evidence.
 
 PARAMETER_NATIVE_TRUTH:
-- Use `REQ-PARAM-MEMORY-LIGHTWEIGHT-SAVE` in `功能/需求真源索引.md` and owner `功能/0开机参数入内存.md`.
+- Use `REQ-PARAM-MEMORY-LIGHTWEIGHT-SAVE` in `功能/需求真源索引.md` and owner `功能/0-1开机参数入内存.md`.
 - Microkernel/native parameters and data must be consumed from microkernel/native memory/API when they exist.
 - Exception: SHM display whitelist only. Do not create a second V3 parameter table for native-owned truth.
 - Drive parameter tables are an explicit drive-only custom-schema exception.
@@ -70,7 +70,7 @@ PATH_AND_DOC_CONSTANTS:
 - SOURCE_RELATIVE_ADDRESS_RULE: source code must use relative filesystem/resource addresses only. Do not hard-code absolute project, host, VM, board, Windows, or Linux paths such as `D:/...`, `C:\...`, `/root/Desktop/v5/...`, `/home/...`, or `/tmp/...` in source, config, scripts, tests, manifests, or generated runtime constants; resolve them from `PROJECT_ROOT`, the executable/resource root, or a caller-provided relative path instead. A real OS/device/API absolute path is allowed only when it is an external non-project fact, fail-closed, and recorded by the indexed owner.
 - MARKDOWN_LINK_RELATIVE_EXCEPTION: Markdown links are relative to the markdown file directory.
 - REQUIREMENT_SOURCE_INDEX: `功能/需求真源索引.md`.
-- HIGHEST_PARAMETER_REQUIREMENT: `功能/0开机参数入内存.md`.
+- HIGHEST_PARAMETER_REQUIREMENT: `功能/0-1开机参数入内存.md`.
 - ARCH_BOUNDARY_DOC: `系统代码架构硬边界守则.md`.
 - PROJECT_GUIDE_DOC: `项目软硬件架构和后期修改指导说明.md`.
 - CMV_GUIDE_DOC: `CMV自动化体系.md`.
@@ -102,7 +102,7 @@ PATH_AND_DOC_CONSTANTS:
 - MARKDOWN_LINK_RELATIVE_EXCEPTION: markdown link hrefs are relative to the markdown file directory.
 - DOC_SINGLE_SOURCE_RULE: every fast-changing requirement has one `REQ-*` owner in `功能/需求真源索引.md`.
 - HIGHEST_REQUIREMENT_DOC_FIRST_RULE: requirement changes update the indexed `功能/` owner before source/config/tests/backlog.
-- PARAMETER_DOC_PRECEDENCE: microkernel-owned parameter truth uses `功能/0开机参数入内存.md`.
+- PARAMETER_DOC_PRECEDENCE: microkernel-owned parameter truth uses `功能/0-1开机参数入内存.md`.
 - HIGHEST_PARAMETER_TABLE_MEMORY_RULE: use `REQ-PARAM-MEMORY-LIGHTWEIGHT-SAVE`; microkernel/native truth wins except SHM display whitelist and drive-only parameter table exception.
 - HIGHEST_NATIVE_TRUTH_RULE: use `REQ-NATIVE-OWNER-FIRST` and `REQ-LINUXCNC-COMMAND-GATE`; owner text lives in `系统代码架构硬边界守则.md`.
 - NATIVE_GAP_EXCEPTION_RULE: native-gap exceptions need exact gap, minimal adapter, fail-closed boundary, readback evidence, and deletion/upstream condition.
@@ -288,13 +288,13 @@ SOURCE_TRUTH:
 DOC_FIRST:
 - Any new or changed product requirement starts in `功能/`: update `功能/需求真源索引.md` only to locate or assign the single `REQ-*` owner, then update that owner document before changing code, tests, plans, backlog, legacy notes, or other docs.
 - Latest explicit user feedback is the highest requirement-change input; when it conflicts with current docs/rules/tests/comments/old notes, settle the change into `功能/需求真源索引.md` and the relevant `功能/` owner first, then source/config.
-- Parameter/native truth changes use `功能/需求真源索引.md` and `功能/0开机参数入内存.md`/architecture owners before source edits.
+- Parameter/native truth changes use `功能/需求真源索引.md` and `功能/0-1开机参数入内存.md`/architecture owners before source edits.
 - Required order is owner doc/rule -> canonical source/config -> local gates -> VM/board original operator-path closure when required -> final chat report. Do not create a document result record unless the user explicitly asks for one.
 - Board-facing behavior cannot close at doc/source/local-test level; without board/operator evidence, report only `source_only` or `local_verified_only`.
 
 MICROKERNEL_PARAM_MIGRATION_WORKFLOW:
-- Scope source of truth: 功能/0开机参数入内存.md is the highest feature requirement for boot-into-memory parameters, microkernel/native truth, and V3 second-truth retirement.
-- New or retained V3-made parameters are allowed only after inventory proves the microkernel/LinuxCNC/HAL/EtherCAT/native owner has no existing field, no registrable native helper/gate, no extensible runtime-memory/API readback, and no equivalent persistent owner for that semantic. Record that proof in 功能/0开机参数入内存.md before adding the parameter.
+- Scope source of truth: 功能/0-1开机参数入内存.md is the highest feature requirement for boot-into-memory parameters, microkernel/native truth, and V3 second-truth retirement.
+- New or retained V3-made parameters are allowed only after inventory proves the microkernel/LinuxCNC/HAL/EtherCAT/native owner has no existing field, no registrable native helper/gate, no extensible runtime-memory/API readback, and no equivalent persistent owner for that semantic. Record that proof in 功能/0-1开机参数入内存.md before adding the parameter.
 - If the microkernel/native owner already has or can own the semantic, every V3-made duplicate parameter is migration debt. Do not expand its callers, add write paths, use it as config generation input, runtime gate, save-success evidence, fallback, or diagnostic crutch. When a slice touches such a field, migrate the supported dependency to the microkernel/native owner first, then delete every now-unused V3-made entry in the same slice; leave only an honest blocker when a supported dependency still prevents deletion.
 - Except for UI coordinate-value display projection, every microkernel/native-owned status, parameter, actual, gate, save-success fact, action result, and safety fact must be consumed from microkernel/native resident memory status data, direct memory/API readback, or a registered native memory block. Do not use `/dev/shm/v3_status_shm`, typed SHM, State Publisher projection, Broker read-only fields, product-action snapshots, JSON, `/run` results, or cached UI state as the source for those facts; touching such a dependency means migrate it to microkernel/native memory first and delete the SHM/V3 duplicate path when unused.
 - Classify every touched parameter as one of: migrate to LinuxCNC/runtime INI, migrate to PARAMETER_FILE/linuxcnc.var, migrate to tool.tbl/native tool owner, migrate to registered non-Python native gate/helper, keep in Settings Drive private domain, or keep only as read-only diagnostic/UI dirty state.
@@ -350,6 +350,7 @@ TOUCH_OWNER_DOWNSHIFT:
 
 TOOLING:
 - Repetitive work should be automated with small task tools/scripts when practical
+- MCP_FIRST: When an MCP tool/resource is available for the target VM, board, browser, repository, filesystem, or service, use MCP first. Use SSH, shell commands, browser automation, or ad hoc probes only when the relevant MCP path is unavailable, insufficient, or explicitly not suited to the task; state the fallback reason in the final reply when it affects verification.
 - REPEAT_WORK_TOOL_FIRST: If a task requires repeated checks, repeated edits, repeated migration, repeated verification, or broad pattern application, use an existing focused tool first. If no suitable tool exists, build the smallest task-appropriate tool or script, verify it on a narrow sample, then continue the repeated work through that tool instead of manual repetition.
 - Prefer reusable project tools under `VM_SOURCE_ROOT/tools/` for project-wide checks; do not create or preserve Windows `D:/v5/tools` as a second tool source.
 - Use repo_ignored/<short_task>/scratch/ for task-only scratch tools
@@ -473,36 +474,36 @@ VM_SOURCE_ROOT=/root/Desktop/v5
 ARCHIVE_ROOT=repo_ignored
 
 VM_ACCESS:
-- Preferred target is the existing VM SSH/MCP access for `/root/Desktop/v5`; do not invent credentials or require a different user unless that is already configured.
-- First probe before any VM build/runtime-source edit: `test -d /root/Desktop/v5 && readlink -f /root/Desktop/v5` through the VM access tool or existing SSH alias.
-- If SSH alias is unavailable, use the existing VM console/hypervisor network setup or documented `vm-bak/` recovery notes; do not install/enable WSL as a workaround
+- Preferred target is the existing VM MCP access for `/root/Desktop/v5`; use the existing SSH alias only as fallback when MCP is unavailable or insufficient. Do not invent credentials or require a different user unless that is already configured.
+- First probe before any VM build/runtime-source edit: `test -d /root/Desktop/v5 && readlink -f /root/Desktop/v5` through VM MCP first, then the existing SSH alias if MCP cannot provide the probe.
+- If MCP and SSH alias are unavailable, use the existing VM console/hypervisor network setup or documented `vm-bak/` recovery notes; do not install/enable WSL as a workaround
 - Treat `VM_SOURCE_ROOT` as the canonical Linux/native/LVGL/runtime-service and project-tool source. Treat Windows `PROJECT_ROOT` as the canonical Markdown, screenshot, and Windows/Vivado source. Do not mirror, bulk sync, or keep backup source copies across Windows and VM; move one-time materials into the owning truth location, then edit/build/verify only from that owner.
 
 ## P1_FEATURE_DOCS
 
 requirements_index=功能/需求真源索引.md
-boot_params_memory=功能/0开机参数入内存.md
+boot_params_memory=功能/0-1开机参数入内存.md
 microkernel=功能/微内核.md
-settings_bus_pulse=功能/3设置页总线模式设置项作用说明.md
-bus_pulse_difference=功能/总线脉冲区别.md
-settings_buttons=功能/3设置页每个按钮作用和目的.md
-settings_set_drive=功能/4设置页设置驱动按钮作用和目的.md
-axis_zero=功能/4轴设0软件偏置方案.md
-home=功能/8回零按钮开机强制回零与双模式真实回零方案.md
-wcs_work_offset=功能/2加工坐标系偏移值保存与读取实现.md
+settings_bus_pulse=功能/2-2设置页总线模式设置项作用说明.md
+bus_pulse_difference=功能/2-1总线脉冲区别.md
+settings_buttons=功能/2-3设置页每个按钮作用和目的.md
+settings_set_drive=功能/2-4设置页设置驱动按钮作用和目的.md
+axis_zero=功能/2-5轴设0软件偏置方案.md
+home=功能/2-6回零按钮开机强制回零与双模式真实回零方案.md
+wcs_work_offset=功能/1-1加工坐标系偏移值保存与读取实现.md
 drive_command_map=功能/1驱动命令映射表命令需求.md
 drive_profile_adapter=功能/1驱动命令映射表命令需求.md
 vps_auth=功能/VPS登录与项目对接说明.md
-toolpath=功能/UI刀路绘图顺序与状态稳定方案.md
-main_buttons=功能/7主页面按钮功能.md
-estop=功能/7主页面按钮功能.md
-start=功能/7主页面按钮功能.md
-rotary_equivalent=功能/6旋转轴等效角目标与解决方案.md
-native_helper_whitelist=功能/native_helper白名单与验收说明.md
+toolpath=功能/3-2UI刀路绘图顺序与状态稳定方案.md
+main_buttons=功能/3-1主页面按钮功能.md
+estop=功能/3-1主页面按钮功能.md
+start=功能/3-1主页面按钮功能.md
+rotary_equivalent=功能/3-3旋转轴等效角目标与解决方案.md
+native_helper_whitelist=功能/0-3native_helper白名单与验收说明.md
 popup=功能/跳窗提示方案.md
 touch_input=功能/-触摸校准与输入链路说明.md
 auto_closed_loop=功能/自动闭环测试方式.md
-red_point=功能/UI刀路绘图顺序与状态稳定方案.md
+red_point=功能/3-2UI刀路绘图顺序与状态稳定方案.md
 
 ## P1_COMMAND_STYLE
 

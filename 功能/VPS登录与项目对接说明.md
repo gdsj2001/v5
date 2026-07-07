@@ -4,7 +4,7 @@
 
 ## AI 阅读入口
 
-- 启动内存/热路径通用规则：见 `REQ-PARAM-MEMORY-LIGHTWEIGHT-SAVE` / `功能/0开机参数入内存.md`，本文只保留本功能特有边界。
+- 启动内存/热路径通用规则：见 `REQ-PARAM-MEMORY-LIGHTWEIGHT-SAVE` / `功能/0-1开机参数入内存.md`，本文只保留本功能特有边界。
 - 先读 `REQ-DRIVE-PROFILE-AUTH-CHAIN`；涉及控制链、WCS 或参数真源时回到对应 REQ owner。
 - 不得为客户、驱动、收费档位或现场临时需求 fork 板端产品代码；下载状态、诊断快照和 public fallback 不能冒充 private 授权成功。
 
