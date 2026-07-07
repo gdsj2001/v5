@@ -39,6 +39,7 @@ DELETE_FIRST_NO_FALLBACK:
 - First cleanup action is deleting unsupported forked, legacy, duplicate, bypass, shadow, fallback, split-brain, or AI-made paths.
 - No disabled branch, env gate, wrapper, alias, renamed survivor, test-only entry, TODO, or doc warning may remain as rollback insurance.
 - If a real supported path still depends on old code, migrate that dependency to the canonical owner first, then delete the old path in the same slice.
+- Temporary patches and workaround overlays are forbidden. Each supported behavior must have one canonical mainline path only; do not leave quick-fix branches, bypass adapters, hotfix copies, or "clean up later" alternate routes that can be forgotten and become forks.
 
 FILE_PLACEMENT:
 - Classify files before creation or movement: source, docs, tools, screenshots, evidence, backups, scratch, caches, runtime JSON, and logs each have an owner directory.
@@ -49,6 +50,7 @@ SOURCE_TRUTH:
 - Do not use `D:/v3` as live source; it is frozen read-only reference only.
 - New v5 maintainable entries must use v5 names, not new `z20_*` names. Existing hardware hostnames/SSH aliases may appear only as external facts.
 - Do not create Windows/VM source mirrors. Move one-time materials into the owning truth location, then edit/build/verify only from that owner.
+- Do not install, enable, or use WSL on Windows for this project. When Linux userspace/tooling is required, use the existing VM owner `/root/Desktop/v5` instead.
 
 BOARD_UNREACHABLE_RECOVERY:
 - If board SSH/MCP/relay is unreachable, do not just wait or add a nicer error.
