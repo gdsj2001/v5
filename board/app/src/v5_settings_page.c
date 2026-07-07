@@ -242,6 +242,13 @@ static int settings_action_eta_seconds(const char *action)
     return 0;
 }
 
+static int settings_action_sets_restart_pending(const char *action)
+{
+    return action &&
+           (strcmp(action, "drive_set_parameters") == 0 ||
+            strcmp(action, "settings_axis_zero") == 0);
+}
+
 static void settings_popup_set_eta(V5SettingsPage *page, int seconds_left)
 {
     char text[32];
@@ -351,6 +358,8 @@ static void settings_popup_create(V5SettingsPage *page)
     lv_obj_add_flag(page->popup_overlay, LV_OBJ_FLAG_HIDDEN);
 }
 
+static void update_return_home_button_label(V5SettingsPage *page);
+
 static void settings_status_timer_cb(lv_timer_t *timer)
 {
     V5SettingsPage *page = timer ? (V5SettingsPage *)timer->user_data : 0;
@@ -382,6 +391,10 @@ static void settings_status_timer_cb(lv_timer_t *timer)
         }
         if (strcmp(status.action, "device_dna_register") == 0) {
             refresh_machine_code_label(page);
+        }
+        if (status.restart_required && settings_action_sets_restart_pending(status.action)) {
+            page->restart_pending = 1;
+            update_return_home_button_label(page);
         }
         set_status_text(page, 42, 221, 128, "%s: 完成 %s", label, status.code[0] ? status.code : detail);
     } else {

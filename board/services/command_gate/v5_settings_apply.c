@@ -787,6 +787,19 @@ static void settings_apply_format_double(char *out, size_t cap, double value)
     snprintf(out, cap, "%.12g", value);
 }
 
+static double settings_apply_round_near_integer(double value)
+{
+    double rounded = (double)((long long)(value >= 0.0 ? value + 0.5 : value - 0.5));
+    double delta = value - rounded;
+    if (delta < 0.0) {
+        delta = -delta;
+    }
+    if (isfinite(value) && delta < 0.0001) {
+        return rounded;
+    }
+    return value;
+}
+
 static int settings_apply_mode_to_ini(const char *value, char *out, size_t out_cap)
 {
     if (!value || !out || out_cap == 0U) {
@@ -896,6 +909,15 @@ static int settings_apply_ini_value_for_field(
     if (!settings_apply_numeric_text(local)) {
         return 0;
     }
+    if (strcmp(field_key, "max_velocity") == 0) {
+        numeric = strtod(local, &end);
+        if (end == local || *end != '\0' || !isfinite(numeric)) {
+            return 0;
+        }
+        settings_apply_format_double(ini_value, ini_cap, numeric / 60.0);
+        settings_apply_format_double(expected_display, display_cap, numeric);
+        return 1;
+    }
     snprintf(ini_value, ini_cap, "%s", local);
     snprintf(expected_display, display_cap, "%s", local);
     return 1;
@@ -935,6 +957,14 @@ static int settings_apply_display_from_raw(const char *field_key, const char *ra
             return 0;
         }
         settings_apply_format_double(out, out_cap, 1.0 / numeric);
+        return 1;
+    }
+    if (strcmp(field_key, "max_velocity") == 0) {
+        numeric = strtod(raw, &end);
+        if (end == raw || *end != '\0' || !isfinite(numeric)) {
+            return 0;
+        }
+        settings_apply_format_double(out, out_cap, settings_apply_round_near_integer(numeric * 60.0));
         return 1;
     }
     snprintf(out, out_cap, "%s", raw);

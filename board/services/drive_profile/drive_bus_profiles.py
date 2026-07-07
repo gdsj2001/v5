@@ -189,6 +189,7 @@ def objects_from_standard_commands(commands: Dict[str, Any]) -> Dict[str, Any]:
     _add_command_object(objects, commands, "drive.reset_fault", "fault_reset")
     _add_command_object(objects, commands, "drive.restore_factory_defaults", "restore_factory_defaults")
     _add_command_object(objects, commands, "drive.read_error_code", "error_code")
+    _add_command_object(objects, commands, "drive.read_aux_error_code", "aux_error_code")
     _add_command_object(objects, commands, "drive.write_mode", "mode_of_operation")
     _add_command_object(objects, commands, "drive.read_mode", "mode_display")
     _add_command_object(objects, commands, "drive.read_actual_position", "actual_position")

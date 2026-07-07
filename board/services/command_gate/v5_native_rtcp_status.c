@@ -115,7 +115,7 @@ int v5_native_rtcp_status_from_mcodes(const int *mcodes, size_t count, int *vali
             saw_m129 = 1;
         }
     }
-    if (saw_m128 == saw_m129) {
+    if (saw_m128 && saw_m129) {
         return 0;
     }
     if (valid_out) {

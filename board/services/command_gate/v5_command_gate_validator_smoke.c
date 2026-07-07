@@ -84,6 +84,13 @@ int main(void)
     frame.axis_mask = V5_COMMAND_AXIS_X_MASK;
     if (!expect_reject(&frame, "stray_axis_mask")) return 9;
 
+    init_frame(&frame, V5_COMMAND_START);
+    if (!expect_reject(&frame, "start_missing_path")) return 10;
+
+    init_frame(&frame, V5_COMMAND_START);
+    snprintf(frame.text_value, sizeof(frame.text_value), "/opt/8ax/v5/gcode/golden/cc.ngc");
+    if (!expect_accept(&frame)) return 11;
+
     printf("v5 command gate validator smoke passed\n");
     return 0;
 }

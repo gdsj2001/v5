@@ -67,6 +67,10 @@ V5LinuxcncrshSendStatus v5_linuxcncrsh_send_estop_reset_sequence(
     int *machine_on_status_out,
     int *machine_on_requested_out);
 
+V5LinuxcncrshSendStatus v5_linuxcncrsh_send_rtcp_sequence(
+    const V5LinuxcncrshConfig *config,
+    int enabled);
+
 V5LinuxcncrshSendStatus v5_linuxcncrsh_send_prepared(
     const V5LinuxcncrshConfig *config,
     const V5CommandPrepared *prepared,

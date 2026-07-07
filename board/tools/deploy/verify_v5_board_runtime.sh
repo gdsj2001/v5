@@ -80,10 +80,10 @@ fi
 rm -f /tmp/v5_rtcp_status_publisher_status.out
 
 if remote 'PYTHONPATH=/usr/lib/python3/dist-packages /usr/libexec/8ax/v5_rtcp_status_publisher.py --once >/tmp/v5_rtcp_status_publisher_once.out 2>&1 && test -s /dev/shm/v5_native_rtcp_status.bin' >/dev/null 2>&1; then
-  ok "rtcp status publisher one-shot samples LinuxCNC native mcodes"
+  ok "rtcp status publisher one-shot samples LinuxCNC/HAL native switchkins actual"
   remote 'tail -n 3 /tmp/v5_rtcp_status_publisher_once.out 2>/dev/null || true' | sed 's/^/INFO rtcp status publisher: /'
 else
-  fail_msg "rtcp status publisher one-shot samples LinuxCNC native mcodes"
+  fail_msg "rtcp status publisher one-shot samples LinuxCNC/HAL native switchkins actual"
   remote 'tail -n 10 /tmp/v5_rtcp_status_publisher_once.out 2>/dev/null || true' | sed 's/^/INFO rtcp status publisher: /'
 fi
 

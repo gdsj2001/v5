@@ -37,6 +37,7 @@ import v5_drive_bus_action
 import v5_device_authorization_download
 import v5_device_dna_register
 import v5_drive_profile_download
+import v5_drive_profile_resident_snapshot
 
 
 
@@ -101,6 +102,9 @@ last_status: Dict[str, Any] = {
     "message_cn": "待命",
     "result_path": "",
     "axis": "",
+    "restart_required": False,
+    "restart_deferred": False,
+    "backend_restart_required": False,
 }
 
 
@@ -172,6 +176,9 @@ def set_last_status(action: str, run_id: str, spec: Dict[str, Any], busy: bool, 
             "message_cn": message,
             "result_path": str(spec.get("result_path", "")),
             "axis": axis,
+            "restart_required": bool(payload.get("restart_required")),
+            "restart_deferred": bool(payload.get("restart_deferred")),
+            "backend_restart_required": bool(payload.get("backend_restart_required")),
             "generated_at": now_utc(),
         })
 
@@ -197,6 +204,20 @@ def reload_position_publisher() -> Dict[str, Any]:
         "stderr": proc.stderr[-1000:],
         "script": str(script),
     }
+
+
+def refresh_drive_profile_resident_snapshot() -> Dict[str, Any]:
+    try:
+        snapshot = v5_drive_profile_resident_snapshot.build_snapshot(v5_drive_profile_resident_snapshot.RUNTIME_PROFILE_ROOT)
+        v5_drive_profile_resident_snapshot.atomic_write_json(v5_drive_profile_resident_snapshot.DEFAULT_OUT, snapshot)
+        return v5_drive_bus_action.replace_resident_snapshot(snapshot)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "code": "DRIVE_PROFILE_RESIDENT_REFRESH_EXCEPTION",
+            "detail": "%s: %s" % (type(exc).__name__, exc),
+            "out": str(v5_drive_profile_resident_snapshot.DEFAULT_OUT),
+        }
 
 
 def service_status(name: str, timeout_s: float = 4.0) -> Dict[str, Any]:
@@ -353,6 +374,15 @@ def run_auth_action(action: str, spec: Dict[str, Any]) -> Dict[str, Any]:
         result = v5_device_authorization_download.run_action(request)
     elif auth_action == "drive_profile_server_download":
         result = v5_drive_profile_download.run_action(request)
+        if isinstance(result, dict) and result.get("ok"):
+            refresh = refresh_drive_profile_resident_snapshot()
+            result["resident_snapshot_refresh"] = refresh
+            if not refresh.get("ok"):
+                result["download_ok_before_resident_refresh"] = True
+                result["ok"] = False
+                result["code"] = "SERVER_DOWNLOAD_RESIDENT_REFRESH_FAILED"
+                result["message_cn"] = "服务器下载已完成，但驱动 profile resident 快照刷新失败，后续驱动动作已 fail-closed。"
+                result["display_message_cn"] = result["message_cn"]
     else:
         result = {
             "ok": False,

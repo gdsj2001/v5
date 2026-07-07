@@ -24,7 +24,7 @@ int main(void)
     V5ProgramOpenResult open_result;
     V5CommandPrepared start_prepared;
     V5CommandRequest start_request;
-    char line[128];
+    char line[384];
     unsigned int program_preview_count;
     unsigned int program_loaded_epoch;
     char program_source_path[384];
@@ -74,6 +74,10 @@ int main(void)
     if (!v5_linuxcncrsh_format_line(&start_prepared, &start_request, line, sizeof(line))) {
         v5_program_controller_destroy(&controller);
         return 6;
+    }
+    if (strcmp(line, "Set Open v5_program_command_smoke.ngc\nSet Mode Auto\nSet Run 0\nSet Resume") != 0) {
+        v5_program_controller_destroy(&controller);
+        return 13;
     }
 
     if (!v5_program_runtime_set_mdi_line(&controller.runtime, "G4 P0")) {

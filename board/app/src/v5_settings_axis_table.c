@@ -182,6 +182,32 @@ static void set_value_from_double(unsigned int row, const char *field_key, doubl
     set_value(row, field_key, buf, 1);
 }
 
+static void set_max_velocity_from_runtime_ini(unsigned int row, const char *value)
+{
+    char *end;
+    double units_per_s;
+    double display_value;
+    double rounded;
+    double delta;
+    if (!value || !value[0]) {
+        return;
+    }
+    units_per_s = strtod(value, &end);
+    if (end == value || *end != '\0' || !isfinite(units_per_s)) {
+        return;
+    }
+    display_value = units_per_s * 60.0;
+    rounded = (double)((long long)(display_value >= 0.0 ? display_value + 0.5 : display_value - 0.5));
+    delta = display_value - rounded;
+    if (delta < 0.0) {
+        delta = -delta;
+    }
+    if (delta < 0.0001) {
+        display_value = rounded;
+    }
+    set_value_from_double(row, "max_velocity", display_value);
+}
+
 static void clear_slave_options(void)
 {
     unsigned int r;
@@ -1044,7 +1070,7 @@ static void parse_runtime_ini_text(const char *text)
         if (row->min_limit[0]) set_value(i, "soft_minus", row->min_limit, 1);
         if (row->home[0]) set_value(i, "zero", row->home, 1);
         if (row->max_limit[0]) set_value(i, "soft_plus", row->max_limit, 1);
-        if (row->max_velocity[0]) set_value(i, "max_velocity", row->max_velocity, 1);
+        if (row->max_velocity[0]) set_max_velocity_from_runtime_ini(i, row->max_velocity);
         if (row->max_acceleration[0]) set_value(i, "max_acceleration", row->max_acceleration, 1);
         if (row->backlash[0]) set_value(i, "backlash", row->backlash, 1);
     }

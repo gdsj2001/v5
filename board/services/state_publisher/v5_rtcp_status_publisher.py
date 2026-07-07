@@ -46,7 +46,7 @@ def status_from_mcodes(mcodes: Iterable[int]) -> Tuple[int, int]:
             saw_m128 = True
         elif code == 129:
             saw_m129 = True
-    if saw_m128 == saw_m129:
+    if saw_m128 and saw_m129:
         return 0, 0
     return 1, 1 if saw_m128 else 0
 
@@ -71,17 +71,20 @@ def parse_mock(text: str):
     return [int(part.strip()) for part in text.split(',') if part.strip()]
 
 
-def load_linuxcnc():
+def load_hal():
     dist = '/usr/lib/python3/dist-packages'
     if os.path.isdir(dist) and dist not in sys.path:
         sys.path.insert(0, dist)
-    import linuxcnc  # type: ignore
-    return linuxcnc
+    import hal  # type: ignore
+    return hal
 
 
-def poll_once(stat, path: str) -> Tuple[int, int]:
-    stat.poll()
-    valid, active = status_from_mcodes(getattr(stat, 'mcodes', ()))
+def status_from_hal_value(value) -> Tuple[int, int]:
+    return 1, 1 if float(value) >= 0.5 else 0
+
+
+def poll_once(hal_module, path: str) -> Tuple[int, int]:
+    valid, active = status_from_hal_value(hal_module.get_value('motion.switchkins-type'))
     write_status(path, valid, active)
     return valid, active
 
@@ -89,7 +92,7 @@ def poll_once(stat, path: str) -> Tuple[int, int]:
 lock_process_memory("v5_rtcp_status_publisher")
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description='Publish v5 RTCP actual status from LinuxCNC native mcodes.')
+    parser = argparse.ArgumentParser(description='Publish v5 RTCP actual status from LinuxCNC/HAL native switchkins actual.')
     parser.add_argument('--path', default=DEFAULT_PATH)
     parser.add_argument('--interval-ms', type=int, default=DEFAULT_INTERVAL_MS)
     parser.add_argument('--once', action='store_true')
@@ -103,19 +106,23 @@ def main() -> int:
         print(f'v5_rtcp_status_publisher mock valid={valid} active={active} path={args.path}')
         return 0
 
-    linuxcnc = load_linuxcnc()
-    stat = linuxcnc.stat()
+    hal_module = load_hal()
+    hal_component = hal_module.component(f'v5_rtcp_pub_{os.getpid()}')
+    hal_component.ready()
     interval = max(args.interval_ms, 20) / 1000.0
-    while True:
-        try:
-            valid, active = poll_once(stat, args.path)
-            print(f'v5_rtcp_status_publisher valid={valid} active={active}', flush=True)
-        except Exception as exc:
-            write_status(args.path, 0, 0)
-            print(f'v5_rtcp_status_publisher unavailable: {exc}', file=sys.stderr, flush=True)
-        if args.once:
-            return 0
-        time.sleep(interval)
+    try:
+        while True:
+            try:
+                valid, active = poll_once(hal_module, args.path)
+                print(f'v5_rtcp_status_publisher valid={valid} active={active}', flush=True)
+            except Exception as exc:
+                write_status(args.path, 0, 0)
+                print(f'v5_rtcp_status_publisher unavailable: {exc}', file=sys.stderr, flush=True)
+            if args.once:
+                return 0
+            time.sleep(interval)
+    finally:
+        hal_component.exit()
 
 
 if __name__ == '__main__':

@@ -311,13 +311,18 @@ int main(void)
         strcmp(v5_settings_axis_table_value(0U, 4U), "5") != 0 ||
         strcmp(v5_settings_axis_table_value(0U, 5U), "1") != 0 ||
         strcmp(v5_settings_axis_table_value(0U, 6U), "1") != 0 ||
-        strcmp(v5_settings_axis_table_value(0U, 12U), "166.666666667") != 0 ||
+        strcmp(v5_settings_axis_table_value(0U, 9U), "-500") != 0 ||
+        strcmp(v5_settings_axis_table_value(0U, 11U), "500") != 0 ||
+        strcmp(v5_settings_axis_table_value(0U, 12U), "10000") != 0 ||
         strcmp(v5_settings_axis_table_value(0U, 15U), "18") != 0 ||
+        strcmp(v5_settings_axis_table_value(3U, 12U), "50000") != 0 ||
         strcmp(v5_settings_axis_table_value(6U, 0U), "直线") != 0 ||
-        strcmp(v5_settings_axis_table_value(6U, 12U), "166.666667") != 0 ||
+        strcmp(v5_settings_axis_table_value(6U, 9U), "-500") != 0 ||
+        strcmp(v5_settings_axis_table_value(6U, 11U), "500") != 0 ||
+        strcmp(v5_settings_axis_table_value(6U, 12U), "10000") != 0 ||
         strcmp(v5_settings_axis_table_value(7U, 0U), "旋转") != 0 ||
         strcmp(v5_settings_axis_table_value(7U, 15U), "18") != 0) {
-        fprintf(stderr, "axis readback values missing: X mode=%s A mode=%s X direction=%s X slave=%s X pitch=%s X motor=%s X load=%s X velocity=%s X bit=%s GANTRY mode=%s GANTRY velocity=%s TOOLMAG mode=%s TOOLMAG bit=%s\n",
+        fprintf(stderr, "axis readback values missing: X mode=%s A mode=%s X direction=%s X slave=%s X pitch=%s X motor=%s X load=%s X min=%s X max=%s X velocity=%s X bit=%s A velocity=%s GANTRY mode=%s GANTRY min=%s GANTRY max=%s GANTRY velocity=%s TOOLMAG mode=%s TOOLMAG bit=%s\n",
                 v5_settings_axis_table_value(0U, 0U),
                 v5_settings_axis_table_value(3U, 0U),
                 v5_settings_axis_table_value(0U, 1U),
@@ -325,13 +330,36 @@ int main(void)
                 v5_settings_axis_table_value(0U, 4U),
                 v5_settings_axis_table_value(0U, 5U),
                 v5_settings_axis_table_value(0U, 6U),
+                v5_settings_axis_table_value(0U, 9U),
+                v5_settings_axis_table_value(0U, 11U),
                 v5_settings_axis_table_value(0U, 12U),
                 v5_settings_axis_table_value(0U, 15U),
+                v5_settings_axis_table_value(3U, 12U),
                 v5_settings_axis_table_value(6U, 0U),
+                v5_settings_axis_table_value(6U, 9U),
+                v5_settings_axis_table_value(6U, 11U),
                 v5_settings_axis_table_value(6U, 12U),
                 v5_settings_axis_table_value(7U, 0U),
                 v5_settings_axis_table_value(7U, 15U));
         return 5;
+    }
+
+    if (!v5_settings_axis_table_commit_value(0U, 12U, "12000")) {
+        fprintf(stderr, "axis max velocity per-minute commit failed\n");
+        return 32;
+    }
+    {
+        char axis_vel[64];
+        char joint_vel[64];
+        if (!read_section_ini_key("linuxcnc/ini/v5_bus.ini", "AXIS_X", "MAX_VELOCITY", axis_vel, sizeof(axis_vel)) ||
+            !read_section_ini_key("linuxcnc/ini/v5_bus.ini", "JOINT_0", "MAX_VELOCITY", joint_vel, sizeof(joint_vel)) ||
+            strcmp(axis_vel, "200") != 0 ||
+            strcmp(joint_vel, "200") != 0 ||
+            strcmp(v5_settings_axis_table_value(0U, 12U), "12000") != 0) {
+            fprintf(stderr, "axis max velocity unit conversion failed: axis=%s joint=%s ui=%s\n",
+                    axis_vel, joint_vel, v5_settings_axis_table_value(0U, 12U));
+            return 33;
+        }
     }
 
     if (v5_settings_axis_table_commit_value(0U, 10U, "0")) {

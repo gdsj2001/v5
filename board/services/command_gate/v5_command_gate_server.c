@@ -134,12 +134,22 @@ static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5Command
     } else if (request.kind == V5_COMMAND_HOME && strcmp(prepared.owner, "native_home_mode_gate") == 0) {
         (void)v5_linuxcncrsh_format_home_sequence(response->command_line, sizeof(response->command_line));
         status = v5_linuxcncrsh_send_home_sequence(&g_linuxcncrsh_config, 0, 0);
+        copy_cstr(
+            response->readback_code,
+            sizeof(response->readback_code),
+            status == V5_LINUXCNCRSH_SEND_SENT ? "HOME_NATIVE_ALL_HOMED" : "HOME_NATIVE_ALL_HOMED_TIMEOUT");
     } else if (request.kind == V5_COMMAND_ESTOP_RESET && strcmp(prepared.owner, "native_safety") == 0) {
         (void)v5_linuxcncrsh_format_estop_reset_sequence(response->command_line, sizeof(response->command_line));
         status = v5_linuxcncrsh_send_estop_reset_sequence(&g_linuxcncrsh_config, &response->machine_on_status, &response->machine_on_requested);
     } else if (request.kind == V5_COMMAND_ESTOP_FORCE && strcmp(prepared.owner, "native_safety") == 0) {
         (void)v5_linuxcncrsh_format_line(&prepared, &request, response->command_line, sizeof(response->command_line));
         status = v5_linuxcncrsh_send_estop_force_sequence(&g_linuxcncrsh_config);
+    } else if (request.kind == V5_COMMAND_RTCP_SET && strcmp(prepared.owner, "native_linuxcncrsh") == 0) {
+        if (!v5_linuxcncrsh_format_line(&prepared, &request, response->command_line, sizeof(response->command_line))) {
+            response->send_status = V5_COMMAND_GATE_SEND_INVALID;
+            return;
+        }
+        status = v5_linuxcncrsh_send_rtcp_sequence(&g_linuxcncrsh_config, request.enabled_value);
     } else {
         if (!v5_linuxcncrsh_format_line(&prepared, &request, response->command_line, sizeof(response->command_line))) {
             response->send_status = V5_COMMAND_GATE_SEND_INVALID;

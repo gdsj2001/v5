@@ -169,6 +169,9 @@ int main(void)
     if (!same_text(button_text_for_action(&page, V5_MAIN_PAGE_ACTION_ESTOP_FORCE), "急停")) {
         return 26;
     }
+    if (!same_text(button_text_for_action(&page, V5_MAIN_PAGE_ACTION_RTCP_TOGGLE), "刀尖\n关")) {
+        return 33;
+    }
     v5_program_controller_init(&controller);
     v5_main_page_bind_program_controller(&page, &controller);
 
@@ -220,7 +223,7 @@ int main(void)
         if (!same_text(button_text_for_action(&page, V5_MAIN_PAGE_ACTION_ESTOP_FORCE), "取消急停")) {
             return 27;
         }
-        if (!expect_command_line(&page, V5_MAIN_PAGE_ACTION_ESTOP_FORCE, "estop_reset", "native_safety", "Set EStop Off | Get Estop | Set Machine On")) {
+        if (!expect_command_line(&page, V5_MAIN_PAGE_ACTION_ESTOP_FORCE, "estop_reset", "native_safety", "Set EStop Off | Get Estop | Set Machine On | Get Machine")) {
             return 24;
         }
         v5_native_readback_set_unavailable(&readback, "smoke_reset");
@@ -232,7 +235,7 @@ int main(void)
         if (!same_text(button_text_for_action(&page, V5_MAIN_PAGE_ACTION_ESTOP_FORCE), "取消急停")) {
             return 29;
         }
-        if (!expect_command_line(&page, V5_MAIN_PAGE_ACTION_ESTOP_FORCE, "estop_reset", "native_safety", "Set EStop Off | Get Estop | Set Machine On")) {
+        if (!expect_command_line(&page, V5_MAIN_PAGE_ACTION_ESTOP_FORCE, "estop_reset", "native_safety", "Set EStop Off | Get Estop | Set Machine On | Get Machine")) {
             return 30;
         }
         v5_native_readback_set_machine_enabled(&readback, 1);
@@ -246,7 +249,7 @@ int main(void)
         v5_native_readback_set_unavailable(&readback, "smoke_reset");
         v5_main_page_set_native_readback(&page, &readback);
         v5_main_page_set_native_readback_refresh_callback(&page, refresh_estop_active, &page);
-        if (!expect_command_line(&page, V5_MAIN_PAGE_ACTION_ESTOP_FORCE, "estop_reset", "native_safety", "Set EStop Off | Get Estop | Set Machine On")) {
+        if (!expect_command_line(&page, V5_MAIN_PAGE_ACTION_ESTOP_FORCE, "estop_reset", "native_safety", "Set EStop Off | Get Estop | Set Machine On | Get Machine")) {
             return 25;
         }
         v5_main_page_set_native_readback_refresh_callback(&page, 0, 0);
@@ -331,13 +334,21 @@ int main(void)
         v5_native_readback_init(&readback);
         v5_native_readback_set_rtcp_actual(&readback, 0);
         v5_main_page_set_native_readback(&page, &readback);
-        if (!expect_command_line(&page, V5_MAIN_PAGE_ACTION_RTCP_TOGGLE, "rtcp_set", "native_linuxcncrsh", "Set MDI M128")) {
+        if (!same_text(button_text_for_action(&page, V5_MAIN_PAGE_ACTION_RTCP_TOGGLE), "刀尖\n关")) {
+            v5_program_controller_destroy(&controller);
+            return 34;
+        }
+        if (!expect_command_line(&page, V5_MAIN_PAGE_ACTION_RTCP_TOGGLE, "rtcp_set", "native_linuxcncrsh", "Set Mode MDI\nSet MDI M128")) {
             v5_program_controller_destroy(&controller);
             return 13;
         }
         v5_native_readback_set_rtcp_actual(&readback, 1);
         v5_main_page_set_native_readback(&page, &readback);
-        if (!expect_command_line(&page, V5_MAIN_PAGE_ACTION_RTCP_TOGGLE, "rtcp_set", "native_linuxcncrsh", "Set MDI M129")) {
+        if (!same_text(button_text_for_action(&page, V5_MAIN_PAGE_ACTION_RTCP_TOGGLE), "刀尖\n开")) {
+            v5_program_controller_destroy(&controller);
+            return 35;
+        }
+        if (!expect_command_line(&page, V5_MAIN_PAGE_ACTION_RTCP_TOGGLE, "rtcp_set", "native_linuxcncrsh", "Set Mode MDI\nSet MDI M129")) {
             v5_program_controller_destroy(&controller);
             return 14;
         }

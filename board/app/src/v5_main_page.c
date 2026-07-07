@@ -1422,6 +1422,8 @@ static void log_button_event(V5MainPageActionKind action, int ok, const V5MainPa
         write_json_text(fp, report->command.owner);
         fprintf(fp, ",\"command_line\":");
         write_json_text(fp, report->command_line);
+        fprintf(fp, ",\"readback_code\":");
+        write_json_text(fp, report->readback_code);
     }
     fprintf(fp, "}\n");
     fclose(fp);
@@ -1753,6 +1755,7 @@ void v5_main_page_init(V5MainPage *page)
 }
 
 static void update_estop_button_text(V5MainPage *page);
+static void update_rtcp_button_text(V5MainPage *page);
 
 int v5_main_page_create(V5MainPage *page, lv_obj_t *parent)
 {
@@ -1921,6 +1924,7 @@ int v5_main_page_create(V5MainPage *page, lv_obj_t *parent)
     make_v3_main_buttons(page);
     update_toolpath_view_button_visuals(page);
     update_estop_button_text(page);
+    update_rtcp_button_text(page);
     return page->button_count == V5_MAIN_PAGE_BUTTON_COUNT;
 }
 
@@ -2118,6 +2122,7 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
 
     if ((refresh_flags & V5_MAIN_PAGE_REFRESH_BUTTONS) != 0U) {
         update_toolpath_view_button_visuals(page);
+        update_rtcp_button_text(page);
     }
     if ((refresh_flags & V5_MAIN_PAGE_REFRESH_ESTOP) != 0U) {
         update_estop_button_text(page);
@@ -2297,6 +2302,24 @@ static void update_estop_button_text(V5MainPage *page)
     }
 }
 
+static void update_rtcp_button_text(V5MainPage *page)
+{
+    const char *text = "刀尖\n关";
+    unsigned int i;
+    if (!page) {
+        return;
+    }
+    if (v5_native_readback_rtcp_known(&page->native_readback) && page->native_readback.rtcp_enabled) {
+        text = "刀尖\n开";
+    }
+    for (i = 0U; i < page->button_count; ++i) {
+        if (page->button_actions[i] == V5_MAIN_PAGE_ACTION_RTCP_TOGGLE && page->button_labels[i]) {
+            lv_label_set_text(page->button_labels[i], text);
+            return;
+        }
+    }
+}
+
 void v5_main_page_bind_program_controller(V5MainPage *page, V5ProgramController *controller)
 {
     if (!page) {
@@ -2325,6 +2348,7 @@ void v5_main_page_set_native_readback(V5MainPage *page, const V5NativeReadback *
         v5_native_readback_set_unavailable(&page->native_readback, "native_readback_unavailable");
     }
     update_estop_button_text(page);
+    update_rtcp_button_text(page);
     update_main_page_wcs_header(page);
     update_toolpath_status_text(page);
 }
@@ -2497,6 +2521,7 @@ static int main_page_refresh_safety_readback_from_gate(
 static void execute_prepared_command_if_enabled(V5MainPage *page, V5MainPageActionReport *report)
 {
     V5CommandGateResult gate_result;
+    unsigned int gate_timeout_ms = 1000U;
 
     if (!page || !report || report->local_only || !report->prepared || !report->command.accepted) {
         return;
@@ -2514,7 +2539,14 @@ static void execute_prepared_command_if_enabled(V5MainPage *page, V5MainPageActi
     }
 
     v5_command_gate_result_init(&gate_result);
-    if (!v5_command_gate_send_prepared(&report->command, &report->request, &gate_result, 1000U)) {
+    if (report->request.kind == V5_COMMAND_ESTOP_RESET || report->request.kind == V5_COMMAND_ESTOP_FORCE) {
+        gate_timeout_ms = 3000U;
+    } else if (report->request.kind == V5_COMMAND_RTCP_SET) {
+        gate_timeout_ms = 2500U;
+    } else if (report->request.kind == V5_COMMAND_HOME) {
+        gate_timeout_ms = 5000U;
+    }
+    if (!v5_command_gate_send_prepared(&report->command, &report->request, &gate_result, gate_timeout_ms)) {
         report->send_status = gate_result.send_status;
         return;
     }
@@ -2548,6 +2580,10 @@ static void execute_prepared_command_if_enabled(V5MainPage *page, V5MainPageActi
                 (void)main_page_refresh_safety_readback_from_gate(page, 0, 0);
             }
         }
+    }
+    if (report->executed && report->request.kind == V5_COMMAND_RTCP_SET) {
+        v5_native_readback_set_rtcp_actual(&page->native_readback, report->request.enabled_value);
+        update_rtcp_button_text(page);
     }
 }
 

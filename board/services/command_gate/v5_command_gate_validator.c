@@ -296,7 +296,6 @@ int v5_command_gate_validate_execute_frame(
             }
         }
         break;
-    case V5_COMMAND_START:
     case V5_COMMAND_PAUSE:
     case V5_COMMAND_RESUME:
     case V5_COMMAND_HOME:
@@ -305,6 +304,13 @@ int v5_command_gate_validate_execute_frame(
     case V5_COMMAND_G92_CLEAR:
         if (!axis_mask_must_be_zero(frame, reason, reason_cap) ||
             !command_text_ok(frame->text_value, 0, 0, reason, reason_cap) ||
+            !command_text_ok(frame->secondary_text_value, 0, 0, reason, reason_cap)) {
+            return 0;
+        }
+        break;
+    case V5_COMMAND_START:
+        if (!axis_mask_must_be_zero(frame, reason, reason_cap) ||
+            !command_text_ok(frame->text_value, 1, 1, reason, reason_cap) ||
             !command_text_ok(frame->secondary_text_value, 0, 0, reason, reason_cap)) {
             return 0;
         }

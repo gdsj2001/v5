@@ -730,6 +730,7 @@ int v5_program_runtime_prepare_start(
     }
     if (v5_program_runtime_has_open_program(runtime)) {
         request->kind = V5_COMMAND_START;
+        request->text_value = runtime->source_path;
         return 1;
     }
     return 0;

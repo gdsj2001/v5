@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+
+halcmd sets re-switchkins-select 0
+exit 0

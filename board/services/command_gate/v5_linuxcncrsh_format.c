@@ -28,7 +28,10 @@ int v5_linuxcncrsh_format_line(
         rc = snprintf(out, out_size, "Set Open %s", request->text_value);
         return v5_linuxcncrsh_format_ok(rc, out_size);
     case V5_COMMAND_START:
-        rc = snprintf(out, out_size, "Set Run 0");
+        if (!request->text_value || !request->text_value[0]) {
+            return 0;
+        }
+        rc = snprintf(out, out_size, "Set Open %s\nSet Mode Auto\nSet Run 0\nSet Resume", request->text_value);
         return v5_linuxcncrsh_format_ok(rc, out_size);
     case V5_COMMAND_MDI_RUN:
         if (!request->text_value || !request->text_value[0]) {
@@ -87,7 +90,7 @@ int v5_linuxcncrsh_format_line(
         rc = snprintf(out, out_size, "Set MDI G92.1");
         return v5_linuxcncrsh_format_ok(rc, out_size);
     case V5_COMMAND_RTCP_SET:
-        rc = snprintf(out, out_size, "Set MDI %s", request->enabled_value ? "M128" : "M129");
+        rc = snprintf(out, out_size, "Set Mode MDI\nSet MDI %s", request->enabled_value ? "M128" : "M129");
         return v5_linuxcncrsh_format_ok(rc, out_size);
     case V5_COMMAND_FEED_OVERRIDE_SET:
         if (request->index_value < 0 || request->index_value > 200) {
@@ -112,7 +115,6 @@ int v5_linuxcncrsh_format_estop_reset_sequence(char *out, size_t out_size)
     if (!out || out_size == 0U) {
         return 0;
     }
-    rc = snprintf(out, out_size, "Set EStop Off | Get Estop | Set Machine On");
+    rc = snprintf(out, out_size, "Set EStop Off | Get Estop | Set Machine On | Get Machine");
     return v5_linuxcncrsh_format_ok(rc, out_size);
 }
-

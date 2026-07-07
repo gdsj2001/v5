@@ -46,7 +46,9 @@ int main(void)
             return 7;
         }
         v5_native_readback_init(&readback);
-        if (v5_native_rtcp_status_read(path, 1000U, &readback) || v5_native_readback_rtcp_known(&readback)) {
+        if (!v5_native_rtcp_status_read(path, 1000U, &readback) ||
+            !v5_native_readback_rtcp_known(&readback) ||
+            readback.rtcp_enabled) {
             unlink(path);
             return 8;
         }
@@ -64,6 +66,6 @@ int main(void)
         }
     }
     unlink(path);
-    printf("v5 native rtcp status: missing=fail_closed mcodes_m128=active mcodes_m129=inactive absent_or_ambiguous=invalid\n");
+    printf("v5 native rtcp status: missing=fail_closed mcodes_m128=active mcodes_m129_or_absent=inactive ambiguous=invalid\n");
     return 0;
 }

@@ -1,4 +1,6 @@
 #include "v5_linuxcncrsh_client.h"
+#include "v5_native_modal_tool_status.h"
+#include "v5_native_rtcp_status.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -125,13 +127,84 @@ static int v5_linuxcncrsh_recv_text(int fd, char *out, size_t out_size)
     return used > 0U;
 }
 
+static void v5_linuxcncrsh_drain_pending(int fd)
+{
+    char discard[512];
+    if (fd < 0) {
+        return;
+    }
+    while (recv(fd, discard, sizeof(discard), MSG_DONTWAIT) > 0) {
+    }
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        errno = 0;
+    }
+}
+
+static int v5_linuxcncrsh_response_has_word(const char *text, const char *word)
+{
+    size_t word_len;
+    const char *p;
+    if (!text || !word || !word[0]) {
+        return 0;
+    }
+    word_len = strlen(word);
+    p = text;
+    while (*p) {
+        while (*p && !isalnum((unsigned char)*p)) {
+            ++p;
+        }
+        if (*p) {
+            const char *start = p;
+            size_t len;
+            while (*p && isalnum((unsigned char)*p)) {
+                ++p;
+            }
+            len = (size_t)(p - start);
+            if (len == word_len) {
+                int match = 1;
+                size_t i;
+                for (i = 0U; i < len; ++i) {
+                    if (toupper((unsigned char)start[i]) != toupper((unsigned char)word[i])) {
+                        match = 0;
+                        break;
+                    }
+                }
+                if (match) {
+                    return 1;
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+static void v5_linuxcncrsh_recv_available(int fd, char *out, size_t *used, size_t out_size)
+{
+    if (fd < 0 || !out || !used || out_size == 0U) {
+        return;
+    }
+    while (*used + 1U < out_size) {
+        ssize_t rc;
+        errno = 0;
+        rc = recv(fd, out + *used, out_size - *used - 1U, MSG_DONTWAIT);
+        if (rc <= 0) {
+            break;
+        }
+        *used += (size_t)rc;
+        out[*used] = '\0';
+    }
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        errno = 0;
+    }
+}
+
 static int v5_linuxcncrsh_contains_machine_state(const char *text);
-static int v5_linuxcncrsh_contains_machine_off(const char *text);
 static int v5_linuxcncrsh_contains_estop_state(const char *text, int *active_out);
 
 static int v5_linuxcncrsh_recv_until_machine(int fd, char *out, size_t out_size)
 {
     size_t used = 0U;
+    int found = 0;
     if (!out || out_size == 0U) {
         return 0;
     }
@@ -144,15 +217,20 @@ static int v5_linuxcncrsh_recv_until_machine(int fd, char *out, size_t out_size)
         used += (size_t)rc;
         out[used] = '\0';
         if (v5_linuxcncrsh_contains_machine_state(out)) {
-            return 1;
+            found = 1;
+            usleep(20000U);
+            v5_linuxcncrsh_recv_available(fd, out, &used, out_size);
+            break;
         }
     }
-    return used > 0U && v5_linuxcncrsh_contains_machine_state(out);
+    return found || (used > 0U && v5_linuxcncrsh_contains_machine_state(out));
 }
 
 static int v5_linuxcncrsh_recv_until_estop(int fd, char *out, size_t out_size, int *active_out)
 {
     size_t used = 0U;
+    int active = 0;
+    int found = 0;
     if (!out || out_size == 0U) {
         return 0;
     }
@@ -164,28 +242,68 @@ static int v5_linuxcncrsh_recv_until_estop(int fd, char *out, size_t out_size, i
         }
         used += (size_t)rc;
         out[used] = '\0';
-        if (v5_linuxcncrsh_contains_estop_state(out, active_out)) {
-            return 1;
+        if (v5_linuxcncrsh_contains_estop_state(out, &active)) {
+            found = 1;
+            usleep(20000U);
+            v5_linuxcncrsh_recv_available(fd, out, &used, out_size);
+            (void)v5_linuxcncrsh_contains_estop_state(out, &active);
+            break;
         }
     }
-    return used > 0U && v5_linuxcncrsh_contains_estop_state(out, active_out);
+    if (!found && used > 0U) {
+        found = v5_linuxcncrsh_contains_estop_state(out, &active);
+    }
+    if (found && active_out) {
+        *active_out = active;
+    }
+    return found;
 }
 
-static int v5_linuxcncrsh_line_equals(const char *text, const char *wanted)
+static int v5_linuxcncrsh_line_span_equals(const char *start, const char *end, const char *wanted)
 {
-    const char *p;
     size_t wanted_len;
+    size_t len;
+    size_t i;
 
-    if (!text || !wanted) {
+    if (!start || !end || start > end || !wanted) {
         return 0;
     }
+    while (start < end && isspace((unsigned char)*start)) {
+        ++start;
+    }
+    while (end > start && isspace((unsigned char)*(end - 1))) {
+        --end;
+    }
+    len = (size_t)(end - start);
     wanted_len = strlen(wanted);
+    if (len != wanted_len) {
+        return 0;
+    }
+    for (i = 0U; i < len; ++i) {
+        if (toupper((unsigned char)start[i]) != toupper((unsigned char)wanted[i])) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int v5_linuxcncrsh_parse_binary_state_latest(
+    const char *text,
+    const char *on_line,
+    const char *off_line,
+    int *enabled_out)
+{
+    const char *p;
+    int found = 0;
+    int enabled = 0;
+
+    if (!text || !on_line || !off_line) {
+        return 0;
+    }
     p = text;
     while (*p) {
         const char *start;
         const char *end;
-        size_t len;
-        size_t i;
 
         while (*p == '\r' || *p == '\n') {
             ++p;
@@ -195,47 +313,26 @@ static int v5_linuxcncrsh_line_equals(const char *text, const char *wanted)
             ++p;
         }
         end = p;
-        while (start < end && isspace((unsigned char)*start)) {
-            ++start;
-        }
-        while (end > start && isspace((unsigned char)*(end - 1))) {
-            --end;
-        }
-        len = (size_t)(end - start);
-        if (len == wanted_len) {
-            int match = 1;
-            for (i = 0U; i < len; ++i) {
-                if (toupper((unsigned char)start[i]) != toupper((unsigned char)wanted[i])) {
-                    match = 0;
-                    break;
-                }
-            }
-            if (match) {
-                return 1;
-            }
+        if (v5_linuxcncrsh_line_span_equals(start, end, on_line)) {
+            enabled = 1;
+            found = 1;
+        } else if (v5_linuxcncrsh_line_span_equals(start, end, off_line)) {
+            enabled = 0;
+            found = 1;
         }
         while (*p == '\r' || *p == '\n') {
             ++p;
         }
     }
-    return 0;
+    if (found && enabled_out) {
+        *enabled_out = enabled;
+    }
+    return found;
 }
 
 static int v5_linuxcncrsh_parse_machine_state(const char *text, int *enabled_out)
 {
-    if (v5_linuxcncrsh_line_equals(text, "MACHINE ON")) {
-        if (enabled_out) {
-            *enabled_out = 1;
-        }
-        return 1;
-    }
-    if (v5_linuxcncrsh_line_equals(text, "MACHINE OFF")) {
-        if (enabled_out) {
-            *enabled_out = 0;
-        }
-        return 1;
-    }
-    return 0;
+    return v5_linuxcncrsh_parse_binary_state_latest(text, "MACHINE ON", "MACHINE OFF", enabled_out);
 }
 
 static int v5_linuxcncrsh_contains_machine_state(const char *text)
@@ -243,27 +340,9 @@ static int v5_linuxcncrsh_contains_machine_state(const char *text)
     return v5_linuxcncrsh_parse_machine_state(text, 0);
 }
 
-static int v5_linuxcncrsh_contains_machine_off(const char *text)
-{
-    int enabled = 1;
-    return v5_linuxcncrsh_parse_machine_state(text, &enabled) && !enabled;
-}
-
 static int v5_linuxcncrsh_contains_estop_state(const char *text, int *active_out)
 {
-    if (v5_linuxcncrsh_line_equals(text, "ESTOP ON")) {
-        if (active_out) {
-            *active_out = 1;
-        }
-        return 1;
-    }
-    if (v5_linuxcncrsh_line_equals(text, "ESTOP OFF")) {
-        if (active_out) {
-            *active_out = 0;
-        }
-        return 1;
-    }
-    return 0;
+    return v5_linuxcncrsh_parse_binary_state_latest(text, "ESTOP ON", "ESTOP OFF", active_out);
 }
 
 static int g_v5_linuxcncrsh_fd = -1;
@@ -394,13 +473,70 @@ static int v5_linuxcncrsh_send_request_text(int fd, const char *request, char *o
     if (!v5_linuxcncrsh_format_ok(rc, sizeof(framed))) {
         return 0;
     }
+    v5_linuxcncrsh_drain_pending(fd);
     if (!v5_linuxcncrsh_send_all(fd, framed)) {
         return 0;
     }
     if (out && out_size > 0U) {
-        return v5_linuxcncrsh_recv_text(fd, out, out_size);
+        if (!v5_linuxcncrsh_recv_text(fd, out, out_size)) {
+            return 0;
+        }
+        return !v5_linuxcncrsh_response_has_word(out, "NAK") &&
+               !v5_linuxcncrsh_response_has_word(out, "ERROR");
     }
-    return v5_linuxcncrsh_recv_text(fd, discard, sizeof(discard));
+    if (!v5_linuxcncrsh_recv_text(fd, discard, sizeof(discard))) {
+        return 0;
+    }
+    return !v5_linuxcncrsh_response_has_word(discard, "NAK") &&
+           !v5_linuxcncrsh_response_has_word(discard, "ERROR");
+}
+
+static int v5_linuxcncrsh_send_request_text_actual_checked(int fd, const char *request)
+{
+    char framed[768];
+    char discard[512];
+    int rc;
+
+    if (fd < 0 || !request || !request[0]) {
+        return 0;
+    }
+    rc = snprintf(framed, sizeof(framed), "%s\n", request);
+    if (!v5_linuxcncrsh_format_ok(rc, sizeof(framed))) {
+        return 0;
+    }
+    v5_linuxcncrsh_drain_pending(fd);
+    if (!v5_linuxcncrsh_send_all(fd, framed)) {
+        return 0;
+    }
+    (void)v5_linuxcncrsh_recv_text(fd, discard, sizeof(discard));
+    return 1;
+}
+
+static int v5_linuxcncrsh_send_control_command_fresh(
+    const V5LinuxcncrshConfig *config,
+    const char *request,
+    int ignore_text_result,
+    unsigned int settle_us)
+{
+    int fd;
+    int ok;
+
+    if (!request || !request[0]) {
+        return 0;
+    }
+    v5_linuxcncrsh_gate_close();
+    fd = v5_linuxcncrsh_gate_connect(config);
+    if (fd < 0) {
+        return 0;
+    }
+    ok = v5_linuxcncrsh_send_request_text(fd, "Set Enable EMCTOO", 0, 0U) &&
+         (ignore_text_result ? v5_linuxcncrsh_send_request_text_actual_checked(fd, request)
+                             : v5_linuxcncrsh_send_request_text(fd, request, 0, 0U));
+    v5_linuxcncrsh_gate_close();
+    if (ok && settle_us > 0U) {
+        usleep(settle_us);
+    }
+    return ok;
 }
 
 static int v5_linuxcncrsh_send_fifo_commands(int fd, const char *line)
@@ -468,6 +604,7 @@ int v5_linuxcncrsh_probe_machine(
         return 0;
     }
 
+    v5_linuxcncrsh_drain_pending(fd);
     ok = v5_linuxcncrsh_send_all(fd, "Get Machine\n") &&
          v5_linuxcncrsh_recv_until_machine(fd, transcript, sizeof(transcript)) &&
          v5_linuxcncrsh_contains_machine_state(transcript);
@@ -503,6 +640,61 @@ int v5_linuxcncrsh_probe_machine_enabled(
     }
     return v5_linuxcncrsh_parse_machine_state(transcript, enabled_out);
 }
+
+#ifndef _WIN32
+static int v5_linuxcncrsh_wait_machine_enabled_actual(
+    const V5LinuxcncrshConfig *config,
+    int expected_enabled,
+    unsigned int attempts,
+    unsigned int delay_us)
+{
+    unsigned int attempt;
+    unsigned int stable = 0U;
+    for (attempt = 0U; attempt < attempts; ++attempt) {
+        int enabled = 0;
+        int ok;
+        v5_linuxcncrsh_gate_close();
+        ok = v5_linuxcncrsh_probe_machine_enabled(config, &enabled, 0, 0);
+        v5_linuxcncrsh_gate_close();
+        if (ok && enabled == (expected_enabled ? 1 : 0)) {
+            ++stable;
+        } else {
+            stable = 0U;
+        }
+        if (stable >= 2U) {
+            return 1;
+        }
+        if (delay_us > 0U) {
+            usleep(delay_us);
+        }
+    }
+    return 0;
+}
+
+static int v5_linuxcncrsh_wait_all_homed_actual(unsigned int attempts, unsigned int delay_us)
+{
+    unsigned int attempt;
+    unsigned int stable = 0U;
+    for (attempt = 0U; attempt < attempts; ++attempt) {
+        V5NativeReadback readback;
+        v5_native_readback_init(&readback);
+        if (v5_native_modal_tool_status_read(0, V5_NATIVE_MODAL_TOOL_STATUS_DEFAULT_MAX_AGE_MS, &readback) &&
+            v5_native_readback_all_homed_known(&readback) &&
+            readback.all_homed) {
+            ++stable;
+        } else {
+            stable = 0U;
+        }
+        if (stable >= 2U) {
+            return 1;
+        }
+        if (delay_us > 0U) {
+            usleep(delay_us);
+        }
+    }
+    return 0;
+}
+#endif
 
 int v5_native_probe_machine_enabled_actual(int *enabled_out)
 {
@@ -545,6 +737,7 @@ int v5_linuxcncrsh_probe_estop(
         return 0;
     }
 
+    v5_linuxcncrsh_drain_pending(fd);
     ok = v5_linuxcncrsh_send_all(fd, "Get Estop\n") &&
          v5_linuxcncrsh_recv_until_estop(fd, transcript, sizeof(transcript), &active);
     if (!ok) {
@@ -631,17 +824,18 @@ V5LinuxcncrshSendStatus v5_linuxcncrsh_send_estop_reset_sequence(
         *machine_on_requested_out = 0;
     }
 
-    status = v5_linuxcncrsh_send_line(config, "Set EStop Off");
-    if (status != V5_LINUXCNCRSH_SEND_SENT) {
-        return status;
+    if (!v5_linuxcncrsh_send_control_command_fresh(config, "Set EStop Off", 0, 100000U)) {
+        return V5_LINUXCNCRSH_SEND_IO_ERROR;
     }
     for (unsigned int attempt = 0U; attempt < 10U; ++attempt) {
         if (v5_linuxcncrsh_probe_estop(config, &estop_active, transcript, sizeof(transcript)) && !estop_active) {
             latch_cleared = 1;
             break;
         }
+        v5_linuxcncrsh_gate_close();
         usleep(100000U);
     }
+    v5_linuxcncrsh_gate_close();
     if (!latch_cleared) {
         return V5_LINUXCNCRSH_SEND_IO_ERROR;
     }
@@ -649,9 +843,20 @@ V5LinuxcncrshSendStatus v5_linuxcncrsh_send_estop_reset_sequence(
     if (machine_on_requested_out) {
         *machine_on_requested_out = 1;
     }
-    status = v5_linuxcncrsh_send_line(config, "Set Machine On");
+    status = v5_linuxcncrsh_send_control_command_fresh(config, "Set Machine On", 1, 500000U)
+                 ? V5_LINUXCNCRSH_SEND_SENT
+                 : V5_LINUXCNCRSH_SEND_IO_ERROR;
     if (machine_on_status_out) {
         *machine_on_status_out = (int)status;
+    }
+    if (status != V5_LINUXCNCRSH_SEND_SENT) {
+        return status;
+    }
+    if (!v5_linuxcncrsh_wait_machine_enabled_actual(config, 1, 10U, 100000U)) {
+        if (machine_on_status_out) {
+            *machine_on_status_out = (int)V5_LINUXCNCRSH_SEND_IO_ERROR;
+        }
+        return V5_LINUXCNCRSH_SEND_IO_ERROR;
     }
     return V5_LINUXCNCRSH_SEND_SENT;
 #endif
@@ -673,6 +878,9 @@ V5LinuxcncrshSendStatus v5_linuxcncrsh_send_home_sequence(
     if (mode_out && mode_out_size > 0U) {
         snprintf(mode_out, mode_out_size, "manual_home_all_joints");
     }
+    if (!v5_linuxcncrsh_wait_machine_enabled_actual(config, 1, 3U, 100000U)) {
+        return V5_LINUXCNCRSH_SEND_IO_ERROR;
+    }
     fd = v5_linuxcncrsh_gate_connect(config);
     if (fd < 0) {
         return V5_LINUXCNCRSH_SEND_UNAVAILABLE;
@@ -682,6 +890,9 @@ V5LinuxcncrshSendStatus v5_linuxcncrsh_send_home_sequence(
          v5_linuxcncrsh_send_request_text(fd, "Set Home -1", 0, 0U);
     if (!ok) {
         v5_linuxcncrsh_gate_close();
+        return V5_LINUXCNCRSH_SEND_IO_ERROR;
+    }
+    if (!v5_linuxcncrsh_wait_all_homed_actual(50U, 100000U)) {
         return V5_LINUXCNCRSH_SEND_IO_ERROR;
     }
     return V5_LINUXCNCRSH_SEND_SENT;
@@ -696,10 +907,6 @@ V5LinuxcncrshSendStatus v5_linuxcncrsh_send_estop_force_sequence(
     return V5_LINUXCNCRSH_SEND_UNAVAILABLE;
 #else
     V5LinuxcncrshConfig urgent_config;
-    int fd;
-    char ack[512];
-    char transcript[1024];
-    int ok;
 
     memset(&urgent_config, 0, sizeof(urgent_config));
     if (config) {
@@ -709,19 +916,47 @@ V5LinuxcncrshSendStatus v5_linuxcncrsh_send_estop_force_sequence(
         urgent_config.timeout_ms = 250U;
     }
 
-    fd = v5_linuxcncrsh_gate_connect(&urgent_config);
-    if (fd < 0) {
-        return V5_LINUXCNCRSH_SEND_UNAVAILABLE;
-    }
-    ok = v5_linuxcncrsh_send_request_text(fd, "Set Enable EMCTOO", 0, 0U) &&
-         v5_linuxcncrsh_send_request_text(fd, "Set Machine Off", ack, sizeof(ack)) &&
-         v5_linuxcncrsh_send_request_text(fd, "Get Machine", transcript, sizeof(transcript)) &&
-         v5_linuxcncrsh_contains_machine_off(transcript);
-    if (!ok) {
-        v5_linuxcncrsh_gate_close();
+    if (!v5_linuxcncrsh_send_control_command_fresh(&urgent_config, "Set Machine Off", 1, 50000U) ||
+        !v5_linuxcncrsh_wait_machine_enabled_actual(&urgent_config, 0, 8U, 100000U)) {
         return V5_LINUXCNCRSH_SEND_IO_ERROR;
     }
     return V5_LINUXCNCRSH_SEND_SENT;
+#endif
+}
+
+V5LinuxcncrshSendStatus v5_linuxcncrsh_send_rtcp_sequence(
+    const V5LinuxcncrshConfig *config,
+    int enabled)
+{
+#ifdef _WIN32
+    (void)config;
+    (void)enabled;
+    return V5_LINUXCNCRSH_SEND_UNAVAILABLE;
+#else
+    char line[64];
+    int target = enabled ? 1 : 0;
+    V5LinuxcncrshSendStatus status;
+    V5NativeReadback readback;
+    int rc;
+
+    rc = snprintf(line, sizeof(line), "Set Mode MDI\nSet MDI %s", target ? "M128" : "M129");
+    if (!v5_linuxcncrsh_format_ok(rc, sizeof(line))) {
+        return V5_LINUXCNCRSH_SEND_INVALID;
+    }
+    status = v5_linuxcncrsh_send_line(config, line);
+    if (status != V5_LINUXCNCRSH_SEND_SENT) {
+        return status;
+    }
+    for (unsigned int attempt = 0U; attempt < 20U; ++attempt) {
+        v5_native_readback_init(&readback);
+        if (v5_native_rtcp_status_read(0, V5_NATIVE_RTCP_STATUS_DEFAULT_MAX_AGE_MS, &readback) &&
+            v5_native_readback_rtcp_known(&readback) &&
+            readback.rtcp_enabled == target) {
+            return V5_LINUXCNCRSH_SEND_SENT;
+        }
+        usleep(100000U);
+    }
+    return V5_LINUXCNCRSH_SEND_IO_ERROR;
 #endif
 }
 
@@ -743,6 +978,10 @@ V5LinuxcncrshSendStatus v5_linuxcncrsh_send_prepared(
     if (prepared && request && request->kind == V5_COMMAND_ESTOP_FORCE &&
         strcmp(prepared->owner ? prepared->owner : "", "native_safety") == 0) {
         return v5_linuxcncrsh_send_estop_force_sequence(config);
+    }
+    if (prepared && request && request->kind == V5_COMMAND_RTCP_SET &&
+        strcmp(prepared->owner ? prepared->owner : "", "native_linuxcncrsh") == 0) {
+        return v5_linuxcncrsh_send_rtcp_sequence(config, request->enabled_value);
     }
     if (!v5_linuxcncrsh_format_line(prepared, request, line, sizeof(line))) {
         return V5_LINUXCNCRSH_SEND_INVALID;

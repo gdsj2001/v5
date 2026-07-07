@@ -26,6 +26,9 @@ typedef struct V5SettingsActionStatus {
     char message[768];
     char result_path[192];
     char axis[16];
+    int restart_required;
+    int restart_deferred;
+    int backend_restart_required;
 } V5SettingsActionStatus;
 
 int v5_settings_action_start(V5MainPageActionKind action, V5SettingsActionResult *result);

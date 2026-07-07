@@ -38,7 +38,7 @@ static int expect_estop_reset_sequence(void)
     if (!v5_linuxcncrsh_format_estop_reset_sequence(line, sizeof(line))) {
         return 0;
     }
-    if (strcmp(line, "Set EStop Off | Get Estop | Set Machine On") != 0) {
+    if (strcmp(line, "Set EStop Off | Get Estop | Set Machine On | Get Machine") != 0) {
         printf("estop_reset_sequence mismatch: %s\n", line);
         return 0;
     }
@@ -90,7 +90,7 @@ int main(void)
         return 7;
     }
     if (!v5_command_rtcp_prepare(1, &prepared, &request) ||
-        !expect_line("rtcp_on", "Set MDI M128", &prepared, &request)) {
+        !expect_line("rtcp_on", "Set Mode MDI\nSet MDI M128", &prepared, &request)) {
         return 8;
     }
     if (!v5_command_jog_increment_prepare('X', 10.0, 1, &prepared, &request) ||
@@ -116,12 +116,12 @@ int main(void)
         return 11;
     }
     if (!v5_command_rtcp_toggle_prepare(&readback, &prepared, &request) ||
-        !expect_line("rtcp_toggle_off", "Set MDI M129", &prepared, &request)) {
+        !expect_line("rtcp_toggle_off", "Set Mode MDI\nSet MDI M129", &prepared, &request)) {
         return 16;
     }
     v5_native_readback_set_rtcp_actual(&readback, 0);
     if (!v5_command_rtcp_toggle_prepare(&readback, &prepared, &request) ||
-        !expect_line("rtcp_toggle_on", "Set MDI M128", &prepared, &request)) {
+        !expect_line("rtcp_toggle_on", "Set Mode MDI\nSet MDI M128", &prepared, &request)) {
         return 17;
     }
     v5_native_readback_set_unavailable(&readback, "rtcp_missing");

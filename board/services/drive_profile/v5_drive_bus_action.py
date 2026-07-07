@@ -466,6 +466,32 @@ def read_resident_snapshot() -> Dict[str, Any]:
     return snapshot
 
 
+def replace_resident_snapshot(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    profiles = snapshot.get("profiles") if isinstance(snapshot, dict) else None
+    if not isinstance(profiles, list) or not profiles:
+        raise DriveActionError("DRIVE_PROFILE_RESIDENT_SNAPSHOT_EMPTY", "驱动 profile 运行内存快照为空，读取驱动未执行。", snapshot)
+    global _RESIDENT_SNAPSHOT_CACHE
+    _RESIDENT_SNAPSHOT_CACHE = snapshot
+    maps = snapshot.get("maps") if isinstance(snapshot.get("maps"), list) else []
+    return {
+        "ok": True,
+        "loaded": True,
+        "generated_at": snapshot.get("generated_at", ""),
+        "profile_count": len(profiles),
+        "map_file_count": snapshot.get("map_file_count", 0),
+        "maps": [
+            {
+                "scope": item.get("scope", ""),
+                "ok": bool(item.get("ok")),
+                "sha256": item.get("sha256", ""),
+                "profile_count": item.get("profile_count", 0),
+                "map_version": item.get("map_version", ""),
+            }
+            for item in maps if isinstance(item, dict)
+        ],
+    }
+
+
 def parse_slave_identity(position: str, timeout_s: float) -> Dict[str, Any]:
     result = run_command(["ethercat", "slaves", "-p", str(position), "-v"], timeout_s)
     detail = {"position": str(position), "identity_ok": False, "identity_stdout": result.get("stdout", ""), "identity_stderr": result.get("stderr", "")}
@@ -849,6 +875,7 @@ def compact_health(health: Any) -> Dict[str, Any]:
     for key in (
         "statusword",
         "error_code",
+        "aux_error_code",
         "mode_of_operation",
         "actual_position_counts",
         "egear_numerator",
@@ -862,6 +889,22 @@ def compact_health(health: Any) -> Dict[str, Any]:
 def compact_readback(readback: Any) -> Dict[str, Any]:
     if not isinstance(readback, dict):
         return {"ok": False, "code": "BAD_READBACK_RESULT"}
+    if "attempt_count" in readback and "attempts" not in readback:
+        compact: Dict[str, Any] = {
+            "ok": bool(readback.get("ok")),
+            "attempt_count": readback.get("attempt_count"),
+            "health": compact_health(readback.get("health")),
+        }
+        if isinstance(readback.get("last_attempt"), dict):
+            last = readback.get("last_attempt") or {}
+            compact["last_attempt"] = {
+                "attempt": last.get("attempt"),
+                "read_ok": bool(last.get("read_ok")),
+                "health": compact_health(last.get("health")),
+            }
+        if isinstance(readback.get("mailbox_recovery"), dict):
+            compact["mailbox_recovery"] = readback.get("mailbox_recovery")
+        return compact
     attempts = readback.get("attempts") if isinstance(readback.get("attempts"), list) else []
     compact: Dict[str, Any] = {
         "ok": bool(readback.get("ok")),
@@ -874,7 +917,6 @@ def compact_readback(readback: Any) -> Dict[str, Any]:
             "attempt": last.get("attempt"),
             "read_ok": bool(last.get("read_ok")),
             "health": compact_health(last.get("health")),
-            "reads": {name: compact_read_item(item) for name, item in (last.get("reads", {}) or {}).items()} if isinstance(last.get("reads"), dict) else {},
         }
     if isinstance(readback.get("mailbox_recovery"), dict):
         compact["mailbox_recovery"] = readback.get("mailbox_recovery")
@@ -921,7 +963,7 @@ def compact_target_result(item: Any) -> Dict[str, Any]:
         "mode_write_status",
     )
     compact = {key: item.get(key) for key in keep if key in item}
-    for key in ("target_egear", "factory_reset_write", "fault_reset_write", "egear_write", "mode_write", "post_write_op_recovery", "fault_reset_after_factory_reset"):
+    for key in ("target_egear", "factory_reset_write", "fault_reset_write", "egear_write", "mode_write", "post_write_op_recovery", "factory_reset_recovery", "fault_reset_after_factory_reset"):
         if key in item:
             compact[key] = item.get(key)
     if "mode_pre_readback" in item and isinstance(item.get("mode_pre_readback"), dict):
@@ -1025,6 +1067,9 @@ def read_required_state(target: Dict[str, Any], timeout_s: float) -> Dict[str, A
         item = read_command(position, name, commands.get(name, {}), True)
         reads[name] = item
         ok = ok and bool(item.get("ok"))
+    aux_error_command = commands.get("drive.read_aux_error_code")
+    if isinstance(aux_error_command, dict) and aux_error_command.get("supported") is not False:
+        reads["drive.read_aux_error_code"] = read_command(position, "drive.read_aux_error_code", aux_error_command, False)
     velocity_command = commands.get("drive.read_actual_velocity")
     if isinstance(velocity_command, dict) and velocity_command.get("supported") is not False:
         reads["drive.read_actual_velocity"] = read_command(position, "drive.read_actual_velocity", velocity_command, False)
@@ -1038,6 +1083,7 @@ def evaluate_drive_health(reads: Dict[str, Any],
     failures: List[Dict[str, Any]] = []
     statusword = read_scalar_value(reads.get("drive.read_statusword", {}))
     error_code = read_scalar_value(reads.get("drive.read_error_code", {}))
+    aux_error_code = read_scalar_value(reads.get("drive.read_aux_error_code", {}))
     mode = read_scalar_value(reads.get("drive.read_mode", {}))
     actual_position = read_scalar_value(reads.get("drive.read_actual_position", {}))
     egear_num, egear_den = read_pair_value(reads.get("drive.read_egear", {}))
@@ -1048,7 +1094,12 @@ def evaluate_drive_health(reads: Dict[str, Any],
     if error_code is None:
         failures.append({"field": "error_code", "code": "DRIVE_ERROR_CODE_READ_FAILED"})
     elif error_code != 0:
-        failures.append({"field": "error_code", "code": "DRIVE_ERROR_CODE_NONZERO", "value": error_code})
+        failure = {"field": "error_code", "code": "DRIVE_ERROR_CODE_NONZERO", "value": error_code}
+        if aux_error_code is not None:
+            failure["aux_error_code"] = aux_error_code
+        failures.append(failure)
+    elif aux_error_code not in (None, 0):
+        failures.append({"field": "aux_error_code", "code": "DRIVE_AUX_ERROR_CODE_NONZERO", "value": aux_error_code})
     if actual_position is None:
         failures.append({"field": "actual_position", "code": "DRIVE_ACTUAL_POSITION_READ_FAILED"})
     if require_positive_egear and (egear_num is None or egear_den is None or egear_num <= 0 or egear_den <= 0):
@@ -1062,6 +1113,7 @@ def evaluate_drive_health(reads: Dict[str, Any],
         "failures": failures,
         "statusword": statusword,
         "error_code": error_code,
+        "aux_error_code": aux_error_code,
         "mode_of_operation": mode,
         "actual_position_counts": actual_position,
         "egear_numerator": egear_num,
@@ -1101,6 +1153,74 @@ def readback_with_retry(target: Dict[str, Any],
         time.sleep(0.25)
     last_health = attempt_results[-1].get("health", {}) if attempt_results else {}
     return {"ok": False, "attempts": attempt_results, "health": last_health, "mailbox_recovery": recovery}
+
+
+FACTORY_RESET_STABILIZE_ATTEMPTS = 8
+FACTORY_RESET_STABILIZE_DELAY_S = 2.0
+
+
+def summarize_reset_recovery_cycle(attempt: int,
+                                   readback: Dict[str, Any],
+                                   fault_reset: Dict[str, Any] | None = None,
+                                   op_recovery: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    health = readback.get("health") if isinstance(readback.get("health"), dict) else {}
+    payload: Dict[str, Any] = {
+        "attempt": attempt,
+        "ok": bool(readback.get("ok")),
+        "statusword": health.get("statusword"),
+        "error_code": health.get("error_code"),
+        "aux_error_code": health.get("aux_error_code"),
+        "egear_numerator": health.get("egear_numerator"),
+        "egear_denominator": health.get("egear_denominator"),
+    }
+    if isinstance(fault_reset, dict):
+        payload["fault_reset_ok"] = bool(fault_reset.get("ok"))
+        payload["fault_reset_code"] = str(fault_reset.get("code") or "")
+    if isinstance(op_recovery, dict):
+        payload["op_recovery_ok"] = bool(op_recovery.get("ok"))
+    return payload
+
+
+def factory_reset_readback_with_recovery(target: Dict[str, Any], timeout_s: float) -> Dict[str, Any]:
+    commands = target.get("commands") if isinstance(target.get("commands"), dict) else {}
+    reset_command = commands.get("drive.reset_fault", {})
+    reset_supported = isinstance(reset_command, dict) and reset_command.get("supported") is not False
+    cycles: List[Dict[str, Any]] = []
+    last_readback: Dict[str, Any] = {"ok": False, "health": {}}
+    for attempt in range(1, FACTORY_RESET_STABILIZE_ATTEMPTS + 1):
+        if attempt > 1:
+            time.sleep(FACTORY_RESET_STABILIZE_DELAY_S)
+        readback = readback_with_retry(target, timeout_s, attempts=1)
+        last_readback = readback
+        if readback.get("ok"):
+            cycles.append(summarize_reset_recovery_cycle(attempt, readback))
+            return {
+                "ok": True,
+                "readback": readback,
+                "summary": {
+                    "ok": True,
+                    "attempt_count": attempt,
+                    "settle_delay_s": FACTORY_RESET_STABILIZE_DELAY_S,
+                    "cycles": cycles,
+                },
+            }
+        fault_reset: Dict[str, Any] | None = None
+        op_recovery: Dict[str, Any] | None = None
+        if reset_supported:
+            fault_reset = write_command(str(target.get("position") or ""), "drive.reset_fault", reset_command)
+            if not fault_reset.get("ok"):
+                op_recovery = recover_slave_mailbox(str(target.get("position") or ""), timeout_s)
+        cycles.append(summarize_reset_recovery_cycle(attempt, readback, fault_reset, op_recovery))
+    return {
+        "ok": False,
+        "readback": last_readback,
+        "summary": {
+            "ok": False,
+            "attempt_count": len(cycles),
+            "settle_delay_s": FACTORY_RESET_STABILIZE_DELAY_S,
+            "cycles": cycles,
+        },
+    }
 
 
 def assert_drive_write_safety(target: Dict[str, Any], command_names: List[str], timeout_s: float) -> Dict[str, Any]:
@@ -1650,13 +1770,9 @@ def run_factory_reset(timeout_s: float) -> Dict[str, Any]:
                 raise DriveActionError("DRIVE_RESET_WRITE_FAILED", "复位驱动 SDO 写入失败。", write)
             mark_reset_invalid(target["axis_cfg"], "drive_restore_factory_defaults")
             item["post_write_op_recovery"] = recover_slave_mailbox(str(target.get("position") or ""), timeout_s)
-            readback = readback_with_retry(target, timeout_s)
-            if not readback.get("ok"):
-                reset_command = commands.get("drive.reset_fault", {})
-                if isinstance(reset_command, dict) and reset_command.get("supported") is not False:
-                    fault_reset = write_command(str(target.get("position") or ""), "drive.reset_fault", reset_command)
-                    item["fault_reset_after_factory_reset"] = fault_reset
-                    readback = readback_with_retry(target, timeout_s)
+            recovery = factory_reset_readback_with_recovery(target, timeout_s)
+            item["factory_reset_recovery"] = recovery.get("summary", {})
+            readback = recovery.get("readback", {})
             item["readback"] = compact_readback(readback)
             if not readback.get("ok"):
                 raise DriveActionError("DRIVE_RESET_READBACK_FAILED", "复位驱动后必读 SDO 未完整读回。", compact_readback(readback))

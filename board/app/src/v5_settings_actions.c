@@ -433,6 +433,9 @@ int v5_settings_action_poll_status(V5SettingsActionStatus *status)
     json_string_value(response, "message_cn", status->message, sizeof(status->message));
     json_string_value(response, "result_path", status->result_path, sizeof(status->result_path));
     json_string_value(response, "axis", status->axis, sizeof(status->axis));
+    status->restart_required = json_bool_value(response, "restart_required");
+    status->restart_deferred = json_bool_value(response, "restart_deferred");
+    status->backend_restart_required = json_bool_value(response, "backend_restart_required");
     return status->available;
 }
 

@@ -38,13 +38,17 @@ static int prepare_program_open(
     return v5_command_gate_prepare(request, prepared);
 }
 
-static int prepare_start(V5CommandPrepared *prepared, V5CommandRequest *request)
+static int prepare_start(
+    const char *program_path,
+    V5CommandPrepared *prepared,
+    V5CommandRequest *request)
 {
-    if (!prepared || !request) {
+    if (!program_path || !program_path[0] || !prepared || !request) {
         return 0;
     }
     memset(request, 0, sizeof(*request));
     request->kind = V5_COMMAND_START;
+    request->text_value = program_path;
     return v5_command_gate_prepare(request, prepared);
 }
 
@@ -127,7 +131,7 @@ int main(int argc, char **argv)
         return 0;
     }
 
-    if (!prepare_start(&prepared, &request) ||
+    if (!prepare_start(program_path, &prepared, &request) ||
         !send_prepared_or_report("start", &config, &prepared, &request)) {
         return 6;
     }

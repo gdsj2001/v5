@@ -1,6 +1,5 @@
 # schema=v5.settings.parameter_table.tsv.v1
 SETTINGS	bus_pulse_setting	总线
-SETTINGS	slave_options	0,1,2,3,4,5,6,7
 X	slave	0
 Y	slave	1
 Z	slave	2
@@ -23,3 +22,4 @@ G53	tool_setter_z	0
 G53	five_direction_detector_x	0
 G53	five_direction_detector_y	0
 G53	five_direction_detector_z	0
+SETTINGS	slave_options	0:SV630_1Axis_03713,1:SV630_1Axis_03715,2:SV630_1Axis_03715,3:SV630_1Axis_03713,4:SV630_1Axis_03713
