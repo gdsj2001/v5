@@ -1,0 +1,194 @@
+#!/bin/sh
+set -eu
+
+LD_BIND_NOW=1
+export LD_BIND_NOW
+ulimit -l unlimited 2>/dev/null || true
+
+DAEMON=/usr/libexec/8ax/v5_lvgl_shell
+PIDFILE=/run/8ax/v5_ui_relay.pid
+LOGFILE=/run/8ax/v5_ui_relay.log
+PORT=${V5_UI_REMOTE_PORT:-18080}
+REMOTE_BIND=${V5_UI_REMOTE_BIND:-0.0.0.0}
+REMOTE_ALLOW_CIDRS=${V5_UI_REMOTE_ALLOW_CIDRS:-127.0.0.1/32,192.168.1.0/24}
+REMOTE_INPUT=${V5_UI_REMOTE_INPUT:-layout_only}
+PROJECT_ROOT=${V5_PROJECT_ROOT:-/opt/8ax/v5}
+PROFILE_SNAPSHOT=/usr/libexec/8ax/drive_profile/v5_drive_profile_resident_snapshot.py
+
+is_running() {
+  [ -r "$PIDFILE" ] || return 1
+  pid=$(cat "$PIDFILE" 2>/dev/null || true)
+  [ -n "$pid" ] || return 1
+  kill -0 "$pid" 2>/dev/null
+}
+
+set_non_microkernel_affinity() {
+  pid="$1"
+  [ -n "$pid" ] || return 0
+  command -v taskset >/dev/null 2>&1 || return 0
+  if grep -qw 1 /sys/devices/system/cpu/online 2>/dev/null || grep -q '0-1' /sys/devices/system/cpu/online 2>/dev/null; then
+    taskset -pc 1 "$pid" >>"$LOGFILE" 2>&1 || true
+  fi
+}
+
+
+build_profile_snapshot() {
+  if [ -x "$PROFILE_SNAPSHOT" ]; then
+    "$PROFILE_SNAPSHOT" --project-root "$PROJECT_ROOT" --out /run/8ax_v5_drive/drive_profile_resident_snapshot.json >>"$LOGFILE" 2>&1 || true
+  fi
+}
+
+wait_boot_inputs_ready() {
+  python3 - "$PROJECT_ROOT" >>"$LOGFILE" 2>&1 <<'PY'
+import binascii
+import json
+import os
+import struct
+import sys
+import time
+
+project_root = sys.argv[1]
+snapshot_path = "/run/8ax_v5_drive/drive_profile_resident_snapshot.json"
+shm_path = "/dev/shm/v3_status_shm"
+required_files = [
+    os.path.join(project_root, "config/settings/self_parameter_table.tsv"),
+    os.path.join(project_root, "config/settings/drive_parameter_table.tsv"),
+]
+
+def check_params():
+    for path in required_files:
+        if not os.path.isfile(path) or os.path.getsize(path) <= 0:
+            return False, "missing_parameter_owner:%s" % path
+    if not os.path.isfile(snapshot_path) or os.path.getsize(snapshot_path) <= 0:
+        return False, "missing_drive_profile_snapshot"
+    try:
+        with open(snapshot_path, "r", encoding="utf-8") as fp:
+            payload = json.load(fp)
+    except Exception as exc:
+        return False, "bad_drive_profile_snapshot:%s" % type(exc).__name__
+    if not payload.get("loaded") or int(payload.get("profile_count") or 0) <= 0 or int(payload.get("map_file_count") or 0) <= 0:
+        return False, "drive_profile_snapshot_not_loaded"
+    return True, "params_ready"
+
+def check_shm():
+    try:
+        with open(shm_path, "rb") as fp:
+            data = fp.read(808)
+    except OSError:
+        return False, "missing_status_shm"
+    if len(data) != 808:
+        return False, "short_status_shm"
+    magic, version, header, total, payload, flags, seq, crc = struct.unpack_from("<8I", data, 0)
+    if (magic, version, header, total, payload) != (0x56355348, 1, 808, 808, 776):
+        return False, "bad_status_shm_header"
+    if not seq or seq & 1:
+        return False, "status_shm_seq_not_even"
+    calc = binascii.crc32(data[:24])
+    calc = binascii.crc32(data[32:808], calc) & 0xFFFFFFFF
+    if crc != calc:
+        return False, "status_shm_crc_mismatch"
+    epoch = struct.unpack_from("<Q", data, 32)[0]
+    valid_mask, typed_flags = struct.unpack_from("<2I", data, 40)
+    now = time.monotonic_ns()
+    if not epoch or epoch > now or now - epoch > 500_000_000:
+        return False, "status_shm_not_fresh"
+    if (valid_mask & 0x3) != 0x3:
+        return False, "status_shm_coordinates_not_ready"
+    if typed_flags & 0x4:
+        return False, "status_shm_unavailable"
+    return True, "shm_ready"
+
+deadline = time.monotonic() + 120.0
+last_reason = "not_checked"
+while time.monotonic() < deadline:
+    ok, reason = check_params()
+    if ok:
+        ok, reason = check_shm()
+    if ok:
+        print("v5_ui_relay boot inputs ready: %s" % reason)
+        raise SystemExit(0)
+    last_reason = reason
+    time.sleep(0.1)
+print("v5_ui_relay boot inputs not ready: %s" % last_reason, file=sys.stderr)
+raise SystemExit(1)
+PY
+}
+
+clear_framebuffer() {
+  [ -w /dev/fb0 ] || return 0
+  stride=$(cat /sys/class/graphics/fb0/stride 2>/dev/null || true)
+  height=$(sed -n 's/^U:[0-9][0-9]*x\([0-9][0-9]*\).*/\1/p' /sys/class/graphics/fb0/modes 2>/dev/null | head -n 1)
+  case "$stride:$height" in
+    *[!0-9:]*|:|*:|:*) return 0 ;;
+  esac
+  dd if=/dev/zero of=/dev/fb0 bs="$stride" count="$height" >/dev/null 2>&1 || true
+}
+
+
+
+start_service() {
+  if is_running; then
+    echo "v5_ui_relay already running pid=$(cat "$PIDFILE") port=$PORT project_root=$PROJECT_ROOT"
+    return 0
+  fi
+  test -x "$DAEMON"
+  mkdir -p /run/8ax
+  rm -f "$PIDFILE"
+  build_profile_snapshot
+  wait_boot_inputs_ready
+  clear_framebuffer
+  V5_PROJECT_ROOT="$PROJECT_ROOT" V5_UI_REMOTE_INPUT="$REMOTE_INPUT" V5_UI_REMOTE_BIND="$REMOTE_BIND" V5_UI_REMOTE_ALLOW_CIDRS="$REMOTE_ALLOW_CIDRS" setsid "$DAEMON" --serve --port "$PORT" >>"$LOGFILE" 2>&1 &
+  echo "$!" >"$PIDFILE"
+  sleep 1
+  if is_running; then
+    set_non_microkernel_affinity "$(cat "$PIDFILE")"
+    echo "v5_ui_relay started pid=$(cat "$PIDFILE") port=$PORT bind=$REMOTE_BIND allow_cidrs=$REMOTE_ALLOW_CIDRS remote_input=$REMOTE_INPUT project_root=$PROJECT_ROOT"
+    return 0
+  fi
+  echo "v5_ui_relay failed to start" >&2
+  tail -n 40 "$LOGFILE" 2>/dev/null || true
+  return 1
+}
+
+stop_service() {
+  if ! is_running; then
+    rm -f "$PIDFILE"
+    echo "v5_ui_relay not running"
+    return 0
+  fi
+  pid=$(cat "$PIDFILE")
+  kill "$pid" 2>/dev/null || true
+  i=0
+  while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 50 ]; do
+    i=$((i + 1))
+    sleep 0.1
+  done
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -KILL "$pid" 2>/dev/null || true
+    sleep 0.2
+  fi
+  if kill -0 "$pid" 2>/dev/null; then
+    echo "v5_ui_relay did not stop pid=$pid" >&2
+    return 1
+  fi
+  rm -f "$PIDFILE"
+  echo "v5_ui_relay stopped pid=$pid"
+}
+
+case "${1:-}" in
+  start) start_service ;;
+  stop) stop_service ;;
+  restart) stop_service; start_service ;;
+  status)
+    if is_running; then
+      echo "v5_ui_relay running pid=$(cat "$PIDFILE") port=$PORT bind=$REMOTE_BIND allow_cidrs=$REMOTE_ALLOW_CIDRS remote_input=$REMOTE_INPUT project_root=$PROJECT_ROOT"
+    else
+      echo "v5_ui_relay not running"
+      exit 1
+    fi
+    ;;
+  *)
+    echo "usage: $0 {start|stop|restart|status}" >&2
+    exit 2
+    ;;
+esac

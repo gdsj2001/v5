@@ -52,7 +52,7 @@ C: -90.000 .. 159030.000
    - `feed_segments=89322`
    - `rapid_segments=4`
    - `yellow_g0_segments=0`
-2. 文件已同步到 VM truth source 和板端 nc 目录。
+2. 文件已同步到 runtime source truth 和板端 nc 目录。
 3. 板端 LinuxCNC open-only 验证通过：
    - 动作：只执行 `program_open`，没有 `AUTO_RUN`
    - `stat.file=/opt/8ax/phase0_bus5/nc/7-27_dasheng1_rough_re.ngc`

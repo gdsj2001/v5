@@ -1,0 +1,9 @@
+# schema=v5.settings.parameter_table.tsv.v1
+X	encoder_bits	18
+Y	encoder_bits	18
+Z	encoder_bits	18
+A	encoder_bits	18
+B	encoder_bits	18
+C	encoder_bits	18
+GANTRY	encoder_bits	18
+TOOLMAG	encoder_bits	18

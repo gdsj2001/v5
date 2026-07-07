@@ -1,0 +1,25 @@
+# schema=v5.settings.parameter_table.tsv.v1
+SETTINGS	bus_pulse_setting	总线
+SETTINGS	slave_options	0,1,2,3,4,5,6,7
+X	slave	0
+Y	slave	1
+Z	slave	2
+A	slave	3
+B	slave	4
+C	slave	5
+GANTRY	slave	6
+TOOLMAG	slave	7
+X	write_status	待写入
+Y	write_status	待写入
+Z	write_status	待写入
+A	write_status	待写入
+B	write_status	待写入
+C	write_status	待写入
+GANTRY	write_status	待写入
+TOOLMAG	write_status	待写入
+G53	tool_setter_x	0
+G53	tool_setter_y	0
+G53	tool_setter_z	0
+G53	five_direction_detector_x	0
+G53	five_direction_detector_y	0
+G53	five_direction_detector_z	0

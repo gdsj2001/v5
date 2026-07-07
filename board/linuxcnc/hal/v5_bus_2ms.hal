@@ -1,0 +1,142 @@
+# v5_bus_2ms.hal
+# v5 BUS/EtherCAT native HAL. Motion feedback is lcec/CiA402 actual position.
+
+loadrt xyzac-trt-kins coordinates=XYZAC sparm=identityfirst
+loadrt [EMCMOT]TPMOD
+loadrt [EMCMOT]HOMEMOD
+loadrt [EMCMOT]EMCMOT servo_period_nsec=[EMCMOT]SERVO_PERIOD num_joints=[KINS]JOINTS z20_wrapped_rotary_mask=0
+loadrt cia402 count=5
+loadrt bitslice names=x-din,y-din,z-din,a-din,c-din personality=31,31,31,31,31
+
+loadusr -W lcec_conf /opt/8ax/v5/linuxcnc/hal/ethercat-conf-2ms.xml
+loadrt lcec
+
+addf lcec.read-all servo-thread
+addf cia402.0.read-all servo-thread
+addf cia402.1.read-all servo-thread
+addf cia402.2.read-all servo-thread
+addf cia402.3.read-all servo-thread
+addf cia402.4.read-all servo-thread
+addf x-din servo-thread
+addf y-din servo-thread
+addf z-din servo-thread
+addf a-din servo-thread
+addf c-din servo-thread
+addf motion-command-handler servo-thread
+addf motion-controller servo-thread
+addf cia402.0.write-all servo-thread
+addf cia402.1.write-all servo-thread
+addf cia402.2.write-all servo-thread
+addf cia402.3.write-all servo-thread
+addf cia402.4.write-all servo-thread
+addf lcec.write-all servo-thread
+
+net estop-loop iocontrol.0.emc-enable-in
+sets estop-loop TRUE
+
+net tool-change-loop iocontrol.0.tool-change => iocontrol.0.tool-changed
+net tool-prepare-loop iocontrol.0.tool-prepare => iocontrol.0.tool-prepared
+setp iocontrol.0.lube_level TRUE
+
+setp motion.digital-in-00 TRUE
+newsig re-switchkins-select float
+net re-switchkins-select => motion.switchkins-type
+net re-kins-tool-offset motion.tooloffset.z => xyzac-trt-kins.tool-offset
+setp xyzac-trt-kins.x-rot-point [RTCP]X_ROT_POINT
+setp xyzac-trt-kins.y-rot-point [RTCP]Y_ROT_POINT
+setp xyzac-trt-kins.z-rot-point [RTCP]Z_ROT_POINT
+setp xyzac-trt-kins.x-offset [RTCP]X_OFFSET
+setp xyzac-trt-kins.y-offset [RTCP]Y_OFFSET
+setp xyzac-trt-kins.z-offset [RTCP]Z_OFFSET
+
+setp cia402.0.csp-mode true
+setp cia402.1.csp-mode true
+setp cia402.2.csp-mode true
+setp cia402.3.csp-mode true
+setp cia402.4.csp-mode true
+setp cia402.0.pos-scale [JOINT_0]SCALE
+setp cia402.1.pos-scale [JOINT_1]SCALE
+setp cia402.2.pos-scale [JOINT_2]SCALE
+setp cia402.3.pos-scale [JOINT_3]SCALE
+setp cia402.4.pos-scale [JOINT_4]SCALE
+setp cia402.0.velo-scale [JOINT_0]SCALE
+setp cia402.1.velo-scale [JOINT_1]SCALE
+setp cia402.2.velo-scale [JOINT_2]SCALE
+setp cia402.3.velo-scale [JOINT_3]SCALE
+setp cia402.4.velo-scale [JOINT_4]SCALE
+
+net x-statusword        lcec.0.x.statusword        => cia402.0.statusword
+net x-actual-position  lcec.0.x.actual-position   => cia402.0.drv-actual-position
+net x-controlword      cia402.0.controlword       => lcec.0.x.controlword
+net x-target-position  cia402.0.drv-target-position => lcec.0.x.target-position
+net x-digital-inputs   lcec.0.x.digital-inputs    => x-din.in
+
+net y-statusword        lcec.0.y.statusword        => cia402.1.statusword
+net y-actual-position  lcec.0.y.actual-position   => cia402.1.drv-actual-position
+net y-controlword      cia402.1.controlword       => lcec.0.y.controlword
+net y-target-position  cia402.1.drv-target-position => lcec.0.y.target-position
+net y-digital-inputs   lcec.0.y.digital-inputs    => y-din.in
+
+net z-statusword        lcec.0.z.statusword        => cia402.2.statusword
+net z-actual-position  lcec.0.z.actual-position   => cia402.2.drv-actual-position
+net z-controlword      cia402.2.controlword       => lcec.0.z.controlword
+net z-target-position  cia402.2.drv-target-position => lcec.0.z.target-position
+net z-digital-inputs   lcec.0.z.digital-inputs    => z-din.in
+
+net a-statusword        lcec.0.a.statusword        => cia402.3.statusword
+net a-actual-position  lcec.0.a.actual-position   => cia402.3.drv-actual-position
+net a-controlword      cia402.3.controlword       => lcec.0.a.controlword
+net a-target-position  cia402.3.drv-target-position => lcec.0.a.target-position
+net a-digital-inputs   lcec.0.a.digital-inputs    => a-din.in
+
+net c-statusword        lcec.0.c.statusword        => cia402.4.statusword
+net c-actual-position  lcec.0.c.actual-position   => cia402.4.drv-actual-position
+net c-controlword      cia402.4.controlword       => lcec.0.c.controlword
+net c-target-position  cia402.4.drv-target-position => lcec.0.c.target-position
+net c-digital-inputs   lcec.0.c.digital-inputs    => c-din.in
+
+net x-enable joint.0.amp-enable-out => cia402.0.enable
+net y-enable joint.1.amp-enable-out => cia402.1.enable
+net z-enable joint.2.amp-enable-out => cia402.2.enable
+net a-enable joint.3.amp-enable-out => cia402.3.enable
+net c-enable joint.4.amp-enable-out => cia402.4.enable
+
+net x-pos-cmd joint.0.motor-pos-cmd => cia402.0.pos-cmd
+net y-pos-cmd joint.1.motor-pos-cmd => cia402.1.pos-cmd
+net z-pos-cmd joint.2.motor-pos-cmd => cia402.2.pos-cmd
+net a-pos-cmd joint.3.motor-pos-cmd => cia402.3.pos-cmd
+net c-pos-cmd joint.4.motor-pos-cmd => cia402.4.pos-cmd
+
+net x-pos-fb cia402.0.pos-fb => joint.0.motor-pos-fb
+net y-pos-fb cia402.1.pos-fb => joint.1.motor-pos-fb
+net z-pos-fb cia402.2.pos-fb => joint.2.motor-pos-fb
+net a-pos-fb cia402.3.pos-fb => joint.3.motor-pos-fb
+net c-pos-fb cia402.4.pos-fb => joint.4.motor-pos-fb
+
+net x-vel-cmd joint.0.vel-cmd => cia402.0.velocity-cmd
+net y-vel-cmd joint.1.vel-cmd => cia402.1.velocity-cmd
+net z-vel-cmd joint.2.vel-cmd => cia402.2.velocity-cmd
+net a-vel-cmd joint.3.vel-cmd => cia402.3.velocity-cmd
+net c-vel-cmd joint.4.vel-cmd => cia402.4.velocity-cmd
+
+net x-amp-fault cia402.0.drv-fault => joint.0.amp-fault-in
+net y-amp-fault cia402.1.drv-fault => joint.1.amp-fault-in
+net z-amp-fault cia402.2.drv-fault => joint.2.amp-fault-in
+net a-amp-fault cia402.3.drv-fault => joint.3.amp-fault-in
+net c-amp-fault cia402.4.drv-fault => joint.4.amp-fault-in
+
+net x-neg-limit x-din.out-00 => joint.0.neg-lim-sw-in
+net x-pos-limit x-din.out-01 => joint.0.pos-lim-sw-in
+net x-home-sw   x-din.out-02 => joint.0.home-sw-in
+net y-neg-limit y-din.out-00 => joint.1.neg-lim-sw-in
+net y-pos-limit y-din.out-01 => joint.1.pos-lim-sw-in
+net y-home-sw   y-din.out-02 => joint.1.home-sw-in
+net z-neg-limit z-din.out-00 => joint.2.neg-lim-sw-in
+net z-pos-limit z-din.out-01 => joint.2.pos-lim-sw-in
+net z-home-sw   z-din.out-02 => joint.2.home-sw-in
+net a-neg-limit a-din.out-00 => joint.3.neg-lim-sw-in
+net a-pos-limit a-din.out-01 => joint.3.pos-lim-sw-in
+net a-home-sw   a-din.out-02 => joint.3.home-sw-in
+net c-neg-limit c-din.out-00 => joint.4.neg-lim-sw-in
+net c-pos-limit c-din.out-01 => joint.4.pos-lim-sw-in
+net c-home-sw   c-din.out-02 => joint.4.home-sw-in

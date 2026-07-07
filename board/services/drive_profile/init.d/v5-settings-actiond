@@ -1,0 +1,101 @@
+#!/bin/sh
+set -eu
+
+LD_BIND_NOW=1
+export LD_BIND_NOW
+ulimit -l unlimited 2>/dev/null || true
+
+DAEMON=/usr/libexec/8ax/drive_profile/v5_settings_actiond.py
+PIDFILE=/run/8ax/v5_settings_actiond.pid
+LOGFILE=/run/8ax/v5_settings_actiond.log
+SOCKET=/run/8ax_v5_product_ui/settings_actiond.sock
+
+is_running() {
+  [ -r "$PIDFILE" ] || return 1
+  pid=$(cat "$PIDFILE" 2>/dev/null || true)
+  [ -n "$pid" ] || return 1
+  kill -0 "$pid" 2>/dev/null
+}
+
+set_non_microkernel_affinity() {
+  pid="$1"
+  [ -n "$pid" ] || return 0
+  command -v taskset >/dev/null 2>&1 || return 0
+  if grep -qw 1 /sys/devices/system/cpu/online 2>/dev/null || grep -q '0-1' /sys/devices/system/cpu/online 2>/dev/null; then
+    taskset -pc 1 "$pid" >>"$LOGFILE" 2>&1 || true
+  fi
+}
+
+start_service() {
+  if is_running; then
+    echo "v5_settings_actiond already running pid=$(cat "$PIDFILE") socket=$SOCKET"
+    return 0
+  fi
+  test -x "$DAEMON"
+  mkdir -p /run/8ax /run/8ax_v5_product_ui
+  if [ -x /usr/libexec/8ax/drive_profile/v5_drive_profile_resident_snapshot.py ]; then
+    /usr/libexec/8ax/drive_profile/v5_drive_profile_resident_snapshot.py --profile-root /opt/8ax/drive-profiles --out /run/8ax_v5_drive/drive_profile_resident_snapshot.json >/run/8ax/v5_drive_profile_resident_snapshot.log 2>&1 || true
+  fi
+  rm -f "$PIDFILE" "$SOCKET"
+  setsid "$DAEMON" >>"$LOGFILE" 2>&1 &
+  echo "$!" >"$PIDFILE"
+  i=0
+  while [ "$i" -lt 50 ]; do
+    if is_running && [ -S "$SOCKET" ]; then
+      set_non_microkernel_affinity "$(cat "$PIDFILE")"
+      echo "v5_settings_actiond started pid=$(cat "$PIDFILE") socket=$SOCKET"
+      return 0
+    fi
+    if ! is_running; then
+      break
+    fi
+    sleep 0.1
+    i=$((i + 1))
+  done
+  echo "v5_settings_actiond failed to start" >&2
+  tail -n 40 "$LOGFILE" 2>/dev/null || true
+  return 1
+}
+
+stop_service() {
+  if ! is_running; then
+    rm -f "$PIDFILE" "$SOCKET"
+    echo "v5_settings_actiond not running"
+    return 0
+  fi
+  pid=$(cat "$PIDFILE")
+  kill "$pid" 2>/dev/null || true
+  i=0
+  while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 20 ]; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -KILL "$pid" 2>/dev/null || true
+    sleep 0.1
+  fi
+  if kill -0 "$pid" 2>/dev/null; then
+    echo "v5_settings_actiond did not stop pid=$pid" >&2
+    return 1
+  fi
+  rm -f "$PIDFILE" "$SOCKET"
+  echo "v5_settings_actiond stopped pid=$pid"
+}
+
+case "${1:-}" in
+  start) start_service ;;
+  stop) stop_service ;;
+  restart) stop_service; start_service ;;
+  status)
+    if is_running && [ -S "$SOCKET" ]; then
+      echo "v5_settings_actiond running pid=$(cat "$PIDFILE") socket=$SOCKET"
+    else
+      echo "v5_settings_actiond not running"
+      exit 1
+    fi
+    ;;
+  *)
+    echo "usage: $0 {start|stop|restart|status}" >&2
+    exit 2
+    ;;
+esac

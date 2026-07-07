@@ -1,4 +1,4 @@
-﻿# axi_stepdir_enc_v2 Register Map (Slice Executor v3.5.0)
+# axi_stepdir_enc_v2 Register Map (Slice Executor v3.5.0)
 
 状态：`已修复（与当前 v3.5.0 RTL 对齐）`
 

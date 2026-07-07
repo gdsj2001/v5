@@ -1,0 +1,173 @@
+#!/bin/sh
+set -eu
+
+LD_BIND_NOW=1
+export LD_BIND_NOW
+ulimit -l unlimited 2>/dev/null || true
+
+RUN_DIR=/run/8ax
+LINUXCNC_INI=/opt/8ax/v5/linuxcnc/ini/v5_bus.ini
+LINUXCNC_LOG=$RUN_DIR/v5_linuxcnc.log
+LINUXCNC_PID=$RUN_DIR/v5_linuxcnc.pid
+LINUXCNCRSH_LOG=$RUN_DIR/v5_linuxcncrsh.log
+LINUXCNCRSH_PID=$RUN_DIR/v5_linuxcncrsh.pid
+COMMAND_GATE_LOG=$RUN_DIR/v5_command_gate.log
+COMMAND_GATE_PID=$RUN_DIR/v5_command_gate.pid
+COMMAND_GATE_SOCKET=/run/8ax_v5_product_ui/v5_command_gate.sock
+LINUXCNCRSH_PORT=${V5_LINUXCNCRSH_PORT:-5007}
+LINUXCNCRSH_CONNECTPW=${V5_LINUXCNCRSH_CONNECTPW:-EMC}
+LINUXCNCRSH_ENABLEPW=${V5_LINUXCNCRSH_ENABLEPW:-EMCTOO}
+NC_PATH=/opt/8ax/v5/linuxcnc/nc
+
+runtime_prepare() {
+  mkdir -p "$RUN_DIR" /run/8ax_v5_product_ui /opt/8ax/v5/linuxcnc/var "$NC_PATH" /opt/8ax/v5/linuxcnc/remap_subs
+  chown petalinux:petalinux "$RUN_DIR" 2>/dev/null || true
+  chown -R petalinux:petalinux /opt/8ax/v5/linuxcnc/var "$NC_PATH" /opt/8ax/v5/linuxcnc/remap_subs 2>/dev/null || true
+  chmod 666 /dev/uio0 2>/dev/null || true
+}
+
+backend_running() {
+  pidof linuxcncsvr >/dev/null 2>&1 && pidof milltask >/dev/null 2>&1
+}
+
+gate_running() {
+  [ -r "$LINUXCNCRSH_PID" ] || return 1
+  pid=$(cat "$LINUXCNCRSH_PID" 2>/dev/null || true)
+  [ -n "$pid" ] || return 1
+  kill -0 "$pid" 2>/dev/null
+}
+
+native_gate_running() {
+  [ -r "$COMMAND_GATE_PID" ] || return 1
+  pid=$(cat "$COMMAND_GATE_PID" 2>/dev/null || true)
+  [ -n "$pid" ] || return 1
+  kill -0 "$pid" 2>/dev/null && [ -S "$COMMAND_GATE_SOCKET" ]
+}
+
+set_command_gate_affinity() {
+  pid="$1"
+  [ -n "$pid" ] || return 0
+  command -v taskset >/dev/null 2>&1 || return 0
+  if grep -qw 1 /sys/devices/system/cpu/online 2>/dev/null || grep -q '0-1' /sys/devices/system/cpu/online 2>/dev/null; then
+    taskset -pc 1 "$pid" >>"$COMMAND_GATE_LOG" 2>&1 || true
+  fi
+}
+
+stop_native_gate() {
+  if native_gate_running; then
+    kill "$(cat "$COMMAND_GATE_PID")" 2>/dev/null || true
+    sleep 0.3
+  fi
+  killall v5_command_gate_server 2>/dev/null || true
+  rm -f "$COMMAND_GATE_PID" "$COMMAND_GATE_SOCKET"
+}
+
+stop_gate() {
+  stop_native_gate
+  if gate_running; then
+    kill "$(cat "$LINUXCNCRSH_PID")" 2>/dev/null || true
+    sleep 0.3
+  fi
+  killall linuxcncrsh 2>/dev/null || true
+  rm -f "$LINUXCNCRSH_PID"
+}
+
+stop_backend() {
+  su petalinux -c 'TCLLIBPATH=/usr/lib/tcltk /usr/bin/linuxcnc -r -k' >/dev/null 2>&1 || true
+  sleep 0.5
+  killall axis linuxcncsvr milltask io rtapi_app 2>/dev/null || true
+  rm -f "$LINUXCNC_PID"
+}
+
+start_backend() {
+  if backend_running; then
+    echo "LinuxCNC backend already running"
+    return 0
+  fi
+  runtime_prepare
+  : >"$LINUXCNC_LOG"
+  chown petalinux:petalinux "$LINUXCNC_LOG" 2>/dev/null || true
+  su petalinux -c "cd /opt/8ax/v5/linuxcnc/ini && TCLLIBPATH=/usr/lib/tcltk /usr/bin/linuxcnc -r '$LINUXCNC_INI' >>'$LINUXCNC_LOG' 2>&1" &
+  echo "$!" >"$LINUXCNC_PID"
+  i=0
+  while [ "$i" -lt 80 ]; do
+    if backend_running; then
+      echo "LinuxCNC backend running"
+      return 0
+    fi
+    if [ -r "$LINUXCNC_PID" ] && ! kill -0 "$(cat "$LINUXCNC_PID")" 2>/dev/null; then
+      break
+    fi
+    i=$((i + 1))
+    sleep 0.25
+  done
+  echo "LinuxCNC backend failed to start" >&2
+  tail -n 80 "$LINUXCNC_LOG" 2>/dev/null || true
+  return 1
+}
+
+start_native_gate() {
+  stop_native_gate
+  : >"$COMMAND_GATE_LOG"
+  /usr/libexec/8ax/v5_command_gate_server --socket "$COMMAND_GATE_SOCKET" --host 127.0.0.1 --port "$LINUXCNCRSH_PORT" --password "$LINUXCNCRSH_CONNECTPW" --timeout-ms 1000 >>"$COMMAND_GATE_LOG" 2>&1 &
+  echo "$!" >"$COMMAND_GATE_PID"
+  i=0
+  while [ "$i" -lt 40 ]; do
+    if native_gate_running; then
+      set_command_gate_affinity "$(cat "$COMMAND_GATE_PID")"
+      echo "v5_command_gate_server running pid=$(cat "$COMMAND_GATE_PID") socket=$COMMAND_GATE_SOCKET"
+      return 0
+    fi
+    i=$((i + 1))
+    sleep 0.25
+  done
+  echo "v5_command_gate_server failed to start" >&2
+  cat "$COMMAND_GATE_LOG" 2>/dev/null || true
+  return 1
+}
+
+start_gate() {
+  i=0
+  while [ "$i" -lt 40 ]; do
+    pid=$(pidof linuxcncrsh 2>/dev/null || true)
+    if [ -n "$pid" ]; then
+      echo "$pid" | awk '{print $1}' >"$LINUXCNCRSH_PID"
+      if /usr/libexec/8ax/v5_linuxcncrsh_probe --host 127.0.0.1 --port "$LINUXCNCRSH_PORT" --password "$LINUXCNCRSH_CONNECTPW" --timeout-ms 1000 >/tmp/v5_linuxcncrsh_init_probe.out 2>&1; then
+        echo "linuxcncrsh running pid=$(cat "$LINUXCNCRSH_PID") port=$LINUXCNCRSH_PORT"
+        return 0
+      fi
+    fi
+    i=$((i + 1))
+    sleep 0.25
+  done
+  echo "linuxcncrsh failed to start" >&2
+  tail -n 80 "$LINUXCNC_LOG" 2>/dev/null || true
+  cat /tmp/v5_linuxcncrsh_init_probe.out 2>/dev/null || true
+  return 1
+}
+
+case "${1:-}" in
+  start)
+    start_backend
+    start_gate
+    start_native_gate
+    ;;
+  stop)
+    stop_gate
+    stop_backend
+    ;;
+  restart)
+    stop_gate
+    stop_backend
+    start_backend
+    start_gate
+    start_native_gate
+    ;;
+  status)
+    backend_running && gate_running && native_gate_running
+    ;;
+  *)
+    echo "usage: $0 {start|stop|restart|status}" >&2
+    exit 2
+    ;;
+esac

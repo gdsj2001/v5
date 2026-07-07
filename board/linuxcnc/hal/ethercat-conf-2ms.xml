@@ -1,0 +1,139 @@
+<masters>
+  <master idx="0" appTimePeriod="2000000" refClockSyncCycles="5">
+    <slave idx="0" type="generic" vid="0x00100000" pid="0x000c0112" name="x" configPdos="true">
+      <dcConf assignActivate="300" sync0Cycle="*1" sync0Shift="-25000"/>
+      <sdoConfig idx="6060" subIdx="00">
+        <sdoDataRaw data="08"/>
+      </sdoConfig>
+      <syncManager idx="2" dir="out">
+        <pdo idx="1701">
+          <pdoEntry idx="6040" subIdx="00" bitLen="16" halPin="controlword" halType="u32"/>
+          <pdoEntry idx="607a" subIdx="00" bitLen="32" halPin="target-position" halType="s32"/>
+          <pdoEntry idx="60b8" subIdx="00" bitLen="16" halPin="touch-probe-function" halType="u32"/>
+          <pdoEntry idx="60fe" subIdx="01" bitLen="32" halPin="digital-outputs" halType="u32"/>
+        </pdo>
+      </syncManager>
+      <syncManager idx="3" dir="in">
+        <pdo idx="1b01">
+          <pdoEntry idx="603f" subIdx="00" bitLen="16" halPin="error-code" halType="u32"/>
+          <pdoEntry idx="6041" subIdx="00" bitLen="16" halPin="statusword" halType="u32"/>
+          <pdoEntry idx="6064" subIdx="00" bitLen="32" halPin="actual-position" halType="s32"/>
+          <pdoEntry idx="6077" subIdx="00" bitLen="16" halPin="actual-torque" halType="s32"/>
+          <pdoEntry idx="60f4" subIdx="00" bitLen="32" halPin="following-error" halType="s32"/>
+          <pdoEntry idx="60b9" subIdx="00" bitLen="16" halPin="touch-probe-status" halType="u32"/>
+          <pdoEntry idx="60ba" subIdx="00" bitLen="32" halPin="touch-probe-pos1" halType="s32"/>
+          <pdoEntry idx="60bc" subIdx="00" bitLen="32" halPin="touch-probe-pos2" halType="s32"/>
+          <pdoEntry idx="60fd" subIdx="00" bitLen="32" halPin="digital-inputs" halType="u32"/>
+        </pdo>
+      </syncManager>
+    </slave>
+    <slave idx="1" type="generic" vid="0x00100000" pid="0x000c0112" name="y" configPdos="true">
+      <dcConf assignActivate="300" sync0Cycle="*1" sync0Shift="-25000"/>
+      <sdoConfig idx="6060" subIdx="00">
+        <sdoDataRaw data="08"/>
+      </sdoConfig>
+      <syncManager idx="2" dir="out">
+        <pdo idx="1701">
+          <pdoEntry idx="6040" subIdx="00" bitLen="16" halPin="controlword" halType="u32"/>
+          <pdoEntry idx="607a" subIdx="00" bitLen="32" halPin="target-position" halType="s32"/>
+          <pdoEntry idx="60b8" subIdx="00" bitLen="16" halPin="touch-probe-function" halType="u32"/>
+          <pdoEntry idx="60fe" subIdx="01" bitLen="32" halPin="digital-outputs" halType="u32"/>
+        </pdo>
+      </syncManager>
+      <syncManager idx="3" dir="in">
+        <pdo idx="1b01">
+          <pdoEntry idx="603f" subIdx="00" bitLen="16" halPin="error-code" halType="u32"/>
+          <pdoEntry idx="6041" subIdx="00" bitLen="16" halPin="statusword" halType="u32"/>
+          <pdoEntry idx="6064" subIdx="00" bitLen="32" halPin="actual-position" halType="s32"/>
+          <pdoEntry idx="6077" subIdx="00" bitLen="16" halPin="actual-torque" halType="s32"/>
+          <pdoEntry idx="60f4" subIdx="00" bitLen="32" halPin="following-error" halType="s32"/>
+          <pdoEntry idx="60b9" subIdx="00" bitLen="16" halPin="touch-probe-status" halType="u32"/>
+          <pdoEntry idx="60ba" subIdx="00" bitLen="32" halPin="touch-probe-pos1" halType="s32"/>
+          <pdoEntry idx="60bc" subIdx="00" bitLen="32" halPin="touch-probe-pos2" halType="s32"/>
+          <pdoEntry idx="60fd" subIdx="00" bitLen="32" halPin="digital-inputs" halType="u32"/>
+        </pdo>
+      </syncManager>
+    </slave>
+    <slave idx="2" type="generic" vid="0x00100000" pid="0x000c0112" name="z" configPdos="true">
+      <dcConf assignActivate="300" sync0Cycle="*1" sync0Shift="-25000"/>
+      <sdoConfig idx="6060" subIdx="00">
+        <sdoDataRaw data="08"/>
+      </sdoConfig>
+      <syncManager idx="2" dir="out">
+        <pdo idx="1701">
+          <pdoEntry idx="6040" subIdx="00" bitLen="16" halPin="controlword" halType="u32"/>
+          <pdoEntry idx="607a" subIdx="00" bitLen="32" halPin="target-position" halType="s32"/>
+          <pdoEntry idx="60b8" subIdx="00" bitLen="16" halPin="touch-probe-function" halType="u32"/>
+          <pdoEntry idx="60fe" subIdx="01" bitLen="32" halPin="digital-outputs" halType="u32"/>
+        </pdo>
+      </syncManager>
+      <syncManager idx="3" dir="in">
+        <pdo idx="1b01">
+          <pdoEntry idx="603f" subIdx="00" bitLen="16" halPin="error-code" halType="u32"/>
+          <pdoEntry idx="6041" subIdx="00" bitLen="16" halPin="statusword" halType="u32"/>
+          <pdoEntry idx="6064" subIdx="00" bitLen="32" halPin="actual-position" halType="s32"/>
+          <pdoEntry idx="6077" subIdx="00" bitLen="16" halPin="actual-torque" halType="s32"/>
+          <pdoEntry idx="60f4" subIdx="00" bitLen="32" halPin="following-error" halType="s32"/>
+          <pdoEntry idx="60b9" subIdx="00" bitLen="16" halPin="touch-probe-status" halType="u32"/>
+          <pdoEntry idx="60ba" subIdx="00" bitLen="32" halPin="touch-probe-pos1" halType="s32"/>
+          <pdoEntry idx="60bc" subIdx="00" bitLen="32" halPin="touch-probe-pos2" halType="s32"/>
+          <pdoEntry idx="60fd" subIdx="00" bitLen="32" halPin="digital-inputs" halType="u32"/>
+        </pdo>
+      </syncManager>
+    </slave>
+    <slave idx="3" type="generic" vid="0x00100000" pid="0x000c0112" name="a" configPdos="true">
+      <dcConf assignActivate="300" sync0Cycle="*1" sync0Shift="-25000"/>
+      <sdoConfig idx="6060" subIdx="00">
+        <sdoDataRaw data="08"/>
+      </sdoConfig>
+      <syncManager idx="2" dir="out">
+        <pdo idx="1701">
+          <pdoEntry idx="6040" subIdx="00" bitLen="16" halPin="controlword" halType="u32"/>
+          <pdoEntry idx="607a" subIdx="00" bitLen="32" halPin="target-position" halType="s32"/>
+          <pdoEntry idx="60b8" subIdx="00" bitLen="16" halPin="touch-probe-function" halType="u32"/>
+          <pdoEntry idx="60fe" subIdx="01" bitLen="32" halPin="digital-outputs" halType="u32"/>
+        </pdo>
+      </syncManager>
+      <syncManager idx="3" dir="in">
+        <pdo idx="1b01">
+          <pdoEntry idx="603f" subIdx="00" bitLen="16" halPin="error-code" halType="u32"/>
+          <pdoEntry idx="6041" subIdx="00" bitLen="16" halPin="statusword" halType="u32"/>
+          <pdoEntry idx="6064" subIdx="00" bitLen="32" halPin="actual-position" halType="s32"/>
+          <pdoEntry idx="6077" subIdx="00" bitLen="16" halPin="actual-torque" halType="s32"/>
+          <pdoEntry idx="60f4" subIdx="00" bitLen="32" halPin="following-error" halType="s32"/>
+          <pdoEntry idx="60b9" subIdx="00" bitLen="16" halPin="touch-probe-status" halType="u32"/>
+          <pdoEntry idx="60ba" subIdx="00" bitLen="32" halPin="touch-probe-pos1" halType="s32"/>
+          <pdoEntry idx="60bc" subIdx="00" bitLen="32" halPin="touch-probe-pos2" halType="s32"/>
+          <pdoEntry idx="60fd" subIdx="00" bitLen="32" halPin="digital-inputs" halType="u32"/>
+        </pdo>
+      </syncManager>
+    </slave>
+    <slave idx="4" type="generic" vid="0x00100000" pid="0x000c0112" name="c" configPdos="true">
+      <dcConf assignActivate="300" sync0Cycle="*1" sync0Shift="-25000"/>
+      <sdoConfig idx="6060" subIdx="00">
+        <sdoDataRaw data="08"/>
+      </sdoConfig>
+      <syncManager idx="2" dir="out">
+        <pdo idx="1701">
+          <pdoEntry idx="6040" subIdx="00" bitLen="16" halPin="controlword" halType="u32"/>
+          <pdoEntry idx="607a" subIdx="00" bitLen="32" halPin="target-position" halType="s32"/>
+          <pdoEntry idx="60b8" subIdx="00" bitLen="16" halPin="touch-probe-function" halType="u32"/>
+          <pdoEntry idx="60fe" subIdx="01" bitLen="32" halPin="digital-outputs" halType="u32"/>
+        </pdo>
+      </syncManager>
+      <syncManager idx="3" dir="in">
+        <pdo idx="1b01">
+          <pdoEntry idx="603f" subIdx="00" bitLen="16" halPin="error-code" halType="u32"/>
+          <pdoEntry idx="6041" subIdx="00" bitLen="16" halPin="statusword" halType="u32"/>
+          <pdoEntry idx="6064" subIdx="00" bitLen="32" halPin="actual-position" halType="s32"/>
+          <pdoEntry idx="6077" subIdx="00" bitLen="16" halPin="actual-torque" halType="s32"/>
+          <pdoEntry idx="60f4" subIdx="00" bitLen="32" halPin="following-error" halType="s32"/>
+          <pdoEntry idx="60b9" subIdx="00" bitLen="16" halPin="touch-probe-status" halType="u32"/>
+          <pdoEntry idx="60ba" subIdx="00" bitLen="32" halPin="touch-probe-pos1" halType="s32"/>
+          <pdoEntry idx="60bc" subIdx="00" bitLen="32" halPin="touch-probe-pos2" halType="s32"/>
+          <pdoEntry idx="60fd" subIdx="00" bitLen="32" halPin="digital-inputs" halType="u32"/>
+        </pdo>
+      </syncManager>
+    </slave>
+  </master>
+</masters>

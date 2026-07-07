@@ -1,0 +1,85 @@
+# Build/cache/generated local output directories
+build/
+build-*/
+cmake-build-*/
+out/
+dist/
+tmp/
+temp/
+logs/
+repo_ignored/temp/
+repo_ignored/**/temp/
+
+# Python cache
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+**/.pytest_cache/
+
+# C/C#/frontend generated output
+bin/
+obj/
+**/bin/
+**/obj/
+node_modules/
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+
+# Runtime/generated local files
+*.log
+*.tmp
+*.temp
+
+# Compressed/package outputs are not pushed
+*.zip
+*.7z
+*.rar
+*.tar
+*.tar.gz
+*.tgz
+*.tar.bz2
+*.tbz2
+*.tar.xz
+*.txz
+*.gz
+*.bz2
+*.xz
+*.zst
+
+# Test proof/evidence captures are not pushed
+artifacts/
+**/artifacts/
+截图/
+Testing/Temporary/
+**/Testing/Temporary/
+**/evidence/
+**/evidence_*/
+**/*_evidence/
+**/*evidence*/
+repo_ignored/**/release/
+repo_ignored/**/*.png
+repo_ignored/**/*.jpg
+repo_ignored/**/*.jpeg
+repo_ignored/**/*.bmp
+repo_ignored/**/*.gif
+repo_ignored/**/*.webp
+repo_ignored/**/*.raw
+repo_ignored/**/*.frame
+repo_ignored/**/*.bin
+repo_ignored/**/*.jsonl
+repo_ignored/**/*frame*.json
+repo_ignored/**/*metrics*.json
+repo_ignored/**/*events*.json
+repo_ignored/**/*summary*.json
+
+# Editor and OS files
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+Desktop.ini

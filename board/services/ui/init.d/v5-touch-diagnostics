@@ -1,0 +1,88 @@
+#!/bin/sh
+set -eu
+
+DAEMON=/usr/libexec/8ax/v5_touch_diagnostics
+PIDFILE=/run/8ax/v5_touch_diagnostics.pid
+LOGFILE=/run/8ax/v5_touch_diagnostics.log
+DEVICE=${V5_TOUCH_DEVICE:-/dev/input/by-path/z20-touchscreen}
+CALIBRATION=${V5_TOUCH_CALIBRATION_PATH:-/opt/8ax/safe_ui/re_touch_calibration.json}
+ENABLE=${V5_TOUCH_ENABLE:-/run/8ax_v5_product_ui/enable_touch_diagnostics}
+OUT=${V5_TOUCH_EVENTS:-/run/8ax_v5_product_ui/touch_events.jsonl}
+
+is_running() {
+  [ -r "$PIDFILE" ] || return 1
+  pid=$(cat "$PIDFILE" 2>/dev/null || true)
+  [ -n "$pid" ] || return 1
+  kill -0 "$pid" 2>/dev/null
+}
+
+set_non_microkernel_affinity() {
+  pid="$1"
+  [ -n "$pid" ] || return 0
+  command -v taskset >/dev/null 2>&1 || return 0
+  if grep -qw 1 /sys/devices/system/cpu/online 2>/dev/null || grep -q '0-1' /sys/devices/system/cpu/online 2>/dev/null; then
+    taskset -pc 1 "$pid" >>"$LOGFILE" 2>&1 || true
+  fi
+}
+
+start_service() {
+  if is_running; then
+    echo "v5_touch_diagnostics already running pid=$(cat "$PIDFILE") out=$OUT"
+    return 0
+  fi
+  test -x "$DAEMON"
+  test -r "$DEVICE"
+  test -r "$CALIBRATION"
+  mkdir -p /run/8ax "$(dirname "$ENABLE")" "$(dirname "$OUT")"
+  rm -f "$PIDFILE"
+  setsid "$DAEMON" --device "$DEVICE" --calibration "$CALIBRATION" --enable "$ENABLE" --out "$OUT" >>"$LOGFILE" 2>&1 &
+  echo "$!" >"$PIDFILE"
+  sleep 1
+  if is_running; then
+    set_non_microkernel_affinity "$(cat "$PIDFILE")"
+    echo "v5_touch_diagnostics started pid=$(cat "$PIDFILE") out=$OUT"
+    return 0
+  fi
+  echo "v5_touch_diagnostics failed to start" >&2
+  tail -n 40 "$LOGFILE" 2>/dev/null || true
+  return 1
+}
+
+stop_service() {
+  if ! is_running; then
+    rm -f "$PIDFILE"
+    echo "v5_touch_diagnostics not running"
+    return 0
+  fi
+  pid=$(cat "$PIDFILE")
+  kill "$pid" 2>/dev/null || true
+  sleep 0.5
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -KILL "$pid" 2>/dev/null || true
+    sleep 0.2
+  fi
+  if kill -0 "$pid" 2>/dev/null; then
+    echo "v5_touch_diagnostics did not stop pid=$pid" >&2
+    return 1
+  fi
+  rm -f "$PIDFILE"
+  echo "v5_touch_diagnostics stopped pid=$pid"
+}
+
+case "${1:-}" in
+  start) start_service ;;
+  stop) stop_service ;;
+  restart) stop_service; start_service ;;
+  status)
+    if is_running; then
+      echo "v5_touch_diagnostics running pid=$(cat "$PIDFILE") out=$OUT"
+    else
+      echo "v5_touch_diagnostics not running"
+      exit 1
+    fi
+    ;;
+  *)
+    echo "usage: $0 {start|stop|restart|status}" >&2
+    exit 2
+    ;;
+esac

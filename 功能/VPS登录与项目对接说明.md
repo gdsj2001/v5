@@ -151,7 +151,7 @@ it.cjwsjzyy.xyz
 - 本项目访问 VPS 涉及设备登记、授权下载、private/public profile、OTA private scope 和 Factory Client 发布签名时，公钥/私钥材料统一以 Windows 人工保管目录 `D:\授权私钥` 为来源；只记录路径和摘要，不复制私钥内容。
 - Factory Client 顶部 `授权私钥` 字段应选择 `D:\授权私钥\factory-device-auth-private.pem`。
 - 同目录公钥文件为 `D:\授权私钥\device_auth_public.pem` 和 `D:\授权私钥\factory-device-auth-public.pem`；当前两个公钥文件内容一致，SHA256 为 `5608ee95805979e3a9936a5803716fd65afeb8b64fc72e56acb0dcfc8835ac1f`。
-- VM 源码部署输入只允许保存同一把公钥副本：`/root/Desktop/v5/config/auth/device_auth_public.pem`，部署到板端 `/etc/6x-cnc/device_auth_public.pem` 供授权验签使用；不得把 `factory-device-auth-private.pem` 或任何设备私钥复制进 VM 源码、部署 manifest、截图、日志或仓库。
+- 源码部署输入只允许保存同一把公钥副本：`D:\v5\board\config\auth\device_auth_public.pem`，部署到板端 `/etc/6x-cnc/device_auth_public.pem` 供授权验签使用；不得把 `factory-device-auth-private.pem` 或任何设备私钥复制进 VM 源码、部署 manifest、截图、日志或仓库。
 - VPS live 签发密钥使用同一组材料：私钥运行路径是 `/opt/8ax-auth/secrets/device-auth-signing-private.pem`，公钥运行路径是 `/opt/8ax-auth/public/device-auth-signing-public.pem`；即使服务器底层有历史 symlink，文档、服务配置和人工核对只使用 `/opt/8ax-auth` 口径，不再新增 `/opt/z20-auth` 产品路径。
 - 按当前 v5/VPS 代码口径，VPS 存储和发布路径使用 `/opt/8ax-auth/...`；板端验签公钥位置是 `/etc/6x-cnc/device_auth_public.pem`。VPS 端签名私钥/公钥若由运维部署在 secrets/public 目录，必须落在当前 8ax-auth 部署树下，不再把旧 z20-auth 部署树作为产品路径。
 - 私钥不得提交进 Git、不得打进 Factory Client exe、不得写入截图或过程日志；更换密钥后必须重新生成并上传设备授权文件，再让板端执行 `下载授权` 验签闭环。
@@ -226,9 +226,9 @@ OTA package 规则：
 
 | 范围 | owner |
 | --- | --- |
-| remote relay | 当前 v5 板端运行真源在 VM `/root/Desktop/v5` 的 `app/src/v5_remote_*`、`services/ui/*` 和对应部署 manifest；旧 `v3_remote_ui_relay.py` 只作历史参考，不作为产品 owner |
+| remote relay | 当前 v5 板端运行真源在 Windows `D:\v5\board` 的 `app/src/v5_remote_*`、`services/ui/*` 和对应部署 manifest；旧 `v3_remote_ui_relay.py` 只作历史参考，不作为产品 owner |
 | remote input | board `remote_input.sock` framed JSON |
-| 驱动 profile 下载/上传 | 当前板端下载真源为 `/root/Desktop/v5/services/auth_download/v5_drive_profile_download.py`、`services/drive_profile/v5_settings_actiond.py`、`services/drive_profile/v5_drive_bus_action.py`；发布输入以当前 Factory Client/VPS admin API 和 `config/drive-profiles/*` 的 intended remote path 为准 |
+| 驱动 profile 下载/上传 | 当前板端下载真源为 `D:\v5\board\services\auth_download\v5_drive_profile_download.py`、`services/drive_profile/v5_settings_actiond.py`、`services/drive_profile/v5_drive_bus_action.py`；发布输入以当前 Factory Client/VPS admin API 和 `config/drive-profiles/*` 的 intended remote path 为准 |
 | Factory Client 管理界面 | `8ax-factory-client-source/8ax.FactoryClient`；界面字段和窗口/DPI 细则见 `8ax-factory-client-source/README.md` |
 | 板端 OTA relay/action/client | 按当前 v5 代码现状和 `待做工作/板端升级.md` 推进；未实现前必须 fail-closed，不再把旧 v3 relay 写成当前 owner |
 
