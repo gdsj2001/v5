@@ -8,6 +8,26 @@ set project_dir [file normalize [file join $script_dir ".." ".."]]
 # - Bypass compile_c for the current system BD after frozen RTL is injected.
 #   In this project compile_c is only needed for the active LCD v_frmbuf_rd HLS block;
 #   bypassing it avoids obsolete Vivado 2020.2 HLS IP packager revision overflow.
+# - Restore generated GMII pre-ODDR E-stop gating after BD generation and before
+#   synth_design reads the generated system netlist.
+
+proc ::z20::apply_gmii_pre_oddr_estop_patch {project_dir} {
+  set patch_script [file normalize [file join $project_dir "scripts/patch_gmii_pre_oddr_estop_gate.ps1"]]
+  if {![file exists $patch_script]} {
+    error "Missing GMII pre-ODDR E-stop patch script: $patch_script"
+  }
+  set powershell_cmd [auto_execok powershell]
+  if {$powershell_cmd eq ""} {
+    set powershell_cmd [auto_execok pwsh]
+  }
+  if {$powershell_cmd eq ""} {
+    error "Cannot find powershell or pwsh for GMII pre-ODDR E-stop patch"
+  }
+  set patch_output [exec {*}$powershell_cmd -NoProfile -ExecutionPolicy Bypass -File [file nativename $patch_script] -ProjectDir [file nativename $project_dir]]
+  puts $patch_output
+}
+
+::z20::apply_gmii_pre_oddr_estop_patch $project_dir
 
 if {[llength [info commands compile_c]] > 0 && [llength [info commands __z20_orig_compile_c]] == 0} {
   rename compile_c __z20_orig_compile_c

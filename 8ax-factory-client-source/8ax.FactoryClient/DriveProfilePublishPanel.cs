@@ -7,6 +7,7 @@ internal sealed class DriveProfilePublishPanel : UserControl
 {
     private static readonly Regex Sha256Hex = new(@"^[0-9a-fA-F]{64}$", RegexOptions.Compiled);
     private static readonly Regex VpsId = new(@"^[0-9]{6}$", RegexOptions.Compiled);
+    private static readonly Regex PrivateTargetRel = new(@"^private/[^/]+/(driver_profile_map\.json)$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private readonly Func<ApiClient> _apiProvider;
     private readonly Action<string> _log;
@@ -209,7 +210,7 @@ internal sealed class DriveProfilePublishPanel : UserControl
     private static string BuildPreview(DriveProfilePublishRequest request)
     {
         string target = request.Scope == "private"
-            ? $"private/{request.PrivateId}/driver_profile_map.json"
+            ? "private/current-device/driver_profile_map.json (server_verified after publish)"
             : "public/driver_profile_map.json";
         return
             $"scope: {request.Scope}\r\n" +
@@ -225,13 +226,30 @@ internal sealed class DriveProfilePublishPanel : UserControl
         {
             return "服务端未返回发布详情。";
         }
+        string targetRel = DisplayTargetRel(response);
         return
             $"success: {response.Success}\r\n" +
             $"message: {response.Message ?? "-"}\r\n" +
             $"source_scope: {response.SourceScope ?? "-"}\r\n" +
-            $"target_rel: {response.TargetRel ?? "-"}\r\n" +
+            $"target_rel: {targetRel}\r\n" +
             $"vps_distribution_id: {response.VpsDistributionId ?? "-"}\r\n" +
             $"dna_binding: {response.DnaBinding ?? "-"}\r\n" +
             $"profile_sha256: {response.ProfileSha256 ?? "-"}";
+    }
+
+    private static string DisplayTargetRel(DriveProfilePublishResponse response)
+    {
+        if (!string.Equals(response.SourceScope, "private", StringComparison.OrdinalIgnoreCase))
+        {
+            return response.TargetRel ?? "-";
+        }
+
+        string suffix = "driver_profile_map.json";
+        Match match = PrivateTargetRel.Match(response.TargetRel ?? String.Empty);
+        if (match.Success)
+        {
+            suffix = match.Groups[1].Value;
+        }
+        return $"private/current-device/{suffix} (server_verified)";
     }
 }

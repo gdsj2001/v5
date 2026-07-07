@@ -26,7 +26,7 @@ node_modules/
 # IDE local state
 .vs/
 
-# Build and generated output directories
+# Build/cache/generated local output directories
 build/
 build-*/
 cmake-build-*/
@@ -34,11 +34,13 @@ out/
 dist/
 **/bin/
 **/obj/
-artifacts/
 vm-v5/
 tmp/
 temp/
+**/tmp/
+**/temp/
 logs/
+**/logs/
 
 # CMake generated files
 CMakeFiles/
@@ -48,14 +50,18 @@ compile_commands.json
 
 # Vivado local/generated run output
 .Xil/
+*.cache/
+*.gen/
+*.hw/
+*.runs/
+new-vivado/**/NA/
+vivado_hw_project/**/NA/
 *.jou
 *.str
 *.log
 *.wdb
 *.vcd
 
-# Local-only process/output area
-repo_ignored/
-
-# Operator/automation screenshots and captured frames
-截图/
+# Project-local temporary area
+repo_ignored/temp/
+repo_ignored/**/temp/

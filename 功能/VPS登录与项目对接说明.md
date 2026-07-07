@@ -79,6 +79,8 @@ OTA 升级按钮规则：
 
 Windows 客户端不得为这些按钮新增 SSH、shell、SFTP、直接读写 `/run`、直接调用 LinuxCNC/HAL 或远程点击替代路径。
 
+WinRemote 远程画面只允许使用板端 `remote_ui_relay` 的 HTTP 首帧初始化和 `WS /remote/stream` dirty-rect 流。`WS /remote/stream` 无法连接、升级失败或运行中断开时，客户端必须记录 `relay_stream_unavailable` 并进入重连/失败状态，不得降级为低频 HTTP 全帧轮询、旧 `/dev/fb0` 抓屏、SSH/SFTP 文件读取、FIFO 或其它显示 fallback；远程输入仍只允许 `WS /remote/input`。
+
 
 
 规则：
@@ -146,9 +148,11 @@ it.cjwsjzyy.xyz
 
 工厂设备授权签名密钥：
 
-- 当前 Windows 人工保管目录是 `D:\授权私钥`，只记录路径，不复制私钥内容。
+- 本项目访问 VPS 涉及设备登记、授权下载、private/public profile、OTA private scope 和 Factory Client 发布签名时，公钥/私钥材料统一以 Windows 人工保管目录 `D:\授权私钥` 为来源；只记录路径和摘要，不复制私钥内容。
 - Factory Client 顶部 `授权私钥` 字段应选择 `D:\授权私钥\factory-device-auth-private.pem`。
-- 同目录公钥文件为 `D:\授权私钥\device_auth_public.pem` 和 `D:\授权私钥\factory-device-auth-public.pem`；当前公钥文件 SHA256 为 `5608ee95805979e3a9936a5803716fd65afeb8b64fc72e56acb0dcfc8835ac1f`。
+- 同目录公钥文件为 `D:\授权私钥\device_auth_public.pem` 和 `D:\授权私钥\factory-device-auth-public.pem`；当前两个公钥文件内容一致，SHA256 为 `5608ee95805979e3a9936a5803716fd65afeb8b64fc72e56acb0dcfc8835ac1f`。
+- VM 源码部署输入只允许保存同一把公钥副本：`/root/Desktop/v5/config/auth/device_auth_public.pem`，部署到板端 `/etc/6x-cnc/device_auth_public.pem` 供授权验签使用；不得把 `factory-device-auth-private.pem` 或任何设备私钥复制进 VM 源码、部署 manifest、截图、日志或仓库。
+- VPS live 签发密钥使用同一组材料：私钥运行路径是 `/opt/8ax-auth/secrets/device-auth-signing-private.pem`，公钥运行路径是 `/opt/8ax-auth/public/device-auth-signing-public.pem`；即使服务器底层有历史 symlink，文档、服务配置和人工核对只使用 `/opt/8ax-auth` 口径，不再新增 `/opt/z20-auth` 产品路径。
 - 按当前 v5/VPS 代码口径，VPS 存储和发布路径使用 `/opt/8ax-auth/...`；板端验签公钥位置是 `/etc/6x-cnc/device_auth_public.pem`。VPS 端签名私钥/公钥若由运维部署在 secrets/public 目录，必须落在当前 8ax-auth 部署树下，不再把旧 z20-auth 部署树作为产品路径。
 - 私钥不得提交进 Git、不得打进 Factory Client exe、不得写入截图或过程日志；更换密钥后必须重新生成并上传设备授权文件，再让板端执行 `下载授权` 验签闭环。
 
@@ -176,6 +180,7 @@ it.cjwsjzyy.xyz
 - VPS 得到候选 ID 后必须和已保存设备 ID 对比：同一 PL DNA 已有保存 ID 时返回原保存 ID；候选 ID 被其它 DNA 占用时，不得覆盖、不允许重复，必须按同一算法加稳定 salt/counter 继续寻找未占用 6 位 ID 并保存，或 fail-closed 返回明确 collision 错误。
 - `/api/v1/admin/devices` 必须返回字段 `vpsDistributionId`；现阶段它可等于已保存的 6 位 `devices.device_id`，但语义是“VPS 分发并冻结的显示 ID”，不是客户端本地序号。
 - VPS 端设备 private 根目录统一使用 `/opt/8ax-auth/storage/private/<vpsDistributionId>-<pl_dna_hash>/`。`vpsDistributionId` 必须是 VPS 已保存的 6 位分发 ID；`pl_dna_hash` 是该 ID 绑定的 PL DNA hash。这个 id-dna folder 只允许作为 VPS 服务端内部存储路径和数据管理字段，不得暴露给板端 URL、UI、日志或下载接口。Factory Client 发布 private profile 或 private OTA 时必须同时提交 `vpsDistributionId` 和 `pl_dna_hash` 供 VPS 校验，VPS 写入路径只能使用校验通过后的 id-dna folder，不得写入 hash-only 或旧 ID-only 目录。
+- Factory Client 管理界面可以显示 `vpsDistributionId`、`dna_binding=server_verified`、scope、SHA 和服务端返回摘要，但不得在预览、发布结果、日志或弹窗中原样显示 private `targetRel`、`private_folder`、`<vpsDistributionId>-<pl_dna_hash>`、hash-only 目录或旧 ID-only 目录；private 目标只能显示为当前设备 private profile/OTA 已由服务端校验。
 - VPS `/api/v1/admin/devices` 必须返回 `authorizationStatus`。对应 id-dna private 目录里还没有 `device_authorization.json` 时返回 `pending_factory_authorization`；存在授权文件时返回 `authorized`。Factory Client 设备 DNA 表必须把 `pending_factory_authorization` 行显示为红色，提醒还没人工确认授权。
 
 板端设置页 `登记本机码` 链路：

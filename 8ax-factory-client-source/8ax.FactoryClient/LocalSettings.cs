@@ -15,13 +15,10 @@ internal sealed class LocalSettings
     {
         get
         {
-            var dir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "8ax",
-                "FactoryClient",
-                "secrets");
-            Directory.CreateDirectory(dir);
-            return Path.Combine(dir, "factory-device-auth-private.pem");
+            return Path.Combine(
+                "D:\\",
+                "授权私钥",
+                "factory-device-auth-private.pem");
         }
     }
 

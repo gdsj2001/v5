@@ -1,0 +1,5 @@
+{"ts_utc":"2026-07-05T09:49:10.1121380\u002B00:00","source":"relay","frame_id":2,"fps":0,"latency_ms":0,"full_frame_requests":1,"dirty_rect_frames":0,"full_frame_repairs":0,"need_full_frame":0,"rejected_frames":0}
+{"ts_utc":"2026-07-05T09:49:10.7408092\u002B00:00","source":"relay","frame_id":3,"fps":1.584,"latency_ms":0,"full_frame_requests":2,"dirty_rect_frames":0,"full_frame_repairs":0,"need_full_frame":0,"rejected_frames":0}
+{"ts_utc":"2026-07-05T09:49:12.1062953\u002B00:00","source":"relay","frame_id":4,"fps":1.456,"latency_ms":0,"full_frame_requests":3,"dirty_rect_frames":0,"full_frame_repairs":0,"need_full_frame":0,"rejected_frames":0}
+{"ts_utc":"2026-07-05T09:49:13.4552656\u002B00:00","source":"relay","frame_id":5,"fps":1.349,"latency_ms":0,"full_frame_requests":4,"dirty_rect_frames":0,"full_frame_repairs":0,"need_full_frame":0,"rejected_frames":0}
+{"ts_utc":"2026-07-05T09:49:14.8244145\u002B00:00","source":"relay","frame_id":6,"fps":1.256,"latency_ms":0,"full_frame_requests":5,"dirty_rect_frames":0,"full_frame_repairs":0,"need_full_frame":0,"rejected_frames":0}

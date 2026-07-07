@@ -1,0 +1,16 @@
+{"ts_utc":"2026-07-05T09:49:08.1111895\u002B00:00","event":"app_start","mode":"Relay","evidence_dir":"D:\\v5\\repo_ignored\\winremote_board_connect_probe\\evidence_after_frame_fix","view_only":false,"enable_pointer":false,"enable_remote_input":true}
+{"ts_utc":"2026-07-05T09:49:08.1363612\u002B00:00","event":"relay_mode_selected","relay":"http://192.168.1.221:18080/","enable_remote_input":true}
+{"ts_utc":"2026-07-05T09:49:08.8825228\u002B00:00","event":"update_current","local_version":"2026.0703.1339","remote_version":"2026.0703.1339","manifest":"https://license.cjwsjzyy.xyz/8ax-winremote/win-x64/manifest.json"}
+{"ts_utc":"2026-07-05T09:49:09.5285568\u002B00:00","event":"relay_info","relay":"http://192.168.1.221:18080/","width":1024,"height":600,"pixel_format":"bgra32","view_only":true,"system_metrics":"cpu0 --%  cpu1 --%  \u5185\u5B58 --%  \u786C\u76D8 --%"}
+{"ts_utc":"2026-07-05T09:49:09.5351618\u002B00:00","event":"relay_input_blocked","reason":"relay_view_only","session_id":"win-a127e79961294c8981f094e2c62a95a5"}
+{"ts_utc":"2026-07-05T09:49:09.5375057\u002B00:00","event":"full_frame_request","reason":"initial","relay":"http://192.168.1.221:18080/"}
+{"ts_utc":"2026-07-05T09:49:10.1088885\u002B00:00","event":"frame_applied","source":"full","frame_id":2,"status":"AppliedFullFrame","dirty_rects":0}
+{"ts_utc":"2026-07-05T09:49:10.1381280\u002B00:00","event":"relay_stream_unavailable","relay":"http://192.168.1.221:18080/","message":"The server returned status code \u0027404\u0027 when status code \u0027101\u0027 was expected.","fallback":"http_full_frame_polling"}
+{"ts_utc":"2026-07-05T09:49:10.1409112\u002B00:00","event":"full_frame_request","reason":"polling_fallback","relay":"http://192.168.1.221:18080/","stream_failure":"The server returned status code \u0027404\u0027 when status code \u0027101\u0027 was expected."}
+{"ts_utc":"2026-07-05T09:49:10.7400672\u002B00:00","event":"frame_applied","source":"poll","frame_id":3,"status":"AppliedFullFrame","dirty_rects":0}
+{"ts_utc":"2026-07-05T09:49:11.4981843\u002B00:00","event":"full_frame_request","reason":"polling_fallback","relay":"http://192.168.1.221:18080/","stream_failure":"The server returned status code \u0027404\u0027 when status code \u0027101\u0027 was expected."}
+{"ts_utc":"2026-07-05T09:49:12.1055013\u002B00:00","event":"frame_applied","source":"poll","frame_id":4,"status":"AppliedFullFrame","dirty_rects":0}
+{"ts_utc":"2026-07-05T09:49:12.8669698\u002B00:00","event":"full_frame_request","reason":"polling_fallback","relay":"http://192.168.1.221:18080/","stream_failure":"The server returned status code \u0027404\u0027 when status code \u0027101\u0027 was expected."}
+{"ts_utc":"2026-07-05T09:49:13.4545797\u002B00:00","event":"frame_applied","source":"poll","frame_id":5,"status":"AppliedFullFrame","dirty_rects":0}
+{"ts_utc":"2026-07-05T09:49:14.2138373\u002B00:00","event":"full_frame_request","reason":"polling_fallback","relay":"http://192.168.1.221:18080/","stream_failure":"The server returned status code \u0027404\u0027 when status code \u0027101\u0027 was expected."}
+{"ts_utc":"2026-07-05T09:49:14.8239305\u002B00:00","event":"frame_applied","source":"poll","frame_id":6,"status":"AppliedFullFrame","dirty_rects":0}

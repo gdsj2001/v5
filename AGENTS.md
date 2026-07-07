@@ -25,6 +25,7 @@ DEFAULT_ACTION:
 - Implement/fix/verify to the required endpoint.
 - Delete retired/fallback/shadow paths before adding another path.
 - Keep status honest: `source_only`, `local_verified_only`, `board_verified`, or `blocked`.
+- For user-raised feature changes, edit only the indexed `功能/` owner document for requirement text, then modify code, build/deploy, and test on the board when required. Do not write implementation results, board evidence, screenshots, or progress summaries into `功能/`, `待做工作/`, backlog, legacy, or process documents unless the user explicitly asks for that specific document update.
 
 ## P0_NON_NEGOTIABLES
 
@@ -91,7 +92,7 @@ PATH_AND_DOC_CONSTANTS:
 - When the user asks to implement a specific `待做工作/*.md`, read that workdoc first, then locate the related `功能/` owner through `功能/需求真源索引.md`.
 - If the specified workdoc changes, corrects, or clarifies product behavior, runtime truth, owner boundaries, acceptance conditions, or forbidden paths, update the indexed `功能/` owner first. Then implement code/tests/configs against the updated owner, not against stale copied text.
 - If the workdoc and the current `功能/` owner conflict, treat the specified workdoc plus the latest user message as the requirement-change input; do not bypass `功能/`. Convert the stable requirement into the owner, then synchronize implementation.
-- After implementation, update the workdoc only with status, evidence, blocker, next acceptance condition, or deletion condition. Do not duplicate volatile owner policy text in the workdoc unless it is clearly marked as a pointer to the `REQ-*` owner.
+- After implementation, do not write status, evidence, screenshots, command output, board results, or completion summaries back into the workdoc by default. Report verification in the final chat reply instead. Update a workdoc only when the user explicitly asks to update that workdoc, or when the user names that workdoc as the target artifact and asks for its content to change.
 
 ## P0_RULE_POINTERS
 
@@ -116,7 +117,7 @@ RULE_READING_ORDER:
 - If the latest user message names a specific `待做工作/*.md`, read that workdoc as the active requirement-change input before implementation, then use `WORKDOC_TO_FEATURE_FLOW` to settle the stable requirement into the relevant `功能/` owner.
 - Do not bulk-merge every rule, backlog, old note, or chat summary before acting. If a non-owner document repeats a volatile rule, treat the repeated text as a reference only and follow the indexed owner.
 - Do not create a new rule document to resolve confusion until the existing index, owner document, `待做工作/拆分.md`, `待做工作/改进.md`, and `待做工作/遗留.md` have been checked for the same scope.
-- Human-facing backlog or work-instruction documents must stay short: what is wrong, how to close it, current status/evidence, blocker if any, and next acceptance condition. Do not add command logs, AI reasoning logs, chat history, or duplicate policy text.
+- When the user explicitly asks to update a human-facing backlog or work-instruction document, keep it short: what is wrong, how to close it, blocker if any, and next acceptance condition. Do not add command logs, AI reasoning logs, chat history, progress records, verification results, or duplicate policy text.
 - After context loss, compaction, or handoff, restart from this order: `AGENTS.md` -> `功能/需求真源索引.md` -> relevant owner document -> `git status`/`git diff` -> active work card or `待做工作/遗留.md`. Do not rebuild plans from memory or old chat.
 
 ## P0_HUMAN_FEEDBACK_PRECEDENCE
@@ -152,8 +153,8 @@ USER_ISSUE_SOLVING_RULE:
 - A tool, command, build, test, deploy, board, or runtime failure is diagnostic evidence. Investigate the cause, try a reasonable fix-forward or alternate allowed path, and continue toward closure when safe.
 - Do not treat "command failed", "tool errored", "cannot access", "test failed", "board unavailable", or "stopped here" as complete work. These can only be intermediate findings or blockers.
 - Stop as `blocked` only when solving would be unsafe/destructive without user approval, required external state is unavailable, user input is genuinely required, or multiple meaningful attempts have hit the same concrete blocker.
-- Multiple meaningful attempts means at least three distinct relevant attempts, or three consecutive turns/tries ending at the same blocker after diagnosis. When this threshold is reached, append/update LEGACY_FILE with the blocker, attempts made, missing evidence, next acceptance condition, and strongest honest status before final reply.
-- A LEGACY_FILE entry is not a substitute for attempting the solution. It is the record for unresolved work after the agent has made reasonable progress attempts or hit a real safety/external blocker.
+- Multiple meaningful attempts means at least three distinct relevant attempts, or three consecutive turns/tries ending at the same blocker after diagnosis. When this threshold is reached, report the blocker, attempts made, missing verification, next acceptance condition, and strongest honest status in the final chat reply.
+- A LEGACY_FILE entry is not a substitute for attempting the solution. Do not write a LEGACY_FILE entry unless the user explicitly asks for a persistent unresolved-work record.
 
 CONTINUOUS_PROGRESS_RULE:
 - The default execution mode is continuous progress. If a requested workstream has a known next safe action, continue to that action without waiting for user confirmation, intermediate approval, status acknowledgement, or a new chat prompt.
@@ -174,11 +175,11 @@ INCREMENTAL_UI_AUTOMATION_GATE:
 - Running the full flow before per-function screenshot/click verification is a P0 workflow violation because it hides the real failing step and wastes VM/board/motion time. Report `blocked_by_incremental_ui_automation_gate` instead of bypassing this gate.
 
 PROGRESS_DOC_SYNC_RULE:
-- Any material progress on an improvement, legacy item, owner migration, board/operator step, or blocker must update the corresponding location in the active improvement document, work instruction, work card, and/or LEGACY_FILE before stopping or switching context.
-- "Material progress" includes a source fix, test added, local gate result, VM build, board deploy, screenshot/click proof, failed verification, new blocker, changed root cause, changed close condition, or evidence that a legacy description is stale.
-- Update the existing matching section, work card, or legacy item in place. Do not append loose notes at the bottom, create duplicate improvement documents, or leave only chat/process logs for future agents to reconstruct.
-- Rule owner documents record rule or close-condition changes only. Do not turn owner rule files into process logs; put execution progress in the active work instruction/work card or LEGACY_FILE.
-- Keep the update concise and human-readable: current status, strongest evidence, blocker if any, and next acceptance condition. Do not write command流水, long logs, or AI-only reasoning into human docs.
+- Do not auto-write progress, results, board/operator evidence, screenshot paths, command output, or completion summaries into human documents. The default result channel is the final chat reply.
+- `功能/` owner documents record only settled requirements, owner boundaries, field mappings, and acceptance rules based on the user's requested behavior. Do not turn owner rule files into process logs or verification-result logs.
+- `待做工作/`, backlog, legacy, and process documents are not updated with results by default. Update them only when the latest user message explicitly asks to modify that specific document or when the user names that document as the requested target artifact.
+- If a true blocker prevents implementation or board testing, report the blocker in the final chat reply. Write a blocker into `待做工作/遗留.md` only when the user explicitly requests a persistent legacy/blocker record.
+- If the user explicitly requests a human document update, keep it concise and human-readable. Do not write command流水, long logs, AI-only reasoning, progress records, or verification-result logs into human docs.
 
 RISK_GRADED_EXECUTION_RULE:
 - This is the detailed gate expansion for `P0_ENTRY_RULES` item 2. The top entry rules decide the first path; this section defines the full gate expectations after classification.
@@ -194,7 +195,7 @@ FINISH_LINE_MATRIX:
 - non_board_local_code: update doc first if behavior changed -> edit source/config -> run targeted compile/unit/contract/static gates -> final status `local_verified_only` unless board closure also ran.
 - board_visible_function_code: update doc first if behavior changed -> edit source/config in the owning truth location -> build full current VM_SOURCE_ROOT when runtime is involved -> deploy canonical artifact -> trigger the original UI/operator path automatically -> collect the minimal verification outputs needed for the claim -> final status `board_verified` only after the verification actually ran.
 - motion_capable_code: complete board_visible_function_code plus `nc/cc.ngc` golden motion run result; no golden loop means no pass/fixed/done claim.
-- blocked_or_unsafe: keep source state honest -> record exact blocker and missing test in final reply and append/update LEGACY_FILE -> final status `blocked` or `source_only`; never claim fixed/done/verified.
+- blocked_or_unsafe: keep source state honest -> record exact blocker and missing test in final reply -> final status `blocked` or `source_only`; never claim fixed/done/verified. Do not append/update LEGACY_FILE unless the user explicitly asks for a persistent blocker record.
 DO_NOT_STOP_AT:
 - source edits only
 - docs/rules/legacy records only
@@ -206,7 +207,7 @@ DO_NOT_STOP_AT:
 - VM build without board deploy when board-visible behavior changed
 - plan/checklist/legacy record without executing required tests
 - reporting the first command/tool/test error without diagnosis and fix-forward attempts
-- writing LEGACY_FILE before meaningful attempts unless the blocker is unsafe, destructive, external-state unavailable, or requires user input
+- writing any result/blocker record into LEGACY_FILE or other human documents unless the user explicitly asks for that document update
 
 PASS_WORDS_REQUIRE_VERIFICATION=fixed, repaired, done, passed, verified, board_verified, release_ready, works on board, live, closed-loop complete, operator_says_ok
 
@@ -241,14 +242,14 @@ BEFORE_EDIT:
 
 PROCESS_FILE_DISABLED:
 - Do not create or update `process.md`, `过程.md`, or equivalent per-task process markdown.
-- Use git status/diff, final reply, generated verification outputs, and LEGACY_FILE for required traceability.
+- Use git status/diff, final reply, and generated verification outputs for required traceability. Use LEGACY_FILE only when the user explicitly asks for a persistent legacy/blocker record.
 - Low-level scratch logs may be generated only when required by a tool or verification output; do not create a separate process markdown just to narrate work.
 
 LEGACY_RECORD:
-- If any unfinished, blocked, deferred, fail-closed, not-board-verified, or follow-up item remains at the end of a task, append/update `待做工作/遗留.md`.
-- If board closure was required but not executed or failed, append/update LEGACY_FILE before final reply with the exact missing test, blocker, and acceptance condition.
-- If multiple meaningful attempts cannot resolve a user-raised problem, append/update LEGACY_FILE before final reply with: exact blocker, attempts made, files or commands checked, missing verification, next concrete action, and status `blocked`, `source_only`, or `local_verified_only` as appropriate.
-- Do not use LEGACY_FILE as a way to stop early. First diagnose, retry with allowed alternatives, and fix forward unless blocked by safety, missing user input, external unavailability, or repeated same-blocker attempts.
+- If any unfinished, blocked, deferred, fail-closed, not-board-verified, or follow-up item remains at the end of a task, report it in the final chat reply.
+- If board closure was required but not executed or failed, report the exact missing test, blocker, and acceptance condition in the final chat reply.
+- If multiple meaningful attempts cannot resolve a user-raised problem, report the exact blocker, attempts made, missing verification, next concrete action, and status `blocked`, `source_only`, or `local_verified_only` in the final chat reply.
+- Do not use LEGACY_FILE as a way to stop early or as a default result sink. First diagnose, retry with allowed alternatives, and fix forward unless blocked by safety, missing user input, external unavailability, or repeated same-blocker attempts. Write LEGACY_FILE only when the user explicitly asks for a persistent record.
 - `待做工作/遗留.md` is a legacy backlog record only; do not use it as a task board, file lock, deploy lock, or replacement for disabled process files.
 
 USER_FEEDBACK_NOISE_FILTER:
@@ -276,7 +277,7 @@ VM_BOARD_SINGLE_OPERATOR:
 BOARD_UNREACHABLE_RECOVERY_RULE:
 - If the development board is unreachable by ping/SSH/remote relay during a board deploy, restart, recovery, or verification slice, treat the failure as a recoverable board-access fault before declaring `blocked`: use the existing tools relay power-cycle path for the development board plus COM/serial boot monitoring when available, then re-probe ping, SSH, port 18080, `/remote/info`, and board relay/input readiness.
 - Relay power-cycle and COM monitoring are recovery/diagnostic steps only. They must not patch board product files, bypass full-current VM_SOURCE_ROOT build/deploy, replace original UI/operator-path verification, or become a hidden runtime fallback.
-- Use bounded attempts and preserve evidence: record the relay tool/command, COM port or reason COM was unavailable, boot/network readiness observation, and final probes in the final reply or generated verification output. If relay control or COM monitoring cannot restore access after meaningful attempts, append/update `待做工作/遗留.md` through LEGACY_FILE with the exact remaining blocker, attempts made, missing verification, and next acceptance condition.
+- Use bounded attempts and preserve evidence in generated verification output where needed; summarize only the relevant result in the final reply. If relay control or COM monitoring cannot restore access after meaningful attempts, report the exact remaining blocker, attempts made, missing verification, and next acceptance condition in the final reply; do not append/update `待做工作/遗留.md` unless the user explicitly asks.
 
 SOURCE_TRUTH:
 - Runtime source truth is split by owner: Linux/native/LVGL/runtime-service source and project tools belong in VM_SOURCE_ROOT; Markdown, screenshots, and Windows/Vivado-owned sources belong in PROJECT_ROOT. Board `/opt/8ax/...`, staging bundles, deploy outputs, `bak/`, `repo_ignored/`, `artifacts/`, `deploy_tmp/`, old builds, and temp clean copies are not source truth.
@@ -288,7 +289,7 @@ DOC_FIRST:
 - Any new or changed product requirement starts in `功能/`: update `功能/需求真源索引.md` only to locate or assign the single `REQ-*` owner, then update that owner document before changing code, tests, plans, backlog, legacy notes, or other docs.
 - Latest explicit user feedback is the highest requirement-change input; when it conflicts with current docs/rules/tests/comments/old notes, settle the change into `功能/需求真源索引.md` and the relevant `功能/` owner first, then source/config.
 - Parameter/native truth changes use `功能/需求真源索引.md` and `功能/0开机参数入内存.md`/architecture owners before source edits.
-- Required order is owner doc/rule -> canonical source/config -> local gates -> VM/board original operator-path closure when required -> result record.
+- Required order is owner doc/rule -> canonical source/config -> local gates -> VM/board original operator-path closure when required -> final chat report. Do not create a document result record unless the user explicitly asks for one.
 - Board-facing behavior cannot close at doc/source/local-test level; without board/operator evidence, report only `source_only` or `local_verified_only`.
 
 MICROKERNEL_PARAM_MIGRATION_WORKFLOW:
@@ -379,7 +380,7 @@ BOARD_FUNCTION_CLOSURE_REQUIRED:
 - Local compile/unit/mock tests are required but not sufficient for board-facing operator functions; they are only pre-board gates.
 - The required board sequence is: build from full current VM_SOURCE_ROOT runtime source -> deploy canonical artifact -> trigger the original operator path automatically -> collect the minimal Broker result, SHM/status, events/touch logs, UI screenshot/framebuffer, or service logs needed to prove the specific claim -> run motion golden verification when motion-capable.
 - Writing documentation, adding a legacy item, showing a plan, or running only local tests cannot close a board-facing code change.
-- If the board is unavailable, a live board/VM/operator/motion process is active, hardware is unsafe, or a required precondition is missing, retry or work around when practical; if still blocked, mark the task blocked/source-only, append/update `待做工作/遗留.md` through LEGACY_FILE, and do not claim the feature is fixed or board-verified.
+- If the board is unavailable, a live board/VM/operator/motion process is active, hardware is unsafe, or a required precondition is missing, retry or work around when practical; if still blocked, mark the task blocked/source-only in the final reply, and do not claim the feature is fixed or board-verified. Do not append/update `待做工作/遗留.md` unless the user explicitly asks.
 
 LOCAL_GATES:
 - compile/build where applicable

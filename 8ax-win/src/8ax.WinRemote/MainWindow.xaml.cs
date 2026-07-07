@@ -19,7 +19,6 @@ public partial class MainWindow : Window
 {
     private const double RelayMoveMinIntervalMs = 16.0;
     private const int RelayMoveMinPixelDelta = 1;
-    private const int RelayPollingIntervalMs = 750;
     private const int RelayReconnectInitialDelayMs = 700;
     private const int RelayReconnectMaxDelayMs = 5000;
     private const int SystemMetricsRefreshMs = 1000;
@@ -663,34 +662,12 @@ public partial class MainWindow : Window
             {
                 ["relay"] = relayBaseUri,
                 ["message"] = ex.Message,
-                ["fallback"] = "http_full_frame_polling",
+                ["action"] = "reconnect",
             });
-            await Dispatcher.InvokeAsync(() =>
-            {
-                SetConnectionState("polling", "#28313D", "#D6E3EF");
-                StatusText.Text = $"source: {relayBaseUri}  relay stream unavailable: {Compact(ex.Message)}  fallback: polling  {RemotePointerStatusText}";
-            });
-            await RunFullFramePollingAsync(relayBaseUri, relayClient, ex.Message);
+            throw;
         }
 
         return true;
-    }
-
-    private async Task RunFullFramePollingAsync(Uri relayBaseUri, RemoteRelayClient relayClient, string streamFailure)
-    {
-        while (!_shutdown.IsCancellationRequested)
-        {
-            _stats.MarkFullFrameRequest();
-            _evidence.RecordEvent("full_frame_request", new Dictionary<string, object?>
-            {
-                ["reason"] = "polling_fallback",
-                ["relay"] = relayBaseUri,
-                ["stream_failure"] = streamFailure,
-            });
-            RemoteFramePacket fullFrame = await relayClient.GetFullFrameAsync(_shutdown.Token);
-            await Dispatcher.InvokeAsync(() => ApplyRelayPacket(fullFrame, relayBaseUri, "poll"));
-            await Task.Delay(RelayPollingIntervalMs, _shutdown.Token);
-        }
     }
 
     private void MarkRelayDisconnected()
@@ -837,14 +814,7 @@ public partial class MainWindow : Window
 
             EmptyStateText.Visibility = Visibility.Collapsed;
             _stats.MarkFrame(ToStatsFrameId(result.FrameId), 0);
-            if (String.Equals(source, "poll", StringComparison.OrdinalIgnoreCase))
-            {
-                SetConnectionState("polling", "#28313D", "#D6E3EF");
-            }
-            else
-            {
-                SetConnectionState("live", "#263D30", "#A8E8B2");
-            }
+            SetConnectionState("live", "#263D30", "#A8E8B2");
             _evidence.RecordEvent("frame_applied", new Dictionary<string, object?>
             {
                 ["source"] = source,

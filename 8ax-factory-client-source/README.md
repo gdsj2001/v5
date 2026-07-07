@@ -13,7 +13,7 @@
 - VPS 未返回或返回非 6 位数字时，表格显示 `-`，不能用 `deviceId` 冒充。
 - `设备ID` 仍是 VPS/数据库内部设备标识，删除、授权上传等接口继续使用 `deviceId`。
 - 设备列表必须显示 VPS 返回的 `authorizationStatus`。未人工确认并上传授权文件时，该行状态必须用红色显示，状态文本可显示为“待人工授权”；只有 VPS 已存在该 ID 对应的 `device_authorization.json` 时才显示普通颜色/已授权。
-- 工厂授权私钥必须是本机私有文件，不得提交进 Git、不得打进发布 exe。Factory Client 顶部 `授权私钥` 路径默认指向 `%LOCALAPPDATA%\8ax\FactoryClient\secrets\factory-device-auth-private.pem`，也可通过 `选择私钥` 指向本机其它安全位置。
+- 工厂授权私钥必须是本机私有文件，不得提交进 Git、不得打进发布 exe。Factory Client 顶部 `授权私钥` 路径默认指向 `D:\授权私钥\factory-device-auth-private.pem`，也可通过 `选择私钥` 指向本机其它安全位置。
 - 当前这台 Windows 工厂机的授权私钥保管位置是 `D:\授权私钥\factory-device-auth-private.pem`；对应公钥文件在同目录 `device_auth_public.pem` / `factory-device-auth-public.pem`，路径依据见 `功能/VPS登录与项目对接说明.md`。
 - 点击 `人工确认授权` 成功上传授权文件后，VPS 才把该设备视为已授权；Factory Client 刷新列表后必须恢复普通行色。
 - 点击 `删除登记` 删除设备 DNA 登记时，VPS 必须同时删除该 6 位 ID 对应 private 目录里的 `device_authorization.json`，防止以后同 ID/旧授权被误下载；删除响应要说明授权文件是否已删除。

@@ -1,0 +1,70 @@
+# 参数归类
+
+引用需求真源：`REQ-PARAM-MEMORY-LIGHTWEIGHT-SAVE`、`REQ-NATIVE-OWNER-FIRST`、`REQ-SETTINGS-RUNTIME-DRIVE-ONLY`、`REQ-RTCP-G53-NATIVE-ACTUAL`、`REQ-BUS-PULSE-MODE-DIFFERENCE`、`REQ-SCALE-CHAIN-HISTORY-POLLUTION`。
+
+## 归类原则
+
+设置页参数只按三类 owner 归类：
+
+1. 微内核参数：LinuxCNC runtime INI、HAL/native、kinematics/native、WCS/native、已登记 native memory/API。凡是微内核已有或应该下沉到微内核的参数，必须使用微内核/native readback，不得进自建参数表。
+2. 自建参数：微内核参数和驱动映射表参数都没有承载的设置页参数。自建参数必须开机进入 RAM，UI 自动读取，不得显示 `NAT`、空占位、UI 默认值、旧 JSON、`/run` result 或 SHM 投影。
+3. 驱动映射表参数：驱动参数映射表/drive provider，只服务驱动私域对象字典、SDO/PDO、驱动 profile、驱动读写证据和授权下载链路。驱动映射表参数不能反向成为 LinuxCNC 运动参数、坐标基、RTCP/G53、WCS/G92、刀补、模态或安全真源。
+
+## 微内核参数
+
+| 设置页位置 | UI 参数 | 微内核来源 | 读取要求 |
+| --- | --- | --- | --- |
+| 顶部 | 运动模型 | kinematics/native 或 runtime INI `[RTCP]` | 例如 AC 摇篮；不得进自建参数。 |
+| G53 机床坐标目标位置表 | A 中心 X | 当前模态加工坐标系 X 偏移值，WCS/native owner readback | 不是固定 G53 几何常量；不得写入自建参数。 |
+| G53 机床坐标目标位置表 | A 中心 Y | `G53_A_Y`，native geometry/runtime INI readback | 从微内核/native 读取；不得用 UI 默认值补。 |
+| G53 机床坐标目标位置表 | A 中心 Z | `G53_A_Z`，native geometry/runtime INI readback | 从微内核/native 读取；不得用 UI 默认值补。 |
+| G53 机床坐标目标位置表 | B 中心 X | `G53_B_X` 或等价 B 轴 native geometry/runtime INI readback | B 中心位于 A/C 中间，坐标体系参考 A/C 中心；不得写入自建参数。 |
+| G53 机床坐标目标位置表 | B 中心 Y | `G53_B_Y` 或等价 B 轴 native geometry/runtime INI readback | B 中心位于 A/C 中间，坐标体系参考 A/C 中心；不得写入自建参数。 |
+| G53 机床坐标目标位置表 | B 中心 Z | `G53_B_Z` 或等价 B 轴 native geometry/runtime INI readback | B 中心位于 A/C 中间，坐标体系参考 A/C 中心；不得写入自建参数。 |
+| G53 机床坐标目标位置表 | C 中心 X | `G53_C_X`，native geometry/runtime INI readback | 从微内核/native 读取；不得用 UI 默认值补。 |
+| G53 机床坐标目标位置表 | C 中心 Y | `G53_C_Y`，native geometry/runtime INI readback | 从微内核/native 读取；不得用 UI 默认值补。 |
+| G53 机床坐标目标位置表 | C 中心 Z | 当前模态加工坐标系 Z 偏移值，WCS/native owner readback | 不是固定 G53 几何常量；不得写入自建参数。 |
+| 机械坐标显示 | X/Y/Z/A/B/C/龙门/刀库 MCS | native 运行态坐标/显示投影链路 | 运行态坐标显示来自微内核/native，不属于自建参数。 |
+| 轴参数表 | 轴模式 | runtime INI `[AXIS_*]` / native axis readback | 龙门、刀库作为第 7、8 轴，有 native owner 时同样走 native，不得灰色禁用。 |
+| 轴参数表 | 目标精度 | runtime INI/native `SCALE` 相关 readback | 不能用 UI 默认值补。 |
+| 轴参数表 | 螺距/每转角度 | runtime INI/native 比例链 readback | 影响 `SCALE` 和电子齿轮计算。 |
+| 轴参数表 | 电机 | native/runtime `motor_rev` readback | 影响比例链，必须从 runtime/native 读取。 |
+| 轴参数表 | 负载 | native/runtime `load_rev` readback | 影响比例链，必须从 runtime/native 读取。 |
+| 轴参数表 | 回零次序 | LinuxCNC homing/native owner | 从微内核/native 读取。 |
+| 轴参数表 | 回零方向 | LinuxCNC homing/native owner | 从微内核/native 读取。 |
+| 轴参数表 | -软限位 | runtime INI/native limit owner | 从微内核/native 读取。 |
+| 轴参数表 | 零位 | Pulse 为 `HOME_OFFSET`/runtime owner | BUS 设零动作仍按对应 native/drive 证据闭环。 |
+| 轴参数表 | +软限位 | runtime INI/native limit owner | 从微内核/native 读取。 |
+| 轴参数表 | 速度 | runtime INI/native motion owner | 从微内核/native 读取。 |
+| 轴参数表 | 加速 | runtime INI/native motion owner | 从微内核/native 读取。 |
+| 轴参数表 | 反向间隙 | runtime INI/native motion owner | 从微内核/native 读取；不得进自建参数。 |
+
+## 自建参数
+
+| 设置页位置 | UI 参数 | 自建参数用途 | 读取要求 |
+| --- | --- | --- | --- |
+| 顶部 | 脉冲/总线 | 当前机型设置项 | UI 从自建参数读取；不用硬件探测、驱动映射表或默认文案补值。 |
+| G53 机床坐标目标位置表 | 对刀仪 X/Y/Z | 设置页测量/标定显示参数 | 微内核和驱动映射表没有该设置页参数，放入自建参数并由 UI 读取。 |
+| G53 机床坐标目标位置表 | 5 方向检测仪 X/Y/Z | 设置页测量/标定显示参数 | 微内核和驱动映射表没有该设置页参数，放入自建参数并由 UI 读取。 |
+| 轴参数表 | 从站 | 设置页轴从站编号显示参数 | 当前 UI 设置项进自建参数；不归微内核运动参数，也不使用驱动映射表伪造。 |
+| 轴参数表 | bit | 设置页稳定显示参数 | UI 稳定显示归自建参数；后续设置驱动动作可使用驱动映射表做真实驱动读写证据。 |
+| 轴参数表 | 分子 | 设置页稳定显示参数 | UI 稳定显示归自建参数；写驱动/读回证据不等于 UI 稳定显示 owner。 |
+| 轴参数表 | 分母 | 设置页稳定显示参数 | UI 稳定显示归自建参数；写驱动/读回证据不等于 UI 稳定显示 owner。 |
+| 轴参数表 | 写入状态 | 设置页稳定显示参数 | UI 稳定显示归自建参数；驱动动作结果只作为刷新/证据来源。 |
+
+## 驱动映射表参数
+
+| 设置页位置 | 参数/动作 | 驱动映射表来源 | 边界 |
+| --- | --- | --- | --- |
+| 设置驱动按钮/下载授权 | 驱动 profile | drive provider / 驱动参数映射表 | 只服务驱动私域选择、下载和证据链；不是轴运动参数 owner。 |
+| 设置驱动按钮/下载授权 | SDO/PDO 对象字典 | 驱动参数映射表 | 只用于真实驱动读写；不得反向成为 UI 稳定显示参数真源。 |
+| 设置驱动按钮/下载授权 | 授权下载参数 | drive provider 授权/下载链路 | 只服务驱动写入流程；不得接管微内核参数或自建参数。 |
+| 设置驱动按钮/下载授权 | 驱动读写证据 | drive provider readback/evidence | 只能作为设置驱动动作闭环证据；不能替代 LinuxCNC/native readback。 |
+| 轴参数表驱动动作 | bit/分子/分母写驱动证据 | 驱动参数映射表 | UI 稳定显示仍归自建参数；驱动映射表只记录真实驱动读写证据。 |
+
+## 禁止项
+
+- 不得把微内核/native 已有或应该拥有的参数放进自建参数。
+- 不得为了消除 `NAT` 把 UI 默认值、旧 `settings_runtime.json`、`config_cache`、SHM、`/run` result 或驱动映射表中不存在的伪字段当真值。
+- 不得把驱动参数映射表扩展成运动参数、G53/RTCP、WCS/G92、刀补、模态或安全 owner。
+- 龙门和刀库是第 7、8 轴，不是占位行；有 owner 的字段必须和其他轴一样显示，不得灰色禁用。

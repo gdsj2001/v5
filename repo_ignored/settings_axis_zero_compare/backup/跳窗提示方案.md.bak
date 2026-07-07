@@ -1,0 +1,385 @@
+# 跳窗提示原因显示与多语言方案
+
+引用需求真源：`REQ-BUS-PULSE-MODE-DIFFERENCE`、`REQ-UI-POPUP-RESULT-POLICY`、`REQ-DOC-SINGLE-SOURCE`、`REQ-PARAM-MEMORY-LIGHTWEIGHT-SAVE`、`REQ-NATIVE-OWNER-FIRST`、`REQ-SETTINGS-RUNTIME-DRIVE-ONLY`、`REQ-LINUXCNC-COMMAND-GATE`、`REQ-G92-NATIVE-RUNTIME`、`REQ-WCS-NATIVE-OWNER`、`REQ-ROTARY-UNWRAP-ABSOLUTE-PROOF`、`REQ-ROTARY-REBASE-NATIVE-GATE`、`REQ-RTCP-G53-NATIVE-ACTUAL`、`REQ-UI-FIRST-FRAME-CACHE`。
+
+## AI 阅读入口
+
+- 启动内存/热路径通用规则：见 `REQ-PARAM-MEMORY-LIGHTWEIGHT-SAVE` / `功能/0开机参数入内存.md`，本文只保留本功能特有边界。
+- 本文定位：后台命令结果弹窗、成功提示、失败/阻塞/确认继续和急停遮挡边界。
+- 先读 `REQ-UI-POPUP-RESULT-POLICY`；弹窗内容涉及具体功能失败原因时回到对应功能 owner。
+- 弹窗只表达结果和操作员确认，不得成为控制成功真源、运动准入、参数保存依据或绕过 native/microkernel 回读的证据；SHM 只允许作为 UI 坐标/模态/速度倍率显示投影。
+- 所有全屏跳窗打开/关闭都必须遵守 `REQ-UI-FIRST-FRAME-CACHE`，统一调用公共首帧 guard/helper（当前源码为 `V5UiFirstFrameGuard` 或等价 owner 入口）；不得在单个弹窗里复制私有 cache/blit/fallback 分支。
+
+本文定义 v3 UI 中后台命令跳窗的显示规则。目标是让用户在失败、阻塞、确认继续或需要处理的跳窗里直接判断当前动作、提示、失败原因和下一步，而不是只看到“执行失败”“前置检查失败”或 `broker direct returned guarded status` 这类泛化文案。普通成功结果不得弹出全屏窗口，只允许关闭进度窗并在顶部用简短文字显示约 2 秒；设置页驱动动作、授权/服务器下载和单轴设0这类需要操作员继续确认结果的成功，必须保留同一个弹窗并显示最终结果，直到操作员点击关闭。BUS/Pulse 模式差异、Pulse 禁用 BUS 驱动动作和 Pulse 设零/回零口径以 `功能/总线脉冲区别.md` 为准；被禁用的 Pulse 按钮不进入进度弹窗或 Broker 请求。
+
+## 1. 适用范围
+
+本方案适用于仍允许使用全屏结果弹窗的 `ReV3CommandResult` 后台命令，包括但不限于：
+
+- 坐标与偏移：倍率命令。
+- 设置页：设置读取、设置保存、零位设0、机械零点保存、驱动扫描/读取/写入/复位、服务器下载、本机码登记、授权下载。
+
+主页面运动动作不再使用全屏结果弹窗，也不得再保留这些动作自己的跳窗判断或跳窗调用：启动、回零、点动、连续点动、首点、暂停/继续、急停/取消急停、RTCP 开关、加工坐标系切换、加工坐标归零。上述动作的本地拒绝、请求构建失败、Broker/product action 失败和最终失败，只允许写顶部短提示和事件日志；动作本身、真实运动门禁、急停直通、Broker 结构化结果和事件日志仍保留，不得因为删除弹窗而删除安全门禁或真实控制链。
+
+本地输入校验类提示也必须写清直接原因，例如“请先点选单个加工坐标轴”，但这类提示可以不显示提示码。只要已经收到 Broker/product action 返回的 `ReV3CommandResult`，失败跳窗必须按本方案显示。
+
+### 1.1 当前源码跳窗/提示盘点
+
+本节只记录当前源码已经存在的跳窗、提示入口和触发范围；后续新增或重构时，应先更新本节再改 UI 行为。当前 UI 提示分为两类：全屏 `popup_layer` 弹窗和顶部短提示 `top_message`。全屏弹窗用于需要操作员确认、关闭或看到完整失败原因的场景；顶部短提示用于短时状态反馈、选择提示和被抑制弹窗的原因展示。
+
+| 类别 | 当前源码入口 | 触发范围 | 当前显示/行为 |
+| --- | --- | --- | --- |
+| 通用全屏错误/结果弹窗 | `lvgl_app/src/v3_ui_popup.c` 的 `re_v3_ui_show_error_popup()` | 所有本地拒绝、后台失败、命令结果弹窗最终都可落到此入口 | 显示动作名和原因；显示前隐藏软键盘；弹窗层置顶；当前源码弹窗按钮包含 `急停` 和 `关闭`。 |
+| 顶部短提示 | `lvgl_app/src/v3_ui_state.c` 的 `re_v3_ui_set_blocked_message*()` | 坐标点选、程序选择、点动步长、被 suppress 的后台结果、普通本地状态提示 | 默认约 6 秒；显示在顶部状态层；不会阻塞底层按钮。 |
+| 旧后台命令失败弹窗 | 已删除：`lvgl_app/src/v3_ui_command_popup.inc` 不再是当前入口 | 主页面运动命令、WCS/RTCP、急停/复位、首点等不得恢复旧 Broker/product action 失败弹窗；设置页/VPS/驱动等仍允许的长动作结果只能由当前 popup owner 显示，不能恢复旧 `.inc` 中介层。 |
+| 后台命令进度弹窗 | `show_command_progress_popup()`、`drive_bus_progress_begin()`、`re_v3_drive_bus_async_show_active_progress()` | 设置保存、设置驱动、扫描从站、读取驱动、复位驱动、服务器下载、本机码登记、授权下载、单轴设0等长动作 | 执行中可显示进度；异步 job 接受后继续跟踪；关闭弹窗会请求取消后台 job；普通成功完成时关闭进度窗并只在顶部显示约 2 秒简短成功文字；设置页驱动动作、授权/服务器下载和单轴设0成功时必须把原进度窗更新为最终成功结果并保留到操作员点击关闭。 |
+| 设置保存/保存并重启弹窗 | `execute_settings_apply_gate_command()` | 设置页右上角保存/保存并重启 | 有 dirty 时显示保存进度；成功且已 owner/native readback 确认时关闭进度窗并顶部短提示；只发起重启 handoff 的路径返回主页并显示长时间顶部提示；失败显示提示码、原因和 failed stage。 |
+| 设置页单字段即时保存提示 | `execute_settings_axis_param_immediate_apply_command()` | 设置页轴参数即时保存字段 | 后台未接入、请求过长、等待 owner/native readback 或失败时提示；成功且回读确认时不额外弹出全屏成功窗。 |
+| 设置页单轴设0弹窗 | `execute_settings_axis_zero_gate_command()`、`execute_settings_axis_zero_pulse_home_offset_command()`、`update_settings_axis_zero_success_message()` | BUS count-domain 设0、Pulse 轴参数表 `设零` 键盘写当前轴 0 位 `HOME_OFFSET` | 可先显示包含操作轴的进度弹窗；成功后仍保留同一弹窗，显示提示码、操作轴和成功原因，必须由操作员点击关闭；失败按提示码/原因/详情显示，且应带操作轴。 |
+| 设置驱动/驱动读写弹窗 | `execute_drive_bus_gate_command()` 与异步 job 更新函数 | BUS/EtherCAT 模式下扫描从站、读取驱动、设置驱动、复位驱动、故障复位等设置页驱动动作 | 先显示驱动动作进度；`BROKER_JOB_ACCEPTED` 后进入异步跟踪；成功后仍保留同一弹窗，显示提示码和最终成功原因，必须由操作员点击关闭；失败显示门禁/读写/后台 job 原因。Pulse/StepDir 模式下这些 BUS 驱动动作灰色禁用，不产生本弹窗。 |
+| 本机码/授权/服务器下载弹窗 | `execute_dna_register_gate_command()`、`execute_auth_download_gate_command()`、`execute_server_download_gate_command()` | 设置页本机码登记、下载授权、BUS/EtherCAT 服务器下载 | 先显示下载/登记进度；异步 job 接受后跟踪；成功后仍保留同一弹窗，显示提示码和最终成功原因，必须由操作员点击关闭；失败显示 Broker/product action 失败原因。Pulse/StepDir 模式下 `服务器下载` 按 BUS 驱动动作禁用，不进入本弹窗。 |
+| 主页面运动命令提示 | `v3_ui_command_start.c`、`v3_ui_command_home.c`、`v3_ui_command_motion.c`、`v3_ui_command_wcs.c`、`v3_ui_command_rtcp.c`、`v3_ui_first_point.c` | 启动、回零、点动、连续点动、加工坐标系切换、RTCP、急停/取消急停、首点、加工坐标归零 | 不得调用全屏 popup，也不得走通用失败弹窗格式化；失败、阻塞和本地拒绝只写顶部短提示与事件日志。 |
+| 程序页本地提示/确认 | `lvgl_app/src/v3_page_program.c`、`v3_ui_app_mdi_actions.c` | 未选择 G-code、打开/编辑/保存程序失败、删除程序二次确认 | 未选择/打开失败会弹全屏错误；删除程序第一次只显示顶部确认提示“再次点击确认”，第二次失败才弹窗。 |
+| 软键盘/本地输入提示 | `lvgl_app/src/v3_ui_keyboard.c`、`v3_ui_keyboard_settings.inc` | MDI 键盘、本地设置键盘、设0输入等 | 键盘本身不是结果弹窗；输入按键会给顶部短提示。设置页键盘显示时会隐藏通用 popup layer，但当前需要继续保证 modal/click-swallow，防止底层按钮穿透。 |
+| 未接入/被阻塞按钮提示 | `v3_ui_app.c`、`v3_ui_widgets.c`、各 command 文件本地 precheck | 功能尚未接入、系统正忙、后台通道未接入、请求构建失败、动作被安全门禁拒绝 | 通常先写顶部短提示，再显示全屏错误弹窗；文案必须说明未发送真实命令或拒绝原因。 |
+
+当前没有发现 LVGL `lv_msgbox` 独立消息框路径；产品使用自建 `popup_layer`。因此后续所有跳窗统一按本文格式和 `ReV3CommandResult` 字段规则收敛，不再新增第二套 msgbox、toast 或独立弹窗协议。
+全屏 `popup_layer` 属于覆盖层，显示前必须通过公共首帧 guard 捕获被覆盖页面，关闭时先恢复捕获帧，再只 invalidate 顶部状态、机器码或本次动作实际改变的区域；不得让关闭动作等待设置页或主页面整页重绘。
+
+设置页 `登记本机码`、`下载授权`、`服务器下载` 三个按钮必须共享同一条 VPS 设备身份链路。`登记本机码` 只负责现读本机 PL DNA 并提交 VPS，由 VPS 返回并保存 6 位 `vpsDistributionId`；板端不得用 DNA 本地推导值当作最终 ID。VPS 返回 ID 后，板端本地登记状态只允许保存 `vpsDistributionId`、登记结果码和公钥摘要，不允许保存 raw PL DNA、DNA hash、`pl_dna_hash` 或 id-dna folder；设置页顶部 `本机码` 只显示该 6 位 ID，不显示 `已登记` 等登记状态后缀、不显示本机码片段或 hash；没有合法 6 位 ID 时，在同一 ID 位置显示 `未登记`。设置页顶部不得再显示 `请求:NAT 实际:NAT` 这类旧状态占位。若 VPS 未返回合法 6 位 ID、本地写入失败或 ID-DNA 关系不能确认，登记弹窗必须显示失败，不得显示本地猜测 ID。
+
+`下载授权` 和 BUS/EtherCAT 可用的 `服务器下载` 必须先读取本地登记状态中的 `vpsDistributionId`；本地前置顺序固定为先校验 6 位 ID 存在，再现读本机 live DNA 并在内存中计算 DNA hash，之后把 ID 和本次临时 DNA/DNA hash 一起发送给 VPS，由 VPS 一次校验返回。客户端请求路径只能携带 6 位 ID，不能把 DNA hash 或 `id-dna` 放进路径；临时读取的 DNA/DNA hash 不允许落盘保存，不允许写 UI、日志或 SHM。授权文件只能由 VPS 按该 ID 解析到当前设备 private 目录后下载 `device_authorization.json`；私有驱动映射表只能由 VPS 按同一 ID 解析后下载 `driver_profile_map.json`。`pl_dna_hash` 只作为 VPS 侧绑定和路径解析字段；没有已登记 ID 时，这两个按钮必须提示先登记本机码，不得只凭 DNA hash 查找私有目录，也不得从其它设备 private 目录兜底。
+
+## 2. 用户可见格式
+
+失败、阻塞、确认继续、不能继续、安全确认和其它需要操作员处理的后台命令跳窗，操作员可见正文必须统一为 3 个文本项，固定顺序如下；三个文本项之间必须空一行：
+
+```text
+提示: <code>
+
+原因: <当前语言的直接原因>
+
+下一步: <操作员下一步应该怎么处理>
+```
+
+这 3 个文本项是主格式，不得额外插入 `详情`、`现状`、`风险`、`不能继续`、`继续后` 等第四项或更多项。Broker/product action 返回的 `detail`、`current_state_cn`、`risk_cn`、`cannot_continue_cn`、`continue_action_cn` 等字段只能用于生成 `原因` 或 `下一步` 的内容；确需保留原始明细时写入事件日志、Broker 结果或诊断文件，不直接放进操作员跳窗正文。
+
+`原因` 必须是明确、可判断的直接原因，让操作员知道“到底因为什么被拒绝/失败/等待”。禁止只显示让人无从适从的泛化文案，例如“执行失败”“前置检查失败”“启动失败”“设置保存失败”“状态异常”“条件不满足”“后台返回失败”。如果只拿到这类泛化文案，UI 必须继续从提示码、结构化 detail、第一条 issue/error、轴号/坐标系/驱动从站上下文中提取具体原因；仍无法提取时，应显示“后台未返回具体失败原因”这类明确的 unknown-detail 原因，并在 `下一步` 中要求重新执行原动作或联系维护人员，而不是假装已有具体原因。
+
+设置页 `settings_axis_zero` / 机械零点设0 的进程、失败状态和需要操作员处理的状态都必须显示本次操作轴，但轴号只能压进 `原因` 或 `下一步` 文本项内，不得新增 `操作轴` 第四项。该轴号只能从 `axis_<轴>_zero` 字段或 Broker/product action 返回的结构化 `detail.axis` 推导，不得在每个轴按钮分支重复拼文案。
+
+进程窗口示例：
+```text
+提示: SETTINGS_ZERO_PENDING
+
+原因: A轴正在设零
+
+下一步: 完成后可继续设置其它轴，最后统一保存并重启
+```
+
+失败窗口示例：
+```text
+提示: SETTINGS_ZERO_ABS_SPLIT_UNAVAILABLE
+
+原因: A轴零位设0失败，驱动绝对位置读回不完整
+
+下一步: 检查轴选择和驱动状态，重新读取驱动后再设0
+```
+
+成功结果默认不弹全屏窗口。若成功前存在普通进度弹窗，成功时必须自动关闭进度弹窗，并在顶部状态栏显示约 2 秒简短成功文字，例如“回零完成”“保存完成”。失败时同一窗口更新为失败状态并保留到操作员点击关闭、急停或其它明确动作。
+
+设置页例外：`下载授权`、BUS/EtherCAT 可用的 `服务器下载`、`扫描从站`、`复位驱动`、`读取驱动`、`清除故障`、`设置驱动`、本机码登记，以及轴参数表单轴 `设0/零位` 成功后不得自动关闭弹窗；必须把原进度窗更新为最终成功结果，至少显示 `提示`、成功原因和“确认结果后点关闭”的下一步，并保留到操作员点击关闭。Pulse/StepDir 模式下按 `功能/总线脉冲区别.md` 禁用的 BUS 驱动动作不产生弹窗。若操作员在后台 job 完成前已经手动关闭该弹窗，后台后续成功不得重新弹出覆盖设置页，只能记录事件和顶部状态。
+
+`扫描从站` 成功结果弹窗仍只能保持 `提示 / 原因 / 下一步` 三个文本项，不得新增第四项；其中 `原因` 文本项必须显示本次扫描到的驱动/从站列表，固定排成两列四行。每格显示序号、从站编号和驱动名，少于 8 个用 `--` 占位，多于 8 个在同一 `原因` 项内提示剩余数量；该列表只能来自本次 `drive_scan_slaves` 返回的 `slaves`、本次 `ethercat slaves` 行解析出的驱动名，或由本次扫描写入的自建参数表候选，不得用固定默认列表、固定驱动型号、驱动映射表或旧结果伪造。
+
+最终结果弹窗的正文颜色必须跟随结果状态：成功结果使用绿色字体，失败、阻塞、不能继续或安全确认失败使用红色字体。进行中的进度弹窗不按成功/失败染色，保持普通提示色；当进度窗更新为最终成功或失败结果时再切换为绿色或红色。
+
+设置页这几个长耗时弹窗必须在弹窗内容区左下角显示预计时间倒计时：`下载授权`、BUS/EtherCAT 可用的 `服务器下载`、`扫描从站`、`复位驱动`、`读取驱动`、`清除故障`、`设置驱动`。倒计时文案固定为 `预计: MM:SS`，只表示本次后台 job 的 UI 估算剩余时间，不作为成功、失败、超时或运动安全真源；真正结果仍以 Broker/product action 返回和 native/microkernel/owner 回读为准。倒计时只在这些动作的进行中进度弹窗显示，最终成功/失败结果、普通错误弹窗、确认继续弹窗和单轴设0弹窗不得保留倒计时。操作员关闭弹窗、后台 job 完成、取消、超时或进度跟踪结束时，UI 必须清理并隐藏倒计时，避免旧预计时间污染下一次弹窗。
+
+所有后台命令跳窗都必须保留三个操作能力，但急停不得作为弹窗内容区左下角按钮：
+
+```text
+急停: 直接复用主页面急停按钮本体，并显示在该按钮当前屏幕位置、尺寸和红色语义
+确认继续: 位于弹窗内容区，按 allow_user_continue 启用或禁用
+关闭: 位于弹窗内容区
+```
+
+`急停` 必须动态引用主页面急停按钮对象，不得复制坐标、尺寸、颜色或重新创建第二个急停按钮。弹窗显示时，UI 只允许把主页面急停按钮本体提升到弹窗遮罩之上并保持可点；弹窗遮罩仍必须拦截其它底层按钮。后续主页面急停按钮位置或尺寸调整时，弹窗急停显示必须自动跟随，无需再改弹窗坐标。
+
+`关闭` 只负责关闭当前弹窗或取消正在跟踪的后台任务，不得触发被弹窗遮挡的底层按钮。关闭弹窗动作必须绑定在 `LV_EVENT_RELEASED` 释放事件上触发，不得在 `LV_EVENT_PRESSED` 按下阶段隐藏弹窗。弹窗隐藏前必须让当前 LVGL 输入设备执行释放吸收；弹窗隐藏后，UI 层必须对底层输入设备施加至少 200ms 的触摸抑制锁定。在该保护窗口内，除主页面急停按钮本体外，所有底层按钮、设置表格单元格、软键盘入口、`保存并重启`、`点动`、`重启` 等 operator 输入都必须在分发前被忽略，防止用户在弹窗上按下、滑动、释放时穿透到刚露出的底层控件。
+
+`确认继续` 不是无条件绕过按钮。它必须按 Broker/product action 返回的结构化字段决定是否启用：
+
+```text
+allow_user_continue: true/false
+confirm_continue_required: true/false
+continue_token: <本次结果绑定的短期 token，可选>
+continue_request_patch: <二次请求必须附加的字段，可选>
+original_request_id: <产生本弹窗的原请求 id，可选，仅用于绑定弹窗来源>
+current_state_cn: <当前现状>
+risk_cn: <继续风险>
+continue_action_cn: <点击确认继续后会执行什么>
+cannot_continue_cn: <不能继续时的明确原因>
+```
+
+UI 规则：
+
+- 所有跳窗都显示 `确认继续` 按钮。
+- 跳窗不得渲染固定黄色标题文字，例如“提示”；操作员可见内容只保留三个文本项和动作按钮。
+- `allow_user_continue=true` 时，按钮启用；二次请求必须带 `confirm_continue=true`，并带回原 `code/request_id` 或 Broker 要求的 `continue_token`，防止旧弹窗误继续。
+- 点击 `确认继续` 的瞬间，UI 不得读取、附加或比较 SHM/display `status_epoch`；二次请求只表达操作者确认了当前提示，并带回绑定字段或 `continue_token`。当前安全状态必须由 Broker/product action 重新直连微内核/native actual 读取并重跑完整门禁。
+- `allow_user_continue` 缺失或为 `false` 时，按钮显示为禁用态；`下一步` 必须使用 `cannot_continue_cn` 或本地化后的“当前错误不能继续执行”生成。
+- UI 不得自行判断某个硬门禁能否继续；是否可继续只能来自 Broker/product action 的结构化结果。
+- Broker/product action 收到 `confirm_continue=true` 后，必须在微内核/native 最新 actual 状态上重新执行完整运动门禁校验，包括急停、使能、busy/interpreter 状态、轴状态、限位、程序/刀路/几何/授权等该动作原本需要的全部 precheck。`confirm_continue=true` 或 `continue_token` 只证明操作员确认了风险提示，不得跳过任何门禁，不得信任旧状态快照或 SHM 显示投影强行运动。
+- 若后端重跑 native/microkernel 门禁发现新急停、新运动、新限位、新 busy、授权/几何/状态不可用或其它 owner 要求的 actual 证明缺失，必须结构化拒绝并返回新的提示码、原因和下一步。
+- 点击 `确认继续` 前，弹窗三个文本项必须让操作员知道当前原因和继续后的处理动作；不允许只显示“是否继续”。
+- 点击 `确认继续` 后如果二次请求仍失败，必须显示新的提示码、原因和下一步，不得复用旧弹窗文案。
+
+可继续的跳窗正文必须仍保持三个文本项，并且文本项之间空一行：
+
+```text
+提示: <code>
+
+原因: <当前语言的直接原因>
+
+下一步: <continue_action_cn；若存在 current_state_cn/risk_cn，可压缩进这一项>
+```
+
+不能继续的跳窗正文也必须仍保持三个文本项，并且文本项之间空一行：
+
+```text
+提示: <code>
+
+原因: <当前语言的直接原因>
+
+下一步: <cannot_continue_cn 或硬门禁处理办法>
+```
+
+典型不可继续示例：
+
+```text
+提示: ROTARY_COUNT_DOMAIN_ENCODER_CALIBRATION_REQUIRED
+
+原因: 旋转轴编码器位数未建立本机可信校准
+
+下一步: 先执行复位驱动，再执行设置驱动；设置驱动会写入并读回电子齿轮，再通过受控微动建立本机校准
+```
+
+显示规则：
+
+- `提示` 使用 `ReV3CommandResult.code`；若为空，允许从 `detail` JSON 的 `code` 字段兜底。
+- `原因` 使用 UI 本地的 `code -> 本地化原因` 对照表生成，当前默认语言为中文；没有映射时使用 Broker/detail JSON 中的 `direct_reason_cn`、`reason_cn`、`message_cn`、`message`、`reason`、`error` 等字段压缩生成。
+- `原因` 不能只描述动作类别，必须包含阻塞事实或失败证据：例如“机器未上使能，不能回零”“程序文件哈希与加载信标不一致”“A轴驱动绝对位置读回不完整”。“回零失败”“启动前置检查失败”“驱动写入失败”只能作为内部 fallback，不能直接给操作员看。
+- `下一步` 优先使用 Broker/detail JSON 中的 `handling_cn`、`next_step_cn`、`required_action_cn`、`cannot_continue_cn`、`continue_action_cn`、`operator_action_cn`；缺失时由 UI 按提示码映射生成。下一步必须是给操作员的下一步动作，不得只重复原因。
+- C 端解析 Broker/detail JSON 前必须先做有界顶层对象校验：输入必须在固定字节上限内以 NUL 结束，顶层必须是单个 JSON object，闭合 `}` 后只能有空白，关键诊断字段不得出现重复顶层 key。校验失败时按结构化失败处理，不能继续用截断、尾随垃圾或重复字段结果驱动弹窗。
+- 找不到提示码映射时，必须显示原始 code，并用 Broker 明细或 fallback 文案兜底生成 `原因` 和 `下一步`，不能吞掉新错误。
+- 跳窗正文不得出现“请查看日志”作为操作员提示。若 UI 暂时无法本地化某个返回文本，也必须在窗口里显示原始 code、可见后台返回文本压缩出的原因和下一步，不能用“查看日志”替代原因。
+- 已经格式化好的结构化正文也必须符合三个文本项格式；轴号、坐标系、驱动从站等上下文只能压进 `原因` 或 `下一步`，不得新增 `操作轴:`、`详情:` 等额外项。通用英文/泛化过滤不得把这类正文替换掉。
+- 跳窗正文面向操作员，绝对不能出现底层控制框架、内部进程、脚本或调试工具名称；若 Broker 明细带出内部名称，UI 必须在显示前替换成“运动控制器”“后台通道”等产品化说法。
+
+示例：
+
+```text
+提示: HOME_BUS_ZERO_DELTA_LIMIT
+
+原因: 到设0位置的距离超过安全上限
+
+下一步: 先停止运动并检查当前轴位置，确认安全后重新设0或重新回零
+```
+
+```text
+提示: BROKER_BUSY
+
+原因: 后台已有命令在执行
+
+下一步: 等当前动作完成，或按急停停止后再重新操作
+```
+
+## 3. 本地化对照表
+
+UI 层维护统一对照表，不允许把中文、英文或其他语言原因散落在各个按钮分支里。
+
+对照表字段建议：
+
+```c
+typedef struct {
+    const char *match;
+    ReV3ReasonCodeMatch match_type;
+    const char *zh_cn;
+    const char *en;
+    const char *handling_zh_cn;
+    const char *handling_en;
+} ReV3LocalizedReason;
+```
+
+匹配规则：
+
+- 先做精确匹配，再做包含匹配。
+- 精确匹配用于稳定提示码，例如 `BROKER_BUSY`、`NO_RESPONSE`、`HOME_BUS_ZERO_DELTA_LIMIT`。
+- 包含匹配用于同类前缀或后缀提示码，例如 `STATUS_UNAVAILABLE`、`STALE_EPOCH`、`JOG_PRECONDITION`。
+- 当前语言默认 `zh-CN`。后续新增语言时，只扩展对照表字段和语言选择入口，不改按钮业务分支。
+
+常见提示码映射必须覆盖，并且每个映射都必须提供下一步：
+
+| 提示码或片段 | 原因 | 下一步 |
+| --- | --- | --- |
+| `BROKER_BUSY` / `COMMAND_IN_FLIGHT` | 后台已有命令在执行 | 等当前动作完成；若当前动作疑似卡住，先按急停停止，再重新执行原操作 |
+| `STALE_COMMAND` / `STALE_EPOCH` | 状态时间戳已过期 | 等界面状态刷新后重新操作；不要连续快速点击同一按钮 |
+| `STATUS_UNAVAILABLE` / `EPOCH_UNAVAILABLE` / `SHM` | 运行状态帧不可用或未刷新 | 等状态恢复；若持续出现，先返回主页观察状态，必要时重启后端和界面 |
+| `ESTOP_BROKER_SOCKET_UNAVAILABLE` | 急停后台通道不可用，命令未下发 | 立即使用硬件急停或断使能；确认安全后检查后台通道 |
+| `ESTOP_BROKER_DIRECT_FAIL` | 急停后台通道请求失败，命令未确认 | 立即使用硬件急停或断使能；不要继续运行程序 |
+| `ESTOP` | 机器处于急停状态 | 排除现场风险后点击取消急停/上使能；未确认安全前不要启动、回零或点动 |
+| `DISABLED` | 机器未上使能 | 先取消急停并上使能；使能确认后再执行当前动作 |
+| `INTERPRETER_NOT_IDLE` / `NOT_IDLE` | 机器或解释器不空闲 | 等程序停止或暂停后复位到空闲；需要立即停止时按急停或暂停 |
+| `NO_PROGRAM` / `PROGRAM_OPEN` | 程序文件未打开、不可读或未确认加载 | 返回程序页重新选择并打开程序；确认加载成功后再启动 |
+| `VELOCITY_PROOF_MISSING` / `VELOCITY_NOT_SEEN` | 启动已下发但未观察到速度变化 | 不要重复按启动；检查急停、使能、程序加载和解释器状态后重新启动 |
+| `HOME_BUS_ZERO_TARGET_MISSING` | BUS 回零设0目标缺失或未证明 | 先完成该轴设0和设置保存/重启确认，再重新执行 BUS 回零 |
+| `HOME_BUS_ZERO_COMMAND_START_FAILED` | BUS 回零运动命令未被控制器接受 | 确认急停已取消、机器已使能且解释器空闲后重新回零 |
+| `HOME_BUS_ZERO_DRIVE_READBACK_FAILED` | 驱动实际位置读回失败 | 重新读取驱动状态；若仍失败，检查 EtherCAT/驱动通讯后再回零 |
+| `HOME_BUS_ZERO_DELTA_LIMIT` | 到设0位置的距离超过安全上限 | 先停止运动并检查当前轴位置，确认安全后重新设0或重新回零 |
+| `HOME_BUS_ZERO_TIMEOUT` / `HOME_TIMEOUT` | 回零动作超时或未到位 | 按急停或停止确认机器静止；检查限位、回零方向和速度后重新回零 |
+| `SETTINGS_READ` | 设置读取来源不可用、状态帧过期或字段解析失败 | 等状态刷新后重新进入设置页；若持续失败，重启后端/界面后再读取设置 |
+| `SETTINGS_APPLY` | 设置保存被具体字段、状态帧、运行态回读或重启 handoff 门禁拒绝 | 按弹窗指出的字段或阶段修正设置；重新保存，不要直接启动机器 |
+| `WORK_ZERO` | 加工坐标归零所需的 WCS、轴选择或机器状态不满足 | 先确认已回零、轴选择正确且机器空闲，再重新执行加工坐标归零 |
+| `WCS_SWITCH` | 加工坐标系切换失败或未确认 | 先停止程序并确认解释器空闲，再重新切换坐标系 |
+| `JOG_PRECONDITION` | 点动安全条件不满足 | 先取消急停、上使能、完成回零并停止程序，再重新点动 |
+| `JOG_NO_POSITION_CHANGE` | 点动下发后未观察到位置变化 | 松开点动按钮，确认轴选择/步长/使能状态后再点动；若仍无变化，检查驱动使能 |
+| `DRIVE_READ` / `DRIVE_WRITE` | BUS/EtherCAT 驱动参数读取、写入或读回在具体轴、对象字典、SDO、OP 恢复或读回比对阶段失败 | 按弹窗指出的轴和阶段处理；先确认机器停止并断开运动，再重新读取或设置驱动 |
+| `DRIVE_WRITE_JOB_STATUS_CHANNEL_LOST` | 后台任务状态通道连续不可用 | 不要重复点击设置驱动；等待任务状态恢复，必要时重启后端后重新读取驱动 |
+| `DEVICE_AUTH` | 授权文件下载、签名验签、DNA hash 比对、时间窗或权限字段校验失败 | 检查授权文件、系统时间和本机码是否匹配；重新下载授权后再上使能 |
+| `DNA_REGISTER` | 本机码登记在网络、VPS 返回、厂家 token、本地 DNA 读取或授权文件验签阶段失败 | 检查网络、厂家 token 和本机 DNA 状态；重新登记本机码后再下载授权 |
+| `SERVER_DOWNLOAD` | BUS/EtherCAT 服务器下载在网络、授权、公共/私有映射表完整性或 profile 校验阶段失败 | 检查网络和授权状态；重新服务器下载，成功后再扫描/设置驱动 |
+
+同类条件不足必须拆到具体阻塞原因，不允许只显示“条件不足”“未回零”或“前置检查失败”：
+
+| 提示码或片段 | 原因 | 下一步 |
+| --- | --- | --- |
+| `HOME_PRECONDITION_ESTOP` | 当前处于急停状态，不能执行回零 | 排除风险后取消急停并上使能，再重新回零 |
+| `HOME_PRECONDITION_DISABLED` | 机器未上使能，不能执行回零 | 先上使能并确认驱动 Operation Enabled，再重新回零 |
+| `HOME_PRECONDITION_BUSY` | 微内核/native Home gate 返回当前不能执行回零 | 等程序停止并让底层 Home gate 返回可执行状态后，再重新回零 |
+| `HOME_STATUS_UNAVAILABLE` | 回零前状态不可用或未刷新 | 等状态刷新；若持续不可用，重启后端和界面后再回零 |
+| `HOME_SEQUENCE_PREREQ_UNHOMED` | 前序回零轴未完成，不能单独回零当前轴 | 先按回零顺序完成前序轴回零，再回零当前轴 |
+| `HOME_PROFILE_MISSING` / `HOME_SEQUENCE_INVALID` | 回零参数或回零顺序配置缺失、重复或无效 | 进入设置页修正回零参数，保存并重启后重新回零 |
+| `HOME_SETTINGS_*` | 回零设置未证明已在运行态生效，或目标轴运行态证明缺失/无效 | 重新保存设置并等待运行态回读确认，再执行回零 |
+| `MOTION_GATE_DNA_NOT_VERIFIED` | 本机码或授权未验证，运动命令被阻止 | 先登记本机码、下载授权并完成验签，再取消急停/上使能 |
+| `MOTION_GATE_HOME_SEQUENCE_NOT_APPLIED` | 回零顺序策略未在运行态生效 | 保存设置并重启后端，确认回零顺序回读后再运动 |
+| `MOTION_GATE_AXIS_ZERO_NOT_APPLIED` | 轴零位设0策略未在运行态证明 | 重新设0并保存/重启，确认运行态证明后再运动 |
+| `MOTION_GATE_EGEAR_NOT_VERIFIED` | 电子齿轮参数未完成写入读回验证 | 执行设置驱动并完成读回验证后，再执行运动命令 |
+| `MOTION_GATE_DRIVER_MODE_MISMATCH` | 当前驱动模式不支持该运动命令 | 切换到正确驱动模式并完成使能/回读确认后再操作 |
+| `WORK_ZERO_NOT_HOMED` | 机器尚未回零，不能执行加工坐标归零 | 先完成机器回零，再执行加工坐标归零 |
+| `ROTARY_EQUIV_ZERO_RAW_UNTRUSTED` / `ROTARY_EQUIV_ZERO_AXIS_ZERO_REQUIRED` | 旋转轴当前位置或零点未建立可信 raw | 重新设0或执行真实回零，确认 raw/unwrap 可信后再操作 |
+| `BROKER_ROTARY_EQUIV_ZERO_DISABLED` | 旋转轴等效回零执行门禁已关闭 | 不要继续执行等效回零；由维护人员确认门禁策略后再启用 |
+| `NOT_HOMED` / `UNHOMED` | 机器尚未回零，或存在未回零的前置轴/目标轴 | 按顺序完成所有要求轴回零后再执行当前动作 |
+
+当 `detail` JSON 中包含 `errors`、`profile_errors` 或 `missing_prerequisites` 数组时，三个文本项必须提取第一条现场明细并压缩到 `原因` 或 `下一步`。例如 `missing_prerequisites[0].axis="X"` 时，`原因` 应显示“前序轴 X 未回零”；`profile_errors[0]` 带 `axis/code/message` 时，`原因` 应显示“X轴 <本地化明细>”。这类明细只来自 Broker/product action 返回的结构化 detail，UI 不得为显示原因再去查询底层控制或 HAL。
+
+## 4. 明细字段优先级
+
+格式化入口按以下顺序取直接明细：
+
+1. `direct_reason_cn`
+2. `reason_cn`
+3. `message_cn`
+4. `message`
+5. `reason`
+6. `error`
+7. fallback 文案
+
+继续相关字段按以下顺序提取和显示：
+
+1. `current_state_cn`
+2. `risk_cn`
+3. `continue_action_cn`
+4. `cannot_continue_cn`
+5. `allow_user_continue`
+6. `confirm_continue_required`
+7. `continue_token`
+8. `continue_request_patch`
+
+如果 Broker/product action 没有返回这些字段，UI 必须按 `allow_user_continue=false` 处理，并显示禁用的 `确认继续` 按钮。
+
+以下内容只能作为泛化 fallback，不得作为唯一原因：
+
+- `执行失败`
+- `前置检查失败`
+- `启动失败`
+- `回零失败`
+- `设置保存失败`
+- `驱动写入失败`
+- `条件不满足`
+- `状态异常`
+- `后台返回失败`
+- `direct failed`
+- `broker direct returned guarded status`
+- `accepted by broker`
+
+如果明细中包含冒号、逗号、分号或现场变量，例如“服务器下载失败：映射表完整性校验未通过”，应保留为具体详情，不能因为包含“失败”二字就丢弃。
+
+如果过滤泛化 fallback 后仍没有可用明细，三个文本项必须明确暴露“缺少具体原因”这个事实：
+
+```text
+提示: <code 或 UNKNOWN_DETAIL>
+
+原因: 后台未返回具体失败原因
+
+下一步: 保持当前状态，不要重复快速点击；重新执行原动作一次，若仍出现此结果则联系维护人员并提供提示码
+```
+
+## 5. 架构边界
+
+跳窗格式化属于 UI 显示层：
+
+- UI 只负责展示失败/阻塞/确认类 `code/detail`，以及成功时的约 2 秒顶部短提示；不得为了显示原因直接调用底层控制 API、读写 HAL、执行命令行调试工具，也不得读取 `/opt/8ax/phase0_bus5/settings_runtime.json` 或热路径轮询 JSON。
+- 真实运动原因仍由底层运动控制、HAL/EtherCAT、Broker、product action 和 SHM 状态链路给出。
+- Broker/product action 必须返回结构化 `code` 和可解析 detail。UI 不得把缺失结果静默包装成成功。
+- 事件日志仍保留原始 `detail`，跳窗显示只保留三个文本项本地化摘要。
+
+## 6. 实现入口
+
+实现入口：
+
+- `lvgl_app/src/v3_ui_command.c`
+  - `k_command_reason_table[]`：提示码本地化对照表。
+  - `re_v3_ui_format_command_failure_popup_message()`：统一失败跳窗格式化。
+  - `show_command_result_failure_popup()`：统一显示失败跳窗；设置页轴设0失败必须从 `axis_<轴>_zero` 或结构化 `detail.axis` 推导轴号，并把轴号压进 `原因` 或 `下一步`，不得新增 `操作轴:` 第四项，也不得在每个轴按钮分支重复拼文案。
+  - 设置页轴设0的进程、成功和失败状态必须走共享轴号格式化入口，正文仍保持 `提示 / 原因 / 下一步` 三个文本项；成功不得自动关闭窗口，必须保留结果弹窗到操作员点击关闭。
+  - 任意弹窗可见时，顶部临时黄色提示和顶部状态条不得重复显示同一操作提示；弹窗入口必须清空已有顶部临时提示，状态刷新也不得在弹窗层可见时把顶部黄色状态条重新抬到前景。
+  - 统一 popup action model 必须让 `确认继续 / 关闭` 走同一内容区入口；`急停` 直接复用主页面急停按钮本体并动态跟随其位置，不得回退成弹窗左下角按钮，也不得在单个按钮业务分支里私自创建无确认 token 的继续按钮。
+- `lvgl_app/src/v3_ui_internal.h`
+  - 声明共享格式化入口。
+- `lvgl_app/src/v3_ui_first_point.c`
+  - 首点命令失败也调用同一格式化入口。
+
+新增或修改按钮时，只允许把 `ReV3CommandResult` 失败分支接入统一入口；不得在按钮分支中重新拼接“某某失败：xxx”作为最终方案。
+
+## 7. 验收标准
+
+源码验收：
+
+- 静态检查确认所有后台命令失败分支调用统一格式化入口。
+- 覆盖测试确认对照表存在 `zh_cn` 和后续语言字段，且常见提示码被收录。
+- 覆盖测试确认所有命令跳窗都保留 `急停 / 确认继续 / 关闭` 三个操作能力，其中 `急停` 直接复用主页面急停按钮本体并动态跟随其当前位置，`确认继续 / 关闭` 显示在弹窗内容区。
+- 覆盖测试确认普通后台成功结果不会调用全屏弹窗；BUS/EtherCAT 设置页驱动动作、授权/服务器下载和单轴设0成功会保留同一结果弹窗，顶部简短成功提示不能替代弹窗内容。
+- 覆盖测试确认 `allow_user_continue=false` 或缺失时，`确认继续` 为禁用态，并显示 `不能继续` 原因。
+- 覆盖测试确认 `allow_user_continue=true` 时，二次请求必须带 `confirm_continue=true`、原请求绑定字段或 `continue_token`，不得携带 SHM/display `status_epoch`；旧弹窗、过期 token 或 native/microkernel 门禁重证失败必须由后端结构化拒绝。
+- 覆盖测试确认后端收到 `confirm_continue=true` 后仍重新执行该动作完整运动门禁，不能因确认继续跳过急停、使能、busy/interpreter、限位、程序/刀路/几何/授权等 precheck。
+- 覆盖测试确认可继续弹窗同时显示 `现状`、`风险`、`继续后`，不可继续弹窗显示 `现状`、`不能继续`。
+- `git diff --check` 不报错。
+
+原始路径验收：
+
+- 通过原始 UI/UDS 路径触发至少三类失败：急停/未使能、状态过期或 Broker busy、运动/驱动类失败。
+- 跳窗必须能直接看出提示码和原因。
+- 每个跳窗必须可见 `确认继续` 按钮；硬门禁场景按钮禁用且能看出不能继续原因。
+- 跳窗正文原因和详情均不得出现底层控制框架或内部调试工具名称；原始 detail 可以留在事件日志中供工程诊断。
+- 事件日志必须保留原始 Broker detail，便于后续诊断。
+- 不能因为提示码未收录而只显示泛化失败；未收录提示码也要显示 code 和原始明细。
+
+## 8. 多语言要求
+
+支持其他语言时必须满足：
+
+1. 增加语言选择来源，例如配置项或 UI 设置项。
+2. 在对照表中新增对应语言列。
+3. 保持 `code` 稳定，避免因语言变化影响日志、测试和故障定位。
+4. Broker 可以继续返回 `message_cn` 等中文明细，但 UI 的首要用户提示应来自本地化对照表；Broker 明细作为 `详情` 兜底。

@@ -330,8 +330,8 @@ module pl_estop_axi_lite_v3 #(
     parameter integer BRAKE_LEAD_US = 50,
     parameter integer AXIS_COUNT = 8,
     parameter integer Z_AXIS_INDEX = 2,
-    parameter [15:0] GENERAL_OUTPUT_SAFE_LEVELS = 16'h0000,
-    parameter [0:0] BUS_TX_IDLE_LEVELS = 1'b0,
+    parameter integer GENERAL_OUTPUT_SAFE_LEVELS = 0,
+    parameter integer BUS_TX_IDLE_LEVELS = 0,
     parameter [31:0] BUILD_ID = 32'h20260629
 ) (
     input  wire                              S_AXI_ACLK,
@@ -375,6 +375,9 @@ module pl_estop_axi_lite_v3 #(
     output wire                              estop_irq
 );
 
+    localparam [15:0] GENERAL_OUTPUT_SAFE_LEVELS_VEC = GENERAL_OUTPUT_SAFE_LEVELS[15:0];
+    localparam [0:0] BUS_TX_IDLE_LEVELS_VEC = BUS_TX_IDLE_LEVELS[0:0];
+
     pl_estop_axi_lite #(
         .C_S_AXI_DATA_WIDTH(C_S_AXI_DATA_WIDTH),
         .C_S_AXI_ADDR_WIDTH(C_S_AXI_ADDR_WIDTH),
@@ -384,9 +387,9 @@ module pl_estop_axi_lite_v3 #(
         .AXIS_COUNT(AXIS_COUNT),
         .Z_AXIS_INDEX(Z_AXIS_INDEX),
         .GENERAL_OUTPUT_COUNT(16),
-        .GENERAL_OUTPUT_SAFE_LEVELS(GENERAL_OUTPUT_SAFE_LEVELS),
+        .GENERAL_OUTPUT_SAFE_LEVELS(GENERAL_OUTPUT_SAFE_LEVELS_VEC),
         .BUS_TX_GATE_COUNT(1),
-        .BUS_TX_IDLE_LEVELS(BUS_TX_IDLE_LEVELS),
+        .BUS_TX_IDLE_LEVELS(BUS_TX_IDLE_LEVELS_VEC),
         .BUILD_ID(BUILD_ID)
     ) u_impl (
         .S_AXI_ACLK(S_AXI_ACLK),

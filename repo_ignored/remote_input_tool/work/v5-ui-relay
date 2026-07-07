@@ -1,0 +1,82 @@
+#!/bin/sh
+set -eu
+
+DAEMON=/usr/libexec/8ax/v5_lvgl_shell
+PIDFILE=/run/8ax/v5_ui_relay.pid
+LOGFILE=/run/8ax/v5_ui_relay.log
+PORT=${V5_UI_REMOTE_PORT:-18080}
+REMOTE_INPUT=${V5_UI_REMOTE_INPUT:-layout_only}
+
+is_running() {
+  [ -r "$PIDFILE" ] || return 1
+  pid=$(cat "$PIDFILE" 2>/dev/null || true)
+  [ -n "$pid" ] || return 1
+  kill -0 "$pid" 2>/dev/null
+}
+
+
+clear_framebuffer() {
+  [ -w /dev/fb0 ] || return 0
+  stride=$(cat /sys/class/graphics/fb0/stride 2>/dev/null || true)
+  height=$(sed -n 's/^U:[0-9][0-9]*x\([0-9][0-9]*\).*//p' /sys/class/graphics/fb0/modes 2>/dev/null | head -n 1)
+  case "$stride:$height" in
+    *[!0-9:]*|:|*:|:*) return 0 ;;
+  esac
+  dd if=/dev/zero of=/dev/fb0 bs="$stride" count="$height" >/dev/null 2>&1 || true
+}
+
+start_service() {
+  if is_running; then
+    echo "v5_ui_relay already running pid=$(cat "$PIDFILE") port=$PORT"
+    return 0
+  fi
+  test -x "$DAEMON"
+  mkdir -p /run/8ax
+  rm -f "$PIDFILE"
+  clear_framebuffer
+  V5_UI_REMOTE_INPUT="$REMOTE_INPUT" setsid "$DAEMON" --serve --port "$PORT" >>"$LOGFILE" 2>&1 &
+  echo "$!" >"$PIDFILE"
+  sleep 1
+  if is_running; then
+    echo "v5_ui_relay started pid=$(cat "$PIDFILE") port=$PORT remote_input=$REMOTE_INPUT"
+    return 0
+  fi
+  echo "v5_ui_relay failed to start" >&2
+  tail -n 40 "$LOGFILE" 2>/dev/null || true
+  return 1
+}
+
+stop_service() {
+  if ! is_running; then
+    rm -f "$PIDFILE"
+    echo "v5_ui_relay not running"
+    return 0
+  fi
+  pid=$(cat "$PIDFILE")
+  kill "$pid" 2>/dev/null || true
+  sleep 0.5
+  if kill -0 "$pid" 2>/dev/null; then
+    echo "v5_ui_relay did not stop pid=$pid" >&2
+    return 1
+  fi
+  rm -f "$PIDFILE"
+  echo "v5_ui_relay stopped pid=$pid"
+}
+
+case "${1:-}" in
+  start) start_service ;;
+  stop) stop_service ;;
+  restart) stop_service; start_service ;;
+  status)
+    if is_running; then
+      echo "v5_ui_relay running pid=$(cat "$PIDFILE") port=$PORT remote_input=$REMOTE_INPUT"
+    else
+      echo "v5_ui_relay not running"
+      exit 1
+    fi
+    ;;
+  *)
+    echo "usage: $0 {start|stop|restart|status}" >&2
+    exit 2
+    ;;
+esac

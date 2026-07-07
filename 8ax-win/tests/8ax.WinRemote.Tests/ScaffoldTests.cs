@@ -42,7 +42,7 @@ VerifyAppSettingsDefaults();
 VerifyAppSettingsConfigFile();
 VerifyUpdateDefaults();
 VerifyRelayReconnectContract();
-VerifyRelayPollingFallbackContract();
+VerifyRelayStreamFailureNoFallbackContract();
 VerifyRelayInputRetryContract();
 VerifyRelayInputStaleSocketRecoveryContract();
 VerifySystemMetricsTopBarContract();
@@ -387,22 +387,23 @@ static void VerifyRelayReconnectContract()
     Require(true, source.Contains("private async Task<bool> RunRelaySessionAsync", StringComparison.Ordinal), "relay session reports connected-before-end state");
 }
 
-static void VerifyRelayPollingFallbackContract()
+static void VerifyRelayStreamFailureNoFallbackContract()
 {
     string repoRoot = FindRepoRoot(AppContext.BaseDirectory);
     string mainWindow = File.ReadAllText(Path.Combine(repoRoot, "8ax-win", "src", "8ax.WinRemote", "MainWindow.xaml.cs"));
     string relayClient = File.ReadAllText(Path.Combine(repoRoot, "8ax-win", "src", "8ax.WinRemote", "Transport", "RemoteRelayClient.cs"));
     string readme = File.ReadAllText(Path.Combine(repoRoot, "8ax-win", "README.md"));
-    Require(true, mainWindow.Contains("RunFullFramePollingAsync", StringComparison.Ordinal), "relay HTTP polling fallback exists");
+    Require(false, mainWindow.Contains("RunFullFramePollingAsync", StringComparison.Ordinal), "relay HTTP polling fallback is retired");
     Require(true, mainWindow.Contains("relay_stream_unavailable", StringComparison.Ordinal), "relay stream failure evidence exists");
-    Require(true, mainWindow.Contains("\"polling_fallback\"", StringComparison.Ordinal), "relay polling fallback reason recorded");
+    Require(true, mainWindow.Contains("[\"action\"] = \"reconnect\"", StringComparison.Ordinal), "relay stream failure schedules reconnect");
+    Require(false, mainWindow.Contains("\"polling_fallback\"", StringComparison.Ordinal), "relay polling fallback reason is retired");
     Require(true, mainWindow.Contains("ApplyRelayPacket(packet, relayBaseUri, \"stream-retry\")", StringComparison.Ordinal), "dirty frame is replayed after full repair");
     Require(true, mainWindow.Contains("frame_stale", StringComparison.Ordinal), "stale dirty frames are ignored without repair loop");
-    Require(true, mainWindow.Contains("SetConnectionState(\"polling\"", StringComparison.Ordinal), "relay polling badge exists");
+    Require(false, mainWindow.Contains("SetConnectionState(\"polling\"", StringComparison.Ordinal), "relay polling badge is retired");
     Require(true, relayClient.Contains("StreamConnectTimeout", StringComparison.Ordinal), "relay stream connect timeout exists");
     Require(true, relayClient.Contains("InputConnectTimeout", StringComparison.Ordinal), "relay input connect timeout exists");
     Require(true, relayClient.Contains("WebSocket connect timed out", StringComparison.Ordinal), "websocket timeout is explicit");
-    Require(true, readme.Contains("degraded `relay polling` display mode", StringComparison.Ordinal), "README documents relay polling fallback");
+    Require(true, readme.Contains("does not fall back to relay polling", StringComparison.Ordinal), "README documents relay polling retirement");
     Require(false, mainWindow.Contains("/dev/fb0", StringComparison.Ordinal), "fallback does not use retired fb0 path");
 }
 

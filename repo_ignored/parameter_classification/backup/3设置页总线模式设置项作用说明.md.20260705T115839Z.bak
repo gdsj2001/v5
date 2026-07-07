@@ -1,0 +1,173 @@
+# 设置页总线模式设置项说明
+
+引用需求真源：`REQ-BUS-PULSE-MODE-DIFFERENCE`、`REQ-DOC-SINGLE-SOURCE`、`REQ-PARAM-MEMORY-LIGHTWEIGHT-SAVE`、`REQ-NATIVE-OWNER-FIRST`、`REQ-SETTINGS-RUNTIME-DRIVE-ONLY`、`REQ-LINUXCNC-COMMAND-GATE`、`REQ-DRIVE-PROFILE-AUTH-CHAIN`、`REQ-G92-NATIVE-RUNTIME`、`REQ-WCS-NATIVE-OWNER`、`REQ-RTCP-G53-NATIVE-ACTUAL`。
+
+## AI 阅读入口
+
+- 本文定位：BUS 设置页字段、页面分区、保存/重启边界和 UI 字段 owner 总览。
+- BUS/Pulse 模式差异先读 `REQ-BUS-PULSE-MODE-DIFFERENCE`；参数保存和 drive-only 边界先读 `REQ-PARAM-MEMORY-LIGHTWEIGHT-SAVE` / `REQ-SETTINGS-RUNTIME-DRIVE-ONLY`。
+- UI 只能显示/编辑字段并发起受控请求；active mode、runtime INI、驱动状态 and 运动准入必须由后端/native 内存/API 回读证明。
+
+
+## 1. 总线模式边界
+
+BUS 模式指底层轴驱动适配器为 EtherCAT/CiA402 伺服链路。设置页只负责显示运行内存投影、提交字段请求和触发受控动作，不是运动真源。
+
+| 类型 | 作用 | 生效边界 |
+| --- | --- | --- |
+| UI 编辑值 | 用户当前输入或下拉选择 | 只是 dirty/request，不是运行态真值 |
+| 参数 owner | runtime INI、`motion_driver.conf`、native owner、Settings Drive 私域或受控 helper | 写入唯一 owner 并源回读后才算字段保存成功 |
+| 运行态真值 | 微内核/native owner/API 的 fresh 状态；SHM 只投影坐标、模态、转速、进给速度和主轴/进给倍率显示 | native actual 用于运动准入和动作证明；SHM 仅用于 UI 显示 |
+| 驱动动作 | 通过 Broker 调用 EtherCAT 扫描、读取、复位或写 SDO | 必须有动作结果和读回证据，不能靠 UI 成功态代替 |
+
+硬边界：
+
+- UI 不直接读写 `/opt/8ax/phase0_bus5/settings_runtime.json`、runtime INI、HAL pin 或 `/run/*.json` 临时控制文件。
+- 每个可编辑字段提交时只提交本字段，写本字段唯一 owner，并回读本字段源位置；成功后清本字段 dirty，保留 restart pending。
+- 参数页任何可编辑参数被修改后，右上角按钮必须立即从 `返回` 改为 `保存并重启`；字段已写 owner 但等待 restart 生效、保存回读待确认或存在任意 dirty 时都保持 `保存并重启`。只有没有 dirty、没有待回读、没有 backend restart pending 时，按钮才允许显示 `返回`。
+- `保存并重启` 的前台完成边界是字段 owner 写入/源回读、restart precheck、backend + UI restart handoff、返回主页面；完整 native 状态恢复、machine-on 和驱动 Operation Enabled 属于后台恢复诊断。
+- 运动、设0、Home、Jog、Start、设置驱动等执行动作必须在执行时读取 fresh microkernel/native 安全状态并 fail-closed；不得把 SHM 显示投影当安全证明。
+- 授权/DNA 校验必须前置到后台非实时路径：开机、backend/UI restart 后，或 `estop_or_reset` 上使能前由授权 owner 完成 live DNA 多次读取、授权验签和 hash 比对，并生成只读 latch 状态。运动、Home、Jog、Start、设0、设置驱动等热路径只消费 latch，不得每次动作重新读硬件 DNA、验签授权文件或访问 VPS。
+- 设置页触摸热路径不能被后台维护刷新阻塞；普通单元格按下只打开键盘，`设0/zero` 只能在明确点击完成事件后执行。
+- 设置页触摸闭环验收的人工顺序固定为：`下载授权 -> 服务器下载 -> 扫描从站 -> 复位驱动 -> 读取驱动 -> 清除故障 -> 设置驱动 -> X/Y/Z/A/C 每个轴逐个设零 -> 设置 A/C 轴坐标 -> 保存并重启`。该顺序用于设置页链路，不得替换成主页 `Home -> Open Program -> Start` 运动链路；主页运动链路只能在设置页链路闭合后另行验收。
+- 可编辑单元格按下到软键盘出现并显示可输入数字不得超过 `0.2s`；数字键按下到输入框显示该数字也不得超过 `0.2s`。软键盘 `OK` 或下拉提交按下后，单字段 owner 写入、源位置回读、UI 清 dirty 或结构化失败显示不得超过 `0.5s`。驱动长流程和 `保存并重启` 不按 `0.5s` 等最终硬件动作完成，但按下后 `0.2s` 内必须出现进度窗口或明确提交反馈，并持续显示阶段进度和耗时。超过时限必须定位并修复，不能继续后续步骤掩盖慢点。
+
+## 2. Owner 引用
+
+跨功能和易变规则只在 owner 文档维护。本文只保留设置页集成视角。
+
+| 范围 | Owner 文档 | 本文只保留 |
+| --- | --- | --- |
+| 参数轻量保存、status_epoch、运行内存投影 | `功能/0开机参数入内存.md` | 设置页字段提交边界和 UI 状态 |
+| 驱动映射表、profile schema、VPS 下载、新品牌接入 | `功能/1驱动命令映射表命令需求.md`、`功能/VPS登录与项目对接说明.md` | `服务器下载`、`扫描从站` 的页面入口和 fail-closed 依赖 |
+| 授权/DNA、VPS challenge/signature、开机/上使能前 latch | `REQ-DRIVE-PROFILE-AUTH-CHAIN`、`功能/VPS登录与项目对接说明.md` | `登记本机码`、`下载授权` 和总线运动准入怎样消费只读 latch |
+| BUS/Pulse 模式差异、模式切换、Pulse 禁用 BUS 驱动动作 | `功能/总线脉冲区别.md` | 设置页只保留入口和显示边界，不维护第二套模式口径 |
+| 设置驱动、电子齿轮、驱动复位、读回证据 | `功能/4设置页设置驱动按钮作用和目的.md` | 按钮语义、前置安全、缺证据时的页面阻断 |
+| BUS/Pulse 设0、count-domain 零点、Pulse `HOME_OFFSET` | `功能/总线脉冲区别.md`、`功能/4轴设0软件偏置方案.md` | 设置页 `设0` 入口和运动准入依赖 |
+| G53/RTCP 几何 native owner | `REQ-RTCP-G53-NATIVE-ACTUAL` 对应 owner | 暴露 A/B/C 中心里有 owner 的字段：`G53_A_Y/G53_A_Z/G53_B_X/G53_B_Y/G53_B_Z/G53_C_X/G53_C_Y`；A 中心 X、C 中心 Z 显示当前模态加工坐标系偏移值 |
+
+## 3. 页面分区
+
+| 分区 | 内容 | 页面要求 |
+| --- | --- | --- |
+| 顶部状态区 | BUS/Pulse active mode、授权/DNA 状态、运行态提示 | active/safety/authorization 直连 native/受控 readback；SHM 只显示坐标/模态/速度倍率投影，不可用时显示 degraded |
+| 授权区 | `登记本机码`、`下载授权` | 板端只登记 DNA 和下载验签授权；授权签发只在工厂端 |
+| 驱动动作区 | `服务器下载`、`扫描从站`、`读取`、`故障复位`、`复位驱动`、`设置驱动` | BUS/EtherCAT 模式下全部走 Broker/UDS；高风险写驱动动作必须先做受控 machine-off 前置；Pulse/StepDir 模式下 `服务器下载`、`扫描从站`、`复位驱动`、`读取驱动`、`清除故障`、`设置驱动` 按 owner 三层拒绝：Broker/product action 拒绝、C dispatch 拒绝、UI 灰色不可点击 |
+| 轴参数表 | X/Y/Z/A/C 的模式、从站、精度、螺距、减速比、速度、加速度、软限位、回零次序、设0 | 每个字段按唯一 owner 即时保存；任意参数修改、已写盘待生效或回读待确认都保留 `保存并重启` |
+| RTCP/G53 区 | A/B/C 回转中心相关显示和可编辑字段 | B 中心显示在 A 中心和 C 中心之间；只允许 owner 明确的字段可编辑，其他轴向显示 unavailable 或 native readback |
+| 资源预留区 | 从轴、S 轴、刀库等 | 当前不作为 X/Y/Z/A/C 运动验收条件，不保留可误触入口 |
+
+## 4. 字段 Owner 总览
+
+| 字段族 | 前台保存 owner | 运行态真值 |
+| --- | --- | --- |
+| `motion_driver_mode` | `motion_driver.conf` | 后端 active mode + native/microkernel direct readback |
+| `axis_mode`、`precision`、`pitch`、`motor_rev/load_rev` | runtime INI 或 Settings Drive 私域，按字段 owner 分域 | runtime INI/native `SCALE` 回读；SHM 不承载 SCALE 真源 |
+| `max_velocity`、`max_acceleration`、`backlash`、`run_tolerance`、`idle_tolerance` | runtime INI `[AXIS_*]` / `[JOINT_*]` | LinuxCNC/native runtime 回读 |
+| `home_order/home_sequence` | runtime INI/native `HOME_SEQUENCE` | Home 预检和 native/API readback |
+| `soft_minus/soft_plus` | runtime INI/native limit owner | LinuxCNC/native runtime limit readback |
+| `encoder_bits`、内部一圈 count、多圈周期、电子齿轮读回状态 | Settings Drive 私域、profile、EtherCAT/SDO 读回证据 | 驱动读回证据 + 运动准入 gate |
+| `zero/设0` | BUS count-domain 零点或 Pulse `HOME_OFFSET` owner | `功能/4轴设0软件偏置方案.md` 定义的 native/owner 证明；SHM 只显示坐标投影 |
+| `G53_A_Y/G53_A_Z/G53_B_X/G53_B_Y/G53_B_Z/G53_C_X/G53_C_Y` | active runtime INI `[RTCP]` owner | RTCP/G53 native readback；B 中心坐标体系参考 A/C 中心 |
+
+字段规则：
+
+- `soft_minus/soft_plus` 的 UI 值为 `0` 表示该方向软限位不生效；保存时必须由 owner 换算为可执行限位语义，不能把 UI 值当 LinuxCNC 真值。
+- A/C 旋转轴默认 `0/0` 表示 no-soft-limit；不得生成误导性的 `±360` 默认限制。
+- A 中心 X 显示当前模态加工坐标系 X 偏移值，C 中心 Z 显示当前模态加工坐标系 Z 偏移值；`G53_A_X` / `G53_C_Z` 不能进入 dirty 或保存链路。B 中心 X/Y/Z 参考 A/C 中心坐标体系，使用 `G53_B_X/G53_B_Y/G53_B_Z` 或等价 native geometry owner。
+- 编码器 bit、内部一圈 count、多圈周期来自 profile/本机参数表和驱动证据；不再通过三点微动或 `log2(count)` 计算。
+
+## 5. 保存与重启
+
+单字段即时保存：
+
+1. 软键盘 `OK` 或下拉选择变化后，UI 只提交本字段。
+2. Broker 调用 `settings_apply`，由字段 owner 写入唯一源。
+3. owner 源回读一致后清本字段 dirty；失败时保留 dirty 并弹出结构化原因。
+4. 需要后端重启才进入运行态的字段，保留已源回读确认的显示值和 `backend_restart_pending`。
+
+右上角 `保存并重启`：
+
+1. 任意参数 dirty、保存回读待确认或 backend restart pending 时，按钮从 `返回` 改为 `保存并重启`；不得保留 `保存`、`保存并返回` 或只对 restart-required 字段切换的旧分支。
+2. 点击后先确认所有 dirty 字段已写入唯一 owner 并完成源回读。
+3. restart precheck 通过后发起 backend + UI restart handoff。
+4. 前台恢复主页面后结束本次按钮流程；后台继续记录 LinuxCNC/native/machine-on/驱动 Operation Enabled 恢复诊断。
+
+不得出现的行为：
+
+- 用 UI dirty 值、`settings_runtime.json`、`/run` result、Broker 快照或默认值冒充运行态真值。
+- 字段保存失败后静默清 dirty。
+- 因驱动参数变化在 `保存并重启` 前弹出“先设置驱动参数”阻断；真正写驱动由 `设置驱动` 动作负责。
+- 未确认源 owner 写入就触发 backend restart。
+
+## 6. 按钮说明
+
+| 按钮 | native action | 页面语义 | 关闭条件 |
+| --- | --- | --- | --- |
+| `登记本机码` | `settings_dna_register` / `device_dna_register` | 现读本机 live PL Device DNA 和设备公钥并登记到 VPS | `DNA_REGISTER_OK` 或 `DNA_REGISTER_ALREADY_PRESENT`，VPS 返回并保存 6 位 ID；板端本地不保存 DNA/hash |
+| `下载授权` | `settings_auth_download` / `device_authorization_download` | 现读本机 live PL Device DNA，带本地 ID 让 VPS 校验后下载工厂端签发授权并用板端公钥验签 | `DEVICE_AUTH_DOWNLOAD_OK` 或 `DEVICE_AUTH_ALREADY_VALID`，DNA/hash 只在本次校验内存使用 |
+| `服务器下载` | `settings_server_download` | 下载 public/private profile 映射表 | 结果能区分成功、缺失、失败和 not_modified；schema 细节看映射表 owner |
+| `扫描从站` | `settings_scan` | 扫描 EtherCAT 从站并匹配 profile | 当前从站、OP 状态和 profile 唯一匹配可被后续动作使用 |
+| `读取` | `settings_read` | 读取驱动/运行参数 readback | 读动作不写参数；结果只作为本次动作证据或页面刷新来源 |
+| `故障复位` | `settings_fault_reset` | 清驱动报警/fault | 不改变轴参数，不证明电子齿轮已写入 |
+| `复位驱动` | `settings_drive_reset` / `drive_factory_reset` | 通过 profile 的 restore-defaults 命令恢复驱动厂家默认参数 | 高风险写驱动动作；实时扫描、匹配 profile、写入并回读；成功后旧齿轮/设0证据失效 |
+| `设置驱动` | `settings_set_drive` / `drive_set_parameters` | 写电子齿轮和驱动私域参数并 SDO 读回 | 每轴目标值、对象、写入结果、读回值和一致性记录完整 |
+| `返回 / 保存并重启` | `settings_save_return` | 动态返回或保存重启入口 | 字段 owner 源回读和 restart handoff 按第 5 节闭合 |
+
+上表中的 `服务器下载`、`扫描从站`、`复位驱动`、`读取驱动`、`清除故障`、`设置驱动` 只描述 BUS/EtherCAT 可用状态；Pulse/StepDir 模式下按 `功能/总线脉冲区别.md` 三层拒绝，不能进入弹窗、Broker、C dispatch 或后台 job。
+
+## 7. 运动准入依赖
+
+以下条件未满足时，Start/Jog/MDI/G-code/rotary 等运动入口必须 fail-closed：
+
+- 授权/DNA latch 已由后台非实时 owner 建立，且状态为 valid；latch 只包含 hash、授权范围、生成时间、boot/restart 代次和验签结果，不包含 raw PL DNA、token、私钥或授权原文。
+- latch 缺失、过期、三次 live DNA 读取不一致、授权 DNA hash 与本机 hash 不匹配、授权文件验签失败、授权过期、系统时间不可用或状态 owner 不可用时，运动入口和 `estop_or_reset` 上使能前置必须返回 `MOTION_GATE_DNA_NOT_VERIFIED` 或对应授权失败码。
+- 当前从站、profile、标准命令和驱动对象匹配唯一有效。
+- X/Y/Z/A/C 的电子齿轮写入和 SDO 读回一致。
+- `设0/zero` 的 BUS 或 Pulse 证据满足对应 owner 要求。
+- soft limit、`HOME_SEQUENCE`、active mode、runtime INI/native owner 和 native/API readback 一致；`pitch/motor_rev/load_rev/precision/axis_mode` 改变 `SCALE` 时，已设0轴的硬盘 raw soft limit 必须按新 `zero_counts / SCALE + UI限位距离` 同步重算，UI soft limit 仍显示相对 0 位距离。
+- 状态帧 fresh，非 stale，且执行动作现场重新读取安全状态。
+
+BUS 主页面 `回零` 的准入以授权/DNA、设置页回零次序和 `设0` count-domain 目标证明为核心；它不消费回零方向、HOME_SEARCH 或限位开关语义。Pulse Home 的回零速度和开关语义按 Pulse owner 处理。
+
+## 8. 人工操作顺序
+
+1. 确认 active mode 是 BUS/EtherCAT，并进入设置页确认 LinuxCNC/native 字段来自 native/受控 readback；unknown/degraded/mismatch 先处理。
+2. 点击 `下载授权`，确认授权下载、验签和 DNA 匹配；若因本机码或授权状态缺失失败，停在授权 owner 修复，不通过改顺序绕过。
+3. 点击 `服务器下载`，确认 public/private profile 映射表下载、校验和板端缓存结果。
+4. 点击 `扫描从站`，确认当前从站、OP 状态和 profile 唯一匹配。
+5. 点击 `复位驱动`，确认恢复厂家默认参数、必要 fault 清除、自动读回和最终读回校验；复位后旧电子齿轮、设零和 count-domain trust 证据失效。
+6. 点击 `读取驱动`，确认必读 SDO、电子齿轮、statusword 和驱动私域读回完整。
+7. 点击 `清除故障`，确认驱动报警/fault 已清除；该步不改变轴参数，也不证明电子齿轮已写入。
+8. 点击 `设置驱动`，确认逐轴电子齿轮、模式写入、OP 恢复、必读 SDO 读回和 `DRIVE_SET_OK`，并确认右上角进入 `保存并重启` 状态。
+9. 按 X、Y、Z、A、C 每个轴逐个执行设置页单轴 `设零/设0`；X/Y/Z 直线轴不要求危险确认，A/C 转动轴必须有危险确认。当前轴未取得请求、自动上使能证明（若该动作需要上使能）、raw/count-domain 读回、硬盘 raw 限位写入和结果码证据前，不进入下一轴。
+10. 设置 A/B/C 中心坐标，只允许编辑 owner 明确的 `G53_A_Y`、`G53_A_Z`、`G53_B_X`、`G53_B_Y`、`G53_B_Z`、`G53_C_X`、`G53_C_Y`；A 中心 X、C 中心 Z 是当前模态加工坐标系偏移值，不进入 dirty 或保存链路。每个字段提交后确认字段保存成功或结构化失败。
+11. 点击 `保存并重启`，确认 dirty 字段已写入唯一 owner 并源位置回读，restart precheck 通过，backend + UI restart handoff 成功，并恢复主页面；后台恢复诊断不作为前台完成条件。
+12. 真实运动前先做急停、软限位、回零次序、设0投影和低速 jog 的单项验证。
+
+## 9. 最小验收清单
+
+- UI 列名、字段 key 和 `settings_apply` 支持字段一致。
+- 进入设置页时，坐标/模态/速度倍率显示可来自 fresh SHM 显示投影，其它稳定显示来自开机已加载的 microkernel/native 常驻内存、参数 owner 映射或受控 readback；缺失时显示 unavailable/degraded。设置页不得在显示刷新、字段切换或保存成功判断时直接读硬盘配置、旧 JSON、`/run` result、脚本快照或 profile 文件兜底。
+- 单字段保存只写本字段 owner，只回读本字段源位置；失败不清 dirty。
+- 可编辑单元格和软键盘数字输入的本地响应均不超过 `0.2s`；单字段 owner 写入和源位置回读反馈不超过 `0.5s`。
+- 修改任意可编辑参数后，右上角显示 `保存并重启`；字段已即时保存但尚未统一重启生效时仍保持 `保存并重启`。
+- `保存并重启` 触发 restart 前，dirty 字段 owner 源回读已证明目标值写入。
+- 驱动参数不因 `settings_apply OK` 自动视为已进驱动；必须由 `设置驱动` 的 SDO 读回证明。
+- `复位驱动` 后，旧电子齿轮、设0、rotary count checkpoint 和 count-domain trust 证据全部失效。
+- `settings_dna_register` 只登记 DNA；`settings_auth_download` 只下载验签授权；板端不签发授权。
+- 上使能不是危险动作；设置页任一动作需要上使能时必须由后端自动上使能并用 fresh microkernel/native 回读证明，不得要求操作员手动补上使能。只有转动轴相关动作按危险动作处理，A/C 旋转轴设零、A/C 轴坐标写入、会导致旋转轴实际运动或相位重定的动作才需要二次危险确认。
+- 开机、backend/UI restart 后或 `estop_or_reset` 上使能前必须能看到授权/DNA latch valid；运动热路径只读 latch，不重复读硬件 DNA、验签文件或访问 VPS；latch invalid/degraded 时设置页显示原因，运动和上使能 fail-closed。
+- `settings_server_download` / `settings_scan` 的 schema、profile 选择和新增品牌流程只按映射表 owner 验收。
+- Pulse/StepDir 模式下 `服务器下载`、`扫描从站`、`复位驱动`、`读取驱动`、`清除故障`、`设置驱动` 必须满足 Broker/product action、C dispatch、UI 视觉三层拒绝；点击不产生 Broker 请求或进度弹窗。
+- `G53_A_Y/G53_A_Z/G53_B_X/G53_B_Y/G53_B_Z/G53_C_X/G53_C_Y` 只写 active runtime INI `[RTCP]` owner，不写 `settings_runtime.json`。
+- `soft_minus/soft_plus=0` 代表该方向软限位不生效，并由 native/runtime owner 表达。
+- `S/从轴/刀库` 当前不得作为 X/Y/Z/A/C 运动轴的通过条件或可误触入口。
+
+## 10. 当前硬边界
+
+- G53/RTCP 几何：按 `REQ-RTCP-G53-NATIVE-ACTUAL`，native/runtime INI `[RTCP]` 和微内核/native actual 是真源；UI dirty、Broker 快照、SHM 显示投影、`/run` JSON、`settings_runtime.json` 都不是几何真值。
+- `settings_runtime.json`：按 `REQ-SETTINGS-RUNTIME-DRIVE-ONLY`，只保留 Settings Drive 私域和驱动/count-domain 证据；速度、加速度、HOME、HOME_OFFSET、HOME_SEQUENCE、软限位、RTCP/G53、WCS/G92/tool/HAL/modal 不得写回该文件当产品参数源。
+- 字段 owner：按 `REQ-PARAM-MEMORY-LIGHTWEIGHT-SAVE`，每个表格字段必须接回唯一 owner，再由 owner/native fresh 回读；UI dirty 值只是一笔请求输入，SHM 只显示允许的 UI 投影字段。
+- 脉冲切换限制：因脉冲/StepDir 硬件及固件暂时未就绪，运动模式切换为脉冲模式必须受限。UI 选项应将脉冲模式置灰禁用，若强行提交必须被 Broker 和 C dispatch 双重拦截，并明确返回“硬件尚未就绪，禁止切换至脉冲模式”的硬件未就绪错误。
+- native 优先：按 `REQ-NATIVE-OWNER-FIRST` 和 `REQ-LINUXCNC-COMMAND-GATE`，LinuxCNC/HAL/EtherCAT/native helper 已有 owner 的能力，不在 V3 里扩展第二真源。
