@@ -233,12 +233,12 @@ static int settings_action_eta_seconds(const char *action)
     if (!action) return 0;
     if (strcmp(action, "device_authorization_download") == 0) return 120;
     if (strcmp(action, "drive_profile_server_download") == 0) return 120;
-    if (strcmp(action, "drive_scan_slaves") == 0) return 15;
-    if (strcmp(action, "drive_factory_reset") == 0) return 70;
-    if (strcmp(action, "drive_parameter_read") == 0) return 35;
-    if (strcmp(action, "drive_fault_reset") == 0) return 35;
+    if (strcmp(action, "drive_scan_slaves") == 0) return 20;
+    if (strcmp(action, "drive_factory_reset") == 0) return 90;
+    if (strcmp(action, "drive_parameter_read") == 0) return 45;
+    if (strcmp(action, "drive_fault_reset") == 0) return 45;
     if (strcmp(action, "drive_set_parameters") == 0) return 180;
-    if (strcmp(action, "settings_axis_zero") == 0) return 12;
+    if (strcmp(action, "settings_axis_zero") == 0) return 20;
     return 0;
 }
 
