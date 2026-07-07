@@ -1,8 +1,9 @@
 # Push scope notes:
-# - D:/v5 tracks project files by default, including docs, screenshots,
-#   evidence/artifacts, Vivado-owned files, and published Windows client executables.
-# - Only cache, temporary, and generated local build/run outputs are excluded
-#   by .gitignore and by the desktop push script before commit.
+# - D:/v5 tracks source, docs, configs, Vivado-owned files, and published
+#   Windows client executables by default.
+# - Cache, temporary files, generated build/run outputs, compressed packages,
+#   and test proof/evidence captures are excluded by .gitignore and by the
+#   desktop push script before commit.
 
 8ax-win/publish/win-x64/*.exe filter=lfs diff=lfs merge=lfs -text
 8ax-factory-client-source/publish/win-x64/*.exe filter=lfs diff=lfs merge=lfs -text

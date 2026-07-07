@@ -1,3 +1,0 @@
-{"ts_utc":"2026-07-05T09:54:31.2745319\u002B00:00","source":"relay","frame_id":2,"fps":0,"latency_ms":0,"full_frame_requests":1,"dirty_rect_frames":0,"full_frame_repairs":0,"need_full_frame":0,"rejected_frames":0}
-{"ts_utc":"2026-07-05T09:54:31.8366723\u002B00:00","source":"relay","frame_id":3,"fps":1.76,"latency_ms":0,"full_frame_requests":2,"dirty_rect_frames":0,"full_frame_repairs":0,"need_full_frame":0,"rejected_frames":0}
-{"ts_utc":"2026-07-05T09:54:33.1308034\u002B00:00","source":"relay","frame_id":4,"fps":1.612,"latency_ms":0,"full_frame_requests":3,"dirty_rect_frames":0,"full_frame_repairs":0,"need_full_frame":0,"rejected_frames":0}
