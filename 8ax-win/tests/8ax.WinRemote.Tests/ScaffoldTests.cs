@@ -48,6 +48,7 @@ VerifyRelayDisplayRefreshRateContract();
 VerifyRelayInputRetryContract();
 VerifyRelayInputStaleSocketRecoveryContract();
 VerifySystemMetricsTopBarContract();
+VerifyBottomStatusBarStableContract();
 VerifyWinRemoteBoardTimeSyncContract();
 VerifyUpgradeProgressContract();
 VerifyDpiScalingContract();
@@ -517,6 +518,25 @@ static void VerifySystemMetricsTopBarContract()
         readme.Contains("refreshes may update only the four percentage", StringComparison.Ordinal)
             && readme.Contains("number fields", StringComparison.Ordinal),
         "README documents number-only refresh");
+}
+
+static void VerifyBottomStatusBarStableContract()
+{
+    string winRoot = FindWinRemoteRoot(AppContext.BaseDirectory);
+    string xaml = ReadWinRemoteFile(winRoot, "src", "8ax.WinRemote", "MainWindow.xaml");
+    string mainWindow = ReadWinRemoteFile(winRoot, "src", "8ax.WinRemote", "MainWindow.xaml.cs");
+    Require(true, xaml.Contains("x:Name=\"StatusFrameText\"", StringComparison.Ordinal), "bottom frame status slot exists");
+    Require(true, xaml.Contains("x:Name=\"StatusFpsText\"", StringComparison.Ordinal), "bottom fps status slot exists");
+    Require(true, xaml.Contains("x:Name=\"StatusRelayText\"", StringComparison.Ordinal), "bottom relay status slot exists");
+    Require(true, xaml.Contains("x:Name=\"StatusDirtyText\"", StringComparison.Ordinal), "bottom dirty status slot exists");
+    Require(true, xaml.Contains("x:Name=\"StatusCountersText\"", StringComparison.Ordinal), "bottom counters status slot exists");
+    Require(true, xaml.Contains("x:Name=\"StatusRemotePointerText\"", StringComparison.Ordinal), "bottom remote pointer slot exists");
+    Require(true, xaml.Contains("<ColumnDefinition Width=\"118\" />", StringComparison.Ordinal), "bottom frame slot has fixed width");
+    Require(true, xaml.Contains("<ColumnDefinition Width=\"252\" />", StringComparison.Ordinal), "bottom pointer detail slot has fixed width");
+    Require(true, mainWindow.Contains("UpdateRelayFrameStatus", StringComparison.Ordinal), "relay frame status uses fixed slot updater");
+    Require(true, mainWindow.Contains("StatusFrameText.Text = $\"frame:", StringComparison.Ordinal), "frame value updates only frame slot");
+    Require(true, mainWindow.Contains("StatusCountersText.Text = CountersText();", StringComparison.Ordinal), "counter value updates only counter slot");
+    Require(false, mainWindow.Contains("StatusText.Text = $\"frame:", StringComparison.Ordinal), "frame status must not rewrite one dynamic full-width line");
 }
 
 static void VerifyWinRemoteBoardTimeSyncContract()

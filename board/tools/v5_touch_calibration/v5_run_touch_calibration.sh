@@ -5,13 +5,55 @@ BASE=/opt/8ax/tools/v5_touch_calibration
 FB_DEVICE=/dev/fb0
 SCREEN_SIZE=1024x600
 RUN_DIR=/run/v5_touch_calibration
+REBOOT_MARKER="$RUN_DIR/reboot.requested"
 
 mkdir -p "$RUN_DIR" /tmp/runtime-v5-touch-calibration /opt/8ax/safe_ui
+rm -f "$REBOOT_MARKER"
+
+cleanup() {
+  rc=$?
+  if [ ! -e "$REBOOT_MARKER" ]; then
+    /etc/init.d/v5-ui-relay restart >/tmp/v5_touch_calibration_restore_ui.log 2>&1 || true
+    /etc/init.d/v5-touch-diagnostics restart >/tmp/v5_touch_calibration_restore_diag.log 2>&1 || true
+  fi
+  exit "$rc"
+}
+trap cleanup EXIT
+
+stop_other_ui_processes() {
+  for pattern in \
+    '[v]5_lvgl_shell' \
+    '[v]5_remote_ui_relay.py' \
+    '[v]5_touch_diagnostics' \
+    '[v]5_touch_calibration.py'
+  do
+    pkill -TERM -f "$pattern" 2>/dev/null || true
+  done
+
+  i=0
+  while ps w 2>/dev/null | awk '
+    /[v]5_lvgl_shell/ || /[v]5_remote_ui_relay.py/ ||
+    /[v]5_touch_diagnostics/ || /[v]5_touch_calibration.py/ { found=1 }
+    END { exit found ? 0 : 1 }
+  '; do
+    i=$((i + 1))
+    [ "$i" -lt 30 ] || break
+    sleep 0.1
+  done
+
+  for pattern in \
+    '[v]5_lvgl_shell' \
+    '[v]5_remote_ui_relay.py' \
+    '[v]5_touch_diagnostics' \
+    '[v]5_touch_calibration.py'
+  do
+    pkill -KILL -f "$pattern" 2>/dev/null || true
+  done
+}
 
 /etc/init.d/v5-ui-relay stop >/tmp/v5_touch_calibration_stop_ui.log 2>&1 || true
 /etc/init.d/v5-touch-diagnostics stop >/tmp/v5_touch_calibration_stop_diag.log 2>&1 || true
-pkill -f '[v]5_touch_diagnostics' 2>/dev/null || true
-pkill -f '[v]5_touch_calibration.py' 2>/dev/null || true
+stop_other_ui_processes
 
 export HOME=/root
 export USER=root
@@ -43,4 +85,4 @@ unset QT_QPA_GENERIC_PLUGINS
 unset QT_QPA_EVDEV_TOUCHSCREEN_PARAMETERS
 
 chmod 700 "$XDG_RUNTIME_DIR" || true
-exec /usr/bin/python3 "$BASE/v5_touch_calibration.py"
+/usr/bin/python3 "$BASE/v5_touch_calibration.py"

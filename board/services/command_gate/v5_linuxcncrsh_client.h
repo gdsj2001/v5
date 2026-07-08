@@ -53,6 +53,9 @@ V5LinuxcncrshSendStatus v5_linuxcncrsh_send_line(
     const V5LinuxcncrshConfig *config,
     const char *line);
 
+V5LinuxcncrshSendStatus v5_linuxcncrsh_send_machine_on_sequence(
+    const V5LinuxcncrshConfig *config);
+
 V5LinuxcncrshSendStatus v5_linuxcncrsh_send_home_sequence(
     const V5LinuxcncrshConfig *config,
     char *mode_out,

@@ -67,6 +67,7 @@ int main(void)
     rc |= require_gate("feed_override_set");
     rc |= require_gate("settings_apply");
     rc |= require_manifest("g53_geometry_parameter_memory");
+    rc |= require_manifest("native_safety_latch_owner");
     rc |= require_status("active_wcs");
     rc |= require_status("wcs_offsets");
     rc |= require_status("g92_offset");

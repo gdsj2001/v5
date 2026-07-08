@@ -188,6 +188,7 @@ int main(void)
         V5_NATIVE_READBACK_G53_CENTER_COUNT,
         V5_NATIVE_READBACK_G53_AXIS_COUNT,
         23U);
+    v5_native_readback_set_rtcp_actual(&readback, 0);
     v5_native_readback_set_modal_actual(&readback, "G0 G17 G21 G40 G49 G54 G64 G80 G90 G94 G97");
     v5_native_readback_set_tool_actual(&readback, 7, 1, 123.456);
     v5_main_page_set_native_readback(&page, &readback);
@@ -316,7 +317,6 @@ int main(void)
         return 10;
     }
     {
-        const double program_first_world[V5_STATUS_AXIS_COUNT] = {10.0, 22.0, 8.0, 45.0, 0.0};
         V5ToolpathScreenPoint program_first_expected;
         lv_coord_t min_x = page.trajectory_points[0].x;
         lv_coord_t max_x = page.trajectory_points[0].x;
@@ -335,7 +335,7 @@ int main(void)
             fabs(page.toolpath_program_wcs_offset[2] - 8.0) > 0.0005 ||
             page.toolpath_fit.bounds.max_u < 40.0 ||
             page.toolpath_fit.bounds.min_v > -80.0 ||
-            !project_expected(&page, program_first_world, &program_first_expected) ||
+            !project_expected(&page, page.toolpath_program_project_points[0].axis, &program_first_expected) ||
             point_delta_abs(&page.trajectory_points[0], &program_first_expected) > 4L ||
             (long)max_x - (long)min_x < 80L || (long)max_y - (long)min_y < 80L) {
             v5_program_controller_destroy(&controller);
@@ -349,6 +349,54 @@ int main(void)
         page.toolpath_static_cache_hits == 0U) {
         v5_program_controller_destroy(&controller);
         return 12;
+    }
+    {
+        lv_point_t wcs_origin_before[5];
+        lv_point_t wcs_axes_before[3][2];
+        double projected_before[3];
+        unsigned int rewrite_before = page.toolpath_line_rewrite_count;
+        unsigned int fit_before = page.toolpath_fit.generation;
+        memcpy(wcs_origin_before, page.toolpath_wcs_origin_points, sizeof(wcs_origin_before));
+        memcpy(wcs_axes_before, page.toolpath_wcs_axis_points, sizeof(wcs_axes_before));
+        projected_before[0] = page.toolpath_program_project_points[0].axis[0];
+        projected_before[1] = page.toolpath_program_project_points[0].axis[1];
+        projected_before[2] = page.toolpath_program_project_points[0].axis[2];
+        status.mcs[3] += 20.0;
+        status.mcs[4] += 35.0;
+        if (!v5_main_page_apply_status(&page, &status) ||
+            page.toolpath_line_rewrite_count <= rewrite_before ||
+            page.toolpath_fit.generation != fit_before ||
+            memcmp(wcs_origin_before, page.toolpath_wcs_origin_points, sizeof(wcs_origin_before)) != 0 ||
+            memcmp(wcs_axes_before, page.toolpath_wcs_axis_points, sizeof(wcs_axes_before)) != 0 ||
+            (fabs(page.toolpath_program_project_points[0].axis[0] - projected_before[0]) < 0.0005 &&
+             fabs(page.toolpath_program_project_points[0].axis[1] - projected_before[1]) < 0.0005 &&
+             fabs(page.toolpath_program_project_points[0].axis[2] - projected_before[2]) < 0.0005)) {
+            v5_program_controller_destroy(&controller);
+            return 37;
+        }
+
+        rewrite_before = page.toolpath_line_rewrite_count;
+        fit_before = page.toolpath_fit.generation;
+        memcpy(wcs_origin_before, page.toolpath_wcs_origin_points, sizeof(wcs_origin_before));
+        memcpy(wcs_axes_before, page.toolpath_wcs_axis_points, sizeof(wcs_axes_before));
+        projected_before[0] = page.toolpath_program_project_points[0].axis[0];
+        projected_before[1] = page.toolpath_program_project_points[0].axis[1];
+        projected_before[2] = page.toolpath_program_project_points[0].axis[2];
+        v5_native_readback_set_rtcp_actual(&readback, 1);
+        v5_main_page_set_native_readback(&page, &readback);
+        status.mcs[3] += 15.0;
+        status.mcs[4] -= 20.0;
+        if (!v5_main_page_apply_status(&page, &status) ||
+            page.toolpath_line_rewrite_count <= rewrite_before ||
+            page.toolpath_fit.generation != fit_before ||
+            memcmp(wcs_origin_before, page.toolpath_wcs_origin_points, sizeof(wcs_origin_before)) != 0 ||
+            memcmp(wcs_axes_before, page.toolpath_wcs_axis_points, sizeof(wcs_axes_before)) != 0 ||
+            (fabs(page.toolpath_program_project_points[0].axis[0] - projected_before[0]) < 0.0005 &&
+             fabs(page.toolpath_program_project_points[0].axis[1] - projected_before[1]) < 0.0005 &&
+             fabs(page.toolpath_program_project_points[0].axis[2] - projected_before[2]) < 0.0005)) {
+            v5_program_controller_destroy(&controller);
+            return 38;
+        }
     }
     gesture_start[0].x = 160;
     gesture_start[0].y = 180;

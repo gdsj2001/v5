@@ -150,7 +150,18 @@ clear_framebuffer() {
 }
 
 stale_service_pids() {
-  ps w 2>/dev/null | awk '/[v]5_lvgl_shell/ || /[v]5_remote_ui_relay.py/ { print $1 }'
+  for cmdline in /proc/[0-9]*/cmdline; do
+    [ -r "$cmdline" ] || continue
+    pid=${cmdline#/proc/}
+    pid=${pid%/cmdline}
+    [ "$pid" != "$$" ] || continue
+    cmd=$(tr '\000' ' ' <"$cmdline" 2>/dev/null || true)
+    case "$cmd" in
+      *"/usr/libexec/8ax/v5_lvgl_shell"*|*"v5_lvgl_shell --serve"*|*"/usr/libexec/8ax/v5_remote_ui_relay.py"*|*"v5_remote_ui_relay.py"*)
+        echo "$pid"
+        ;;
+    esac
+  done
 }
 
 stop_stale_processes() {

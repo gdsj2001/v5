@@ -605,9 +605,7 @@ static int v5_linuxcncrsh_wait_machine_enabled_actual(
     for (attempt = 0U; attempt < attempts; ++attempt) {
         int enabled = 0;
         int ok;
-        v5_linuxcncrsh_gate_close();
         ok = v5_linuxcncrsh_probe_machine_enabled(config, &enabled, 0, 0);
-        v5_linuxcncrsh_gate_close();
         if (ok && enabled == (expected_enabled ? 1 : 0)) {
             ++stable;
         } else {
@@ -769,6 +767,12 @@ V5LinuxcncrshSendStatus v5_linuxcncrsh_send_line(
 
     return V5_LINUXCNCRSH_SEND_SENT;
 #endif
+}
+
+V5LinuxcncrshSendStatus v5_linuxcncrsh_send_machine_on_sequence(
+    const V5LinuxcncrshConfig *config)
+{
+    return v5_linuxcncrsh_send_line(config, "Set Machine On");
 }
 
 V5LinuxcncrshSendStatus v5_linuxcncrsh_send_home_sequence(

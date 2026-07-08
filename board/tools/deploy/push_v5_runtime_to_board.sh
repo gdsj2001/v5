@@ -139,6 +139,22 @@ safe_backup_name() {
   printf '%s' "$1" | sed 's#[/\\]#_#g'
 }
 
+validate_pulled_board_owner_file() {
+  source="$1"
+  tmp_path="$2"
+  case "$source" in
+    linuxcnc/ini/v5_bus.ini)
+      if [ ! -s "$tmp_path" ] ||
+         ! grep -Eq '^[[:space:]]*\[EMC\]' "$tmp_path" ||
+         ! grep -Eq '^[[:space:]]*VERSION[[:space:]]*=' "$tmp_path"; then
+        printf 'board owner invalid; keep local seed %s reason=missing_emc_version\n' "$source"
+        return 1
+      fi
+      ;;
+  esac
+  return 0
+}
+
 pull_board_owner_file() {
   source="$1"
   remote_path="$2"
@@ -151,6 +167,10 @@ pull_board_owner_file() {
   fi
   mkdir -p "$temp_dir" "$local_backup_dir" "$(dirname "$local_path")"
   scp $scp_legacy_protocol_opt -q $board_ssh_legacy_rsa_opts $board_ssh_key_opts -P "$board_ssh_port" "$board_ssh:$remote_path" "$tmp"
+  if ! validate_pulled_board_owner_file "$source" "$tmp"; then
+    rm -f "$tmp"
+    return
+  fi
   if [ -e "$local_path" ] && cmp -s "$tmp" "$local_path"; then
     rm -f "$tmp"
     printf 'board owner unchanged %s <- %s\n' "$source" "$remote_path"

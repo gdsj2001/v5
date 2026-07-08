@@ -59,19 +59,21 @@ def peer_allowed(peer: str, networks) -> bool:
 
 
 def system_metrics() -> dict:
+    memory_used, memory_total = memory_used_total()
+    disk_used, disk_total = disk_used_total()
     return {
         "cpu0_percent": cpu_percent("cpu0"),
         "cpu1_percent": cpu_percent("cpu1"),
-        "memory_percent": memory_percent(),
-        "disk_percent": disk_percent(),
-        "memory_used_bytes": memory_used_total()[0],
-        "memory_total_bytes": memory_used_total()[1],
-        "disk_used_bytes": disk_used_total()[0],
-        "disk_total_bytes": disk_used_total()[1],
+        "memory_percent": percent_used(memory_used, memory_total),
+        "disk_percent": percent_used(disk_used, disk_total),
+        "memory_used_bytes": memory_used,
+        "memory_total_bytes": memory_total,
+        "disk_used_bytes": disk_used,
+        "disk_total_bytes": disk_total,
     }
 
 
-def cpu_percent(name: str):
+def read_cpu_sample(name: str) -> tuple[int, int] | None:
     try:
         for line in Path("/proc/stat").read_text(encoding="ascii").splitlines():
             parts = line.split()
@@ -81,10 +83,42 @@ def cpu_percent(name: str):
                 idle = values[3] + (values[4] if len(values) > 4 else 0)
                 if total <= 0:
                     return None
-                return round((1.0 - (idle / total)) * 100.0, 1)
+                return total, idle
     except OSError:
         return None
     return None
+
+
+class CpuUsageSampler:
+    def __init__(self, sample_reader=read_cpu_sample):
+        self._sample_reader = sample_reader
+        self._previous: dict[str, tuple[int, int]] = {}
+        self._lock = threading.Lock()
+
+    def percent(self, name: str):
+        sample = self._sample_reader(name)
+        if sample is None:
+            return None
+        total, idle = sample
+        with self._lock:
+            previous = self._previous.get(name)
+            self._previous[name] = sample
+        if previous is None:
+            return None
+        previous_total, previous_idle = previous
+        total_delta = total - previous_total
+        idle_delta = idle - previous_idle
+        if total_delta <= 0 or idle_delta < 0:
+            return None
+        busy = (1.0 - (idle_delta / total_delta)) * 100.0
+        return round(max(0.0, min(100.0, busy)), 1)
+
+
+_CPU_USAGE = CpuUsageSampler()
+
+
+def cpu_percent(name: str):
+    return _CPU_USAGE.percent(name)
 
 
 def memory_used_total() -> tuple[int | None, int | None]:
@@ -104,8 +138,7 @@ def memory_used_total() -> tuple[int | None, int | None]:
     return used, total
 
 
-def memory_percent():
-    used, total = memory_used_total()
+def percent_used(used: int | None, total: int | None):
     if not used or not total:
         return None
     return round((used / total) * 100.0, 1)
@@ -119,13 +152,6 @@ def disk_used_total() -> tuple[int | None, int | None]:
     total = st.f_blocks * st.f_frsize
     free = st.f_bfree * st.f_frsize
     return max(0, total - free), total
-
-
-def disk_percent():
-    used, total = disk_used_total()
-    if not used or not total:
-        return None
-    return round((used / total) * 100.0, 1)
 
 
 class FrameState:

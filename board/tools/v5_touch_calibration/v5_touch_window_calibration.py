@@ -46,6 +46,7 @@ class TouchCalibrationCalibrationMixin:
         self.current_raw = (int(raw_x), int(raw_y))
         self.wait_release = True
         self.release_guard_deadline = time.time() + 0.80
+        self._cal_timeout_tick()
         self.status.setText(f"Point {self.cal_index + 1}/{len(self.cal_targets)} recorded; release finger")
 
     def _consume_calibration_release(self, raw_x, raw_y):
@@ -102,6 +103,7 @@ class TouchCalibrationCalibrationMixin:
 
     def _finish_calibration(self):
         pts = self.cal_samples
+        self._stop_target_countdown()
         if len(pts) != len(self.cal_targets):
             self._set_calibration_chrome_visible(True)
             self.calibrating = False
@@ -117,6 +119,10 @@ class TouchCalibrationCalibrationMixin:
             self.sx, self.sxy, self.ox, self.syx, self.sy, self.oy = _fit_affine(pts, self.cal_targets)
         except Exception as exc:
             self._set_calibration_chrome_visible(True)
+            self.calibrating = False
+            self.target_ring.hide()
+            self.target_h.hide()
+            self.target_v.hide()
             self.status.setText(f"Calibration solve failed: {exc}")
             self.hint.setText("Please retry touch calibration.")
             return
@@ -169,6 +175,10 @@ class TouchCalibrationCalibrationMixin:
             self._save_calibration()
         except Exception as exc:
             self._set_calibration_chrome_visible(True)
+            self.calibrating = False
+            self.target_ring.hide()
+            self.target_h.hide()
+            self.target_v.hide()
             self.status.setText(f"Calibration save failed: {exc}")
             self.hint.setText("Please rerun touch calibration.")
             return
@@ -185,8 +195,7 @@ class TouchCalibrationCalibrationMixin:
             % (self.sx, self.sxy, self.ox, self.syx, self.sy, self.oy)
         )
         if self._linuxcnc_handoff_enabled():
-            self.hint.setText(f"Returning to LinuxCNC... ({fit_hint})")
-            self._begin_linuxcnc_handoff("calibration-complete")
+            self.hint.setText(f"Rebooting board... ({fit_hint})")
+            self._begin_linuxcnc_handoff("calibration-complete", board_reboot=True)
         else:
             self.hint.setText(f"Touch-only mode calibrated. {fit_hint}")
-

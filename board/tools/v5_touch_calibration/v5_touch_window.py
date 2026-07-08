@@ -43,6 +43,7 @@ class TouchCalibrationWindow(TouchCalibrationRuntimeMixin, TouchCalibrationResta
         self.wait_release = False
         self.release_guard_deadline = 0.0
         self.ignore_until = 0.0
+        self.cal_target_deadline = 0.0
         self.enable_linuxcnc = os.environ.get("V5_ENABLE_LINUXCNC", "1") == "1"
         # Default behavior: after calibration, return to LinuxCNC UI.
         # Touch-only mode can opt out via V5_TOUCH_CAL_EXIT_TO_LINUXCNC=0.
@@ -60,6 +61,9 @@ class TouchCalibrationWindow(TouchCalibrationRuntimeMixin, TouchCalibrationResta
         self.release_guard_timer.setInterval(120)
         self.release_guard_timer.timeout.connect(self._cal_release_guard_tick)
         self.release_guard_timer.start()
+        self.cal_timeout_timer = QtCore.QTimer(self)
+        self.cal_timeout_timer.setInterval(250)
+        self.cal_timeout_timer.timeout.connect(self._cal_timeout_tick)
 
         self.title = QtWidgets.QLabel("v5 Touch Calibration", self)
         self.title.setGeometry(0, 18, 1024, 42)
@@ -105,6 +109,14 @@ class TouchCalibrationWindow(TouchCalibrationRuntimeMixin, TouchCalibrationResta
         self.raw_label.setAlignment(QtCore.Qt.AlignCenter)
         self.raw_label.setStyleSheet('font: 14pt "Monospace"; color: #f4d35e;')
 
+        self.countdown_label = QtWidgets.QLabel("", self)
+        self.countdown_label.setGeometry(312, 20, 400, 54)
+        self.countdown_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.countdown_label.setStyleSheet(
+            'background:#13202b; border:2px solid #ffe35e; border-radius:12px; font:75 22pt "Sans Serif"; color:#ffe35e;'
+        )
+        self.countdown_label.hide()
+
         self.target_ring = QtWidgets.QFrame(self)
         self.target_ring.setStyleSheet("background:transparent; border:4px solid #ffe35e; border-radius:28px;")
         self.target_ring.setGeometry(-100, -100, 56, 56)
@@ -130,4 +142,3 @@ class TouchCalibrationWindow(TouchCalibrationRuntimeMixin, TouchCalibrationResta
 
 
 __all__ = ["TouchCalibrationWindow"]
-

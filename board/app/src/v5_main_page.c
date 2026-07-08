@@ -310,6 +310,151 @@ static int main_page_project_world_point_transformed(
     return 1;
 }
 
+static int main_page_status_ac_display_values(const V5UiStatusView *status, double *a_deg, double *c_deg)
+{
+    if (a_deg) {
+        *a_deg = 0.0;
+    }
+    if (c_deg) {
+        *c_deg = 0.0;
+    }
+    if (!status || (status->valid_mask & V5_STATUS_VALID_MCS) == 0U ||
+        !isfinite(status->mcs[3]) || !isfinite(status->mcs[4])) {
+        return 0;
+    }
+    if (a_deg) {
+        *a_deg = status->mcs[3];
+    }
+    if (c_deg) {
+        *c_deg = status->mcs[4];
+    }
+    return 1;
+}
+
+static int main_page_program_ac_projection_available(
+    const V5MainPage *page,
+    const V5UiStatusView *status,
+    double *a_deg,
+    double *c_deg,
+    double a_center[V5_STATUS_AXIS_COUNT],
+    double c_center[V5_STATUS_AXIS_COUNT])
+{
+    if (!page || !main_page_status_ac_display_values(status, a_deg, c_deg) ||
+        !main_page_g53_ac_center_world(page, 0U, a_center) ||
+        !main_page_g53_ac_center_world(page, 1U, c_center)) {
+        return 0;
+    }
+    return 1;
+}
+
+static int main_page_program_ac_projection_changed(const V5MainPage *page, const V5UiStatusView *status)
+{
+    double a_deg = 0.0;
+    double c_deg = 0.0;
+    double a_center[V5_STATUS_AXIS_COUNT];
+    double c_center[V5_STATUS_AXIS_COUNT];
+    int valid;
+
+    if (!page || !page->toolpath_program_visible || page->toolpath_program_point_count == 0U) {
+        return 0;
+    }
+    valid = main_page_program_ac_projection_available(page, status, &a_deg, &c_deg, a_center, c_center);
+    if (valid != page->toolpath_program_ac_valid) {
+        return 1;
+    }
+    if (!valid) {
+        return 0;
+    }
+    return fabs(a_deg - page->toolpath_program_ac_a_deg) > 0.0005 ||
+           fabs(c_deg - page->toolpath_program_ac_c_deg) > 0.0005;
+}
+
+static void main_page_rotate_xyz_about_axis(
+    double point[V5_STATUS_AXIS_COUNT],
+    const double center[V5_STATUS_AXIS_COUNT],
+    const double axis[3],
+    double angle_rad)
+{
+    double vx;
+    double vy;
+    double vz;
+    double kx;
+    double ky;
+    double kz;
+    double norm;
+    double c;
+    double s;
+    double dot;
+    double cross_x;
+    double cross_y;
+    double cross_z;
+
+    if (!point || !center || !axis) {
+        return;
+    }
+    norm = sqrt((axis[0] * axis[0]) + (axis[1] * axis[1]) + (axis[2] * axis[2]));
+    if (norm <= 1.0e-12 || !isfinite(norm) || !isfinite(angle_rad)) {
+        return;
+    }
+    kx = axis[0] / norm;
+    ky = axis[1] / norm;
+    kz = axis[2] / norm;
+    vx = point[0] - center[0];
+    vy = point[1] - center[1];
+    vz = point[2] - center[2];
+    c = cos(angle_rad);
+    s = sin(angle_rad);
+    dot = (kx * vx) + (ky * vy) + (kz * vz);
+    cross_x = (ky * vz) - (kz * vy);
+    cross_y = (kz * vx) - (kx * vz);
+    cross_z = (kx * vy) - (ky * vx);
+    point[0] = center[0] + (vx * c) + (cross_x * s) + (kx * dot * (1.0 - c));
+    point[1] = center[1] + (vy * c) + (cross_y * s) + (ky * dot * (1.0 - c));
+    point[2] = center[2] + (vz * c) + (cross_z * s) + (kz * dot * (1.0 - c));
+}
+
+static void main_page_update_program_project_points(
+    V5MainPage *page,
+    const V5UiStatusView *status,
+    unsigned int count)
+{
+    double a_deg = 0.0;
+    double c_deg = 0.0;
+    int ac_valid;
+    double a_center[V5_STATUS_AXIS_COUNT];
+    double c_center[V5_STATUS_AXIS_COUNT];
+    double a_axis[3] = {1.0, 0.0, 0.0};
+    double c_axis[3] = {0.0, 0.0, 1.0};
+    double a_rad;
+    double c_rad;
+    unsigned int i;
+
+    if (!page) {
+        return;
+    }
+    if (count > V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT) {
+        count = V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT;
+    }
+    for (i = 0U; i < count; ++i) {
+        page->toolpath_program_project_points[i] = page->toolpath_program_points[i];
+    }
+    ac_valid = main_page_program_ac_projection_available(page, status, &a_deg, &c_deg, a_center, c_center);
+    page->toolpath_program_ac_valid = ac_valid;
+    page->toolpath_program_ac_a_deg = ac_valid ? a_deg : 0.0;
+    page->toolpath_program_ac_c_deg = ac_valid ? c_deg : 0.0;
+    if (!ac_valid) {
+        return;
+    }
+    a_rad = a_deg * M_PI / 180.0;
+    c_rad = c_deg * M_PI / 180.0;
+    c_axis[1] = -sin(a_rad);
+    c_axis[2] = cos(a_rad);
+    for (i = 0U; i < count; ++i) {
+        main_page_rotate_xyz_about_axis(page->toolpath_program_project_points[i].axis, a_center, a_axis, a_rad);
+        main_page_rotate_xyz_about_axis(page->toolpath_program_project_points[i].axis, c_center, c_axis, c_rad);
+    }
+}
+
 static void main_page_expand_static_geometry_fit(V5MainPage *page, const V5UiStatusView *status)
 {
     double point[V5_STATUS_AXIS_COUNT];
@@ -1243,6 +1388,10 @@ static void hide_toolpath_program_line(V5MainPage *page)
     page->toolpath_program_wcs_valid = 0;
     page->toolpath_program_wcs_index = -1;
     memset(page->toolpath_program_wcs_offset, 0, sizeof(page->toolpath_program_wcs_offset));
+    page->toolpath_program_point_count = 0U;
+    page->toolpath_program_ac_valid = 0;
+    page->toolpath_program_ac_a_deg = 0.0;
+    page->toolpath_program_ac_c_deg = 0.0;
     for (segment = 0U; segment < V5_MAIN_PAGE_TOOLPATH_DRAW_SEGMENTS; ++segment) {
         hide_toolpath_line(page->toolpath_line_segments[segment]);
     }
@@ -1264,6 +1413,10 @@ static void mark_toolpath_static_dirty(V5MainPage *page)
     page->toolpath_program_wcs_index = -1;
     memset(page->toolpath_program_wcs_offset, 0, sizeof(page->toolpath_program_wcs_offset));
     page->toolpath_program_visible = 0;
+    page->toolpath_program_point_count = 0U;
+    page->toolpath_program_ac_valid = 0;
+    page->toolpath_program_ac_a_deg = 0.0;
+    page->toolpath_program_ac_c_deg = 0.0;
     v5_toolpath_display_fit_init(&page->toolpath_fit);
 }
 
@@ -1990,7 +2143,6 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
 {
     V5CoordinatePanelSnapshot panel;
     V5ToolpathDisplaySnapshot dynamic_display;
-    V5UiStatusView preview_status;
     char modal_display_text[256];
     const V5ProgramRuntime *runtime = page && page->program_controller ? v5_program_controller_runtime(page->program_controller) : 0;
     unsigned int preview_count = 0U;
@@ -2001,6 +2153,8 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
     int program_fit_dirty = 0;
     int program_projection_dirty = 0;
     int static_toolpath_due = 0;
+    int program_ac_changed = 0;
+    int program_refresh_due = 0;
     int runtime_has_program = runtime && v5_program_runtime_has_open_program(runtime);
     unsigned int i;
 
@@ -2063,6 +2217,8 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
             (runtime_has_program && !page->toolpath_program_visible) ||
             !page->toolpath_fit.valid ||
             page->toolpath_program_view_generation != page->toolpath_view_generation;
+        program_ac_changed = main_page_program_ac_projection_changed(page, status);
+        program_refresh_due = static_toolpath_due || program_ac_changed;
 
         if (!page->toolpath_fit.valid && status) {
             if (v5_toolpath_display_fit_from_status(status, page->view_plane, &page->toolpath_fit)) {
@@ -2071,83 +2227,90 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
             }
         }
 
-        if (static_toolpath_due && runtime_has_program) {
-            runtime_generation = v5_program_runtime_loaded_epoch(runtime);
-        if (status) {
-            preview_status = *status;
-        } else {
-            memset(&preview_status, 0, sizeof(preview_status));
-        }
-        preview_count = v5_program_runtime_preview_trajectory(
-            runtime,
-            page->toolpath_program_points,
-            V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT);
-        if (preview_count > 0U &&
-            !main_page_apply_program_preview_wcs_offset(
-                page, runtime, page->toolpath_program_points, preview_count, &program_wcs_index, program_wcs_offset)) {
-            preview_count = 0U;
-        }
-        if (preview_count > 0U) {
-            preview_status.trajectory_count = 0U;
-            preview_status.valid_mask &= (uint32_t)(~V5_STATUS_VALID_TRAJECTORY);
-            program_wcs_changed =
-                !page->toolpath_program_wcs_valid ||
-                page->toolpath_program_wcs_index != program_wcs_index ||
-                fabs(page->toolpath_program_wcs_offset[0] - program_wcs_offset[0]) > 0.0005 ||
-                fabs(page->toolpath_program_wcs_offset[1] - program_wcs_offset[1]) > 0.0005 ||
-                fabs(page->toolpath_program_wcs_offset[2] - program_wcs_offset[2]) > 0.0005;
-        }
-        program_fit_dirty =
-            !page->toolpath_program_visible ||
-            page->toolpath_program_generation != runtime_generation ||
-            page->toolpath_program_plane != page->view_plane ||
-            program_wcs_changed ||
-            !page->toolpath_fit.valid;
-        program_projection_dirty =
-            program_fit_dirty ||
-            page->toolpath_program_view_generation != page->toolpath_view_generation;
-        if (preview_count > 0U && program_projection_dirty) {
-            if (!program_fit_dirty ||
-                v5_toolpath_display_fit_from_points(
+        if (program_refresh_due && runtime_has_program) {
+            if (static_toolpath_due) {
+                runtime_generation = v5_program_runtime_loaded_epoch(runtime);
+                preview_count = v5_program_runtime_preview_trajectory(
+                    runtime,
                     page->toolpath_program_points,
-                    preview_count,
-                    page->view_plane,
-                    &page->toolpath_fit)) {
-                if (program_fit_dirty) {
-                    main_page_expand_visible_toolpath_fit(page, status);
-                }
-                unsigned int projected_count = v5_toolpath_display_project_points_with_fit(
-                    page->toolpath_program_points,
-                    preview_count,
-                    &page->toolpath_fit,
-                    (double)V5_TOOLPATH_W,
-                    (double)V5_TOOLPATH_H,
-                    page->toolpath_program_screen_points,
                     V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT);
-                for (i = 0U; i < projected_count; ++i) {
-                    page->toolpath_program_screen_points[i] =
-                        apply_toolpath_view_transform(page, page->toolpath_program_screen_points[i]);
+                if (preview_count > 0U &&
+                    !main_page_apply_program_preview_wcs_offset(
+                        page, runtime, page->toolpath_program_points, preview_count, &program_wcs_index, program_wcs_offset)) {
+                    preview_count = 0U;
                 }
-                set_toolpath_program_line(page, page->toolpath_program_screen_points, projected_count);
-                page->toolpath_program_generation = runtime_generation;
-                page->toolpath_program_view_generation = page->toolpath_view_generation;
-                page->toolpath_program_plane = page->view_plane;
-                page->toolpath_program_wcs_valid = 1;
-                page->toolpath_program_wcs_index = program_wcs_index;
-                page->toolpath_program_wcs_offset[0] = program_wcs_offset[0];
-                page->toolpath_program_wcs_offset[1] = program_wcs_offset[1];
-                page->toolpath_program_wcs_offset[2] = program_wcs_offset[2];
-                if (program_fit_dirty) {
-                    page->toolpath_static_cache_misses += 1U;
+                page->toolpath_program_point_count = preview_count;
+            } else {
+                runtime_generation = page->toolpath_program_generation;
+                preview_count = page->toolpath_program_point_count;
+                program_wcs_index = page->toolpath_program_wcs_index;
+                program_wcs_offset[0] = page->toolpath_program_wcs_offset[0];
+                program_wcs_offset[1] = page->toolpath_program_wcs_offset[1];
+                program_wcs_offset[2] = page->toolpath_program_wcs_offset[2];
+            }
+            if (preview_count > 0U) {
+                main_page_update_program_project_points(page, status, preview_count);
+                program_wcs_changed =
+                    !page->toolpath_program_wcs_valid ||
+                    page->toolpath_program_wcs_index != program_wcs_index ||
+                    fabs(page->toolpath_program_wcs_offset[0] - program_wcs_offset[0]) > 0.0005 ||
+                    fabs(page->toolpath_program_wcs_offset[1] - program_wcs_offset[1]) > 0.0005 ||
+                    fabs(page->toolpath_program_wcs_offset[2] - program_wcs_offset[2]) > 0.0005;
+            }
+            program_fit_dirty =
+                static_toolpath_due &&
+                (!page->toolpath_program_visible ||
+                 page->toolpath_program_generation != runtime_generation ||
+                 page->toolpath_program_plane != page->view_plane ||
+                 program_wcs_changed ||
+                 !page->toolpath_fit.valid);
+            program_projection_dirty =
+                program_fit_dirty ||
+                program_ac_changed ||
+                page->toolpath_program_view_generation != page->toolpath_view_generation;
+            if (preview_count > 0U && program_projection_dirty) {
+                if (!program_fit_dirty ||
+                    v5_toolpath_display_fit_from_points(
+                        page->toolpath_program_project_points,
+                        preview_count,
+                        page->view_plane,
+                        &page->toolpath_fit)) {
+                    if (program_fit_dirty) {
+                        main_page_expand_visible_toolpath_fit(page, status);
+                    }
+                    unsigned int projected_count = v5_toolpath_display_project_points_with_fit(
+                        page->toolpath_program_project_points,
+                        preview_count,
+                        &page->toolpath_fit,
+                        (double)V5_TOOLPATH_W,
+                        (double)V5_TOOLPATH_H,
+                        page->toolpath_program_screen_points,
+                        V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT);
+                    for (i = 0U; i < projected_count; ++i) {
+                        page->toolpath_program_screen_points[i] =
+                            apply_toolpath_view_transform(page, page->toolpath_program_screen_points[i]);
+                    }
+                    set_toolpath_program_line(page, page->toolpath_program_screen_points, projected_count);
+                    page->toolpath_program_generation = runtime_generation;
+                    page->toolpath_program_view_generation = page->toolpath_view_generation;
+                    page->toolpath_program_plane = page->view_plane;
+                    page->toolpath_program_wcs_valid = 1;
+                    page->toolpath_program_wcs_index = program_wcs_index;
+                    page->toolpath_program_wcs_offset[0] = program_wcs_offset[0];
+                    page->toolpath_program_wcs_offset[1] = program_wcs_offset[1];
+                    page->toolpath_program_wcs_offset[2] = program_wcs_offset[2];
+                    page->toolpath_program_point_count = preview_count;
+                    if (program_fit_dirty) {
+                        page->toolpath_static_cache_misses += 1U;
+                    }
+                } else {
+                    hide_toolpath_program_line(page);
                 }
+            } else if (preview_count > 0U && page->toolpath_program_visible) {
+                page->toolpath_static_cache_hits += 1U;
             } else {
                 hide_toolpath_program_line(page);
             }
-        } else if (preview_count > 0U && page->toolpath_program_visible) {
-            page->toolpath_static_cache_hits += 1U;
-        } else {
-            hide_toolpath_program_line(page);
-        }
     } else if (static_toolpath_due) {
         hide_toolpath_program_line(page);
         page->toolpath_program_generation = 0U;
@@ -2155,6 +2318,10 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
         page->toolpath_program_wcs_valid = 0;
         page->toolpath_program_wcs_index = -1;
         memset(page->toolpath_program_wcs_offset, 0, sizeof(page->toolpath_program_wcs_offset));
+        page->toolpath_program_point_count = 0U;
+        page->toolpath_program_ac_valid = 0;
+        page->toolpath_program_ac_a_deg = 0.0;
+        page->toolpath_program_ac_c_deg = 0.0;
     }
 
     update_toolpath_state_lines(page, status);

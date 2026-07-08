@@ -42,6 +42,8 @@ class TouchCalibrationRuntimeMixin:
     def closeEvent(self, event):
         if self.restart_wait_timer.isActive():
             self.restart_wait_timer.stop()
+        if self.cal_timeout_timer.isActive():
+            self.cal_timeout_timer.stop()
         if self.touch_thread is not None:
             try:
                 self.touch_thread.stop()
@@ -134,4 +136,3 @@ class TouchCalibrationRuntimeMixin:
         except Exception as exc:
             self.calibration_warning = f"Calibration file invalid; using default mapping ({exc})."
             self._calibration_loaded = False
-

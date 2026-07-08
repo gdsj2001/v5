@@ -50,6 +50,7 @@ board remote_input.sock framed JSON
 - 内存/磁盘字节数
 
 这些指标只显示，不参与运动、按钮、授权、设置或任何控制判断。字段缺失显示 `--%`。
+CPU 百分比必须用相邻两次 `/proc/stat` 采样的 delta 计算当前占用率，不得用开机累计 idle/total 比例冒充实时占用；第一次采样或采样异常返回缺失值，由 WinRemote 显示 `--%`，后续 `/remote/info` 周期刷新显示最新值。内存和磁盘百分比每次从 OS 现读，只作诊断显示。
 
 ## 3. 板端诊断、G-code 上传与 OTA 升级入口
 

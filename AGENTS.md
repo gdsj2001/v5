@@ -496,12 +496,12 @@ bus_pulse_difference=功能/2-1总线脉冲区别.md
 settings_buttons=功能/2-3设置页每个按钮作用和目的.md
 settings_set_drive=功能/2-4设置页设置驱动按钮作用和目的.md
 axis_zero=功能/2-5轴设0软件偏置方案.md
-home=功能/2-6回零按钮开机强制回零与双模式真实回零方案.md
+home=功能/3-2回零按钮开机强制回零与双模式真实回零方案.md
 wcs_work_offset=功能/1-1加工坐标系偏移值保存与读取实现.md
 drive_command_map=功能/1驱动命令映射表命令需求.md
 drive_profile_adapter=功能/1驱动命令映射表命令需求.md
 vps_auth=功能/VPS登录与项目对接说明.md
-toolpath=功能/3-2UI刀路绘图顺序与状态稳定方案.md
+toolpath=功能/3-4UI刀路绘图顺序与状态稳定方案.md
 main_buttons=功能/3-1主页面按钮功能.md
 estop=功能/3-1主页面按钮功能.md
 start=功能/3-1主页面按钮功能.md
@@ -510,7 +510,7 @@ native_helper_whitelist=功能/0-3native_helper白名单与验收说明.md
 popup=功能/跳窗提示方案.md
 touch_input=功能/-触摸校准与输入链路说明.md
 auto_closed_loop=功能/自动闭环测试方式.md
-red_point=功能/3-2UI刀路绘图顺序与状态稳定方案.md
+red_point=功能/3-4UI刀路绘图顺序与状态稳定方案.md
 
 ## P1_COMMAND_STYLE
 

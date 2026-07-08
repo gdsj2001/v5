@@ -42,7 +42,9 @@ CAL_PROFILE = "screen-fit-topleft-1024x600-v1"
 CAL_ANCHOR = "topleft-v1"
 TOUCH_UDEV_LINK = "/dev/input/by-path/z20-touchscreen"
 RESTART_REQUEST = "/run/v5_touch_calibration/restart.request"
+BOARD_REBOOT_MARKER = "/run/v5_touch_calibration/reboot.requested"
 LINUXCNC_SERVICE = "v5-ui-relay"
+CAL_POINT_TIMEOUT_S = 30.0
 FIT_MAX_ERROR_PX = 36.0
 EDGE_MAX_ERROR_PX = 48.0
 _THIS_DIR = Path(__file__).resolve().parent
@@ -168,4 +170,3 @@ def _fit_affine(samples, targets):
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]
-

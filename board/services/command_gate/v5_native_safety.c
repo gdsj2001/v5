@@ -62,8 +62,7 @@ static int map_latch(V5NativeSafetyResult *result, V5NativeSafetyLatchFrame **fr
     }
     path = getenv(V5_NATIVE_SAFETY_LATCH_PATH_ENV);
     if (!path || !path[0]) {
-        copy_code(result, "NATIVE_SAFETY_LATCH_UNCONFIGURED");
-        return V5_NATIVE_SAFETY_SEND_UNAVAILABLE;
+        path = V5_NATIVE_SAFETY_LATCH_DEFAULT_PATH;
     }
 
     fd = open(path, O_RDWR | O_CLOEXEC);
@@ -99,6 +98,24 @@ static void unmap_latch(V5NativeSafetyLatchFrame *frame)
     }
 }
 
+int v5_native_safety_read_status(V5NativeSafetyResult *result)
+{
+    V5NativeSafetyLatchFrame *frame = 0;
+    int status;
+
+    v5_native_safety_result_init(result);
+    status = map_latch(result, &frame);
+    if (status != V5_NATIVE_SAFETY_SEND_SENT) {
+        return status;
+    }
+    result_from_latch(result, frame);
+    copy_code(result, "NATIVE_SAFETY_STATUS_OK");
+    unmap_latch(frame);
+    return (result && (result->safety_estop_known || result->machine_enable_known))
+               ? V5_NATIVE_SAFETY_SEND_SENT
+               : V5_NATIVE_SAFETY_SEND_UNAVAILABLE;
+}
+
 int v5_native_safety_estop_force(V5NativeSafetyResult *result)
 {
     V5NativeSafetyLatchFrame *frame = 0;
@@ -130,36 +147,25 @@ int v5_native_safety_estop_force(V5NativeSafetyResult *result)
     return V5_NATIVE_SAFETY_SEND_IO_ERROR;
 }
 
-int v5_native_safety_estop_reset(V5NativeSafetyResult *result)
+int v5_native_safety_estop_reset_latch(V5NativeSafetyResult *result)
 {
     V5NativeSafetyLatchFrame *frame = 0;
     uint32_t epoch;
     int status;
 
     v5_native_safety_result_init(result);
-    if (result) {
-        result->machine_on_requested = 1;
-    }
     status = map_latch(result, &frame);
     if (status != V5_NATIVE_SAFETY_SEND_SENT) {
-        if (result) {
-            result->machine_on_status = status;
-        }
         return status;
     }
 
     epoch = epoch_increment(&frame->estop_reset_epoch);
-    for (unsigned int i = 0U; i < 1000U; ++i) {
+    for (unsigned int i = 0U; i < 100U; ++i) {
         result_from_latch(result, frame);
         if (frame->estop_reset_ack_epoch >= epoch &&
             result->safety_estop_known &&
-            !result->safety_estop_active &&
-            result->machine_enable_known &&
-            result->machine_enabled) {
-            copy_code(result, "NATIVE_SAFETY_ESTOP_RESET_OK");
-            if (result) {
-                result->machine_on_status = V5_NATIVE_SAFETY_SEND_SENT;
-            }
+            !result->safety_estop_active) {
+            copy_code(result, "NATIVE_SAFETY_ESTOP_RESET_LATCH_OK");
             unmap_latch(frame);
             return V5_NATIVE_SAFETY_SEND_SENT;
         }
@@ -167,16 +173,100 @@ int v5_native_safety_estop_reset(V5NativeSafetyResult *result)
     }
 
     result_from_latch(result, frame);
-    copy_code(result, "NATIVE_SAFETY_ESTOP_RESET_NOT_CONFIRMED");
-    if (result) {
-        result->machine_on_status = V5_NATIVE_SAFETY_SEND_IO_ERROR;
-    }
+    copy_code(result, "NATIVE_SAFETY_ESTOP_RESET_LATCH_NOT_CONFIRMED");
     unmap_latch(frame);
     return V5_NATIVE_SAFETY_SEND_IO_ERROR;
 }
+
+int v5_native_safety_wait_reset_confirmed(
+    V5NativeSafetyResult *result,
+    unsigned int attempts,
+    unsigned int delay_us)
+{
+    V5NativeSafetyLatchFrame *frame = 0;
+    int status;
+    int machine_on_requested = result ? result->machine_on_requested : 0;
+    int machine_on_status = result ? result->machine_on_status : 0;
+
+    if (attempts == 0U) {
+        attempts = 1U;
+    }
+    status = map_latch(result, &frame);
+    if (status != V5_NATIVE_SAFETY_SEND_SENT) {
+        return status;
+    }
+
+    for (unsigned int i = 0U; i < attempts; ++i) {
+        result_from_latch(result, frame);
+        if (result) {
+            result->machine_on_requested = machine_on_requested;
+            result->machine_on_status = machine_on_status;
+        }
+        if (result &&
+            result->safety_estop_known &&
+            !result->safety_estop_active &&
+            result->machine_enable_known &&
+            result->machine_enabled) {
+            copy_code(result, "NATIVE_SAFETY_ESTOP_RESET_OK");
+            unmap_latch(frame);
+            return V5_NATIVE_SAFETY_SEND_SENT;
+        }
+        if (delay_us > 0U) {
+            usleep(delay_us);
+        }
+    }
+
+    result_from_latch(result, frame);
+    if (result) {
+        result->machine_on_requested = machine_on_requested;
+        result->machine_on_status = machine_on_status;
+    }
+    copy_code(result, "NATIVE_SAFETY_ESTOP_RESET_NOT_CONFIRMED");
+    unmap_latch(frame);
+    return V5_NATIVE_SAFETY_SEND_IO_ERROR;
+}
+
+int v5_native_safety_estop_reset(V5NativeSafetyResult *result)
+{
+    int status = v5_native_safety_estop_reset_latch(result);
+    if (result) {
+        result->machine_on_requested = 1;
+        result->machine_on_status = V5_NATIVE_SAFETY_SEND_IO_ERROR;
+    }
+    if (status != V5_NATIVE_SAFETY_SEND_SENT) {
+        return status;
+    }
+    return v5_native_safety_wait_reset_confirmed(result, 1000U, 1000U);
+}
 #else
+int v5_native_safety_read_status(V5NativeSafetyResult *result)
+{
+    v5_native_safety_result_init(result);
+    copy_code(result, "NATIVE_SAFETY_LATCH_UNAVAILABLE_ON_WIN32");
+    return V5_NATIVE_SAFETY_SEND_UNAVAILABLE;
+}
+
 int v5_native_safety_estop_force(V5NativeSafetyResult *result)
 {
+    v5_native_safety_result_init(result);
+    copy_code(result, "NATIVE_SAFETY_LATCH_UNAVAILABLE_ON_WIN32");
+    return V5_NATIVE_SAFETY_SEND_UNAVAILABLE;
+}
+
+int v5_native_safety_estop_reset_latch(V5NativeSafetyResult *result)
+{
+    v5_native_safety_result_init(result);
+    copy_code(result, "NATIVE_SAFETY_LATCH_UNAVAILABLE_ON_WIN32");
+    return V5_NATIVE_SAFETY_SEND_UNAVAILABLE;
+}
+
+int v5_native_safety_wait_reset_confirmed(
+    V5NativeSafetyResult *result,
+    unsigned int attempts,
+    unsigned int delay_us)
+{
+    (void)attempts;
+    (void)delay_us;
     v5_native_safety_result_init(result);
     copy_code(result, "NATIVE_SAFETY_LATCH_UNAVAILABLE_ON_WIN32");
     return V5_NATIVE_SAFETY_SEND_UNAVAILABLE;

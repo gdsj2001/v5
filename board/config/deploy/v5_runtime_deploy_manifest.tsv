@@ -3,6 +3,7 @@ binary	build/board/app/v5_lvgl_shell	/usr/libexec/8ax/v5_lvgl_shell	0755
 binary	build/board/app/v5_state_publisher	/usr/libexec/8ax/v5_state_publisher	0755
 script	services/state_publisher/v5_rtcp_status_publisher.py	/usr/libexec/8ax/v5_rtcp_status_publisher.py	0755
 script	services/microkernel/v5_g53_geometry_memory_owner.py	/usr/libexec/8ax/v5_g53_geometry_memory_owner.py	0755
+script	services/microkernel/v5_native_safety_latch_owner.py	/usr/libexec/8ax/v5_native_safety_latch_owner.py	0755
 script	services/state_publisher/v5_wcs_status_publisher.py	/usr/libexec/8ax/v5_wcs_status_publisher.py	0755
 binary	build/board/app/v5_touch_diagnostics	/usr/libexec/8ax/v5_touch_diagnostics	0755
 binary	build/board/app/v5_linuxcncrsh_probe	/usr/libexec/8ax/v5_linuxcncrsh_probe	0755

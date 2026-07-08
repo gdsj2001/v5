@@ -15,6 +15,7 @@ extern "C" {
 #define V5_NATIVE_SAFETY_LATCH_MAGIC 0x56355346u
 #define V5_NATIVE_SAFETY_LATCH_VERSION 1u
 #define V5_NATIVE_SAFETY_LATCH_PATH_ENV "V5_NATIVE_SAFETY_LATCH_PATH"
+#define V5_NATIVE_SAFETY_LATCH_DEFAULT_PATH "/dev/shm/v5_native_safety_latch.bin"
 
 typedef struct V5NativeSafetyLatchFrame {
     uint32_t magic;
@@ -40,7 +41,13 @@ typedef struct V5NativeSafetyResult {
 } V5NativeSafetyResult;
 
 void v5_native_safety_result_init(V5NativeSafetyResult *result);
+int v5_native_safety_read_status(V5NativeSafetyResult *result);
 int v5_native_safety_estop_force(V5NativeSafetyResult *result);
+int v5_native_safety_estop_reset_latch(V5NativeSafetyResult *result);
+int v5_native_safety_wait_reset_confirmed(
+    V5NativeSafetyResult *result,
+    unsigned int attempts,
+    unsigned int delay_us);
 int v5_native_safety_estop_reset(V5NativeSafetyResult *result);
 
 #ifdef __cplusplus

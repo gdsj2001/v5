@@ -16,7 +16,34 @@ def write_framebuffer(path: Path, width: int, height: int) -> None:
     path.write_bytes(bytes(payload))
 
 
+def check_cpu_usage_sampler() -> int:
+    samples = {
+        "cpu0": iter([(100, 50), (200, 70), (260, 100)]),
+        "cpu1": iter([(100, 90), (120, 100)]),
+    }
+
+    def sample(name: str):
+        return next(samples[name])
+
+    sampler = relay.CpuUsageSampler(sample)
+    checks = [
+        ("first cpu0 sample has no delta", sampler.percent("cpu0"), None),
+        ("cpu0 first delta", sampler.percent("cpu0"), 80.0),
+        ("cpu0 second delta", sampler.percent("cpu0"), 50.0),
+        ("first cpu1 sample has no delta", sampler.percent("cpu1"), None),
+        ("cpu1 first delta", sampler.percent("cpu1"), 50.0),
+    ]
+    for label, actual, expected in checks:
+        if actual != expected:
+            print("bad cpu sampler", label, actual, expected)
+            return 10
+    return 0
+
+
 def main() -> int:
+    rc = check_cpu_usage_sampler()
+    if rc != 0:
+        return rc
     with tempfile.TemporaryDirectory(prefix="v5_remote_relay_coalesce_") as tmp:
         state = relay.FrameState(Path(tmp), 4, 4)
         write_framebuffer(state.framebuffer_path, state.width, state.height)

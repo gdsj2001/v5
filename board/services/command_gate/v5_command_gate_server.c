@@ -119,18 +119,17 @@ static void response_init(V5CommandGateIpcResponseFrame *response)
     response->send_status = V5_COMMAND_GATE_SEND_UNAVAILABLE;
 }
 
+static void response_copy_native_safety_result(
+    V5CommandGateIpcResponseFrame *response,
+    const V5NativeSafetyResult *result);
+
 static void fill_safety_readback(V5CommandGateIpcResponseFrame *response)
 {
-    int estop_active = 0;
-    int machine_enabled = 0;
-    if (v5_linuxcncrsh_probe_estop(&g_linuxcncrsh_config, &estop_active, 0, 0)) {
-        response->safety_estop_known = 1;
-        response->safety_estop_active = estop_active ? 1 : 0;
+    V5NativeSafetyResult native_result;
+    if (v5_native_safety_read_status(&native_result) != V5_NATIVE_SAFETY_SEND_SENT) {
+        return;
     }
-    if (v5_linuxcncrsh_probe_machine_enabled(&g_linuxcncrsh_config, &machine_enabled, 0, 0)) {
-        response->machine_enable_known = 1;
-        response->machine_enabled = machine_enabled ? 1 : 0;
-    }
+    response_copy_native_safety_result(response, &native_result);
 }
 
 static int fixed_text_has_nul(const char *text, size_t cap)
@@ -211,8 +210,22 @@ static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5Command
     }
     if (request.kind == V5_COMMAND_ESTOP_RESET && strcmp(prepared.owner, "native_safety") == 0) {
         V5NativeSafetyResult native_result;
-        copy_cstr(response->command_line, sizeof(response->command_line), "native_safety.estop_reset");
-        status = v5_native_safety_estop_reset(&native_result);
+        V5LinuxcncrshSendStatus machine_on_status = V5_LINUXCNCRSH_SEND_UNAVAILABLE;
+        copy_cstr(response->command_line, sizeof(response->command_line), "native_safety.estop_reset | Set Machine On");
+        status = v5_native_safety_estop_reset_latch(&native_result);
+        if (status == V5_NATIVE_SAFETY_SEND_SENT) {
+            native_result.machine_on_requested = 1;
+            linuxcncrsh_lock();
+            machine_on_status = v5_linuxcncrsh_send_machine_on_sequence(&g_linuxcncrsh_config);
+            linuxcncrsh_unlock();
+            native_result.machine_on_status = (int)machine_on_status;
+            if (machine_on_status == V5_LINUXCNCRSH_SEND_SENT) {
+                status = v5_native_safety_wait_reset_confirmed(&native_result, 20U, 50000U);
+            } else {
+                copy_cstr(native_result.code, sizeof(native_result.code), "NATIVE_SAFETY_MACHINE_ON_FAILED");
+                status = V5_NATIVE_SAFETY_SEND_IO_ERROR;
+            }
+        }
         response_copy_native_safety_result(response, &native_result);
         response->send_status = (int32_t)status;
         response->executed = status == V5_NATIVE_SAFETY_SEND_SENT ? 1 : 0;
@@ -316,9 +329,7 @@ static void handle_frame(const V5CommandGateIpcRequestFrame *request, V5CommandG
             copy_cstr(response->readback_code, sizeof(response->readback_code), reject_reason);
             return;
         }
-        linuxcncrsh_lock();
         fill_safety_readback(response);
-        linuxcncrsh_unlock();
         response->send_status = (response->safety_estop_known || response->machine_enable_known) ? V5_COMMAND_GATE_SEND_SENT : V5_COMMAND_GATE_SEND_UNAVAILABLE;
         response->executed = 0;
         return;

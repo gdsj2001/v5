@@ -9,7 +9,7 @@ from v5_touch_core import *  # noqa: F401,F403
 
 
 class TouchCalibrationRestartMixin:
-    def _request_restart_via_helper(self) -> bool:
+    def _request_restart_via_helper(self, board_reboot=False) -> bool:
         def _result(accepted=False, completed=False, ok=False, state="failed", detail=""):
             return {
                 "accepted": bool(accepted),
@@ -24,11 +24,14 @@ class TouchCalibrationRestartMixin:
             self.hint.setText(RESTART_HELPER)
             return _result(False, False, False, "failed", "helper-missing")
         worker_result = {"done": False, "ok": False, "rc": -1, "out": ""}
+        helper_args = [RESTART_HELPER]
+        if board_reboot:
+            helper_args.append("--reboot-board")
 
         def _worker():
             try:
                 result = subprocess.run(
-                    [RESTART_HELPER],
+                    helper_args,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,
@@ -69,6 +72,10 @@ class TouchCalibrationRestartMixin:
             if worker_result["done"]:
                 if worker_result["ok"]:
                     output = str(worker_result.get("out", ""))
+                    if "BOARD_REBOOT_DISPATCHED" in output:
+                        self.status.setText("Board reboot dispatched.")
+                        self.hint.setText("Calibration saved; the board is rebooting.")
+                        return _result(True, True, True, "board-reboot", "helper-board-reboot")
                     if "DIRECT_LAUNCH" in output:
                         self.status.setText("LinuxCNC direct launch dispatched.")
                         self.hint.setText("Leaving calibration UI and switching to LinuxCNC.")
@@ -114,6 +121,52 @@ class TouchCalibrationRestartMixin:
         self.target_ring.show()
         self.target_h.show()
         self.target_v.show()
+        self._start_target_countdown()
+
+    def _start_target_countdown(self):
+        self.cal_target_deadline = time.monotonic() + float(CAL_POINT_TIMEOUT_S)
+        self._cal_timeout_tick()
+        if not self.cal_timeout_timer.isActive():
+            self.cal_timeout_timer.start()
+
+    def _stop_target_countdown(self):
+        self.cal_target_deadline = 0.0
+        if self.cal_timeout_timer.isActive():
+            self.cal_timeout_timer.stop()
+        self.countdown_label.hide()
+
+    def _cal_timeout_tick(self):
+        if not self.calibrating:
+            self._stop_target_countdown()
+            return
+        if self.wait_release:
+            self.countdown_label.setText(f"Point {self.cal_index + 1}/{len(self.cal_targets)} Release")
+            self.countdown_label.show()
+            return
+        remaining = self.cal_target_deadline - time.monotonic()
+        if remaining <= 0.0:
+            self._abort_calibration_timeout()
+            return
+        seconds_left = int(remaining + 0.999)
+        self.countdown_label.setText(
+            f"Point {self.cal_index + 1}/{len(self.cal_targets)}  {seconds_left}s"
+        )
+        self.countdown_label.show()
+
+    def _abort_calibration_timeout(self):
+        self.calibrating = False
+        self.wait_start_release = False
+        self.wait_release = False
+        self.release_guard_deadline = 0.0
+        self.ignore_until = 0.0
+        self.target_ring.hide()
+        self.target_h.hide()
+        self.target_v.hide()
+        self._stop_target_countdown()
+        self._set_calibration_chrome_visible(True)
+        self.status.setText("Touch calibration timed out.")
+        self.hint.setText("No calibration parameters were written; returning to product UI.")
+        QtCore.QTimer.singleShot(250, QtWidgets.QApplication.instance().quit)
 
     def _set_calibration_chrome_visible(self, visible):
         for widget in (
@@ -150,8 +203,7 @@ class TouchCalibrationRestartMixin:
     def _apply_runtime_calibration(self):
         if not (os.path.isfile(APPLY_HELPER) and os.access(APPLY_HELPER, os.X_OK)):
             raise RuntimeError(
-                "apply helper missing, searched: %s"
-                % " ; ".join(APPLY_HELPER_CANDIDATES)
+                "apply helper missing: %s" % APPLY_HELPER
             )
         result = subprocess.run(
             [APPLY_HELPER],
@@ -167,7 +219,7 @@ class TouchCalibrationRestartMixin:
     def _linuxcnc_handoff_enabled(self) -> bool:
         return bool(self.enable_linuxcnc or self.force_linuxcnc_handoff)
 
-    def _request_linuxcnc_restart(self):
+    def _request_linuxcnc_restart(self, board_reboot=False):
         def _result(accepted=False, completed=False, ok=False, state="failed", detail=""):
             return {
                 "accepted": bool(accepted),
@@ -179,12 +231,15 @@ class TouchCalibrationRestartMixin:
 
         if not self._linuxcnc_handoff_enabled():
             return _result(False, False, False, "failed", "linuxcnc-disabled")
-        self.status.setText("LinuxCNC restart helper dispatching.")
+        if board_reboot:
+            self.status.setText("Board reboot helper dispatching.")
+        else:
+            self.status.setText("LinuxCNC restart helper dispatching.")
         self.hint.setText(f"Executing {RESTART_HELPER}.")
-        return self._request_restart_via_helper()
+        return self._request_restart_via_helper(board_reboot=board_reboot)
 
-    def _begin_linuxcnc_handoff(self, context: str) -> bool:
-        restart_result = self._request_linuxcnc_restart()
+    def _begin_linuxcnc_handoff(self, context: str, board_reboot=False) -> bool:
+        restart_result = self._request_linuxcnc_restart(board_reboot=board_reboot)
         if not restart_result.get("accepted", False):
             self.status.setText("LinuxCNC restart request failed.")
             self.hint.setText("Check restart path/helper and v5-ui-relay, then retry.")
@@ -192,8 +247,11 @@ class TouchCalibrationRestartMixin:
         if self.restart_wait_timer.isActive():
             self.restart_wait_timer.stop()
         state = restart_result.get("state", "")
-        self.status.setText("LinuxCNC launch dispatched. Leaving calibration UI.")
-        self.hint.setText(f"init.d helper state={state or 'accepted'} ({context}).")
+        if board_reboot:
+            self.status.setText("Board reboot dispatched. Leaving calibration UI.")
+        else:
+            self.status.setText("LinuxCNC launch dispatched. Leaving calibration UI.")
+        self.hint.setText(f"helper state={state or 'accepted'} ({context}).")
         QtCore.QTimer.singleShot(200, QtWidgets.QApplication.instance().quit)
         return True
 
@@ -218,6 +276,7 @@ class TouchCalibrationRestartMixin:
             self.target_ring.hide()
             self.target_h.hide()
             self.target_v.hide()
+            self._stop_target_countdown()
             self.status.setText("Calibration UI reset.")
             self.hint.setText("Touch-only mode keeps UI foreground; restarting calibration.")
             QtCore.QTimer.singleShot(150, self.start_calibration)
@@ -226,7 +285,7 @@ class TouchCalibrationRestartMixin:
         self.target_ring.hide()
         self.target_h.hide()
         self.target_v.hide()
+        self._stop_target_countdown()
         self.status.setText("Touch calibration exited. Returning to LinuxCNC.")
         self.hint.setText("Requesting LinuxCNC restart.")
         self._begin_linuxcnc_handoff("exit")
-

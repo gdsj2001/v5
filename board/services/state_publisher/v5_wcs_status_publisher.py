@@ -35,6 +35,8 @@ WCS_AXIS_COUNT = 5
 WCS_TABLE_VALUE_COUNT = WCS_COUNT * WCS_AXIS_COUNT
 OFFSET_COUNT = WCS_AXIS_COUNT
 POSITION_AXIS_COUNT = 5
+ROTARY_AXIS_INDICES = (3, 4)
+ROTARY_FULL_TURN_DEG = 360.0
 WCS_PARAM_BASES = (5221, 5241, 5261, 5281, 5301, 5321, 5341, 5361, 5381)
 WCS_PARAM_AXIS_OFFSETS = (0, 1, 2, 3, 5)
 BLOCK_STRUCT = struct.Struct('<IIIIiIIIIIQ' + ('d' * WCS_TABLE_VALUE_COUNT) + 'II')
@@ -299,6 +301,27 @@ def normalized_joint_output_with_presence(joints):
     return out, present
 
 
+def rotary_display_phase_deg(value: float) -> float:
+    value = float(value)
+    if not math.isfinite(value):
+        return value
+    phase = math.fmod(value, ROTARY_FULL_TURN_DEG)
+    if phase < 0.0:
+        phase += ROTARY_FULL_TURN_DEG
+    if phase < 0.0005 or (ROTARY_FULL_TURN_DEG - phase) < 0.0005:
+        return 0.0
+    return phase
+
+
+def display_position_projection(values):
+    projected = list(values)
+    if len(projected) < POSITION_AXIS_COUNT:
+        projected += [0.0] * (POSITION_AXIS_COUNT - len(projected))
+    for axis_i in ROTARY_AXIS_INDICES:
+        projected[axis_i] = rotary_display_phase_deg(projected[axis_i])
+    return projected[:POSITION_AXIS_COUNT]
+
+
 def finite_float(value):
     try:
         number = float(value)
@@ -476,11 +499,11 @@ def first_spindle(stat):
 
 def write_position_status(path: str, stat) -> None:
     raw_mcs, mcs_present = normalized_axis_with_presence(getattr(stat, 'joint_actual_position', ()))
-    mcs = raw_mcs
+    mcs = display_position_projection(raw_mcs)
     raw_cmd, cmd_present = normalized_joint_output_with_presence(getattr(stat, 'joint', ()))
     if not cmd_present:
         raw_cmd, cmd_present = normalized_axis_with_presence(getattr(stat, 'position', ()))
-    cmd = raw_cmd
+    cmd = display_position_projection(raw_cmd)
     spindle = first_spindle(stat)
     spindle_speed = float(spindle.get('speed', 0.0)) if isinstance(spindle, dict) else 0.0
     spindle_override = float(spindle.get('override', 1.0)) * 100.0 if isinstance(spindle, dict) else 100.0

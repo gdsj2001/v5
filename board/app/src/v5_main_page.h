@@ -136,7 +136,12 @@ typedef struct V5MainPage {
     int toolpath_program_wcs_index;
     double toolpath_program_wcs_offset[3];
     int toolpath_program_visible;
+    unsigned int toolpath_program_point_count;
+    int toolpath_program_ac_valid;
+    double toolpath_program_ac_a_deg;
+    double toolpath_program_ac_c_deg;
     V5StatusPoint toolpath_program_points[V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT];
+    V5StatusPoint toolpath_program_project_points[V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT];
     V5ToolpathScreenPoint toolpath_program_screen_points[V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT];
     unsigned int toolpath_static_cache_hits;
     unsigned int toolpath_static_cache_misses;
