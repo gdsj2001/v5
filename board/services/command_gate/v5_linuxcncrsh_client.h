@@ -63,10 +63,6 @@ V5LinuxcncrshSendStatus v5_linuxcncrsh_send_home_sequence(
     char *code_out,
     size_t code_out_size);
 
-V5LinuxcncrshSendStatus v5_linuxcncrsh_send_rtcp_sequence(
-    const V5LinuxcncrshConfig *config,
-    int enabled);
-
 V5LinuxcncrshSendStatus v5_linuxcncrsh_send_prepared(
     const V5LinuxcncrshConfig *config,
     const V5CommandPrepared *prepared,

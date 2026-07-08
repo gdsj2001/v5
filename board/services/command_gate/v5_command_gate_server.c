@@ -3,6 +3,7 @@
 #include "v5_linuxcncrsh_client.h"
 #include "v5_native_first_point.h"
 #include "v5_native_rotary_equiv_zero.h"
+#include "v5_native_rtcp_control.h"
 #include "v5_native_safety.h"
 #include "v5_process_residency.h"
 #include "v5_settings_apply.h"
@@ -182,7 +183,8 @@ static int owner_is_allowed(const char *owner)
          strcmp(owner, "native_home_mode_gate") == 0 ||
          strcmp(owner, "native_safety") == 0 ||
          strcmp(owner, "native_first_point") == 0 ||
-         strcmp(owner, "native_rotary_gate") == 0);
+         strcmp(owner, "native_rotary_gate") == 0 ||
+         strcmp(owner, "native_rtcp_control") == 0);
 }
 
 static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5CommandGateIpcResponseFrame *response)
@@ -233,6 +235,18 @@ static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5Command
         response->executed = status == V5_NATIVE_SAFETY_SEND_SENT ? 1 : 0;
         return;
     }
+    if (request.kind == V5_COMMAND_RTCP_SET && strcmp(prepared.owner, "native_rtcp_control") == 0) {
+        V5NativeRtcpControlResult native_result;
+        copy_cstr(
+            response->command_line,
+            sizeof(response->command_line),
+            request.enabled_value ? "native_rtcp_control.set ON" : "native_rtcp_control.set OFF");
+        status = v5_native_rtcp_control_set(request.enabled_value, &native_result);
+        copy_cstr(response->readback_code, sizeof(response->readback_code), native_result.code);
+        response->send_status = (int32_t)status;
+        response->executed = status == V5_NATIVE_RTCP_CONTROL_SEND_SENT ? 1 : 0;
+        return;
+    }
 
     linuxcncrsh_lock();
     if (request.kind == V5_COMMAND_FIRST_POINT && strcmp(prepared.owner, "native_first_point") == 0) {
@@ -267,13 +281,6 @@ static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5Command
             response->readback_code,
             sizeof(response->readback_code),
             home_code[0] ? home_code : "BUS_HOME_RESULT_MISSING");
-    } else if (request.kind == V5_COMMAND_RTCP_SET && strcmp(prepared.owner, "native_linuxcncrsh") == 0) {
-        if (!v5_linuxcncrsh_format_line(&prepared, &request, response->command_line, sizeof(response->command_line))) {
-            response->send_status = V5_COMMAND_GATE_SEND_INVALID;
-            linuxcncrsh_unlock();
-            return;
-        }
-        status = v5_linuxcncrsh_send_rtcp_sequence(&g_linuxcncrsh_config, request.enabled_value);
     } else {
         if (!v5_linuxcncrsh_format_line(&prepared, &request, response->command_line, sizeof(response->command_line))) {
             response->send_status = V5_COMMAND_GATE_SEND_INVALID;

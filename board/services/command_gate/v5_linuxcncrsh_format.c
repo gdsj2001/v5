@@ -87,8 +87,7 @@ int v5_linuxcncrsh_format_line(
         rc = snprintf(out, out_size, "Set MDI G92.1");
         return v5_linuxcncrsh_format_ok(rc, out_size);
     case V5_COMMAND_RTCP_SET:
-        rc = snprintf(out, out_size, "Set Mode MDI\nSet MDI %s", request->enabled_value ? "M128" : "M129");
-        return v5_linuxcncrsh_format_ok(rc, out_size);
+        return 0;
     case V5_COMMAND_FEED_OVERRIDE_SET:
         if (request->index_value < 0 || request->index_value > 200) {
             return 0;

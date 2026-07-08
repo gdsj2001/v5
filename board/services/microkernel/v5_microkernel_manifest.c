@@ -10,6 +10,7 @@ static const V5MicrokernelManifestEntry k_manifest[] = {
     {"kinematics_component", "linuxcnc/runtime/kinematics", V5_MICROKERNEL_MANIFEST_RUNTIME_OWNER, 1, "microkernel"},
     {"g53_geometry_parameter_memory", "microkernel/native/kinematics.g53_geometry", V5_MICROKERNEL_MANIFEST_RUNTIME_OWNER, 1, "microkernel"},
     {"native_safety_latch_owner", "services/microkernel/v5_native_safety_latch_owner.py", V5_MICROKERNEL_MANIFEST_NATIVE_API, 1, "native_safety"},
+    {"native_rtcp_control_owner", "services/state_publisher/v5_rtcp_status_publisher.py", V5_MICROKERNEL_MANIFEST_NATIVE_API, 1, "native_rtcp_control"},
     {"parameter_file", "linuxcnc/runtime/var/linuxcnc.var", V5_MICROKERNEL_MANIFEST_FILE, 1, "microkernel"},
     {"tool_table", "linuxcnc/runtime/var/tool.tbl", V5_MICROKERNEL_MANIFEST_FILE, 1, "microkernel"},
     {"native_gate_registry", "services/microkernel/v5_native_gate_registry.c", V5_MICROKERNEL_MANIFEST_NATIVE_API, 1, "native_gate"},

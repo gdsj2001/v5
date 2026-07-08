@@ -1937,6 +1937,139 @@ static void update_toolpath_view_button_visuals(V5MainPage *page)
     }
 }
 
+static int wcs_index_for_button_action(V5MainPageActionKind action)
+{
+    switch (action) {
+    case V5_MAIN_PAGE_ACTION_WCS_G54: return 0;
+    case V5_MAIN_PAGE_ACTION_WCS_G55: return 1;
+    case V5_MAIN_PAGE_ACTION_WCS_G56: return 2;
+    case V5_MAIN_PAGE_ACTION_WCS_G57: return 3;
+    case V5_MAIN_PAGE_ACTION_WCS_G58: return 4;
+    case V5_MAIN_PAGE_ACTION_WCS_G59: return 5;
+    case V5_MAIN_PAGE_ACTION_WCS_G591: return 6;
+    case V5_MAIN_PAGE_ACTION_WCS_G592: return 7;
+    case V5_MAIN_PAGE_ACTION_WCS_G593: return 8;
+    default: return -1;
+    }
+}
+
+static int jog_step_for_button_action(V5MainPageActionKind action, double *step_out)
+{
+    double step;
+    switch (action) {
+    case V5_MAIN_PAGE_ACTION_JOG_STEP_1:
+        step = 1.0;
+        break;
+    case V5_MAIN_PAGE_ACTION_JOG_STEP_10:
+        step = 10.0;
+        break;
+    case V5_MAIN_PAGE_ACTION_JOG_STEP_100:
+        step = 100.0;
+        break;
+    default:
+        return 0;
+    }
+    if (step_out) {
+        *step_out = step;
+    }
+    return 1;
+}
+
+static void set_button_state_color(lv_obj_t *button, int active, uint8_t ar, uint8_t ag, uint8_t ab, uint8_t ir, uint8_t ig, uint8_t ib)
+{
+    if (!button) {
+        return;
+    }
+    lv_obj_set_style_bg_color(button, active ? rgb(ar, ag, ab) : rgb(ir, ig, ib), 0);
+    lv_obj_set_style_border_color(button, active ? rgb(86, 228, 153) : rgb(76, 119, 146), 0);
+}
+
+static void update_wcs_button_visuals(V5MainPage *page)
+{
+    int wcs_known;
+    unsigned int i;
+    if (!page) {
+        return;
+    }
+    wcs_known = v5_native_readback_wcs_known(&page->native_readback);
+    for (i = 0U; i < page->button_count; ++i) {
+        int wcs_index = wcs_index_for_button_action(page->button_actions[i]);
+        if (wcs_index < 0) {
+            continue;
+        }
+        set_button_state_color(
+            page->buttons[i],
+            wcs_known && page->native_readback.wcs_index == wcs_index,
+            35, 198, 120,
+            32, 52, 73);
+    }
+}
+
+static void update_jog_step_button_visuals(V5MainPage *page)
+{
+    unsigned int i;
+    if (!page) {
+        return;
+    }
+    for (i = 0U; i < page->button_count; ++i) {
+        double step = 0.0;
+        if (!jog_step_for_button_action(page->button_actions[i], &step)) {
+            continue;
+        }
+        set_button_state_color(
+            page->buttons[i],
+            fabs(page->jog_step - step) < 1.0e-9,
+            29, 151, 104,
+            32, 52, 73);
+    }
+}
+
+static void update_axis_all_button_visuals(V5MainPage *page)
+{
+    unsigned int i;
+    int selected;
+    if (!page) {
+        return;
+    }
+    selected = page->selection.space == V5_MAIN_PAGE_SELECT_MCS && page->selection.all_axes;
+    for (i = 0U; i < page->button_count; ++i) {
+        if (page->button_actions[i] == V5_MAIN_PAGE_ACTION_AXIS_ALL) {
+            set_button_state_color(page->buttons[i], selected, 29, 151, 104, 42, 63, 85);
+            return;
+        }
+    }
+}
+
+static void update_rtcp_button_visuals(V5MainPage *page)
+{
+    const char *text = "RTCP";
+    int highlighted;
+    unsigned int i;
+    if (!page) {
+        return;
+    }
+    highlighted = v5_native_readback_rtcp_known(&page->native_readback) && page->native_readback.rtcp_enabled;
+    for (i = 0U; i < page->button_count; ++i) {
+        if (page->button_actions[i] == V5_MAIN_PAGE_ACTION_RTCP_TOGGLE) {
+            if (page->button_labels[i]) {
+                set_label_text_if_changed(page->button_labels[i], text);
+                lv_obj_set_style_text_color(page->button_labels[i], rgb(238, 245, 248), 0);
+            }
+            set_button_state_color(page->buttons[i], highlighted, 29, 151, 104, 42, 63, 85);
+            return;
+        }
+    }
+}
+
+static void update_main_page_state_button_visuals(V5MainPage *page)
+{
+    update_toolpath_view_button_visuals(page);
+    update_wcs_button_visuals(page);
+    update_jog_step_button_visuals(page);
+    update_axis_all_button_visuals(page);
+    update_rtcp_button_visuals(page);
+}
+
 static void make_v3_main_buttons(V5MainPage *page)
 {
     make_button_rgb(page, 920, 0, 104, 60, V5_MAIN_PAGE_ACTION_NAV_MAIN, "主页面", 41, 145, 107);
@@ -1946,11 +2079,11 @@ static void make_v3_main_buttons(V5MainPage *page)
     make_button_rgb(page, 920, 240, 104, 60, V5_MAIN_PAGE_ACTION_NAV_IO, "IO设置", 16, 48, 77);
     make_button_rgb(page, 920, 300, 104, 60, V5_MAIN_PAGE_ACTION_NAV_SETTINGS, "系统设置", 16, 48, 77);
     make_button_rgb(page, 920, 420, 104, 60, V5_MAIN_PAGE_ACTION_PAUSE, "暂停", 74, 91, 111);
-    make_button_rgb(page, 920, 480, 104, 60, V5_MAIN_PAGE_ACTION_START, "启动", 18, 168, 96);
+    make_button_rgb(page, 920, 480, 104, 60, V5_MAIN_PAGE_ACTION_START, "启动", 16, 48, 77);
     make_button_rgb(page, 920, 540, 104, 60, V5_MAIN_PAGE_ACTION_ESTOP_FORCE, "急停", 199, 70, 46);
-    make_button_rgb(page, 842, 14, 38, 34, V5_MAIN_PAGE_ACTION_NAV_NETWORK, "网", 29, 119, 87);
+    make_button_rgb(page, 842, 14, 38, 34, V5_MAIN_PAGE_ACTION_NAV_NETWORK, "网", 16, 48, 77);
 
-    make_button_rgb(page, 456, 282, 42, 20, V5_MAIN_PAGE_ACTION_WCS_G54, "G54", 35, 198, 120);
+    make_button_rgb(page, 456, 282, 42, 20, V5_MAIN_PAGE_ACTION_WCS_G54, "G54", 32, 52, 73);
     make_button_rgb(page, 502, 282, 42, 20, V5_MAIN_PAGE_ACTION_WCS_G55, "G55", 32, 52, 73);
     make_button_rgb(page, 548, 282, 42, 20, V5_MAIN_PAGE_ACTION_WCS_G56, "G56", 32, 52, 73);
     make_button_rgb(page, 594, 282, 42, 20, V5_MAIN_PAGE_ACTION_WCS_G57, "G57", 32, 52, 73);
@@ -1961,13 +2094,13 @@ static void make_v3_main_buttons(V5MainPage *page)
     make_button_rgb(page, 618, 306, 50, 20, V5_MAIN_PAGE_ACTION_WCS_G593, "G59.3", 32, 52, 73);
     make_button_rgb(page, 402, 328, 108, 48, V5_MAIN_PAGE_ACTION_AXIS_ALL, "机械全轴", 42, 63, 85);
     make_button_rgb(page, 516, 328, 50, 48, V5_MAIN_PAGE_ACTION_RTCP_TOGGLE, "RTCP", 42, 63, 85);
-    make_button_rgb(page, 572, 328, 80, 48, V5_MAIN_PAGE_ACTION_HOME, "回零", 42, 126, 101);
-    make_button_rgb(page, 658, 328, 82, 48, V5_MAIN_PAGE_ACTION_WORK_ZERO_X, "归零", 42, 126, 101);
-    make_button_rgb(page, 402, 382, 54, 48, V5_MAIN_PAGE_ACTION_JOG_STEP_1, "X1", 29, 151, 104);
+    make_button_rgb(page, 572, 328, 80, 48, V5_MAIN_PAGE_ACTION_HOME, "回零", 42, 63, 85);
+    make_button_rgb(page, 658, 328, 82, 48, V5_MAIN_PAGE_ACTION_WORK_ZERO_X, "归零", 42, 63, 85);
+    make_button_rgb(page, 402, 382, 54, 48, V5_MAIN_PAGE_ACTION_JOG_STEP_1, "X1", 32, 52, 73);
     make_button_rgb(page, 462, 382, 50, 48, V5_MAIN_PAGE_ACTION_JOG_STEP_10, "X10", 32, 52, 73);
     make_button_rgb(page, 518, 382, 50, 48, V5_MAIN_PAGE_ACTION_JOG_STEP_100, "X100", 32, 52, 73);
-    make_button_rgb(page, 574, 382, 78, 48, V5_MAIN_PAGE_ACTION_JOG_PLUS, "点动+", 39, 113, 164);
-    make_button_rgb(page, 658, 382, 82, 48, V5_MAIN_PAGE_ACTION_JOG_MINUS, "点动-", 39, 113, 164);
+    make_button_rgb(page, 574, 382, 78, 48, V5_MAIN_PAGE_ACTION_JOG_PLUS, "点动+", 32, 52, 73);
+    make_button_rgb(page, 658, 382, 82, 48, V5_MAIN_PAGE_ACTION_JOG_MINUS, "点动-", 32, 52, 73);
     make_button_rgb(page, 328, 262, 58, 30, V5_MAIN_PAGE_ACTION_VIEW_XY, "XY", 25, 45, 62);
     make_button_rgb(page, 328, 298, 58, 30, V5_MAIN_PAGE_ACTION_VIEW_XZ, "XZ", 25, 45, 62);
     make_button_rgb(page, 328, 334, 58, 30, V5_MAIN_PAGE_ACTION_VIEW_YZ, "YZ", 25, 45, 62);
@@ -1986,7 +2119,8 @@ void v5_main_page_init(V5MainPage *page)
 }
 
 static void update_estop_button_text(V5MainPage *page);
-static void update_rtcp_button_text(V5MainPage *page);
+static void update_main_page_state_button_visuals(V5MainPage *page);
+static void update_axis_all_button_visuals(V5MainPage *page);
 
 int v5_main_page_create(V5MainPage *page, lv_obj_t *parent)
 {
@@ -2153,9 +2287,8 @@ int v5_main_page_create(V5MainPage *page, lv_obj_t *parent)
     }
 
     make_v3_main_buttons(page);
-    update_toolpath_view_button_visuals(page);
+    update_main_page_state_button_visuals(page);
     update_estop_button_text(page);
-    update_rtcp_button_text(page);
     return page->button_count == V5_MAIN_PAGE_BUTTON_COUNT;
 }
 
@@ -2364,8 +2497,7 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
     }
 
     if ((refresh_flags & V5_MAIN_PAGE_REFRESH_BUTTONS) != 0U) {
-        update_toolpath_view_button_visuals(page);
-        update_rtcp_button_text(page);
+        update_main_page_state_button_visuals(page);
     }
     if ((refresh_flags & V5_MAIN_PAGE_REFRESH_ESTOP) != 0U) {
         update_estop_button_text(page);
@@ -2496,6 +2628,7 @@ void v5_main_page_select_all_axes(V5MainPage *page)
     page->selection.axis = '*';
     page->selection.all_axes = 1;
     update_coordinate_selection_style(page);
+    update_axis_all_button_visuals(page);
 }
 
 int v5_main_page_select_axis(V5MainPage *page, V5MainPageSelectionSpace space, char axis)
@@ -2513,6 +2646,7 @@ int v5_main_page_select_axis(V5MainPage *page, V5MainPageSelectionSpace space, c
     page->selection.axis = up;
     page->selection.all_axes = 0;
     update_coordinate_selection_style(page);
+    update_axis_all_button_visuals(page);
     return 1;
 }
 
@@ -2539,21 +2673,6 @@ static void update_estop_button_text(V5MainPage *page)
     }
     for (i = 0U; i < page->button_count; ++i) {
         if (page->button_actions[i] == V5_MAIN_PAGE_ACTION_ESTOP_FORCE && page->button_labels[i]) {
-            set_label_text_if_changed(page->button_labels[i], text);
-            return;
-        }
-    }
-}
-
-static void update_rtcp_button_text(V5MainPage *page)
-{
-    const char *text = "RTCP";
-    unsigned int i;
-    if (!page) {
-        return;
-    }
-    for (i = 0U; i < page->button_count; ++i) {
-        if (page->button_actions[i] == V5_MAIN_PAGE_ACTION_RTCP_TOGGLE && page->button_labels[i]) {
             set_label_text_if_changed(page->button_labels[i], text);
             return;
         }
@@ -2588,7 +2707,7 @@ void v5_main_page_set_native_readback(V5MainPage *page, const V5NativeReadback *
         v5_native_readback_set_unavailable(&page->native_readback, "native_readback_unavailable");
     }
     update_estop_button_text(page);
-    update_rtcp_button_text(page);
+    update_main_page_state_button_visuals(page);
     update_main_page_wcs_header(page);
     update_main_page_modal_label(page);
     update_toolpath_status_text(page);
@@ -2715,6 +2834,7 @@ static int main_page_confirm_wcs_readback_after_send(V5MainPage *page, V5MainPag
             report->active_wcs = confirmed.wcs_index;
             snprintf(report->readback_code, sizeof(report->readback_code), "native_readback_confirmed");
             update_main_page_wcs_header(page);
+            update_wcs_button_visuals(page);
             return 1;
         }
     }
@@ -2771,7 +2891,8 @@ static void execute_prepared_command_if_enabled(V5MainPage *page, V5MainPageActi
         strcmp(report->command.owner ? report->command.owner : "", "native_home_mode_gate") != 0 &&
         strcmp(report->command.owner ? report->command.owner : "", "native_safety") != 0 &&
         strcmp(report->command.owner ? report->command.owner : "", "native_first_point") != 0 &&
-        strcmp(report->command.owner ? report->command.owner : "", "native_rotary_gate") != 0) {
+        strcmp(report->command.owner ? report->command.owner : "", "native_rotary_gate") != 0 &&
+        strcmp(report->command.owner ? report->command.owner : "", "native_rtcp_control") != 0) {
         report->send_status = 0;
         return;
     }
@@ -2830,7 +2951,7 @@ static void execute_prepared_command_if_enabled(V5MainPage *page, V5MainPageActi
             page->native_readback_refresh_cb(page->native_readback_refresh_user_data, V5_MAIN_PAGE_ACTION_RTCP_TOGGLE);
         } else {
             update_main_page_modal_label(page);
-            update_rtcp_button_text(page);
+            update_main_page_state_button_visuals(page);
         }
     }
 }
@@ -2873,7 +2994,7 @@ static void apply_local_action_state(V5MainPage *page, const V5MainPageActionRep
     default:
         break;
     }
-    update_toolpath_view_button_visuals(page);
+    update_main_page_state_button_visuals(page);
     if (page->navigation_cb) {
         switch (report->action) {
         case V5_MAIN_PAGE_ACTION_NAV_MAIN:

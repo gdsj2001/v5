@@ -93,48 +93,6 @@ int v5_native_rtcp_status_read(const char *path, unsigned int max_age_ms, V5Nati
     return 1;
 }
 
-int v5_native_rtcp_status_from_mcodes(const int *mcodes, size_t count, int *valid_out, int *active_out)
-{
-    size_t i;
-    int saw_m128 = 0;
-    int saw_m129 = 0;
-
-    if (valid_out) {
-        *valid_out = 0;
-    }
-    if (active_out) {
-        *active_out = 0;
-    }
-    if (!mcodes || count == 0U) {
-        return 0;
-    }
-    for (i = 0U; i < count; ++i) {
-        if (mcodes[i] == 128) {
-            saw_m128 = 1;
-        } else if (mcodes[i] == 129) {
-            saw_m129 = 1;
-        }
-    }
-    if (saw_m128 && saw_m129) {
-        return 0;
-    }
-    if (valid_out) {
-        *valid_out = 1;
-    }
-    if (active_out) {
-        *active_out = saw_m128 ? 1 : 0;
-    }
-    return 1;
-}
-
-int v5_native_rtcp_status_write_from_mcodes(const char *path, const int *mcodes, size_t count)
-{
-    int valid = 0;
-    int active = 0;
-    (void)v5_native_rtcp_status_from_mcodes(mcodes, count, &valid, &active);
-    return v5_native_rtcp_status_write(path, valid, active);
-}
-
 int v5_native_rtcp_status_write(const char *path, int valid, int active)
 {
     FILE *fp;

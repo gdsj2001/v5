@@ -3,6 +3,7 @@
 #include "v5_lvgl_headless.h"
 
 #include <stdio.h>
+#include <stdint.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -137,6 +138,33 @@ static const char *button_text_for_action(V5MainPage *page, V5MainPageActionKind
     return "";
 }
 
+static lv_obj_t *button_for_action(V5MainPage *page, V5MainPageActionKind action)
+{
+    unsigned int i;
+    if (!page) {
+        return 0;
+    }
+    for (i = 0U; i < page->button_count; ++i) {
+        if (page->button_actions[i] == action) {
+            return page->buttons[i];
+        }
+    }
+    return 0;
+}
+
+static int button_bg_matches(V5MainPage *page, V5MainPageActionKind action, int r, int g, int b)
+{
+    lv_obj_t *button = button_for_action(page, action);
+    lv_color_t actual;
+    lv_color_t expected;
+    if (!button) {
+        return 0;
+    }
+    actual = lv_obj_get_style_bg_color(button, LV_PART_MAIN);
+    expected = lv_color_make((uint8_t)r, (uint8_t)g, (uint8_t)b);
+    return lv_color_to32(actual) == lv_color_to32(expected);
+}
+
 static void refresh_estop_active(void *user_data, V5MainPageActionKind action)
 {
     V5MainPage *page = (V5MainPage *)user_data;
@@ -195,6 +223,19 @@ int main(void)
     if (!same_text(button_text_for_action(&page, V5_MAIN_PAGE_ACTION_RTCP_TOGGLE), "RTCP")) {
         return 33;
     }
+    if (!button_bg_matches(&page, V5_MAIN_PAGE_ACTION_START, 16, 48, 77) ||
+        !button_bg_matches(&page, V5_MAIN_PAGE_ACTION_HOME, 42, 63, 85) ||
+        !button_bg_matches(&page, V5_MAIN_PAGE_ACTION_WORK_ZERO_X, 42, 63, 85) ||
+        !button_bg_matches(&page, V5_MAIN_PAGE_ACTION_JOG_PLUS, 32, 52, 73) ||
+        !button_bg_matches(&page, V5_MAIN_PAGE_ACTION_JOG_MINUS, 32, 52, 73)) {
+        return 43;
+    }
+    if (!button_bg_matches(&page, V5_MAIN_PAGE_ACTION_WCS_G54, 32, 52, 73) ||
+        !button_bg_matches(&page, V5_MAIN_PAGE_ACTION_AXIS_ALL, 29, 151, 104) ||
+        !button_bg_matches(&page, V5_MAIN_PAGE_ACTION_JOG_STEP_1, 29, 151, 104) ||
+        !button_bg_matches(&page, V5_MAIN_PAGE_ACTION_JOG_STEP_10, 32, 52, 73)) {
+        return 44;
+    }
     v5_program_controller_init(&controller);
     v5_main_page_bind_program_controller(&page, &controller);
 
@@ -207,6 +248,10 @@ int main(void)
     }
     if (!expect_local(&page, V5_MAIN_PAGE_ACTION_JOG_STEP_10, "jog_step") || page.jog_step != 10.0) {
         return 5;
+    }
+    if (!button_bg_matches(&page, V5_MAIN_PAGE_ACTION_JOG_STEP_1, 32, 52, 73) ||
+        !button_bg_matches(&page, V5_MAIN_PAGE_ACTION_JOG_STEP_10, 29, 151, 104)) {
+        return 45;
     }
     if (!expect_local(&page, V5_MAIN_PAGE_ACTION_VIEW_XZ, "view_xz") || page.view_plane != V5_TOOLPATH_DISPLAY_XZ) {
         return 6;
@@ -327,15 +372,28 @@ int main(void)
         v5_native_readback_set_modal_actual(&readback, "G0 G17 G21 G40 G49 G56 G64 G80 G90 G94 G97");
         v5_native_readback_set_tool_actual(&readback, 0, 1, 15.0);
         v5_main_page_set_native_readback(&page, &readback);
+        if (!button_bg_matches(&page, V5_MAIN_PAGE_ACTION_WCS_G54, 32, 52, 73) ||
+            !button_bg_matches(&page, V5_MAIN_PAGE_ACTION_WCS_G56, 35, 198, 120)) {
+            return 46;
+        }
         if (!v5_main_page_select_axis(&page, V5_MAIN_PAGE_SELECT_WCS, 'Z') ||
             !expect_command_line(&page, V5_MAIN_PAGE_ACTION_WORK_ZERO_X, "work_zero", "native_linuxcncrsh", "Set MDI G10 L20 P3 Z0")) {
             return 19;
         }
+        if (!button_bg_matches(&page, V5_MAIN_PAGE_ACTION_AXIS_ALL, 42, 63, 85)) {
+            return 47;
+        }
         v5_native_readback_set_unavailable(&readback, "smoke_reset");
         v5_main_page_set_native_readback(&page, &readback);
+        if (!button_bg_matches(&page, V5_MAIN_PAGE_ACTION_WCS_G56, 32, 52, 73)) {
+            return 48;
+        }
     }
     if (!expect_local(&page, V5_MAIN_PAGE_ACTION_AXIS_ALL, "axis_all") || !page.selection.all_axes || page.selection.space != V5_MAIN_PAGE_SELECT_MCS) {
         return 20;
+    }
+    if (!button_bg_matches(&page, V5_MAIN_PAGE_ACTION_AXIS_ALL, 29, 151, 104)) {
+        return 49;
     }
 
     if (!expect_missing_gate(&page, V5_MAIN_PAGE_ACTION_START)) {
@@ -371,7 +429,11 @@ int main(void)
             v5_program_controller_destroy(&controller);
             return 34;
         }
-        if (!expect_command_line(&page, V5_MAIN_PAGE_ACTION_RTCP_TOGGLE, "rtcp_set", "native_linuxcncrsh", "Set Mode MDI\nSet MDI M128")) {
+        if (!button_bg_matches(&page, V5_MAIN_PAGE_ACTION_RTCP_TOGGLE, 42, 63, 85)) {
+            v5_program_controller_destroy(&controller);
+            return 40;
+        }
+        if (!expect_command(&page, V5_MAIN_PAGE_ACTION_RTCP_TOGGLE, "rtcp_set", "native_rtcp_control")) {
             v5_program_controller_destroy(&controller);
             return 13;
         }
@@ -386,9 +448,19 @@ int main(void)
             v5_program_controller_destroy(&controller);
             return 35;
         }
-        if (!expect_command_line(&page, V5_MAIN_PAGE_ACTION_RTCP_TOGGLE, "rtcp_set", "native_linuxcncrsh", "Set Mode MDI\nSet MDI M129")) {
+        if (!button_bg_matches(&page, V5_MAIN_PAGE_ACTION_RTCP_TOGGLE, 29, 151, 104)) {
+            v5_program_controller_destroy(&controller);
+            return 41;
+        }
+        if (!expect_command(&page, V5_MAIN_PAGE_ACTION_RTCP_TOGGLE, "rtcp_set", "native_rtcp_control")) {
             v5_program_controller_destroy(&controller);
             return 14;
+        }
+        v5_native_readback_set_unavailable(&readback, "rtcp_unknown");
+        v5_main_page_set_native_readback(&page, &readback);
+        if (!button_bg_matches(&page, V5_MAIN_PAGE_ACTION_RTCP_TOGGLE, 42, 63, 85)) {
+            v5_program_controller_destroy(&controller);
+            return 42;
         }
     }
 

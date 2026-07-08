@@ -23,8 +23,6 @@ linuxcnc	linuxcnc/components/step_ip_v1_5.contract.json	/opt/8ax/v5/linuxcnc/com
 linuxcnc	linuxcnc/ini/v5_bus.ini	/opt/8ax/v5/linuxcnc/ini/v5_bus.ini	0644
 linuxcnc	linuxcnc/hal/v5_bus_2ms.hal	/opt/8ax/v5/linuxcnc/hal/v5_bus_2ms.hal	0644
 linuxcnc	linuxcnc/hal/ethercat-conf-2ms.xml	/opt/8ax/v5/linuxcnc/hal/ethercat-conf-2ms.xml	0644
-linuxcnc	linuxcnc/nc/M128	/opt/8ax/v5/linuxcnc/nc/M128	0755
-linuxcnc	linuxcnc/nc/M129	/opt/8ax/v5/linuxcnc/nc/M129	0755
 runtime_seed	linuxcnc/runtime/var/position.txt	/opt/8ax/v5/linuxcnc/var/position.txt	0644
 runtime_seed	linuxcnc/runtime/var/tool.tbl	/opt/8ax/v5/linuxcnc/var/tool.tbl	0644
 runtime_seed	linuxcnc/runtime/var/linuxcnc.var	/opt/8ax/v5/linuxcnc/var/linuxcnc.var	0644

@@ -14,8 +14,6 @@ extern "C" {
 
 int v5_native_rtcp_status_read(const char *path, unsigned int max_age_ms, V5NativeReadback *readback);
 int v5_native_rtcp_status_write(const char *path, int valid, int active);
-int v5_native_rtcp_status_from_mcodes(const int *mcodes, size_t count, int *valid_out, int *active_out);
-int v5_native_rtcp_status_write_from_mcodes(const char *path, const int *mcodes, size_t count);
 
 #ifdef __cplusplus
 }

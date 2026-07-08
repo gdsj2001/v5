@@ -44,7 +44,31 @@ static int expect_no_linuxcncrsh_line(const char *label, V5PrepareFn fn)
         printf("%s unexpectedly formatted as linuxcncrsh line: %s\n", label, line);
         return 0;
     }
-    printf("%s=native_safety_no_linuxcncrsh_line\n", label);
+    printf("%s=no_linuxcncrsh_line\n", label);
+    return 1;
+}
+
+static int prepare_rtcp_on(V5CommandPrepared *prepared, V5CommandRequest *request)
+{
+    return v5_command_rtcp_prepare(1, prepared, request);
+}
+
+static int prepare_rtcp_off(V5CommandPrepared *prepared, V5CommandRequest *request)
+{
+    return v5_command_rtcp_prepare(0, prepared, request);
+}
+
+static int expect_rtcp_owner(const char *label, int target, V5CommandPrepared *prepared, V5CommandRequest *request)
+{
+    if (!prepared || !request ||
+        request->kind != V5_COMMAND_RTCP_SET ||
+        request->enabled_value != target ||
+        strcmp(prepared->name, "rtcp_set") != 0 ||
+        strcmp(prepared->owner, "native_rtcp_control") != 0 ||
+        !prepared->accepted) {
+        return 0;
+    }
+    printf("%s=native_rtcp_control target=%d\n", label, target);
     return 1;
 }
 
@@ -65,7 +89,7 @@ int main(void)
         char home_line[128];
         if (!v5_command_home_prepare(&prepared, &request) ||
             !v5_linuxcncrsh_format_home_sequence(home_line, sizeof(home_line)) ||
-            strcmp(home_line, "native_home_mode_gate BUS real G53 zero move + native MCS readback") != 0) {
+            strcmp(home_line, "native_home_mode_gate BUS joint-jog proof + joint-jog zero + native MCS readback") != 0) {
             return 12;
         }
         printf("home=%s\n", home_line);
@@ -92,7 +116,8 @@ int main(void)
         return 7;
     }
     if (!v5_command_rtcp_prepare(1, &prepared, &request) ||
-        !expect_line("rtcp_on", "Set Mode MDI\nSet MDI M128", &prepared, &request)) {
+        !expect_rtcp_owner("rtcp_on", 1, &prepared, &request) ||
+        !expect_no_linuxcncrsh_line("rtcp_on", prepare_rtcp_on)) {
         return 8;
     }
     if (!v5_command_jog_increment_prepare('X', 10.0, 1, &prepared, &request) ||
@@ -126,12 +151,13 @@ int main(void)
         return 11;
     }
     if (!v5_command_rtcp_toggle_prepare(&readback, &prepared, &request) ||
-        !expect_line("rtcp_toggle_off", "Set Mode MDI\nSet MDI M129", &prepared, &request)) {
+        !expect_rtcp_owner("rtcp_toggle_off", 0, &prepared, &request) ||
+        !expect_no_linuxcncrsh_line("rtcp_off", prepare_rtcp_off)) {
         return 16;
     }
     v5_native_readback_set_rtcp_actual(&readback, 0);
     if (!v5_command_rtcp_toggle_prepare(&readback, &prepared, &request) ||
-        !expect_line("rtcp_toggle_on", "Set Mode MDI\nSet MDI M128", &prepared, &request)) {
+        !expect_rtcp_owner("rtcp_toggle_on", 1, &prepared, &request)) {
         return 17;
     }
     v5_native_readback_set_unavailable(&readback, "rtcp_missing");

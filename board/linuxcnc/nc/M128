@@ -1,5 +1,0 @@
-#!/bin/sh
-set -eu
-
-halcmd sets re-switchkins-select 1
-exit 0

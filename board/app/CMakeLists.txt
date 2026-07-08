@@ -133,6 +133,7 @@ add_library(v5_command_gate_core STATIC
     ../services/command_gate/v5_native_first_point.c
     ../services/command_gate/v5_native_rotary_equiv_zero.c
     ../services/command_gate/v5_native_readback.c
+    ../services/command_gate/v5_native_rtcp_control.c
     ../services/command_gate/v5_native_rtcp_status.c
     ../services/command_gate/v5_native_wcs_status.c
     ../services/command_gate/v5_native_g53_geometry_status.c

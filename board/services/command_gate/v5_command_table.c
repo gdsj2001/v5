@@ -15,7 +15,7 @@ static const V5CommandEntry kV5Commands[] = {
     {"wcs_select", "native_linuxcncrsh"},
     {"work_zero", "native_linuxcncrsh"},
     {"g92_clear", "native_linuxcncrsh"},
-    {"rtcp_set", "native_linuxcncrsh"},
+    {"rtcp_set", "native_rtcp_control"},
     {"feed_override_set", "native_linuxcncrsh"},
     {"spindle_override_set", "native_linuxcncrsh"},
     {"first_point", "native_first_point"},

@@ -7,6 +7,7 @@ loadrt [EMCMOT]HOMEMOD
 loadrt [EMCMOT]EMCMOT servo_period_nsec=[EMCMOT]SERVO_PERIOD num_joints=[KINS]JOINTS z20_wrapped_rotary_mask=24
 loadrt cia402 count=5
 loadrt bitslice names=x-din,y-din,z-din,a-din,c-din personality=31,31,31,31,31
+loadrt mux2 count=1
 
 loadusr -W lcec_conf /opt/8ax/v5/linuxcnc/hal/ethercat-conf-2ms.xml
 loadusr -Wn v5_native_safety /usr/libexec/8ax/v5_native_safety_latch_owner.py --path /dev/shm/v5_native_safety_latch.bin --component v5_native_safety --interval-ms 2
@@ -23,6 +24,7 @@ addf y-din servo-thread
 addf z-din servo-thread
 addf a-din servo-thread
 addf c-din servo-thread
+addf mux2.0 servo-thread
 addf motion-command-handler servo-thread
 addf motion-controller servo-thread
 addf cia402.0.write-all servo-thread
@@ -40,8 +42,10 @@ net tool-prepare-loop iocontrol.0.tool-prepare => iocontrol.0.tool-prepared
 setp iocontrol.0.lube_level TRUE
 
 setp motion.digital-in-00 TRUE
-newsig re-switchkins-select float
-net re-switchkins-select => motion.switchkins-type
+setp mux2.0.in0 0
+setp mux2.0.in1 1
+setp mux2.0.sel 0
+net re-switchkins-select mux2.0.out => motion.switchkins-type
 net re-kins-tool-offset motion.tooloffset.z => xyzac-trt-kins.tool-offset
 setp xyzac-trt-kins.x-rot-point [RTCP]X_ROT_POINT
 setp xyzac-trt-kins.y-rot-point [RTCP]Y_ROT_POINT
