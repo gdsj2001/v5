@@ -64,9 +64,9 @@ public sealed class RemoteFrameAssembler
             return RemoteFrameApplyResult.NeedFullFrame(_framebuffer.FrameId, $"Dirty base_frame_id {metadata.BaseFrameId} is ahead of local frame {_framebuffer.FrameId}.");
         }
 
-        if (metadata.FrameId != _framebuffer.FrameId + 1)
+        if (metadata.FrameId <= metadata.BaseFrameId)
         {
-            return RemoteFrameApplyResult.NeedFullFrame(_framebuffer.FrameId, $"Dirty frame_id {metadata.FrameId} is not continuous after local frame {_framebuffer.FrameId}.");
+            return RemoteFrameApplyResult.StaleFrame(_framebuffer.FrameId, $"Dirty frame_id {metadata.FrameId} does not advance base frame {metadata.BaseFrameId}.");
         }
 
         if (metadata.DirtyCount != metadata.Rects.Count)

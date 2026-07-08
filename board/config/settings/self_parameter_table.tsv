@@ -4,10 +4,10 @@ X	slave	0
 Y	slave	1
 Z	slave	2
 A	slave	3
-B	slave	4
-C	slave	5
-GANTRY	slave	6
-TOOLMAG	slave	7
+B	slave	NAT
+C	slave	4
+GANTRY	slave	NAT
+TOOLMAG	slave	NAT
 G53	tool_setter_x	0
 G53	tool_setter_y	0
 G53	tool_setter_z	0

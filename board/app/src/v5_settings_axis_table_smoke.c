@@ -1,11 +1,19 @@
 #include "v5_settings_axis_table.h"
+#include "v5_command_gate_ipc.h"
+#include "v5_settings_apply.h"
 #include "v5_settings_parameter_store.h"
 
 #include <ctype.h>
+#include <errno.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/un.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 static int same_text(const char *a, const char *b)
@@ -49,6 +57,155 @@ static void axis_zero_smoke_cb(const char *axis, const char *driver_mode, const 
     snprintf(g_axis_zero_scope, sizeof(g_axis_zero_scope), "%s", target_scope ? target_scope : "");
     snprintf(g_axis_zero_apply, sizeof(g_axis_zero_apply), "%s", apply_mode ? apply_mode : "");
     snprintf(g_axis_zero_slave, sizeof(g_axis_zero_slave), "%s", slave_index ? slave_index : "");
+}
+
+static pid_t g_settings_owner_pid = -1;
+
+static void copy_cstr_smoke(char *dst, size_t cap, const char *src)
+{
+    if (!dst || cap == 0U) return;
+    dst[0] = '\0';
+    if (src && src[0]) {
+        snprintf(dst, cap, "%s", src);
+    }
+}
+
+static int read_all_smoke(int fd, void *data, size_t size)
+{
+    char *p = (char *)data;
+    while (size > 0U) {
+        ssize_t n = recv(fd, p, size, 0);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) return 0;
+        p += (size_t)n;
+        size -= (size_t)n;
+    }
+    return 1;
+}
+
+static int write_all_smoke(int fd, const void *data, size_t size)
+{
+    const char *p = (const char *)data;
+    while (size > 0U) {
+        ssize_t n = send(fd, p, size, 0);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) return 0;
+        p += (size_t)n;
+        size -= (size_t)n;
+    }
+    return 1;
+}
+
+static void settings_owner_response_init(V5CommandGateIpcResponseFrame *response)
+{
+    memset(response, 0, sizeof(*response));
+    response->magic = V5_COMMAND_GATE_IPC_MAGIC;
+    response->version = V5_COMMAND_GATE_IPC_VERSION;
+    response->size = (uint32_t)sizeof(*response);
+    response->send_status = V5_COMMAND_GATE_SEND_UNAVAILABLE;
+}
+
+static void settings_owner_copy_result(V5CommandGateIpcResponseFrame *response, const V5SettingsApplyAxisCommitResult *result)
+{
+    response->settings_owner_written = result->owner_written ? 1 : 0;
+    response->settings_source_readback_confirmed = result->source_readback_confirmed ? 1 : 0;
+    response->settings_restart_pending = result->restart_pending ? 1 : 0;
+    response->settings_scale_chain_attempted = result->scale_chain.attempted ? 1 : 0;
+    response->settings_scale_recomputed = result->scale_chain.scale_recomputed ? 1 : 0;
+    response->settings_raw_limits_recomputed = result->scale_chain.raw_limits_recomputed ? 1 : 0;
+    response->settings_effective_scale = result->scale_chain.effective_scale;
+    response->settings_raw_zero_position = result->scale_chain.raw_zero_position;
+    response->settings_raw_min_limit = result->scale_chain.raw_min_limit;
+    response->settings_raw_max_limit = result->scale_chain.raw_max_limit;
+    copy_cstr_smoke(response->settings_readback_value, sizeof(response->settings_readback_value), result->readback_value);
+    copy_cstr_smoke(response->settings_scale_chain_code, sizeof(response->settings_scale_chain_code), result->scale_chain.code);
+}
+
+static void settings_owner_handle_frame(const V5CommandGateIpcRequestFrame *frame, V5CommandGateIpcResponseFrame *response)
+{
+    V5SettingsApplyAxisCommitRequest request;
+    V5SettingsApplyAxisCommitResult result;
+    int ok;
+    settings_owner_response_init(response);
+    if (!frame || frame->magic != V5_COMMAND_GATE_IPC_MAGIC ||
+        frame->version != V5_COMMAND_GATE_IPC_VERSION ||
+        frame->size != (uint32_t)sizeof(*frame) ||
+        frame->op != (uint32_t)V5_COMMAND_GATE_IPC_OP_SETTINGS_AXIS_COMMIT) {
+        response->send_status = V5_COMMAND_GATE_SEND_INVALID;
+        copy_cstr_smoke(response->readback_code, sizeof(response->readback_code), "BAD_SETTINGS_SMOKE_FRAME");
+        return;
+    }
+    memset(&request, 0, sizeof(request));
+    request.project_root = frame->settings_project_root;
+    request.axis = frame->settings_axis;
+    request.axis_index = frame->settings_axis_index;
+    request.field_key = frame->settings_field_key;
+    request.field_name = frame->settings_field_name;
+    request.value_text = frame->settings_value_text;
+    request.owner_generation = frame->settings_owner_generation;
+    request.readback_token = frame->settings_readback_token;
+    ok = v5_settings_apply_commit_axis_value(&request, &result);
+    settings_owner_copy_result(response, &result);
+    response->send_status = ok ? V5_COMMAND_GATE_SEND_SENT : V5_COMMAND_GATE_SEND_INVALID;
+    response->executed = ok ? 1 : 0;
+    copy_cstr_smoke(response->readback_code, sizeof(response->readback_code), ok ? "SETTINGS_AXIS_COMMIT_OK" : "SETTINGS_AXIS_COMMIT_REJECTED");
+}
+
+static void settings_owner_loop(int listen_fd)
+{
+    while (1) {
+        int client = accept(listen_fd, 0, 0);
+        if (client < 0) {
+            if (errno == EINTR) continue;
+            _exit(2);
+        }
+        while (1) {
+            V5CommandGateIpcRequestFrame request;
+            V5CommandGateIpcResponseFrame response;
+            if (!read_all_smoke(client, &request, sizeof(request))) break;
+            settings_owner_handle_frame(&request, &response);
+            if (!write_all_smoke(client, &response, sizeof(response))) break;
+        }
+        close(client);
+    }
+}
+
+static int start_settings_owner_smoke(void)
+{
+    struct sockaddr_un addr;
+    int fd;
+    mkdir("/run/8ax_v5_product_ui", 0755);
+    unlink(V5_COMMAND_GATE_SOCKET_PATH);
+    fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0) return 0;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", V5_COMMAND_GATE_SOCKET_PATH);
+    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0 || listen(fd, 4) != 0) {
+        close(fd);
+        return 0;
+    }
+    g_settings_owner_pid = fork();
+    if (g_settings_owner_pid < 0) {
+        close(fd);
+        return 0;
+    }
+    if (g_settings_owner_pid == 0) {
+        settings_owner_loop(fd);
+        _exit(0);
+    }
+    close(fd);
+    return 1;
+}
+
+static void stop_settings_owner_smoke(void)
+{
+    if (g_settings_owner_pid > 0) {
+        kill(g_settings_owner_pid, SIGTERM);
+        waitpid(g_settings_owner_pid, 0, 0);
+        g_settings_owner_pid = -1;
+    }
+    unlink(V5_COMMAND_GATE_SOCKET_PATH);
 }
 
 static int copy_file(const char *src, const char *dst)
@@ -194,6 +351,10 @@ int main(void)
           "}\n", fp);
     fclose(fp);
     setenv("V5_SETTINGS_RUNTIME_JSON", "settings_runtime.json", 1);
+    if (!start_settings_owner_smoke()) {
+        return 7;
+    }
+    atexit(stop_settings_owner_smoke);
     mkdir("config", 0755);
     mkdir("config/settings", 0755);
     fp = fopen("config/settings/self_parameter_table.tsv", "wb");
@@ -255,6 +416,9 @@ int main(void)
           "TOOLMAG\tegear_numerator\t4096\n"
           "TOOLMAG\tegear_denominator\t5625\n"
           "TOOLMAG\twrite_status\t已写入\n", fp);
+    fputs("SLAVE_0\tegear_numerator\t777\n"
+          "SLAVE_0\tegear_denominator\t888\n"
+          "SLAVE_0\twrite_status\tslave-ok\n", fp);
     fclose(fp);
     unsigned int rows = v5_settings_axis_table_row_count();
     unsigned int cols = v5_settings_axis_table_column_count();
@@ -266,6 +430,15 @@ int main(void)
     unsigned int select_cols = 0U;
 
     v5_settings_axis_table_load_readback(".");
+    if (strcmp(v5_settings_axis_table_value(0U, 16U), "777") != 0 ||
+        strcmp(v5_settings_axis_table_value(0U, 17U), "888") != 0 ||
+        strcmp(v5_settings_axis_table_value(0U, 18U), "slave-ok") != 0) {
+        fprintf(stderr, "drive display columns must prefer selected slave evidence: num=%s den=%s status=%s\n",
+                v5_settings_axis_table_value(0U, 16U),
+                v5_settings_axis_table_value(0U, 17U),
+                v5_settings_axis_table_value(0U, 18U));
+        return 47;
+    }
     if (rows != 8U || cols != 19U) {
         return 1;
     }
@@ -346,9 +519,9 @@ int main(void)
         strcmp(v5_settings_axis_table_value(0U, 11U), "500") != 0 ||
         strcmp(v5_settings_axis_table_value(0U, 12U), "10000") != 0 ||
         strcmp(v5_settings_axis_table_value(0U, 15U), "18") != 0 ||
-        strcmp(v5_settings_axis_table_value(0U, 16U), "16384") != 0 ||
-        strcmp(v5_settings_axis_table_value(0U, 17U), "3125") != 0 ||
-        strcmp(v5_settings_axis_table_value(0U, 18U), "已写入") != 0 ||
+        strcmp(v5_settings_axis_table_value(0U, 16U), "777") != 0 ||
+        strcmp(v5_settings_axis_table_value(0U, 17U), "888") != 0 ||
+        strcmp(v5_settings_axis_table_value(0U, 18U), "slave-ok") != 0 ||
         strcmp(v5_settings_axis_table_value(3U, 12U), "50000") != 0 ||
         strcmp(v5_settings_axis_table_value(6U, 0U), "直线") != 0 ||
         strcmp(v5_settings_axis_table_value(6U, 9U), "-500") != 0 ||
@@ -401,6 +574,15 @@ int main(void)
         fprintf(stderr, "slave NAT commit failed: X slave=%s\n", v5_settings_axis_table_value(0U, 2U));
         return 36;
     }
+    if (strcmp(v5_settings_axis_table_value(0U, 16U), "--") != 0 ||
+        strcmp(v5_settings_axis_table_value(0U, 17U), "--") != 0 ||
+        strcmp(v5_settings_axis_table_value(0U, 18U), "--") != 0) {
+        fprintf(stderr, "NAT slave must clear drive display columns: num=%s den=%s status=%s\n",
+                v5_settings_axis_table_value(0U, 16U),
+                v5_settings_axis_table_value(0U, 17U),
+                v5_settings_axis_table_value(0U, 18U));
+        return 48;
+    }
     {
         char self_slave[64];
         if (!v5_settings_parameter_store_read_axis(".", V5_SETTINGS_PARAMETER_DISK_SELF, "X", "slave", self_slave, sizeof(self_slave)) ||
@@ -439,12 +621,27 @@ int main(void)
         fprintf(stderr, "slave restore commit failed: X slave=%s\n", v5_settings_axis_table_value(0U, 2U));
         return 40;
     }
+    if (strcmp(v5_settings_axis_table_value(0U, 16U), "777") != 0 ||
+        strcmp(v5_settings_axis_table_value(0U, 17U), "888") != 0 ||
+        strcmp(v5_settings_axis_table_value(0U, 18U), "slave-ok") != 0) {
+        fprintf(stderr, "restored slave must restore slave drive display columns: num=%s den=%s status=%s\n",
+                v5_settings_axis_table_value(0U, 16U),
+                v5_settings_axis_table_value(0U, 17U),
+                v5_settings_axis_table_value(0U, 18U));
+        return 49;
+    }
     if (v5_settings_axis_table_cell_is_disabled(0U, 0U) ||
         v5_settings_axis_table_cell_is_disabled(0U, 2U) ||
         v5_settings_axis_table_cell_is_disabled(0U, 10U) ||
         v5_settings_axis_table_cell_is_disabled(0U, 15U)) {
         fprintf(stderr, "real slave row must re-enable editable/action cells after restore\n");
         return 45;
+    }
+
+    if (v5_settings_axis_table_commit_value(0U, 12U, "12000.5") ||
+        v5_settings_axis_table_commit_value(0U, 4U, "6.5")) {
+        fprintf(stderr, "axis numeric fields except precision must reject decimal input\n");
+        return 46;
     }
 
     if (!v5_settings_axis_table_commit_value(0U, 12U, "12000")) {
@@ -519,10 +716,16 @@ int main(void)
                     v5_settings_axis_table_value(0U, 11U));
             return 31;
         }
-        if (strcmp(v5_settings_axis_table_value(0U, 18U), "已写入") != 0) {
+        if (strcmp(v5_settings_axis_table_value(0U, 18U), "slave-ok") != 0) {
             fprintf(stderr, "axis pitch commit must not overwrite drive write_status: status=%s\n", v5_settings_axis_table_value(0U, 18U));
             return 28;
         }
+    }
+    if (!v5_settings_axis_table_commit_value(0U, 3U, "0.00025") ||
+        strcmp(v5_settings_axis_table_value(0U, 3U), "0.00025") != 0) {
+        fprintf(stderr, "axis precision must still accept decimal input: precision=%s\n",
+                v5_settings_axis_table_value(0U, 3U));
+        return 47;
     }
     if (v5_settings_axis_table_commit_value(0U, 15U, "NAT") ||
         v5_settings_axis_table_commit_value(0U, 15U, "--")) {
@@ -540,7 +743,7 @@ int main(void)
             fprintf(stderr, "axis bit owner readback failed: drive=%s ui=%s\n", drive, v5_settings_axis_table_value(0U, 15U));
             return 16;
         }
-        if (strcmp(v5_settings_axis_table_value(0U, 18U), "已写入") != 0) {
+        if (strcmp(v5_settings_axis_table_value(0U, 18U), "slave-ok") != 0) {
             fprintf(stderr, "axis bit commit must not overwrite drive write_status: status=%s\n", v5_settings_axis_table_value(0U, 18U));
             return 29;
         }

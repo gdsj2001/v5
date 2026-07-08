@@ -8,6 +8,7 @@ binary	build/board/app/v5_touch_diagnostics	/usr/libexec/8ax/v5_touch_diagnostic
 binary	build/board/app/v5_linuxcncrsh_probe	/usr/libexec/8ax/v5_linuxcncrsh_probe	0755
 binary	build/board/app/v5_command_gate_server	/usr/libexec/8ax/v5_command_gate_server	0755
 binary	build/board/app/v5_linuxcncrsh_golden_run	/usr/libexec/8ax/v5_linuxcncrsh_golden_run	0755
+script	services/ui/v5_remote_ui_relay.py	/usr/libexec/8ax/v5_remote_ui_relay.py	0755
 init	services/state_publisher/init.d/v5-rtcp-status-publisher	/etc/init.d/v5-rtcp-status-publisher	0755
 init	services/microkernel/init.d/v5-g53-geometry-memory-owner	/etc/init.d/v5-g53-geometry-memory-owner	0755
 init	services/state_publisher/init.d/v5-wcs-status-publisher	/etc/init.d/v5-wcs-status-publisher	0755

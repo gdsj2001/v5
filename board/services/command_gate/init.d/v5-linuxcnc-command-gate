@@ -109,7 +109,7 @@ start_backend() {
 start_native_gate() {
   stop_native_gate
   : >"$COMMAND_GATE_LOG"
-  /usr/libexec/8ax/v5_command_gate_server --socket "$COMMAND_GATE_SOCKET" --host 127.0.0.1 --port "$LINUXCNCRSH_PORT" --password "$LINUXCNCRSH_CONNECTPW" --timeout-ms 1000 >>"$COMMAND_GATE_LOG" 2>&1 &
+  setsid /usr/libexec/8ax/v5_command_gate_server --socket "$COMMAND_GATE_SOCKET" --host 127.0.0.1 --port "$LINUXCNCRSH_PORT" --password "$LINUXCNCRSH_CONNECTPW" --timeout-ms 1000 >>"$COMMAND_GATE_LOG" 2>&1 &
   echo "$!" >"$COMMAND_GATE_PID"
   i=0
   while [ "$i" -lt 40 ]; do

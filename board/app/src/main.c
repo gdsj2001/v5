@@ -1,6 +1,7 @@
 #include "v5_app.h"
 #include "v5_lvgl_remote_display.h"
 #include "v5_process_residency.h"
+#include "v5_remote_input_ipc.h"
 
 #include "lvgl.h"
 
@@ -43,7 +44,6 @@ static void print_report(const V5ShellBootReport *report)
 int main(int argc, char **argv)
 {
     V5ShellBootReport report;
-    unsigned short port = 18080U;
     int serve = 0;
     int i;
     int rc;
@@ -54,10 +54,8 @@ int main(int argc, char **argv)
             serve = 1;
         } else if (strcmp(argv[i], "--once") == 0) {
             serve = 0;
-        } else if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
-            port = (unsigned short)atoi(argv[++i]);
         } else if (strcmp(argv[i], "--help") == 0) {
-            printf("usage: v5_lvgl_shell [--once|--serve] [--port 18080]\n");
+            printf("usage: v5_lvgl_shell [--once|--serve]\n");
             return 0;
         } else {
             fprintf(stderr, "unknown argument: %s\n", argv[i]);
@@ -90,15 +88,20 @@ int main(int argc, char **argv)
     signal(SIGINT, on_signal);
     signal(SIGCHLD, SIG_IGN);
     signal(SIGPIPE, SIG_IGN);
-    printf("v5 UI remote relay listening: port=%u path=/remote/frame/full format=bgra32\n", (unsigned int)port);
+    printf("v5 UI remote framebuffer IPC ready: path=/run/8ax_v5_product_ui/remote_framebuffer.bgra dirty=/run/8ax_v5_product_ui/remote_dirty format=bgra32\n");
     fflush(stdout);
     while (!g_stop_requested) {
         lv_tick_inc(V5_UI_SHELL_LOOP_MS);
         (void)v5_ui_shell_refresh_once();
-        if (!v5_remote_frame_poll(port, V5_UI_SHELL_LOOP_MS)) {
-            fprintf(stderr, "v5 UI remote relay failed on port %u\n", (unsigned int)port);
+        if (!v5_remote_frame_ipc_pump()) {
+            fprintf(stderr, "v5 UI remote framebuffer IPC failed\n");
             return 1;
         }
+        if (!v5_remote_input_ipc_process()) {
+            fprintf(stderr, "v5 UI remote input IPC failed\n");
+            return 1;
+        }
+        usleep(V5_UI_SHELL_LOOP_MS * 1000U);
     }
     return 0;
 }

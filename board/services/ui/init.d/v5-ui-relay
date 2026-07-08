@@ -5,21 +5,46 @@ LD_BIND_NOW=1
 export LD_BIND_NOW
 ulimit -l unlimited 2>/dev/null || true
 
-DAEMON=/usr/libexec/8ax/v5_lvgl_shell
+UI_DAEMON=/usr/libexec/8ax/v5_lvgl_shell
+RELAY_DAEMON=/usr/libexec/8ax/v5_remote_ui_relay.py
 PIDFILE=/run/8ax/v5_ui_relay.pid
+UI_PIDFILE=/run/8ax/v5_ui_shell.pid
 LOGFILE=/run/8ax/v5_ui_relay.log
 PORT=${V5_UI_REMOTE_PORT:-18080}
 REMOTE_BIND=${V5_UI_REMOTE_BIND:-0.0.0.0}
 REMOTE_ALLOW_CIDRS=${V5_UI_REMOTE_ALLOW_CIDRS:-127.0.0.1/32,192.168.1.0/24}
 REMOTE_INPUT=${V5_UI_REMOTE_INPUT:-layout_only}
+REMOTE_WIDTH=${V5_UI_REMOTE_WIDTH:-1024}
+REMOTE_HEIGHT=${V5_UI_REMOTE_HEIGHT:-600}
 PROJECT_ROOT=${V5_PROJECT_ROOT:-/opt/8ax/v5}
 PROFILE_SNAPSHOT=/usr/libexec/8ax/drive_profile/v5_drive_profile_resident_snapshot.py
 
-is_running() {
-  [ -r "$PIDFILE" ] || return 1
-  pid=$(cat "$PIDFILE" 2>/dev/null || true)
+read_pidfile() {
+  file="$1"
+  [ -r "$file" ] || return 1
+  pid=$(cat "$file" 2>/dev/null || true)
+  [ -n "$pid" ] || return 1
+  printf '%s\n' "$pid"
+}
+
+pid_running() {
+  pid="$1"
   [ -n "$pid" ] || return 1
   kill -0 "$pid" 2>/dev/null
+}
+
+is_ui_running() {
+  pid=$(read_pidfile "$UI_PIDFILE" 2>/dev/null || true)
+  pid_running "$pid"
+}
+
+is_relay_running() {
+  pid=$(read_pidfile "$PIDFILE" 2>/dev/null || true)
+  pid_running "$pid"
+}
+
+is_running() {
+  is_ui_running && is_relay_running
 }
 
 set_non_microkernel_affinity() {
@@ -124,39 +149,86 @@ clear_framebuffer() {
   dd if=/dev/zero of=/dev/fb0 bs="$stride" count="$height" >/dev/null 2>&1 || true
 }
 
+stale_service_pids() {
+  ps w 2>/dev/null | awk '/[v]5_lvgl_shell/ || /[v]5_remote_ui_relay.py/ { print $1 }'
+}
+
+stop_stale_processes() {
+  pids=$(stale_service_pids | tr '\n' ' ')
+  [ -n "$pids" ] || return 0
+  for pid in $pids; do
+    kill "$pid" 2>/dev/null || true
+  done
+  i=0
+  while [ -n "$(stale_service_pids)" ] && [ "$i" -lt 50 ]; do
+    i=$((i + 1))
+    sleep 0.1
+  done
+  pids=$(stale_service_pids | tr '\n' ' ')
+  [ -n "$pids" ] || return 0
+  for pid in $pids; do
+    kill -KILL "$pid" 2>/dev/null || true
+  done
+  sleep 0.2
+  pids=$(stale_service_pids | tr '\n' ' ')
+  [ -z "$pids" ] || {
+    echo "v5_ui_relay stale process did not stop pid=$pids" >&2
+    return 1
+  }
+}
+
 
 
 start_service() {
   if is_running; then
-    echo "v5_ui_relay already running pid=$(cat "$PIDFILE") port=$PORT project_root=$PROJECT_ROOT"
+    echo "v5_ui_relay already running relay_pid=$(cat "$PIDFILE") ui_pid=$(cat "$UI_PIDFILE") port=$PORT project_root=$PROJECT_ROOT"
     return 0
   fi
-  test -x "$DAEMON"
+  test -x "$UI_DAEMON"
+  test -x "$RELAY_DAEMON"
   mkdir -p /run/8ax
-  rm -f "$PIDFILE"
+  mkdir -p /run/8ax_v5_product_ui
+  rm -f "$PIDFILE" "$UI_PIDFILE"
+  stop_stale_processes
   build_profile_snapshot
   wait_boot_inputs_ready
   clear_framebuffer
-  V5_PROJECT_ROOT="$PROJECT_ROOT" V5_UI_REMOTE_INPUT="$REMOTE_INPUT" V5_UI_REMOTE_BIND="$REMOTE_BIND" V5_UI_REMOTE_ALLOW_CIDRS="$REMOTE_ALLOW_CIDRS" setsid "$DAEMON" --serve --port "$PORT" >>"$LOGFILE" 2>&1 &
+  V5_PROJECT_ROOT="$PROJECT_ROOT" V5_UI_REMOTE_INPUT="$REMOTE_INPUT" setsid "$UI_DAEMON" --serve >>"$LOGFILE" 2>&1 &
+  echo "$!" >"$UI_PIDFILE"
+  sleep 1
+  if ! is_ui_running; then
+    echo "v5_ui_shell failed to start" >&2
+    tail -n 40 "$LOGFILE" 2>/dev/null || true
+    return 1
+  fi
+  i=0
+  while [ ! -s /run/8ax_v5_product_ui/remote_framebuffer.bgra ] && [ "$i" -lt 50 ]; do
+    i=$((i + 1))
+    sleep 0.1
+  done
+  V5_UI_REMOTE_INPUT="$REMOTE_INPUT" V5_UI_REMOTE_BIND="$REMOTE_BIND" V5_UI_REMOTE_ALLOW_CIDRS="$REMOTE_ALLOW_CIDRS" V5_UI_REMOTE_PORT="$PORT" V5_UI_REMOTE_WIDTH="$REMOTE_WIDTH" V5_UI_REMOTE_HEIGHT="$REMOTE_HEIGHT" setsid "$RELAY_DAEMON" --host "$REMOTE_BIND" --port "$PORT" --allow-cidrs "$REMOTE_ALLOW_CIDRS" --width "$REMOTE_WIDTH" --height "$REMOTE_HEIGHT" >>"$LOGFILE" 2>&1 &
   echo "$!" >"$PIDFILE"
   sleep 1
   if is_running; then
+    set_non_microkernel_affinity "$(cat "$UI_PIDFILE")"
     set_non_microkernel_affinity "$(cat "$PIDFILE")"
-    echo "v5_ui_relay started pid=$(cat "$PIDFILE") port=$PORT bind=$REMOTE_BIND allow_cidrs=$REMOTE_ALLOW_CIDRS remote_input=$REMOTE_INPUT project_root=$PROJECT_ROOT"
+    echo "v5_ui_relay started relay_pid=$(cat "$PIDFILE") ui_pid=$(cat "$UI_PIDFILE") port=$PORT bind=$REMOTE_BIND allow_cidrs=$REMOTE_ALLOW_CIDRS remote_input=$REMOTE_INPUT project_root=$PROJECT_ROOT"
     return 0
   fi
   echo "v5_ui_relay failed to start" >&2
+  stop_service >/dev/null 2>&1 || true
   tail -n 40 "$LOGFILE" 2>/dev/null || true
   return 1
 }
 
-stop_service() {
-  if ! is_running; then
-    rm -f "$PIDFILE"
-    echo "v5_ui_relay not running"
+stop_pidfile() {
+  file="$1"
+  label="$2"
+  pid=$(read_pidfile "$file" 2>/dev/null || true)
+  if ! pid_running "$pid"; then
+    rm -f "$file"
     return 0
   fi
-  pid=$(cat "$PIDFILE")
   kill "$pid" 2>/dev/null || true
   i=0
   while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 50 ]; do
@@ -168,11 +240,23 @@ stop_service() {
     sleep 0.2
   fi
   if kill -0 "$pid" 2>/dev/null; then
-    echo "v5_ui_relay did not stop pid=$pid" >&2
+    echo "$label did not stop pid=$pid" >&2
     return 1
   fi
-  rm -f "$PIDFILE"
-  echo "v5_ui_relay stopped pid=$pid"
+  rm -f "$file"
+  echo "$label stopped pid=$pid"
+}
+
+stop_service() {
+  if ! is_ui_running && ! is_relay_running; then
+    rm -f "$PIDFILE" "$UI_PIDFILE"
+    stop_stale_processes
+    echo "v5_ui_relay not running"
+    return 0
+  fi
+  stop_pidfile "$PIDFILE" "v5_remote_ui_relay"
+  stop_pidfile "$UI_PIDFILE" "v5_ui_shell"
+  stop_stale_processes
 }
 
 case "${1:-}" in
@@ -181,7 +265,7 @@ case "${1:-}" in
   restart) stop_service; start_service ;;
   status)
     if is_running; then
-      echo "v5_ui_relay running pid=$(cat "$PIDFILE") port=$PORT bind=$REMOTE_BIND allow_cidrs=$REMOTE_ALLOW_CIDRS remote_input=$REMOTE_INPUT project_root=$PROJECT_ROOT"
+      echo "v5_ui_relay running relay_pid=$(cat "$PIDFILE") ui_pid=$(cat "$UI_PIDFILE") port=$PORT bind=$REMOTE_BIND allow_cidrs=$REMOTE_ALLOW_CIDRS remote_input=$REMOTE_INPUT project_root=$PROJECT_ROOT"
     else
       echo "v5_ui_relay not running"
       exit 1

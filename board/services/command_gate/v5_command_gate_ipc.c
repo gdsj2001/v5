@@ -12,6 +12,10 @@
 #include <unistd.h>
 #endif
 
+#ifndef MSG_NOSIGNAL
+#define MSG_NOSIGNAL 0
+#endif
+
 static int g_gate_fd = -1;
 
 void v5_command_gate_result_init(V5CommandGateResult *result)
@@ -52,6 +56,36 @@ static void result_from_frame(V5CommandGateResult *result, const V5CommandGateIp
     copy_cstr(result->readback_code, sizeof(result->readback_code), frame->readback_code);
 }
 
+static void settings_result_init(V5SettingsApplyAxisCommitResult *result)
+{
+    if (!result) {
+        return;
+    }
+    memset(result, 0, sizeof(*result));
+    snprintf(result->scale_chain.code, sizeof(result->scale_chain.code), "%s", "IPC_NOT_ATTEMPTED");
+}
+
+static void settings_result_from_frame(
+    V5SettingsApplyAxisCommitResult *result,
+    const V5CommandGateIpcResponseFrame *frame)
+{
+    if (!result || !frame) {
+        return;
+    }
+    result->owner_written = frame->settings_owner_written ? 1 : 0;
+    result->source_readback_confirmed = frame->settings_source_readback_confirmed ? 1 : 0;
+    result->restart_pending = frame->settings_restart_pending ? 1 : 0;
+    result->scale_chain.attempted = frame->settings_scale_chain_attempted ? 1 : 0;
+    result->scale_chain.scale_recomputed = frame->settings_scale_recomputed ? 1 : 0;
+    result->scale_chain.raw_limits_recomputed = frame->settings_raw_limits_recomputed ? 1 : 0;
+    result->scale_chain.effective_scale = frame->settings_effective_scale;
+    result->scale_chain.raw_zero_position = frame->settings_raw_zero_position;
+    result->scale_chain.raw_min_limit = frame->settings_raw_min_limit;
+    result->scale_chain.raw_max_limit = frame->settings_raw_max_limit;
+    copy_cstr(result->readback_value, sizeof(result->readback_value), frame->settings_readback_value);
+    copy_cstr(result->scale_chain.code, sizeof(result->scale_chain.code), frame->settings_scale_chain_code);
+}
+
 #ifndef _WIN32
 static void gate_close(void)
 {
@@ -77,7 +111,7 @@ static int write_all(int fd, const void *data, size_t size)
 {
     const char *p = (const char *)data;
     while (size > 0U) {
-        ssize_t n = send(fd, p, size, 0);
+        ssize_t n = send(fd, p, size, MSG_NOSIGNAL);
         if (n < 0 && errno == EINTR) {
             continue;
         }
@@ -131,30 +165,43 @@ static int gate_connect(unsigned int timeout_ms)
     return g_gate_fd;
 }
 
-static int transact(const V5CommandGateIpcRequestFrame *request, V5CommandGateResult *result, unsigned int timeout_ms)
+static int transact_response(
+    const V5CommandGateIpcRequestFrame *request,
+    V5CommandGateIpcResponseFrame *response,
+    unsigned int timeout_ms)
 {
-    V5CommandGateIpcResponseFrame response;
     int fd;
     int attempt;
-    v5_command_gate_result_init(result);
-    if (!request) {
+    if (!request || !response) {
         return 0;
     }
+    memset(response, 0, sizeof(*response));
     for (attempt = 0; attempt < 2; ++attempt) {
         fd = gate_connect(timeout_ms);
         if (fd < 0) {
             return 0;
         }
-        if (write_all(fd, request, sizeof(*request)) && read_all(fd, &response, sizeof(response)) &&
-            response.magic == V5_COMMAND_GATE_IPC_MAGIC &&
-            response.version == V5_COMMAND_GATE_IPC_VERSION &&
-            response.size == (uint32_t)sizeof(response)) {
-            result_from_frame(result, &response);
+        if (write_all(fd, request, sizeof(*request)) && read_all(fd, response, sizeof(*response)) &&
+            response->magic == V5_COMMAND_GATE_IPC_MAGIC &&
+            response->version == V5_COMMAND_GATE_IPC_VERSION &&
+            response->size == (uint32_t)sizeof(*response)) {
+            gate_close();
             return 1;
         }
         gate_close();
     }
     return 0;
+}
+
+static int transact(const V5CommandGateIpcRequestFrame *request, V5CommandGateResult *result, unsigned int timeout_ms)
+{
+    V5CommandGateIpcResponseFrame response;
+    v5_command_gate_result_init(result);
+    if (!transact_response(request, &response, timeout_ms)) {
+        return 0;
+    }
+    result_from_frame(result, &response);
+    return 1;
 }
 #endif
 
@@ -216,5 +263,41 @@ int v5_command_gate_probe_safety(V5CommandGateResult *result, unsigned int timeo
     V5CommandGateIpcRequestFrame frame;
     init_request_frame(&frame, V5_COMMAND_GATE_IPC_OP_PROBE_SAFETY);
     return transact(&frame, result, timeout_ms);
+#endif
+}
+
+int v5_command_gate_settings_axis_commit(
+    const V5SettingsApplyAxisCommitRequest *request,
+    V5SettingsApplyAxisCommitResult *result,
+    unsigned int timeout_ms)
+{
+#ifdef _WIN32
+    (void)request;
+    (void)timeout_ms;
+    settings_result_init(result);
+    return 0;
+#else
+    V5CommandGateIpcRequestFrame frame;
+    V5CommandGateIpcResponseFrame response;
+    settings_result_init(result);
+    if (!request || !request->project_root || !request->axis || !request->field_key ||
+        !request->field_name || !request->value_text) {
+        return 0;
+    }
+    init_request_frame(&frame, V5_COMMAND_GATE_IPC_OP_SETTINGS_AXIS_COMMIT);
+    frame.settings_axis_index = request->axis_index;
+    frame.settings_owner_generation = request->owner_generation;
+    frame.settings_readback_token = request->readback_token;
+    copy_cstr(frame.settings_project_root, sizeof(frame.settings_project_root), request->project_root);
+    copy_cstr(frame.settings_axis, sizeof(frame.settings_axis), request->axis);
+    copy_cstr(frame.settings_field_key, sizeof(frame.settings_field_key), request->field_key);
+    copy_cstr(frame.settings_field_name, sizeof(frame.settings_field_name), request->field_name);
+    copy_cstr(frame.settings_value_text, sizeof(frame.settings_value_text), request->value_text);
+    if (!transact_response(&frame, &response, timeout_ms)) {
+        return 0;
+    }
+    settings_result_from_frame(result, &response);
+    return response.send_status == V5_COMMAND_GATE_SEND_SENT &&
+           response.settings_source_readback_confirmed ? 1 : 0;
 #endif
 }

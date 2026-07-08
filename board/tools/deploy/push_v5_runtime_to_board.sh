@@ -5,7 +5,29 @@ repo_root="${V5_REPO_ROOT:-/root/Desktop/v5}"
 manifest="${V5_DEPLOY_MANIFEST:-$repo_root/config/deploy/v5_runtime_deploy_manifest.tsv}"
 board_ssh="${V5_BOARD_SSH:-}"
 board_ssh_port="${V5_BOARD_SSH_PORT:-22}"
+board_ssh_key="${V5_BOARD_SSH_KEY:-}"
+board_ssh_key_opts=""
+if [ -n "$board_ssh_key" ]; then
+  board_ssh_key_opts="-i $board_ssh_key -o IdentitiesOnly=yes"
+fi
+board_ssh_user_known_hosts="${V5_BOARD_SSH_USER_KNOWN_HOSTS:-/dev/null}"
+board_ssh_strict_host_key="${V5_BOARD_SSH_STRICT_HOST_KEY:-no}"
+board_ssh_pubkey_rsa_opt=""
+if ssh -G 127.0.0.1 2>/dev/null | grep -qi '^pubkeyacceptedalgorithms '; then
+  board_ssh_pubkey_rsa_opt="-o PubkeyAcceptedAlgorithms=+ssh-rsa"
+elif ssh -G 127.0.0.1 2>/dev/null | grep -qi '^pubkeyacceptedkeytypes '; then
+  board_ssh_pubkey_rsa_opt="-o PubkeyAcceptedKeyTypes=+ssh-rsa"
+fi
+board_ssh_legacy_rsa_opts="-o HostKeyAlgorithms=+ssh-rsa $board_ssh_pubkey_rsa_opt -o StrictHostKeyChecking=$board_ssh_strict_host_key -o UserKnownHostsFile=$board_ssh_user_known_hosts"
+scp_legacy_protocol_opt=""
+if ! scp -O 2>&1 | grep -q "unknown option -- O"; then
+  scp_legacy_protocol_opt="-O"
+fi
 remote_root="${V5_REMOTE_STAGING_ROOT:-/tmp/v5_runtime_deploy}"
+case "$(uname -s 2>/dev/null || echo unknown)" in
+  MINGW*|MSYS*|CYGWIN*) local_python="${V5_LOCAL_PYTHON:-python}" ;;
+  *) local_python="${V5_LOCAL_PYTHON:-python3}" ;;
+esac
 apply=0
 refresh_only=0
 project_root="$repo_root"
@@ -15,6 +37,30 @@ case "$project_root" in
 esac
 local_backup_dir="${V5_LOCAL_OWNER_BACKUP_DIR:-$project_root/bak}"
 temp_dir="$repo_root/repo_ignored/temp"
+board_build_dir="${V5_BOARD_BUILD_DIR:-$project_root/build/board}"
+
+manifest_source_path() {
+  kind="$1"
+  source="$2"
+  case "$kind:$source" in
+    binary:build/board/app/*)
+      printf '%s/app/%s' "$board_build_dir" "${source#build/board/app/}"
+      ;;
+    *)
+      printf '%s/%s' "$repo_root" "$source"
+      ;;
+  esac
+}
+
+copy_manifest_source_to_bundle() {
+  kind="$1"
+  source="$2"
+  bundle_root="$3"
+  source_path="$(manifest_source_path "$kind" "$source")"
+  target_path="$bundle_root/$source"
+  install -d "$(dirname "$target_path")"
+  cp -p "$source_path" "$target_path"
+}
 
 for arg in "$@"; do
   case "$arg" in
@@ -44,7 +90,7 @@ if [ "$refresh_only" -eq 0 ] && [ ! -r "$manifest" ]; then
 fi
 
 if [ "$refresh_only" -eq 0 ]; then
-  "$repo_root/tools/deploy/precheck_v5_board.sh" "$manifest"
+  V5_BOARD_BUILD_DIR="$board_build_dir" "$repo_root/tools/deploy/precheck_v5_board.sh" "$manifest"
 
   tab=$(printf '\t')
   while IFS="$tab" read -r kind source destination mode extra; do
@@ -55,8 +101,9 @@ if [ "$refresh_only" -eq 0 ]; then
       echo "bad manifest row: $kind $source $destination $mode ${extra:-}" >&2
       exit 3
     fi
-    if [ ! -e "$repo_root/$source" ]; then
-      echo "missing deploy source: $repo_root/$source" >&2
+    source_path="$(manifest_source_path "$kind" "$source")"
+    if [ ! -e "$source_path" ]; then
+      echo "missing deploy source: $source_path" >&2
       exit 4
     fi
   done < "$manifest"
@@ -78,7 +125,7 @@ if [ -z "$board_ssh" ]; then
 fi
 
 remote_sh() {
-  ssh -o BatchMode=yes -o LogLevel=ERROR -o ConnectTimeout=5 -p "$board_ssh_port" "$board_ssh" "$@"
+  ssh -o BatchMode=yes -o LogLevel=ERROR -o ConnectTimeout=5 $board_ssh_legacy_rsa_opts $board_ssh_key_opts -p "$board_ssh_port" "$board_ssh" "$@"
 }
 
 check_board_connection() {
@@ -103,7 +150,7 @@ pull_board_owner_file() {
     return
   fi
   mkdir -p "$temp_dir" "$local_backup_dir" "$(dirname "$local_path")"
-  scp -q -P "$board_ssh_port" "$board_ssh:$remote_path" "$tmp"
+  scp $scp_legacy_protocol_opt -q $board_ssh_legacy_rsa_opts $board_ssh_key_opts -P "$board_ssh_port" "$board_ssh:$remote_path" "$tmp"
   if [ -e "$local_path" ] && cmp -s "$tmp" "$local_path"; then
     rm -f "$tmp"
     printf 'board owner unchanged %s <- %s\n' "$source" "$remote_path"
@@ -130,13 +177,13 @@ merge_board_self_parameter_table() {
     printf 'board self parameter table missing; keep local seed %s <- %s\n' "$source" "$remote_path"
     return
   fi
-  if ! command -v python3 >/dev/null 2>&1; then
-    echo "python3 required to merge board self parameter table: $source" >&2
+  if ! command -v "$local_python" >/dev/null 2>&1; then
+    echo "$local_python required to merge board self parameter table: $source" >&2
     exit 7
   fi
   mkdir -p "$temp_dir" "$local_backup_dir" "$(dirname "$local_path")"
-  scp -q -P "$board_ssh_port" "$board_ssh:$remote_path" "$tmp"
-  local_path="$local_path" board_path="$tmp" backup_dir="$local_backup_dir" python3 - <<'PY'
+  scp $scp_legacy_protocol_opt -q $board_ssh_legacy_rsa_opts $board_ssh_key_opts -P "$board_ssh_port" "$board_ssh:$remote_path" "$tmp"
+  local_path="$local_path" board_path="$tmp" backup_dir="$local_backup_dir" "$local_python" - <<'PY'
 import os
 import shutil
 import time
@@ -222,7 +269,7 @@ refresh_board_owner_files() {
 }
 
 if [ "$refresh_only" -eq 0 ]; then
-  if ! V5_BOARD_SSH="$board_ssh" V5_BOARD_SSH_PORT="$board_ssh_port" "$repo_root/tools/deploy/precheck_v5_board.sh" "$manifest"; then
+  if ! V5_BOARD_BUILD_DIR="$board_build_dir" V5_BOARD_SSH="$board_ssh" V5_BOARD_SSH_PORT="$board_ssh_port" "$repo_root/tools/deploy/precheck_v5_board.sh" "$manifest"; then
     echo "board precheck failed; deploy not started" >&2
     exit 6
   fi
@@ -238,17 +285,24 @@ fi
 
 archive_dir="$temp_dir"
 archive="$archive_dir/v5_runtime_deploy_$$.tar"
+bundle_dir="$archive_dir/v5_runtime_deploy_bundle_$$"
 mkdir -p "$archive_dir"
 rm -f "$archive"
-(
-  cd "$repo_root"
-  {
-    printf '%s\n' tools/deploy/install_v5_runtime.sh config/deploy/v5_runtime_deploy_manifest.tsv
-    awk -F '\t' 'NF && $1 !~ /^#/ { print $2 }' "$manifest"
-  } | sort -u | tar -cf "$archive" -T -
-)
+rm -rf "$bundle_dir"
+install -d "$bundle_dir/tools/deploy" "$bundle_dir/config/deploy"
+cp -p "$repo_root/tools/deploy/install_v5_runtime.sh" "$bundle_dir/tools/deploy/install_v5_runtime.sh"
+cp -p "$repo_root/config/deploy/v5_runtime_deploy_manifest.tsv" "$bundle_dir/config/deploy/v5_runtime_deploy_manifest.tsv"
+tab=$(printf '\t')
+while IFS="$tab" read -r kind source destination mode extra; do
+  case "$kind" in
+    ''|'#'*) continue ;;
+  esac
+  copy_manifest_source_to_bundle "$kind" "$source" "$bundle_dir"
+done < "$manifest"
+(cd "$bundle_dir" && tar -cf "$archive" .)
+rm -rf "$bundle_dir"
 remote_sh "rm -rf '$remote_root' && mkdir -p '$remote_root'"
-scp -q -P "$board_ssh_port" "$archive" "$board_ssh:$remote_root/v5_runtime_deploy.tar"
+scp $scp_legacy_protocol_opt -q $board_ssh_legacy_rsa_opts $board_ssh_key_opts -P "$board_ssh_port" "$archive" "$board_ssh:$remote_root/v5_runtime_deploy.tar"
 rm -f "$archive"
 remote_sh "tar -m -C '$remote_root' -xf '$remote_root/v5_runtime_deploy.tar' && rm -f '$remote_root/v5_runtime_deploy.tar'"
 remote_sh "V5_REPO_ROOT='$remote_root' '$remote_root/tools/deploy/install_v5_runtime.sh' --apply"

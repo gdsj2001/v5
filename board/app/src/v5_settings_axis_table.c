@@ -1,9 +1,9 @@
 #include "v5_settings_axis_table.h"
 #include "v5_boot_closure.h"
+#include "v5_command_gate_ipc.h"
 #include "v5_settings_parameter_store.h"
 #include "v5_ui_first_frame_guard.h"
 #include "v5_lvgl_remote_display.h"
-#include "v5_settings_apply.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -41,7 +41,6 @@ static const V5SettingsAxisRowSpec kAxisRows[] = {
 #define V5_SLAVE_OPTION_MAX 32U
 #define V5_SLAVE_OPTION_CAP 128U
 #define V5_DROPDOWN_OPTIONS_CAP 1024U
-#define V5_RESIDENT_PARAMETER_MAX_ROWS 192U
 #define V5_RESIDENT_PARAMETER_KEY_CAP 96U
 #define V5_RESIDENT_PARAMETER_VALUE_CAP 512U
 
@@ -64,12 +63,6 @@ typedef struct V5AxisIniRow {
     char backlash[24];
 } V5AxisIniRow;
 
-typedef struct V5ResidentParameterRow {
-    char axis[V5_RESIDENT_PARAMETER_KEY_CAP];
-    char field[V5_RESIDENT_PARAMETER_KEY_CAP];
-    char value[V5_RESIDENT_PARAMETER_VALUE_CAP];
-} V5ResidentParameterRow;
-
 static char g_values[V5_AXIS_TABLE_MAX_ROWS][V5_AXIS_TABLE_MAX_COLS][V5_AXIS_VALUE_CAP];
 static unsigned char g_value_real[V5_AXIS_TABLE_MAX_ROWS][V5_AXIS_TABLE_MAX_COLS];
 static int g_loaded;
@@ -84,6 +77,19 @@ static unsigned int g_slave_option_count;
 static char g_project_root[256] = ".";
 static char g_self_parameter_table_text[V5_BOOT_CLOSURE_TEXT_CAP];
 static char g_drive_parameter_table_text[V5_BOOT_CLOSURE_TEXT_CAP];
+
+typedef struct V5SlaveDriveDisplay {
+    char slave_id[V5_AXIS_VALUE_CAP];
+    char egear_numerator[V5_AXIS_VALUE_CAP];
+    char egear_denominator[V5_AXIS_VALUE_CAP];
+    char write_status[V5_AXIS_VALUE_CAP];
+    unsigned char numerator_real;
+    unsigned char denominator_real;
+    unsigned char status_real;
+} V5SlaveDriveDisplay;
+
+static V5SlaveDriveDisplay g_slave_drive_display[V5_SLAVE_OPTION_MAX];
+static unsigned int g_slave_drive_display_count;
 
 typedef struct V5AxisCellRef {
     unsigned int kind;
@@ -137,6 +143,88 @@ static int same_key(const char *a, const char *b)
     return a && b && strcmp(a, b) == 0;
 }
 
+static int axis_field_requires_integer_value(const char *field_key)
+{
+    return same_key(field_key, "pitch") ||
+           same_key(field_key, "motor_rev") ||
+           same_key(field_key, "load_rev") ||
+           same_key(field_key, "soft_minus") ||
+           same_key(field_key, "soft_plus") ||
+           same_key(field_key, "max_velocity") ||
+           same_key(field_key, "max_acceleration") ||
+           same_key(field_key, "backlash");
+}
+
+static int axis_integer_text_is_valid(const char *value)
+{
+    char buf[64];
+    const char *p;
+    if (!value || !value[0] || strlen(value) >= sizeof(buf)) {
+        return 0;
+    }
+    snprintf(buf, sizeof(buf), "%s", value);
+    trim_in_place(buf);
+    p = buf;
+    if (*p == '+' || *p == '-') {
+        ++p;
+    }
+    if (!isdigit((unsigned char)*p)) {
+        return 0;
+    }
+    while (*p) {
+        if (!isdigit((unsigned char)*p)) {
+            return 0;
+        }
+        ++p;
+    }
+    return 1;
+}
+
+static int axis_number_from_text(const char *value, double *out)
+{
+    char buf[64];
+    char *end;
+    double numeric;
+    if (!value || !value[0] || strlen(value) >= sizeof(buf)) {
+        return 0;
+    }
+    snprintf(buf, sizeof(buf), "%s", value);
+    trim_in_place(buf);
+    numeric = strtod(buf, &end);
+    if (end == buf || *end != '\0' || !isfinite(numeric)) {
+        return 0;
+    }
+    if (out) {
+        *out = numeric;
+    }
+    return 1;
+}
+
+static void axis_format_integer(char *out, size_t cap, double value)
+{
+    double rounded;
+    if (!out || cap == 0U || !isfinite(value)) {
+        return;
+    }
+    rounded = (double)((long long)(value >= 0.0 ? value + 0.5 : value - 0.5));
+    if (rounded == 0.0) {
+        rounded = 0.0;
+    }
+    snprintf(out, cap, "%.0f", rounded);
+}
+
+static const char *axis_display_value_for_field(const char *field_key, const char *value, char *scratch, size_t scratch_cap)
+{
+    double numeric;
+    if (axis_field_requires_integer_value(field_key) &&
+        axis_number_from_text(value, &numeric) &&
+        scratch && scratch_cap > 0U) {
+        axis_format_integer(scratch, scratch_cap, numeric);
+        return scratch;
+    }
+    return value;
+}
+
 static unsigned int axis_letter_index(char axis)
 {
     switch (axis) {
@@ -164,10 +252,13 @@ static int column_index(const char *field_key)
 static void set_value(unsigned int row, const char *field_key, const char *value, int real)
 {
     int c = column_index(field_key);
+    char display[V5_AXIS_VALUE_CAP];
+    const char *stored;
     if (row >= V5_AXIS_TABLE_MAX_ROWS || c < 0 || !value || !value[0]) {
         return;
     }
-    snprintf(g_values[row][(unsigned int)c], V5_AXIS_VALUE_CAP, "%s", value);
+    stored = axis_display_value_for_field(field_key, value, display, sizeof(display));
+    snprintf(g_values[row][(unsigned int)c], V5_AXIS_VALUE_CAP, "%s", stored);
     g_value_real[row][(unsigned int)c] = real ? 1U : 0U;
 }
 
@@ -219,6 +310,15 @@ static void clear_slave_options(void)
     }
 }
 
+static void clear_slave_drive_display(void)
+{
+    unsigned int i;
+    g_slave_drive_display_count = 0U;
+    for (i = 0U; i < V5_SLAVE_OPTION_MAX; ++i) {
+        memset(&g_slave_drive_display[i], 0, sizeof(g_slave_drive_display[i]));
+    }
+}
+
 
 static V5SettingsAxisCommitCallback g_commit_callback;
 static void *g_commit_callback_user_data;
@@ -253,6 +353,7 @@ static void clear_values(void)
     snprintf(g_bus_pulse_value, V5_AXIS_VALUE_CAP, "--");
     g_bus_pulse_real = 0U;
     clear_slave_options();
+    clear_slave_drive_display();
     for (r = 0U; r < V5_G53_ROW_COUNT; ++r) {
         for (c = 0U; c < 3U; ++c) {
             snprintf(g_g53_values[r][c], V5_AXIS_VALUE_CAP, "--");
@@ -396,107 +497,6 @@ static int resident_parameter_table_read_axis(V5SettingsParameterDiskTable table
         }
     }
     return found && out[0];
-}
-
-static int resident_parameter_table_append_rewrite_line(char *out,
-                                                        size_t out_cap,
-                                                        size_t *used,
-                                                        const char *axis,
-                                                        const char *field_key,
-                                                        const char *value)
-{
-    int n;
-    if (!out || out_cap == 0U || !used || !axis || !field_key || !value || *used >= out_cap) {
-        return 0;
-    }
-    n = snprintf(out + *used, out_cap - *used, "%s\t%s\t%s\n", axis, field_key, value);
-    if (n <= 0 || (size_t)n >= out_cap - *used) return 0;
-    *used += (size_t)n;
-    return 1;
-}
-
-static int resident_parameter_table_upsert_write(V5SettingsParameterDiskTable table,
-                                                 const char *axis,
-                                                 const char *field_key,
-                                                 const char *value)
-{
-    char *text_blob = resident_parameter_table_text(table);
-    V5ResidentParameterRow *rows;
-    char *rewritten;
-    const char *cursor;
-    char line[1024];
-    size_t count = 0U;
-    size_t i;
-    size_t used = 0U;
-    int found = 0;
-    int ok = 0;
-    int n;
-    if (!text_blob || !text_blob[0] || !axis || !axis[0] || !field_key || !field_key[0] || !value || !value[0]) {
-        return 0;
-    }
-    rows = (V5ResidentParameterRow *)calloc(V5_RESIDENT_PARAMETER_MAX_ROWS, sizeof(*rows));
-    rewritten = (char *)malloc(V5_BOOT_CLOSURE_TEXT_CAP);
-    if (!rows || !rewritten) goto done;
-
-    cursor = text_blob;
-    while (next_text_line(&cursor, line, sizeof(line))) {
-        char *line_axis;
-        char *line_field;
-        char *line_value;
-        int is_target;
-        int replaced = 0;
-        trim_in_place(line);
-        if (!line[0] || line[0] == '#') continue;
-        line_axis = line;
-        line_field = strchr(line_axis, '\t');
-        if (!line_field) continue;
-        *line_field++ = '\0';
-        line_value = strchr(line_field, '\t');
-        if (!line_value) continue;
-        *line_value++ = '\0';
-        if (strchr(line_value, '\t')) continue;
-        trim_in_place(line_axis);
-        trim_in_place(line_field);
-        trim_in_place(line_value);
-        if (!line_axis[0] || !line_field[0] || !line_value[0]) continue;
-        is_target = (strcmp(line_axis, axis) == 0 && strcmp(line_field, field_key) == 0);
-        for (i = 0U; i < count; ++i) {
-            if (strcmp(rows[i].axis, line_axis) == 0 && strcmp(rows[i].field, line_field) == 0) {
-                snprintf(rows[i].value, sizeof(rows[i].value), "%s", is_target ? value : line_value);
-                replaced = 1;
-                break;
-            }
-        }
-        if (is_target) found = 1;
-        if (replaced) continue;
-        if (count >= V5_RESIDENT_PARAMETER_MAX_ROWS) continue;
-        snprintf(rows[count].axis, sizeof(rows[count].axis), "%s", line_axis);
-        snprintf(rows[count].field, sizeof(rows[count].field), "%s", line_field);
-        snprintf(rows[count].value, sizeof(rows[count].value), "%s", is_target ? value : line_value);
-        ++count;
-    }
-    if (!found) goto done;
-
-    n = snprintf(rewritten, V5_BOOT_CLOSURE_TEXT_CAP, "# schema=v5.settings.parameter_table.tsv.v1\n");
-    if (n <= 0 || (size_t)n >= V5_BOOT_CLOSURE_TEXT_CAP) goto done;
-    used = (size_t)n;
-    for (i = 0U; i < count; ++i) {
-        if (!resident_parameter_table_append_rewrite_line(rewritten,
-                                                          V5_BOOT_CLOSURE_TEXT_CAP,
-                                                          &used,
-                                                          rows[i].axis,
-                                                          rows[i].field,
-                                                          rows[i].value)) {
-            goto done;
-        }
-    }
-    memcpy(text_blob, rewritten, used + 1U);
-    ok = 1;
-
-done:
-    free(rewritten);
-    free(rows);
-    return ok;
 }
 
 static int row_index_for_axis_name(const char *axis)
@@ -686,194 +686,6 @@ static V5SettingsParameterDiskTable g53_disk_table(unsigned int row, unsigned in
     return V5_SETTINGS_PARAMETER_DISK_NONE;
 }
 
-static int strings_equal_numeric_ok(const char *a, const char *b);
-
-static const char *g53_runtime_ini_key(unsigned int row, unsigned int col)
-{
-    if (!g53_value_is_native_geometry_owner(row, col)) return 0;
-    if (row == 0U && col == 1U) return "G53_A_Y";
-    if (row == 0U && col == 2U) return "G53_A_Z";
-    if (row == 1U && col == 0U) return "G53_B_X";
-    if (row == 1U && col == 2U) return "G53_B_Z";
-    if (row == 2U && col == 0U) return "G53_C_X";
-    if (row == 2U && col == 1U) return "G53_C_Y";
-    return 0;
-}
-
-static int build_project_path(char *out, size_t out_cap, const char *rel)
-{
-    int n;
-    if (!out || out_cap == 0U || !rel || !rel[0]) return 0;
-    n = snprintf(out, out_cap, "%s/%s", g_project_root[0] ? g_project_root : ".", rel);
-    return n > 0 && (size_t)n < out_cap;
-}
-
-static int value_text_is_numeric_ini_value(const char *value)
-{
-    char buf[64];
-    char *end;
-    if (!value || !value[0] || strchr(value, '\n') || strchr(value, '\r')) return 0;
-    snprintf(buf, sizeof(buf), "%s", value);
-    trim_in_place(buf);
-    if (!buf[0]) return 0;
-    (void)strtod(buf, &end);
-    while (*end && isspace((unsigned char)*end)) {
-        ++end;
-    }
-    return *end == '\0';
-}
-
-static int ini_probe_section(const char *raw, char *section, size_t section_cap)
-{
-    char probe[256];
-    if (!raw || !section || section_cap == 0U) return 0;
-    snprintf(probe, sizeof(probe), "%s", raw);
-    trim_in_place(probe);
-    if (probe[0] != '[') return 0;
-    section[0] = '\0';
-    return sscanf(probe, "[%31[^]]]", section) == 1;
-}
-
-static int ini_probe_key_matches(const char *raw, const char *key)
-{
-    char probe[256];
-    char *eq;
-    if (!raw || !key || !key[0]) return 0;
-    snprintf(probe, sizeof(probe), "%s", raw);
-    trim_in_place(probe);
-    if (!probe[0] || probe[0] == '#' || probe[0] == ';') return 0;
-    eq = strchr(probe, '=');
-    if (!eq) return 0;
-    *eq = '\0';
-    trim_in_place(probe);
-    return same_key(probe, key);
-}
-
-static void runtime_ini_write_key(FILE *out, const char *ini_key, const char *value, int *last_had_newline)
-{
-    if (!out || !ini_key || !value) return;
-    if (last_had_newline && !*last_had_newline) {
-        fputc('\n', out);
-    }
-    fprintf(out, "%s = %s\n", ini_key, value);
-    if (last_had_newline) {
-        *last_had_newline = 1;
-    }
-}
-
-static int value_text_is_safe_ini_value(const char *value)
-{
-    char buf[64];
-    if (!value || !value[0] || strchr(value, '\n') || strchr(value, '\r')) return 0;
-    snprintf(buf, sizeof(buf), "%s", value);
-    trim_in_place(buf);
-    return buf[0] && strchr(buf, '[') == 0 && strchr(buf, ']') == 0;
-}
-
-static int runtime_ini_read_section_value(const char *section_name, const char *ini_key, char *out, size_t out_cap)
-{
-    char path[512];
-    char raw[512];
-    int in_section = 0;
-    FILE *fp;
-    if (!section_name || !section_name[0] || !ini_key || !out || out_cap == 0U || !build_project_path(path, sizeof(path), "linuxcnc/ini/v5_bus.ini")) return 0;
-    out[0] = '\0';
-    fp = fopen(path, "rb");
-    if (!fp) return 0;
-    while (fgets(raw, sizeof(raw), fp)) {
-        char section[32];
-        if (ini_probe_section(raw, section, sizeof(section))) {
-            in_section = same_key(section, section_name);
-            continue;
-        }
-        if (in_section && ini_probe_key_matches(raw, ini_key)) {
-            char *eq = strchr(raw, '=');
-            if (!eq) {
-                fclose(fp);
-                return 0;
-            }
-            snprintf(out, out_cap, "%s", eq + 1);
-            trim_in_place(out);
-            fclose(fp);
-            return out[0] != '\0';
-        }
-    }
-    fclose(fp);
-    return 0;
-}
-
-static int runtime_ini_write_section_value(const char *section_name, const char *ini_key, const char *value, int numeric_required, char *readback, size_t readback_cap)
-{
-    char path[512];
-    char tmp_path[544];
-    char raw[512];
-    FILE *in;
-    FILE *out;
-    int in_section = 0;
-    int saw_section = 0;
-    int wrote_key = 0;
-    int last_had_newline = 1;
-    if (!section_name || !section_name[0] || !ini_key || !ini_key[0] ||
-        (numeric_required ? !value_text_is_numeric_ini_value(value) : !value_text_is_safe_ini_value(value)) ||
-        !build_project_path(path, sizeof(path), "linuxcnc/ini/v5_bus.ini")) {
-        return 0;
-    }
-    if (snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path) <= 0 || strlen(tmp_path) >= sizeof(tmp_path)) {
-        return 0;
-    }
-    in = fopen(path, "rb");
-    if (!in) return 0;
-    out = fopen(tmp_path, "wb");
-    if (!out) {
-        fclose(in);
-        return 0;
-    }
-    while (fgets(raw, sizeof(raw), in)) {
-        char section[32];
-        size_t len = strlen(raw);
-        if (ini_probe_section(raw, section, sizeof(section))) {
-            if (in_section && !wrote_key) {
-                runtime_ini_write_key(out, ini_key, value, &last_had_newline);
-                wrote_key = 1;
-            }
-            in_section = same_key(section, section_name);
-            if (in_section) saw_section = 1;
-        }
-        if (in_section && ini_probe_key_matches(raw, ini_key)) {
-            runtime_ini_write_key(out, ini_key, value, &last_had_newline);
-            wrote_key = 1;
-            continue;
-        }
-        fputs(raw, out);
-        last_had_newline = (len == 0U || raw[len - 1U] == '\n') ? 1 : 0;
-    }
-    if (saw_section && in_section && !wrote_key) {
-        runtime_ini_write_key(out, ini_key, value, &last_had_newline);
-        wrote_key = 1;
-    }
-    fclose(in);
-    if (fclose(out) != 0 || !saw_section || !wrote_key) {
-        remove(tmp_path);
-        return 0;
-    }
-    if (rename(tmp_path, path) != 0) {
-        remove(tmp_path);
-        return 0;
-    }
-    if (!runtime_ini_read_section_value(section_name, ini_key, readback, readback_cap)) return 0;
-    return numeric_required ? strings_equal_numeric_ok(readback, value) : strcmp(readback, value) == 0;
-}
-
-static int runtime_ini_read_rtcp_value(const char *ini_key, char *out, size_t out_cap)
-{
-    return runtime_ini_read_section_value("RTCP", ini_key, out, out_cap);
-}
-
-static int runtime_ini_write_rtcp_value(const char *ini_key, const char *value, char *readback, size_t readback_cap)
-{
-    return runtime_ini_write_section_value("RTCP", ini_key, value, 1, readback, readback_cap);
-}
-
 static void format_double_compact(char *out, size_t cap, double value)
 {
     if (!out || cap == 0U) return;
@@ -884,6 +696,30 @@ static int g53_field_id(unsigned int row, unsigned int col, char *out, size_t ou
 {
     const char *key = g53_field_key(row, col);
     if (!key || !out || out_cap == 0U) return 0;
+    if (row == 0U && col == 1U) {
+        snprintf(out, out_cap, "g53_A_center_y");
+        return 1;
+    }
+    if (row == 0U && col == 2U) {
+        snprintf(out, out_cap, "g53_A_center_z");
+        return 1;
+    }
+    if (row == 1U && col == 0U) {
+        snprintf(out, out_cap, "g53_B_center_x");
+        return 1;
+    }
+    if (row == 1U && col == 2U) {
+        snprintf(out, out_cap, "g53_B_center_z");
+        return 1;
+    }
+    if (row == 2U && col == 0U) {
+        snprintf(out, out_cap, "g53_C_center_x");
+        return 1;
+    }
+    if (row == 2U && col == 1U) {
+        snprintf(out, out_cap, "g53_C_center_y");
+        return 1;
+    }
     snprintf(out, out_cap, "g53_%s", key);
     return 1;
 }
@@ -1152,6 +988,109 @@ static int axis_row_slave_is_nat(unsigned int row)
     return slave_id_is_nat(slave_id);
 }
 
+static int drive_display_field_index(const char *field_key)
+{
+    if (same_key(field_key, "egear_numerator")) return 0;
+    if (same_key(field_key, "egear_denominator")) return 1;
+    if (same_key(field_key, "write_status")) return 2;
+    return -1;
+}
+
+static int drive_display_field_is_slave_owned(const char *field_key)
+{
+    return drive_display_field_index(field_key) >= 0;
+}
+
+static void drive_display_slave_key(const char *slave_id, char *out, size_t cap)
+{
+    if (!out || cap == 0U) return;
+    out[0] = '\0';
+    if (!slave_id || !slave_id[0] || slave_id_is_nat(slave_id)) return;
+    snprintf(out, cap, "SLAVE_%s", slave_id);
+}
+
+static V5SlaveDriveDisplay *slave_drive_display_for_id(const char *slave_id, int create)
+{
+    unsigned int i;
+    if (!slave_id || !slave_id[0] || slave_id_is_nat(slave_id)) {
+        return 0;
+    }
+    for (i = 0U; i < g_slave_drive_display_count; ++i) {
+        if (strcmp(g_slave_drive_display[i].slave_id, slave_id) == 0) {
+            return &g_slave_drive_display[i];
+        }
+    }
+    if (!create || g_slave_drive_display_count >= V5_SLAVE_OPTION_MAX) {
+        return 0;
+    }
+    snprintf(g_slave_drive_display[g_slave_drive_display_count].slave_id,
+             sizeof(g_slave_drive_display[g_slave_drive_display_count].slave_id),
+             "%s",
+             slave_id);
+    return &g_slave_drive_display[g_slave_drive_display_count++];
+}
+
+static void slave_drive_display_set_field(V5SlaveDriveDisplay *display,
+                                          const char *field_key,
+                                          const char *value,
+                                          int real)
+{
+    if (!display || !field_key || !value || !value[0]) return;
+    if (same_key(field_key, "egear_numerator")) {
+        snprintf(display->egear_numerator, sizeof(display->egear_numerator), "%s", value);
+        display->numerator_real = real ? 1U : 0U;
+    } else if (same_key(field_key, "egear_denominator")) {
+        snprintf(display->egear_denominator, sizeof(display->egear_denominator), "%s", value);
+        display->denominator_real = real ? 1U : 0U;
+    } else if (same_key(field_key, "write_status")) {
+        snprintf(display->write_status, sizeof(display->write_status), "%s", value);
+        display->status_real = real ? 1U : 0U;
+    }
+}
+
+static void cache_drive_display_row_for_slave(const char *slave_id, const char *row_key)
+{
+    static const char *fields[] = {"egear_numerator", "egear_denominator", "write_status"};
+    V5SlaveDriveDisplay *display;
+    char value[V5_AXIS_VALUE_CAP];
+    unsigned int i;
+    if (!slave_id || !slave_id[0] || slave_id_is_nat(slave_id) || !row_key || !row_key[0]) {
+        return;
+    }
+    display = slave_drive_display_for_id(slave_id, 1);
+    if (!display) return;
+    for (i = 0U; i < sizeof(fields) / sizeof(fields[0]); ++i) {
+        if (resident_parameter_table_read_axis(V5_SETTINGS_PARAMETER_DISK_DRIVE,
+                                               row_key,
+                                               fields[i],
+                                               value,
+                                               sizeof(value))) {
+            slave_drive_display_set_field(display, fields[i], value, 1);
+        }
+    }
+}
+
+static void apply_drive_display_for_row(unsigned int row)
+{
+    char slave_id[V5_AXIS_VALUE_CAP];
+    V5SlaveDriveDisplay *display;
+    if (row >= v5_settings_axis_table_row_count()) {
+        return;
+    }
+    slave_id[0] = '\0';
+    slave_option_extract_id(row_value(row, "slave"), slave_id, sizeof(slave_id));
+    display = slave_drive_display_for_id(slave_id, 0);
+    if (!display || slave_id_is_nat(slave_id)) {
+        set_value(row, "egear_numerator", "--", 0);
+        set_value(row, "egear_denominator", "--", 0);
+        set_value(row, "write_status", "--", 0);
+        return;
+    }
+    set_value(row, "egear_numerator", display->egear_numerator[0] ? display->egear_numerator : "--", display->numerator_real);
+    set_value(row, "egear_denominator", display->egear_denominator[0] ? display->egear_denominator : "--", display->denominator_real);
+    set_value(row, "write_status", display->write_status[0] ? display->write_status : "--", display->status_real);
+}
+
 static int axis_cell_disabled_by_nat(unsigned int row, unsigned int col)
 {
     return axis_row_slave_is_nat(row) && !axis_column_is_slave(col);
@@ -1185,6 +1124,7 @@ static int should_read_disk_table_for_column(V5SettingsParameterDiskTable table,
     if (!col || !col->field_key) return 0;
     if (strcmp(col->field_key, "slave") == 0) return table == V5_SETTINGS_PARAMETER_DISK_SELF;
     if (strcmp(col->field_key, "encoder_bits") == 0) return table == V5_SETTINGS_PARAMETER_DISK_DRIVE;
+    if (drive_display_field_is_slave_owned(col->field_key)) return 0;
     return disk_table_for_column(col) == table;
 }
 
@@ -1206,6 +1146,34 @@ static void load_disk_parameter_table(V5SettingsParameterDiskTable table)
     }
 }
 
+static void load_slave_drive_display_cache(void)
+{
+    unsigned int r;
+    clear_slave_drive_display();
+    for (r = 0U; r < v5_settings_axis_table_row_count(); ++r) {
+        char slave_id[V5_AXIS_VALUE_CAP];
+        char slave_key[48];
+        const char *slave_value = row_value(r, "slave");
+        slave_id[0] = '\0';
+        slave_key[0] = '\0';
+        slave_option_extract_id(slave_value, slave_id, sizeof(slave_id));
+        if (!slave_id[0] || slave_id_is_nat(slave_id)) {
+            continue;
+        }
+        drive_display_slave_key(slave_id, slave_key, sizeof(slave_key));
+        cache_drive_display_row_for_slave(slave_id, kAxisRows[r].axis);
+        cache_drive_display_row_for_slave(slave_id, slave_key);
+    }
+}
+
+static void apply_drive_display_for_all_rows(void)
+{
+    unsigned int r;
+    for (r = 0U; r < v5_settings_axis_table_row_count(); ++r) {
+        apply_drive_display_for_row(r);
+    }
+}
+
 void v5_settings_axis_table_load_boot_closure(const V5BootClosure *closure)
 {
     if (closure && closure->project_root[0]) {
@@ -1222,6 +1190,8 @@ void v5_settings_axis_table_load_boot_closure(const V5BootClosure *closure)
     load_self_setting_parameter_table();
     load_disk_parameter_table(V5_SETTINGS_PARAMETER_DISK_SELF);
     load_disk_parameter_table(V5_SETTINGS_PARAMETER_DISK_DRIVE);
+    load_slave_drive_display_cache();
+    apply_drive_display_for_all_rows();
     load_g53_disk_parameter_tables();
     mark_missing_encoder_bits_unavailable();
     g_loaded = 1;
@@ -1608,19 +1578,6 @@ int v5_settings_axis_table_start_axis_zero(unsigned int row, const char *home_of
 }
 
 
-static int strings_equal_numeric_ok(const char *a, const char *b)
-{
-    char *ea;
-    char *eb;
-    double da;
-    double db;
-    if (!a || !b) return 0;
-    if (strcmp(a, b) == 0) return 1;
-    da = strtod(a, &ea);
-    db = strtod(b, &eb);
-    return ea != a && eb != b && *ea == '\0' && *eb == '\0' && da == db;
-}
-
 static void set_axis_value_from_double(unsigned int row, const char *field_key, double value)
 {
     char text[V5_AXIS_VALUE_CAP];
@@ -1634,29 +1591,29 @@ static void set_axis_value_from_double(unsigned int row, const char *field_key, 
 int v5_settings_axis_table_commit_g53_value(unsigned int row, unsigned int col, const char *value)
 {
     const char *key;
-    V5SettingsParameterDiskTable table;
-    char readback[V5_AXIS_VALUE_CAP];
+    V5SettingsApplyAxisCommitRequest request;
+    V5SettingsApplyAxisCommitResult commit_result;
     char id[96];
     int ok;
     if (!v5_settings_axis_table_g53_value_is_editable(row, col) || !value || !value[0]) return 0;
     key = g53_field_key(row, col);
     if (!key) return 0;
-    if (g53_value_is_native_geometry_owner(row, col)) {
-        const char *ini_key = g53_runtime_ini_key(row, col);
-        ok = runtime_ini_write_rtcp_value(ini_key, value, readback, sizeof(readback));
-    } else {
-        table = g53_disk_table(row, col);
-        if (table == V5_SETTINGS_PARAMETER_DISK_NONE) return 0;
-        ok = v5_settings_parameter_store_write_axis(g_project_root, table, "G53", key, value);
-        ok = ok && resident_parameter_table_upsert_write(table, "G53", key, value);
-        ok = ok && resident_parameter_table_read_axis(table, "G53", key, readback, sizeof(readback));
-        ok = ok && strings_equal_numeric_ok(readback, value);
-    }
-    if (ok) {
-        set_g53_value(row, col, readback, 1);
-    }
     if (!g53_field_id(row, col, id, sizeof(id))) {
         snprintf(id, sizeof(id), "g53_%u_%u", row, col);
+    }
+    memset(&request, 0, sizeof(request));
+    memset(&commit_result, 0, sizeof(commit_result));
+    request.project_root = g_project_root;
+    request.axis = "G53";
+    request.axis_index = row;
+    request.field_key = key;
+    request.field_name = id;
+    request.value_text = value;
+    request.owner_generation = settings_axis_owner_generation(id);
+    request.readback_token = settings_axis_readback_token(id, value);
+    ok = v5_command_gate_settings_axis_commit(&request, &commit_result, 3000U);
+    if (ok) {
+        set_g53_value(row, col, commit_result.readback_value, 1);
     }
     log_axis_param_event(id, value, ok);
     if (ok) {
@@ -1688,6 +1645,10 @@ int v5_settings_axis_table_commit_value(unsigned int row, unsigned int col, cons
         (strcmp(value, "NAT") == 0 || strcmp(value, "--") == 0)) {
         return 0;
     }
+    if (axis_field_requires_integer_value(col_spec->field_key) &&
+        !axis_integer_text_is_valid(value)) {
+        return 0;
+    }
     if (!v5_settings_axis_table_field_matches_owner(row_spec, col_spec)) {
         return 0;
     }
@@ -1704,7 +1665,7 @@ int v5_settings_axis_table_commit_value(unsigned int row, unsigned int col, cons
     request.value_text = value;
     request.owner_generation = settings_axis_owner_generation(id);
     request.readback_token = settings_axis_readback_token(id, value);
-    ok = v5_settings_apply_commit_axis_value(&request, &commit_result);
+    ok = v5_command_gate_settings_axis_commit(&request, &commit_result, 3000U);
     if (ok && commit_result.scale_chain.raw_limits_recomputed) {
         set_axis_value_from_double(row, "soft_minus", commit_result.scale_chain.raw_min_limit);
         set_axis_value_from_double(row, "soft_plus", commit_result.scale_chain.raw_max_limit);
@@ -1714,6 +1675,9 @@ int v5_settings_axis_table_commit_value(unsigned int row, unsigned int col, cons
     }
     if (ok) {
         set_value(row, col_spec->field_key, commit_result.readback_value, 1);
+        if (same_key(col_spec->field_key, "slave")) {
+            apply_drive_display_for_row(row);
+        }
     }
     {
         log_axis_param_event(id, value, ok);
@@ -1961,13 +1925,12 @@ static void dropdown_changed_cb(lv_event_t *event)
     }
 }
 
-static void dropdown_pressed_cb(lv_event_t *event)
+static void prepare_dropdown_options_for_ref(V5AxisCellRef *ref)
 {
-    V5AxisCellRef *ref = (V5AxisCellRef *)lv_event_get_user_data(event);
     const V5SettingsAxisColumnSpec *col;
     char options[V5_DROPDOWN_OPTIONS_CAP];
     const char *value;
-    if (!ref || !ref->obj || lv_event_get_code(event) != LV_EVENT_PRESSED) {
+    if (!ref || !ref->obj) {
         return;
     }
     if (ref->col >= v5_settings_axis_table_column_count()) return;
@@ -1982,10 +1945,34 @@ static void dropdown_pressed_cb(lv_event_t *event)
     }
 }
 
+static void dropdown_pressed_cb(lv_event_t *event)
+{
+    V5AxisCellRef *ref = (V5AxisCellRef *)lv_event_get_user_data(event);
+    if (lv_event_get_code(event) != LV_EVENT_PRESSED) {
+        return;
+    }
+    prepare_dropdown_options_for_ref(ref);
+}
+
+static void dropdown_cell_hit_cb(lv_event_t *event)
+{
+    V5AxisCellRef *ref = (V5AxisCellRef *)lv_event_get_user_data(event);
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED || !ref || !ref->obj) {
+        return;
+    }
+    if (v5_settings_axis_table_cell_is_disabled(ref->row, ref->col)) {
+        return;
+    }
+    prepare_dropdown_options_for_ref(ref);
+    lv_dropdown_open(ref->obj);
+}
+
 static void dropdown_cell(lv_obj_t *parent, unsigned int row, unsigned int col_index, int x, int y, int w, int h, const char *text, const V5SettingsAxisColumnSpec *col, lv_color_t text_color, const char *debug_id)
 {
     char options[V5_DROPDOWN_OPTIONS_CAP];
     lv_obj_t *dd;
+    lv_obj_t *hit;
+    V5AxisCellRef *ref;
     (void)debug_id;
     if (!dropdown_options_for_cell(col, row, text, options, sizeof(options))) {
         value_cell(parent, x, y, w, h, text, text_color, 0, debug_id);
@@ -2002,15 +1989,20 @@ static void dropdown_cell(lv_obj_t *parent, unsigned int row, unsigned int col_i
     lv_obj_set_style_text_color(dd, text_color, 0);
     lv_obj_set_style_pad_all(dd, 0, 0);
     lv_obj_clear_flag(dd, LV_OBJ_FLAG_SCROLLABLE);
-    {
-        V5AxisCellRef *ref;
-        lv_dropdown_set_options(dd, options);
-        lv_dropdown_set_selected(dd, (uint16_t)dropdown_selected_for_value(options, text));
-        ref = store_cell_ref(V5_CELL_KIND_AXIS, row, col_index, dd, 0, debug_id);
-        lv_obj_add_event_cb(dd, dropdown_pressed_cb, LV_EVENT_PRESSED, ref);
-        lv_obj_add_event_cb(dd, dropdown_changed_cb, LV_EVENT_VALUE_CHANGED, ref);
-        apply_axis_cell_state(dd, 0, row, col_index);
-    }
+    lv_dropdown_set_options(dd, options);
+    lv_dropdown_set_selected(dd, (uint16_t)dropdown_selected_for_value(options, text));
+    ref = store_cell_ref(V5_CELL_KIND_AXIS, row, col_index, dd, 0, debug_id);
+    lv_obj_add_event_cb(dd, dropdown_pressed_cb, LV_EVENT_PRESSED, ref);
+    lv_obj_add_event_cb(dd, dropdown_changed_cb, LV_EVENT_VALUE_CHANGED, ref);
+    apply_axis_cell_state(dd, 0, row, col_index);
+
+    hit = panel(parent, x, y, w, h, 0, 0, 0);
+    lv_obj_set_style_bg_opa(hit, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(hit, 0, 0);
+    lv_obj_add_flag(hit, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(hit, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(hit, dropdown_cell_hit_cb, LV_EVENT_CLICKED, ref);
+    lv_obj_move_foreground(hit);
 }
 
 static void close_keyboard_overlay_with_refresh(V5AxisCellRef *refresh_ref)
@@ -2081,6 +2073,15 @@ static void keyboard_toggle_sign(void)
     refresh_keyboard_value_label();
 }
 
+static int keyboard_ref_uses_integer_axis_value(void)
+{
+    if (!g_keyboard_ref || g_keyboard_ref->kind != V5_CELL_KIND_AXIS ||
+        g_keyboard_ref->col >= v5_settings_axis_table_column_count()) {
+        return 0;
+    }
+    return axis_field_requires_integer_value(kAxisColumns[g_keyboard_ref->col].field_key);
+}
+
 static void keyboard_commit_value(void)
 {
     int ok;
@@ -2127,6 +2128,9 @@ static void keyboard_key_event_cb(lv_event_t *event)
         refresh_keyboard_value_label();
     } else if (strcmp(key, "+/-") == 0) {
         keyboard_toggle_sign();
+    } else if (keyboard_ref_uses_integer_axis_value() &&
+               (strcmp(key, ".") == 0 || strcmp(key, "/") == 0 || strcmp(key, "x") == 0)) {
+        return;
     } else {
         keyboard_append_text(key);
     }

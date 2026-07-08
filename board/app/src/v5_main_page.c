@@ -34,6 +34,59 @@ static lv_color_t rgb(uint8_t r, uint8_t g, uint8_t b)
     return lv_color_make(r, g, b);
 }
 
+static void set_label_text_if_changed(lv_obj_t *label, const char *text)
+{
+    const char *safe = text ? text : "";
+    const char *current;
+    if (!label) {
+        return;
+    }
+    current = lv_label_get_text(label);
+    if (!current || strcmp(current, safe) != 0) {
+        lv_label_set_text(label, safe);
+    }
+}
+
+static int point_equal(const lv_point_t *a, const lv_point_t *b)
+{
+    return a && b && a->x == b->x && a->y == b->y;
+}
+
+static int points_equal(const lv_point_t *a, const lv_point_t *b, unsigned int count)
+{
+    unsigned int i;
+    if (!a || !b) {
+        return 0;
+    }
+    for (i = 0U; i < count; ++i) {
+        if (!point_equal(&a[i], &b[i])) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static void add_hidden_flag_if_visible(lv_obj_t *obj)
+{
+    if (obj && !lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN)) {
+        lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void clear_hidden_flag_if_hidden(lv_obj_t *obj)
+{
+    if (obj && lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN)) {
+        lv_obj_clear_flag(obj, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void set_obj_pos_if_changed(lv_obj_t *obj, lv_coord_t x, lv_coord_t y)
+{
+    if (obj && (lv_obj_get_x(obj) != x || lv_obj_get_y(obj) != y)) {
+        lv_obj_set_pos(obj, x, y);
+    }
+}
+
 static lv_coord_t clamp_coord(double value, lv_coord_t min_value, lv_coord_t max_value)
 {
     if (value < (double)min_value) {
@@ -523,11 +576,11 @@ static void update_toolpath_status_text(V5MainPage *page)
     }
     if (page->toolpath_summary_label &&
         format_toolpath_g53_ac_text(text, sizeof(text), &page->native_readback)) {
-        lv_label_set_text(page->toolpath_summary_label, text);
+        set_label_text_if_changed(page->toolpath_summary_label, text);
     }
     if (page->toolpath_detail_label &&
         format_toolpath_wcs_offset_text(text, sizeof(text), &page->native_readback)) {
-        lv_label_set_text(page->toolpath_detail_label, text);
+        set_label_text_if_changed(page->toolpath_detail_label, text);
     }
 }
 
@@ -538,7 +591,7 @@ static void update_main_page_wcs_header(V5MainPage *page)
         return;
     }
     snprintf(text, sizeof(text), "加工 %s", main_page_wcs_code(&page->native_readback));
-    lv_label_set_text(page->wcs_header_label, text);
+    set_label_text_if_changed(page->wcs_header_label, text);
 }
 
 static void clear_obj_style(lv_obj_t *obj)
@@ -602,13 +655,13 @@ static void set_toolpath_v3_dot_center(lv_obj_t *dot, const V5ToolpathScreenPoin
         return;
     }
     if (!valid || !point) {
-        lv_obj_add_flag(dot, LV_OBJ_FLAG_HIDDEN);
+        add_hidden_flag_if_visible(dot);
         return;
     }
     x = V5_TOOLPATH_X + clamp_coord(point->x, half, V5_TOOLPATH_W - half);
     y = V5_TOOLPATH_Y + clamp_coord(point->y, half, V5_TOOLPATH_H - half);
-    lv_obj_set_pos(dot, x - half, y - half);
-    lv_obj_clear_flag(dot, LV_OBJ_FLAG_HIDDEN);
+    set_obj_pos_if_changed(dot, x - half, y - half);
+    clear_hidden_flag_if_hidden(dot);
 }
 
 
@@ -621,13 +674,13 @@ static void set_toolpath_v3_center_dot(lv_obj_t *dot, const V5ToolpathScreenPoin
         return;
     }
     if (!valid || !point) {
-        lv_obj_add_flag(dot, LV_OBJ_FLAG_HIDDEN);
+        add_hidden_flag_if_visible(dot);
         return;
     }
     x = V5_TOOLPATH_X + clamp_coord(point->x, half, V5_TOOLPATH_W - half);
     y = V5_TOOLPATH_Y + clamp_coord(point->y, half, V5_TOOLPATH_H - half);
-    lv_obj_set_pos(dot, x - half, y - half);
-    lv_obj_clear_flag(dot, LV_OBJ_FLAG_HIDDEN);
+    set_obj_pos_if_changed(dot, x - half, y - half);
+    clear_hidden_flag_if_hidden(dot);
 }
 
 static const char *toolpath_wcs_name_for_index(unsigned int index)
@@ -652,7 +705,7 @@ static lv_obj_t *make_toolpath_v3_line(lv_obj_t *parent, uint8_t r, uint8_t g, u
 
 static void hide_toolpath_line(lv_obj_t *line)
 {
-    if (line) {
+    if (line && !lv_obj_has_flag(line, LV_OBJ_FLAG_HIDDEN)) {
         lv_obj_add_flag(line, LV_OBJ_FLAG_HIDDEN);
         lv_line_set_points(line, 0, 0);
     }
@@ -685,10 +738,17 @@ static void set_toolpath_axis_line(lv_obj_t *line, lv_point_t points[2], const V
         hide_toolpath_line(line);
         return;
     }
-    points[0] = toolpath_local_point(&clipped_start);
-    points[1] = toolpath_local_point(&clipped_end);
-    lv_line_set_points(line, points, 2);
-    lv_obj_clear_flag(line, LV_OBJ_FLAG_HIDDEN);
+    {
+        lv_point_t next[2];
+        next[0] = toolpath_local_point(&clipped_start);
+        next[1] = toolpath_local_point(&clipped_end);
+        if (lv_obj_has_flag(line, LV_OBJ_FLAG_HIDDEN) || !points_equal(points, next, 2U)) {
+            points[0] = next[0];
+            points[1] = next[1];
+            lv_line_set_points(line, points, 2);
+        }
+    }
+    clear_hidden_flag_if_hidden(line);
 }
 
 static int main_page_tool_length_mm(const V5MainPage *page, double *out)
@@ -750,18 +810,24 @@ static void set_toolpath_origin_cross(lv_obj_t *line, lv_point_t points[5], cons
     }
     x = clamp_coord(origin->x, half, V5_TOOLPATH_W - half);
     y = clamp_coord(origin->y, half, V5_TOOLPATH_H - half);
-    points[0].x = x;
-    points[0].y = y - half;
-    points[1].x = x + half;
-    points[1].y = y;
-    points[2].x = x;
-    points[2].y = y + half;
-    points[3].x = x - half;
-    points[3].y = y;
-    points[4].x = x;
-    points[4].y = y - half;
-    lv_line_set_points(line, points, 5);
-    lv_obj_clear_flag(line, LV_OBJ_FLAG_HIDDEN);
+    {
+        lv_point_t next[5];
+        next[0].x = x;
+        next[0].y = y - half;
+        next[1].x = x + half;
+        next[1].y = y;
+        next[2].x = x;
+        next[2].y = y + half;
+        next[3].x = x - half;
+        next[3].y = y;
+        next[4].x = x;
+        next[4].y = y - half;
+        if (lv_obj_has_flag(line, LV_OBJ_FLAG_HIDDEN) || !points_equal(points, next, 5U)) {
+            memcpy(points, next, sizeof(next));
+            lv_line_set_points(line, points, 5);
+        }
+    }
+    clear_hidden_flag_if_hidden(line);
 }
 
 static void hide_toolpath_ac_geometry(V5MainPage *page)
@@ -772,18 +838,10 @@ static void hide_toolpath_ac_geometry(V5MainPage *page)
     hide_toolpath_line(page->toolpath_a_axis_line);
     hide_toolpath_line(page->toolpath_c_axis_line);
     hide_toolpath_line(page->toolpath_holder_line);
-    if (page->toolpath_a_center_line) {
-        lv_obj_add_flag(page->toolpath_a_center_line, LV_OBJ_FLAG_HIDDEN);
-    }
-    if (page->toolpath_c_center_line) {
-        lv_obj_add_flag(page->toolpath_c_center_line, LV_OBJ_FLAG_HIDDEN);
-    }
-    if (page->toolpath_a_label) {
-        lv_obj_add_flag(page->toolpath_a_label, LV_OBJ_FLAG_HIDDEN);
-    }
-    if (page->toolpath_c_label) {
-        lv_obj_add_flag(page->toolpath_c_label, LV_OBJ_FLAG_HIDDEN);
-    }
+    add_hidden_flag_if_visible(page->toolpath_a_center_line);
+    add_hidden_flag_if_visible(page->toolpath_c_center_line);
+    add_hidden_flag_if_visible(page->toolpath_a_label);
+    add_hidden_flag_if_visible(page->toolpath_c_label);
 }
 
 
@@ -800,8 +858,8 @@ static void hide_toolpath_program_wcs_objects(V5MainPage *page)
             hide_toolpath_line(page->toolpath_program_wcs_axis_lines[wcs][axis]);
         }
         if (page->toolpath_program_wcs_labels[wcs]) {
-            lv_label_set_text(page->toolpath_program_wcs_labels[wcs], "");
-            lv_obj_add_flag(page->toolpath_program_wcs_labels[wcs], LV_OBJ_FLAG_HIDDEN);
+            set_label_text_if_changed(page->toolpath_program_wcs_labels[wcs], "");
+            add_hidden_flag_if_visible(page->toolpath_program_wcs_labels[wcs]);
         }
     }
 }
@@ -928,14 +986,14 @@ static void set_toolpath_ac_geometry_from_basis(
     set_toolpath_v3_center_dot(page->toolpath_a_center_line, &ac_center[0], 1);
     set_toolpath_v3_center_dot(page->toolpath_c_center_line, &ac_center[1], 1);
     if (page->toolpath_a_label) {
-        lv_label_set_text(page->toolpath_a_label, "A");
-        lv_obj_set_pos(page->toolpath_a_label, V5_TOOLPATH_X + clamp_coord(ac_axis_end[0].x + 4.0, 0, V5_TOOLPATH_W - 24), V5_TOOLPATH_Y + clamp_coord(ac_axis_end[0].y - 12.0, 0, V5_TOOLPATH_H - 22));
-        lv_obj_clear_flag(page->toolpath_a_label, LV_OBJ_FLAG_HIDDEN);
+        set_label_text_if_changed(page->toolpath_a_label, "A");
+        set_obj_pos_if_changed(page->toolpath_a_label, V5_TOOLPATH_X + clamp_coord(ac_axis_end[0].x + 4.0, 0, V5_TOOLPATH_W - 24), V5_TOOLPATH_Y + clamp_coord(ac_axis_end[0].y - 12.0, 0, V5_TOOLPATH_H - 22));
+        clear_hidden_flag_if_hidden(page->toolpath_a_label);
     }
     if (page->toolpath_c_label) {
-        lv_label_set_text(page->toolpath_c_label, "C");
-        lv_obj_set_pos(page->toolpath_c_label, V5_TOOLPATH_X + clamp_coord(ac_axis_end[1].x + 8.0, 0, V5_TOOLPATH_W - 20), V5_TOOLPATH_Y + clamp_coord(ac_axis_end[1].y - 10.0, 0, V5_TOOLPATH_H - 22));
-        lv_obj_clear_flag(page->toolpath_c_label, LV_OBJ_FLAG_HIDDEN);
+        set_label_text_if_changed(page->toolpath_c_label, "C");
+        set_obj_pos_if_changed(page->toolpath_c_label, V5_TOOLPATH_X + clamp_coord(ac_axis_end[1].x + 8.0, 0, V5_TOOLPATH_W - 20), V5_TOOLPATH_Y + clamp_coord(ac_axis_end[1].y - 10.0, 0, V5_TOOLPATH_H - 22));
+        clear_hidden_flag_if_hidden(page->toolpath_c_label);
     }
 }
 
@@ -994,18 +1052,18 @@ static void draw_toolpath_boot_scaffold(V5MainPage *page)
     set_toolpath_v3_dot_center(page->toolpath_holder_marker_line, &mcs_origin, 1);
 
     if (page->toolpath_mcs_label) {
-        lv_label_set_text(page->toolpath_mcs_label, "MCS");
-        lv_obj_clear_flag(page->toolpath_mcs_label, LV_OBJ_FLAG_HIDDEN);
+        set_label_text_if_changed(page->toolpath_mcs_label, "MCS");
+        clear_hidden_flag_if_hidden(page->toolpath_mcs_label);
     }
     if (page->toolpath_wcs_label) {
-        lv_label_set_text(page->toolpath_wcs_label, "WCS");
-        lv_obj_set_pos(page->toolpath_wcs_label, 18, 326);
-        lv_obj_clear_flag(page->toolpath_wcs_label, LV_OBJ_FLAG_HIDDEN);
+        set_label_text_if_changed(page->toolpath_wcs_label, "WCS");
+        set_obj_pos_if_changed(page->toolpath_wcs_label, 18, 326);
+        clear_hidden_flag_if_hidden(page->toolpath_wcs_label);
     }
     for (i = 0U; i < 3U; ++i) {
         if (page->toolpath_mcs_axis_labels[i]) {
-            lv_label_set_text(page->toolpath_mcs_axis_labels[i], "");
-            lv_obj_clear_flag(page->toolpath_mcs_axis_labels[i], LV_OBJ_FLAG_HIDDEN);
+            set_label_text_if_changed(page->toolpath_mcs_axis_labels[i], "");
+            clear_hidden_flag_if_hidden(page->toolpath_mcs_axis_labels[i]);
         }
     }
 }
@@ -1079,8 +1137,8 @@ static void update_toolpath_state_lines(V5MainPage *page, const V5UiStatusView *
     wcs_valid = mcs_valid && v5_native_readback_wcs_offset_known(&page->native_readback);
     if (!wcs_valid) {
         if (page->toolpath_wcs_label) {
-            lv_label_set_text(page->toolpath_wcs_label, "WCS");
-            lv_obj_clear_flag(page->toolpath_wcs_label, LV_OBJ_FLAG_HIDDEN);
+            set_label_text_if_changed(page->toolpath_wcs_label, "WCS");
+            clear_hidden_flag_if_hidden(page->toolpath_wcs_label);
         }
     } else {
         const double *active_offsets = v5_native_readback_active_wcs_offsets(&page->native_readback);
@@ -1099,12 +1157,12 @@ static void update_toolpath_state_lines(V5MainPage *page, const V5UiStatusView *
             wcs_origin_point = apply_toolpath_view_transform(page, wcs_origin_point);
             set_toolpath_origin_cross(page->toolpath_wcs_origin_line, page->toolpath_wcs_origin_points, &wcs_origin_point, 1);
             if (page->toolpath_wcs_label) {
-                lv_obj_set_pos(
+                set_obj_pos_if_changed(
                     page->toolpath_wcs_label,
                     V5_TOOLPATH_X + clamp_coord(wcs_origin_point.x + 5.0, 0, V5_TOOLPATH_W - 36),
                     V5_TOOLPATH_Y + clamp_coord(wcs_origin_point.y - 14.0, 0, V5_TOOLPATH_H - 18));
-                lv_label_set_text(page->toolpath_wcs_label, main_page_wcs_code(&page->native_readback));
-                lv_obj_clear_flag(page->toolpath_wcs_label, LV_OBJ_FLAG_HIDDEN);
+                set_label_text_if_changed(page->toolpath_wcs_label, main_page_wcs_code(&page->native_readback));
+                clear_hidden_flag_if_hidden(page->toolpath_wcs_label);
             }
             for (i = 0U; i < 3U; ++i) {
                 int ok = v5_toolpath_display_project_world_point(wcs_axis[i], &page->toolpath_fit, (double)V5_TOOLPATH_W, (double)V5_TOOLPATH_H, &wcs_axis_point[i]);
@@ -1960,61 +2018,61 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
     if ((refresh_flags & V5_MAIN_PAGE_REFRESH_DYNAMIC) != 0U) {
         v5_coordinate_panel_from_status(status, &panel);
         for (i = 0; i < V5_MAIN_PAGE_AXIS_COUNT; ++i) {
-        if (page->axis_labels[i]) {
-            char axis[2] = {panel.lines[i].axis ? panel.lines[i].axis : '-', '\0'};
-            lv_label_set_text(page->axis_labels[i], axis);
-        }
-        if (page->mcs_labels[i]) {
-            lv_label_set_text(page->mcs_labels[i], panel.lines[i].mcs_text);
-        }
-        if (page->cmd_labels[i]) {
-            char wcs_text[32];
-            format_main_page_wcs_coordinate(wcs_text, sizeof(wcs_text), status, &page->native_readback, i);
-            lv_label_set_text(page->cmd_labels[i], wcs_text);
-        }
-        if (page->error_labels[i]) {
-            char error_text[32];
-            snprintf(error_text, sizeof(error_text), "%c: %s", panel.lines[i].axis ? panel.lines[i].axis : '-', panel.lines[i].following_error_text);
-            lv_label_set_text(page->error_labels[i], error_text);
-        }
+            if (page->axis_labels[i]) {
+                char axis[2] = {panel.lines[i].axis ? panel.lines[i].axis : '-', '\0'};
+                set_label_text_if_changed(page->axis_labels[i], axis);
+            }
+            if (page->mcs_labels[i]) {
+                set_label_text_if_changed(page->mcs_labels[i], panel.lines[i].mcs_text);
+            }
+            if (page->cmd_labels[i]) {
+                char wcs_text[32];
+                format_main_page_wcs_coordinate(wcs_text, sizeof(wcs_text), status, &page->native_readback, i);
+                set_label_text_if_changed(page->cmd_labels[i], wcs_text);
+            }
+            if (page->error_labels[i]) {
+                char error_text[32];
+                snprintf(error_text, sizeof(error_text), "%c: %s", panel.lines[i].axis ? panel.lines[i].axis : '-', panel.lines[i].following_error_text);
+                set_label_text_if_changed(page->error_labels[i], error_text);
+            }
         }
         refresh_main_coordinate_digits(page);
-        lv_label_set_text(page->spindle_speed_label, panel.spindle_speed_text);
-        lv_label_set_text(page->linear_velocity_label, panel.linear_velocity_text);
-        lv_label_set_text(page->feed_override_label, panel.feed_override_text);
-        lv_label_set_text(page->spindle_override_label, panel.spindle_override_text);
+        set_label_text_if_changed(page->spindle_speed_label, panel.spindle_speed_text);
+        set_label_text_if_changed(page->linear_velocity_label, panel.linear_velocity_text);
+        set_label_text_if_changed(page->feed_override_label, panel.feed_override_text);
+        set_label_text_if_changed(page->spindle_override_label, panel.spindle_override_text);
     }
 
     if ((refresh_flags & V5_MAIN_PAGE_REFRESH_SLOW) != 0U) {
         update_main_page_wcs_header(page);
         update_toolpath_status_text(page);
         format_main_page_modal(modal_display_text, sizeof(modal_display_text), &page->native_readback);
-        lv_label_set_text(page->modal_label, modal_display_text);
+        set_label_text_if_changed(page->modal_label, modal_display_text);
         if (page->cpu0_label && page->cpu1_label) {
-        char cpu0_text[24];
-        char cpu1_text[24];
-        v5_remote_metrics_display_text(cpu0_text, sizeof(cpu0_text), cpu1_text, sizeof(cpu1_text));
-        lv_label_set_text(page->cpu0_label, cpu0_text);
-        lv_label_set_text(page->cpu1_label, cpu1_text);
+            char cpu0_text[24];
+            char cpu1_text[24];
+            v5_remote_metrics_display_text(cpu0_text, sizeof(cpu0_text), cpu1_text, sizeof(cpu1_text));
+            set_label_text_if_changed(page->cpu0_label, cpu0_text);
+            set_label_text_if_changed(page->cpu1_label, cpu1_text);
         }
     }
 
     if ((refresh_flags & V5_MAIN_PAGE_REFRESH_DYNAMIC) != 0U) {
-    static_toolpath_due =
-        ((refresh_flags & V5_MAIN_PAGE_REFRESH_SLOW) != 0U) ||
-        (runtime_has_program && !page->toolpath_program_visible) ||
-        !page->toolpath_fit.valid ||
-        page->toolpath_program_view_generation != page->toolpath_view_generation;
+        static_toolpath_due =
+            ((refresh_flags & V5_MAIN_PAGE_REFRESH_SLOW) != 0U) ||
+            (runtime_has_program && !page->toolpath_program_visible) ||
+            !page->toolpath_fit.valid ||
+            page->toolpath_program_view_generation != page->toolpath_view_generation;
 
-    if (!page->toolpath_fit.valid && status) {
-        if (v5_toolpath_display_fit_from_status(status, page->view_plane, &page->toolpath_fit)) {
-            main_page_expand_visible_toolpath_fit(page, status);
-            page->toolpath_static_cache_misses += 1U;
+        if (!page->toolpath_fit.valid && status) {
+            if (v5_toolpath_display_fit_from_status(status, page->view_plane, &page->toolpath_fit)) {
+                main_page_expand_visible_toolpath_fit(page, status);
+                page->toolpath_static_cache_misses += 1U;
+            }
         }
-    }
 
-    if (static_toolpath_due && runtime_has_program) {
-        runtime_generation = v5_program_runtime_loaded_epoch(runtime);
+        if (static_toolpath_due && runtime_has_program) {
+            runtime_generation = v5_program_runtime_loaded_epoch(runtime);
         if (status) {
             preview_status = *status;
         } else {
@@ -2296,7 +2354,7 @@ static void update_estop_button_text(V5MainPage *page)
     }
     for (i = 0U; i < page->button_count; ++i) {
         if (page->button_actions[i] == V5_MAIN_PAGE_ACTION_ESTOP_FORCE && page->button_labels[i]) {
-            lv_label_set_text(page->button_labels[i], text);
+            set_label_text_if_changed(page->button_labels[i], text);
             return;
         }
     }
@@ -2314,7 +2372,7 @@ static void update_rtcp_button_text(V5MainPage *page)
     }
     for (i = 0U; i < page->button_count; ++i) {
         if (page->button_actions[i] == V5_MAIN_PAGE_ACTION_RTCP_TOGGLE && page->button_labels[i]) {
-            lv_label_set_text(page->button_labels[i], text);
+            set_label_text_if_changed(page->button_labels[i], text);
             return;
         }
     }

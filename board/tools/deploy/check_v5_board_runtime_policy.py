@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import argparse
 import os
 import subprocess
 import sys
 import textwrap
 
+DEFAULT_BOARD_TARGET = "root@192.168.1.221"
 
 REMOTE_CHECK = r'''
 from pathlib import Path
+import json
 import re
 import sys
+import urllib.request
 import pwd
 
 PIDFILES = {
@@ -19,6 +23,7 @@ PIDFILES = {
     "v5_rtcp_status_publisher": "/run/8ax/v5_rtcp_status_publisher.pid",
     "v5_wcs_status_publisher": "/run/8ax/v5_wcs_status_publisher.pid",
     "v5_ui_relay": "/run/8ax/v5_ui_relay.pid",
+    "v5_lvgl_shell": "/run/8ax/v5_ui_shell.pid",
     "v5_settings_actiond": "/run/8ax/v5_settings_actiond.pid",
     "v5_touch_diagnostics": "/run/8ax/v5_touch_diagnostics.pid",
 }
@@ -193,6 +198,34 @@ def audit_remote_relay(pid: int) -> int:
         return rc
     for table, local_addr in listeners:
         print(f"AUDIT_REMOTE_RELAY_LISTENER table={table} local_addr_hex={local_addr} port=18080")
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:18080/remote/diagnostics", timeout=2.0) as response:
+            diagnostics = json.loads(response.read().decode("utf-8"))
+        metrics = diagnostics.get("metrics")
+    except Exception as exc:
+        print(f"FAIL v5_ui_relay: diagnostics unavailable: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
+    required_metrics = (
+        "full_frame_requests",
+        "stream_sessions",
+        "stream_initial_full_frames",
+        "stream_repair_full_frames",
+        "dirty_rect_frames",
+        "input_sessions",
+    )
+    if not isinstance(metrics, dict):
+        print("FAIL v5_ui_relay: diagnostics metrics missing", file=sys.stderr)
+        return 1
+    missing = [name for name in required_metrics if name not in metrics]
+    if missing:
+        print(f"FAIL v5_ui_relay: diagnostics metrics missing keys={','.join(missing)}", file=sys.stderr)
+        return 1
+    print(
+        "AUDIT_REMOTE_RELAY_METRICS "
+        f"full_frame_requests={metrics.get('full_frame_requests')} "
+        f"stream_sessions={metrics.get('stream_sessions')} "
+        f"dirty_rect_frames={metrics.get('dirty_rect_frames')}"
+    )
     return rc
 
 rc = 0
@@ -229,11 +262,12 @@ sys.exit(rc)
 
 
 def main() -> int:
-    board = os.environ.get("V5_BOARD_SSH", "")
-    port = os.environ.get("V5_BOARD_SSH_PORT", "22")
-    if not board:
-        print("V5_BOARD_SSH is required", file=sys.stderr)
-        return 2
+    parser = argparse.ArgumentParser(description="Audit live v5 board runtime process policy.")
+    parser.add_argument("--board-target", default=os.environ.get("V5_BOARD_SSH", DEFAULT_BOARD_TARGET))
+    parser.add_argument("--board-port", default=os.environ.get("V5_BOARD_SSH_PORT", "22"))
+    args = parser.parse_args()
+    board = args.board_target
+    port = args.board_port
     remote = "python3 - <<'PY'\n" + REMOTE_CHECK + "\nPY\n"
     proc = subprocess.run(
         ["ssh", "-o", "BatchMode=yes", "-o", "LogLevel=ERROR", "-o", "ConnectTimeout=5", "-p", port, board, remote],

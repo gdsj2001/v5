@@ -33,7 +33,7 @@ void v5_lvgl_remote_display_render_now(void);
 int v5_lvgl_remote_display_cache_capture(unsigned int slot);
 int v5_lvgl_remote_display_cache_blit(unsigned int slot);
 int v5_remote_frame_snapshot(V5RemoteFrameSnapshot *snapshot);
-int v5_remote_frame_poll(unsigned short port, unsigned int timeout_ms);
+int v5_remote_frame_ipc_pump(void);
 
 #ifdef __cplusplus
 }

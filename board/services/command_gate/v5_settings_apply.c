@@ -41,6 +41,8 @@ static void scale_chain_result_code(V5SettingsApplyScaleChainResult *result, con
     snprintf(result->code, sizeof(result->code), "%s", code);
 }
 
+static double settings_apply_nearest_integer(double value);
+
 static int file_exists(const char *path)
 {
     struct stat st;
@@ -684,11 +686,11 @@ int v5_settings_apply_scale_chain_commit(
         scale_chain_result_code(result, "RAW_ZERO_OUTSIDE_LIMITS");
         return 0;
     }
-    min_distance = raw_min_current - old_zero;
-    max_distance = raw_max_current - old_zero;
+    min_distance = settings_apply_nearest_integer(raw_min_current - old_zero);
+    max_distance = settings_apply_nearest_integer(raw_max_current - old_zero);
     new_zero = zero_counts / effective_scale;
-    new_min = new_zero + min_distance;
-    new_max = new_zero + max_distance;
+    new_min = settings_apply_nearest_integer(new_zero + min_distance);
+    new_max = settings_apply_nearest_integer(new_zero + max_distance);
     if (!isfinite(new_zero) || !isfinite(new_min) || !isfinite(new_max) || new_min >= new_max) {
         free(json);
         scale_chain_result_code(result, "RAW_LIMIT_RECOMPUTE_INVALID");
@@ -751,6 +753,45 @@ static int settings_apply_numeric_text(const char *value)
     return *end == '\0';
 }
 
+static int settings_apply_integer_text(const char *value)
+{
+    char buf[64];
+    const char *p;
+    if (!value || !value[0] || strlen(value) >= sizeof(buf) ||
+        strchr(value, '\n') || strchr(value, '\r')) {
+        return 0;
+    }
+    snprintf(buf, sizeof(buf), "%s", value);
+    settings_apply_trim(buf);
+    p = buf;
+    if (*p == '+' || *p == '-') {
+        ++p;
+    }
+    if (!isdigit((unsigned char)*p)) {
+        return 0;
+    }
+    while (*p) {
+        if (!isdigit((unsigned char)*p)) {
+            return 0;
+        }
+        ++p;
+    }
+    return 1;
+}
+
+static int settings_apply_axis_field_requires_integer_value(const char *field_key)
+{
+    return field_key &&
+           (strcmp(field_key, "pitch") == 0 ||
+            strcmp(field_key, "motor_rev") == 0 ||
+            strcmp(field_key, "load_rev") == 0 ||
+            strcmp(field_key, "soft_minus") == 0 ||
+            strcmp(field_key, "soft_plus") == 0 ||
+            strcmp(field_key, "max_velocity") == 0 ||
+            strcmp(field_key, "max_acceleration") == 0 ||
+            strcmp(field_key, "backlash") == 0);
+}
+
 static int settings_apply_safe_ini_value(const char *value)
 {
     char buf[64];
@@ -787,17 +828,21 @@ static void settings_apply_format_double(char *out, size_t cap, double value)
     snprintf(out, cap, "%.12g", value);
 }
 
-static double settings_apply_round_near_integer(double value)
+static double settings_apply_nearest_integer(double value)
 {
     double rounded = (double)((long long)(value >= 0.0 ? value + 0.5 : value - 0.5));
-    double delta = value - rounded;
-    if (delta < 0.0) {
-        delta = -delta;
+    if (rounded == 0.0) {
+        rounded = 0.0;
     }
-    if (isfinite(value) && delta < 0.0001) {
-        return rounded;
+    return rounded;
+}
+
+static void settings_apply_format_integer(char *out, size_t cap, double value)
+{
+    if (!out || cap == 0U || !isfinite(value)) {
+        return;
     }
-    return value;
+    snprintf(out, cap, "%.0f", settings_apply_nearest_integer(value));
 }
 
 static int settings_apply_mode_to_ini(const char *value, char *out, size_t out_cap)
@@ -909,17 +954,29 @@ static int settings_apply_ini_value_for_field(
     if (!settings_apply_numeric_text(local)) {
         return 0;
     }
+    if (settings_apply_axis_field_requires_integer_value(field_key) &&
+        !settings_apply_integer_text(local)) {
+        return 0;
+    }
     if (strcmp(field_key, "max_velocity") == 0) {
         numeric = strtod(local, &end);
         if (end == local || *end != '\0' || !isfinite(numeric)) {
             return 0;
         }
         settings_apply_format_double(ini_value, ini_cap, numeric / 60.0);
-        settings_apply_format_double(expected_display, display_cap, numeric);
+        settings_apply_format_integer(expected_display, display_cap, numeric);
         return 1;
     }
     snprintf(ini_value, ini_cap, "%s", local);
-    snprintf(expected_display, display_cap, "%s", local);
+    if (settings_apply_axis_field_requires_integer_value(field_key)) {
+        numeric = strtod(local, &end);
+        if (end == local || *end != '\0' || !isfinite(numeric)) {
+            return 0;
+        }
+        settings_apply_format_integer(expected_display, display_cap, numeric);
+    } else {
+        snprintf(expected_display, display_cap, "%s", local);
+    }
     return 1;
 }
 
@@ -964,7 +1021,15 @@ static int settings_apply_display_from_raw(const char *field_key, const char *ra
         if (end == raw || *end != '\0' || !isfinite(numeric)) {
             return 0;
         }
-        settings_apply_format_double(out, out_cap, settings_apply_round_near_integer(numeric * 60.0));
+        settings_apply_format_integer(out, out_cap, numeric * 60.0);
+        return 1;
+    }
+    if (settings_apply_axis_field_requires_integer_value(field_key)) {
+        numeric = strtod(raw, &end);
+        if (end == raw || *end != '\0' || !isfinite(numeric)) {
+            return 0;
+        }
+        settings_apply_format_integer(out, out_cap, numeric);
         return 1;
     }
     snprintf(out, out_cap, "%s", raw);
@@ -1298,6 +1363,49 @@ static int settings_apply_commit_runtime_ini(
     return 1;
 }
 
+static const char *settings_apply_g53_rtcp_key(const char *field_name)
+{
+    if (!field_name) return 0;
+    if (strcmp(field_name, "g53_A_center_y") == 0) return "G53_A_Y";
+    if (strcmp(field_name, "g53_A_center_z") == 0) return "G53_A_Z";
+    if (strcmp(field_name, "g53_B_center_x") == 0) return "G53_B_X";
+    if (strcmp(field_name, "g53_B_center_z") == 0) return "G53_B_Z";
+    if (strcmp(field_name, "g53_C_center_x") == 0) return "G53_C_X";
+    if (strcmp(field_name, "g53_C_center_y") == 0) return "G53_C_Y";
+    return 0;
+}
+
+static int settings_apply_commit_g53_geometry(
+    const V5SettingsApplyAxisCommitRequest *request,
+    V5SettingsApplyAxisCommitResult *result)
+{
+    char ini_path[512];
+    char raw[64];
+    const char *ini_key;
+    if (!request || !request->field_name || !request->value_text ||
+        !settings_apply_numeric_text(request->value_text) ||
+        !build_runtime_ini_path(ini_path, sizeof(ini_path), request->project_root)) {
+        return 0;
+    }
+    ini_key = settings_apply_g53_rtcp_key(request->field_name);
+    if (!ini_key) {
+        return 0;
+    }
+    if (!ini_write_section_text(ini_path, "RTCP", ini_key, request->value_text, 0, raw, sizeof(raw))) {
+        return 0;
+    }
+    if (!ini_read_section_text(ini_path, "RTCP", ini_key, raw, sizeof(raw))) {
+        return 0;
+    }
+    if (!settings_apply_values_match(raw, request->value_text)) {
+        return 0;
+    }
+    if (result) {
+        snprintf(result->readback_value, sizeof(result->readback_value), "%s", raw);
+    }
+    return 1;
+}
+
 static V5SettingsParameterDiskTable settings_apply_disk_table_for_owner(
     const char *field_key,
     V5ParameterOwnerKind owner)
@@ -1378,6 +1486,9 @@ int v5_settings_apply_commit_axis_value(
     switch (owner_record.field->owner) {
     case V5_PARAMETER_OWNER_RUNTIME_INI:
         ok = settings_apply_commit_runtime_ini(request, result);
+        break;
+    case V5_PARAMETER_OWNER_KINEMATICS_NATIVE:
+        ok = settings_apply_commit_g53_geometry(request, result);
         break;
     case V5_PARAMETER_OWNER_SELF_PARAMETER_TABLE:
     case V5_PARAMETER_OWNER_DRIVE_ONLY:

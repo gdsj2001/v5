@@ -2,6 +2,7 @@
 #define V5_COMMAND_GATE_IPC_H
 
 #include "v5_command_gate.h"
+#include "v5_settings_apply.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -17,6 +18,11 @@ extern "C" {
 #define V5_COMMAND_GATE_SECONDARY_TEXT_CAP 128u
 #define V5_COMMAND_GATE_MODE_CAP 64u
 #define V5_COMMAND_GATE_LINE_CAP 384u
+#define V5_COMMAND_GATE_PROJECT_ROOT_CAP 256u
+#define V5_COMMAND_GATE_AXIS_CAP 16u
+#define V5_COMMAND_GATE_FIELD_KEY_CAP 64u
+#define V5_COMMAND_GATE_FIELD_NAME_CAP 128u
+#define V5_COMMAND_GATE_SETTING_VALUE_CAP 128u
 
 #define V5_COMMAND_GATE_SEND_UNAVAILABLE 0
 #define V5_COMMAND_GATE_SEND_SENT 1
@@ -26,6 +32,7 @@ extern "C" {
 typedef enum V5CommandGateIpcOp {
     V5_COMMAND_GATE_IPC_OP_EXECUTE = 1,
     V5_COMMAND_GATE_IPC_OP_PROBE_SAFETY = 2,
+    V5_COMMAND_GATE_IPC_OP_SETTINGS_AXIS_COMMIT = 3,
 } V5CommandGateIpcOp;
 
 typedef struct V5CommandGateIpcRequestFrame {
@@ -43,6 +50,14 @@ typedef struct V5CommandGateIpcRequestFrame {
     char text_value[V5_COMMAND_GATE_TEXT_CAP];
     char secondary_text_value[V5_COMMAND_GATE_SECONDARY_TEXT_CAP];
     char mode_value[V5_COMMAND_GATE_MODE_CAP];
+    uint32_t settings_axis_index;
+    uint32_t settings_owner_generation;
+    uint32_t settings_readback_token;
+    char settings_project_root[V5_COMMAND_GATE_PROJECT_ROOT_CAP];
+    char settings_axis[V5_COMMAND_GATE_AXIS_CAP];
+    char settings_field_key[V5_COMMAND_GATE_FIELD_KEY_CAP];
+    char settings_field_name[V5_COMMAND_GATE_FIELD_NAME_CAP];
+    char settings_value_text[V5_COMMAND_GATE_SETTING_VALUE_CAP];
 } V5CommandGateIpcRequestFrame;
 
 typedef struct V5CommandGateIpcResponseFrame {
@@ -59,6 +74,18 @@ typedef struct V5CommandGateIpcResponseFrame {
     int32_t machine_enabled;
     char command_line[V5_COMMAND_GATE_LINE_CAP];
     char readback_code[64];
+    int32_t settings_owner_written;
+    int32_t settings_source_readback_confirmed;
+    int32_t settings_restart_pending;
+    int32_t settings_scale_chain_attempted;
+    int32_t settings_scale_recomputed;
+    int32_t settings_raw_limits_recomputed;
+    double settings_effective_scale;
+    double settings_raw_zero_position;
+    double settings_raw_min_limit;
+    double settings_raw_max_limit;
+    char settings_readback_value[64];
+    char settings_scale_chain_code[64];
 } V5CommandGateIpcResponseFrame;
 
 typedef struct V5CommandGateResult {
@@ -81,6 +108,10 @@ int v5_command_gate_send_prepared(
     V5CommandGateResult *result,
     unsigned int timeout_ms);
 int v5_command_gate_probe_safety(V5CommandGateResult *result, unsigned int timeout_ms);
+int v5_command_gate_settings_axis_commit(
+    const V5SettingsApplyAxisCommitRequest *request,
+    V5SettingsApplyAxisCommitResult *result,
+    unsigned int timeout_ms);
 
 #ifdef __cplusplus
 }

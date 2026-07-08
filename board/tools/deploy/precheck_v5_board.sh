@@ -6,6 +6,12 @@ manifest="${1:-$repo_root/config/deploy/v5_runtime_deploy_manifest.tsv}"
 board_ssh="${V5_BOARD_SSH:-}"
 board_ssh_port="${V5_BOARD_SSH_PORT:-22}"
 strict_remote="${V5_PRECHECK_STRICT_REMOTE:-0}"
+project_root="$repo_root"
+case "$project_root" in
+  */board) project_root="${project_root%/board}" ;;
+  *\\board) project_root="${project_root%\\board}" ;;
+esac
+board_build_dir="${V5_BOARD_BUILD_DIR:-$project_root/build/board}"
 
 if [ ! -r "$manifest" ]; then
   echo "FAIL missing deploy manifest: $manifest" >&2
@@ -26,6 +32,19 @@ remote_check() {
   ssh -o BatchMode=yes -o LogLevel=ERROR -o ConnectTimeout=3 -p "$board_ssh_port" "$board_ssh" "$@"
 }
 
+manifest_source_path() {
+  kind="$1"
+  source="$2"
+  case "$kind:$source" in
+    binary:build/board/app/*)
+      printf '%s/app/%s' "$board_build_dir" "${source#build/board/app/}"
+      ;;
+    *)
+      printf '%s/%s' "$repo_root" "$source"
+      ;;
+  esac
+}
+
 check_source_manifest() {
   tab=$(printf '\t')
   while IFS="$tab" read -r kind source destination mode extra; do
@@ -36,9 +55,9 @@ check_source_manifest() {
       record_fail "bad manifest row: $kind $source $destination $mode ${extra:-}"
       continue
     fi
-    source_path="$repo_root/$source"
+    source_path="$(manifest_source_path "$kind" "$source")"
     if [ -e "$source_path" ]; then
-      record_ok "source $kind $source -> $destination mode=$mode"
+      record_ok "source $kind $source -> $destination mode=$mode path=$source_path"
     else
       record_fail "missing source $source_path"
     fi
@@ -73,7 +92,7 @@ check_remote_target() {
     fi
   done
 
-  remote_check 'ps w 2>/dev/null | grep -E "v5_state_publisher|v5_rtcp_status_publisher|v5_g53_geometry_memory_owner|v5_wcs_status_publisher|v5_lvgl_shell|linuxcncrsh|linuxcncsvr|milltask" | grep -v grep || true' |
+  remote_check 'ps w 2>/dev/null | grep -E "v5_state_publisher|v5_rtcp_status_publisher|v5_g53_geometry_memory_owner|v5_wcs_status_publisher|v5_lvgl_shell|v5_remote_ui_relay|linuxcncrsh|linuxcncsvr|milltask" | grep -v grep || true' |
     sed 's/^/INFO board process: /'
 
   if remote_check 'test -x /etc/init.d/v5-state-publisher'; then

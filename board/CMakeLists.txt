@@ -8,6 +8,7 @@ project(v5_clean_mainline C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+find_package(Threads REQUIRED)
 
 if(MSVC)
     add_compile_options(/utf-8)

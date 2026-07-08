@@ -32,6 +32,7 @@ VerifyProtocolEnvelopeRoundTrip();
 VerifyRemoteInfoSystemMetricsSerialization();
 VerifyPointerEventDtoSerialization();
 VerifyFullFrameAndDirtyRectApply();
+VerifyCoalescedDirtyFrameIsAccepted();
 VerifyBaseFrameMismatchNeedsFullFrame();
 VerifyStaleDirtyFrameIsIgnored();
 VerifyInvalidPayloadIsRejected();
@@ -178,6 +179,34 @@ static void VerifyBaseFrameMismatchNeedsFullFrame()
     Require(RemoteFrameApplyStatus.NeedFullFrame, result.Status, "base mismatch status");
     Require(1L, framebuffer.FrameId, "base mismatch keeps frame id");
     Require(before[0], framebuffer.CopyBgra32Pixels()[0], "base mismatch keeps pixels");
+}
+
+static void VerifyCoalescedDirtyFrameIsAccepted()
+{
+    RemoteFramebuffer framebuffer = new();
+    RemoteFrameAssembler assembler = new(framebuffer);
+    assembler.Apply(new RemoteFramePacket(
+        FrameMetadata.FullFrame(10, PointerMapper.RemoteWidth, PointerMapper.RemoteHeight, PointerMapper.RemoteWidth * 4, RemotePixelFormats.Bgra32),
+        FullBgraFrame(1, 2, 3)));
+
+    RemoteFrameApplyResult result = assembler.Apply(new RemoteFramePacket(
+        FrameMetadata.DirtyRects(
+            13,
+            10,
+            PointerMapper.RemoteWidth,
+            PointerMapper.RemoteHeight,
+            PointerMapper.RemoteWidth * 4,
+            RemotePixelFormats.Bgra32,
+            new[] { new DirtyRectMetadata(1, 1, 2, 2, "raw") }),
+        SolidBgraRect(2, 2, 44, 55, 66)));
+
+    Require(RemoteFrameApplyStatus.AppliedDirtyRects, result.Status, "coalesced dirty status");
+    Require(13L, framebuffer.FrameId, "coalesced dirty frame id");
+    byte[] pixels = framebuffer.CopyBgra32Pixels();
+    int offset = PixelOffset(1, 1);
+    Require((byte)44, pixels[offset], "coalesced dirty blue");
+    Require((byte)55, pixels[offset + 1], "coalesced dirty green");
+    Require((byte)66, pixels[offset + 2], "coalesced dirty red");
 }
 
 static void VerifyStaleDirtyFrameIsIgnored()

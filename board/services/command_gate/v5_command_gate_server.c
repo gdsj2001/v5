@@ -3,6 +3,7 @@
 #include "v5_linuxcncrsh_client.h"
 #include "v5_native_first_point.h"
 #include "v5_process_residency.h"
+#include "v5_settings_apply.h"
 
 #include <errno.h>
 #include <signal.h>
@@ -12,12 +13,21 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <pthread.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/un.h>
 #include <unistd.h>
 
+#ifndef MSG_NOSIGNAL
+#define MSG_NOSIGNAL 0
+#endif
+
+#define V5_COMMAND_GATE_CLIENT_IO_TIMEOUT_MS 250U
+
 static volatile sig_atomic_t g_stop_requested;
+static pthread_mutex_t g_linuxcncrsh_lock = PTHREAD_MUTEX_INITIALIZER;
 static V5LinuxcncrshConfig g_linuxcncrsh_config = {"127.0.0.1", 5007U, "EMC", "v5_command_gate", 1000U};
 static char g_host[64] = "127.0.0.1";
 static char g_password[64] = "EMC";
@@ -39,6 +49,28 @@ static void copy_cstr(char *dst, size_t cap, const char *src)
         return;
     }
     snprintf(dst, cap, "%s", src);
+}
+
+static int set_socket_timeout_ms(int fd, unsigned int timeout_ms)
+{
+    struct timeval timeout;
+    if (timeout_ms == 0U) {
+        timeout_ms = 1U;
+    }
+    timeout.tv_sec = (time_t)(timeout_ms / 1000U);
+    timeout.tv_usec = (suseconds_t)((timeout_ms % 1000U) * 1000U);
+    return setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) == 0 &&
+           setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) == 0;
+}
+
+static void linuxcncrsh_lock(void)
+{
+    (void)pthread_mutex_lock(&g_linuxcncrsh_lock);
+}
+
+static void linuxcncrsh_unlock(void)
+{
+    (void)pthread_mutex_unlock(&g_linuxcncrsh_lock);
 }
 
 static int read_all(int fd, void *data, size_t size)
@@ -63,7 +95,7 @@ static int write_all(int fd, const void *data, size_t size)
 {
     const char *p = (const char *)data;
     while (size > 0U) {
-        ssize_t n = send(fd, p, size, 0);
+        ssize_t n = send(fd, p, size, MSG_NOSIGNAL);
         if (n < 0 && errno == EINTR) {
             if (g_stop_requested) return 0;
             continue;
@@ -100,6 +132,32 @@ static void fill_safety_readback(V5CommandGateIpcResponseFrame *response)
     }
 }
 
+static int fixed_text_has_nul(const char *text, size_t cap)
+{
+    return text && memchr(text, '\0', cap) != 0;
+}
+
+static void response_copy_settings_result(
+    V5CommandGateIpcResponseFrame *response,
+    const V5SettingsApplyAxisCommitResult *result)
+{
+    if (!response || !result) {
+        return;
+    }
+    response->settings_owner_written = result->owner_written ? 1 : 0;
+    response->settings_source_readback_confirmed = result->source_readback_confirmed ? 1 : 0;
+    response->settings_restart_pending = result->restart_pending ? 1 : 0;
+    response->settings_scale_chain_attempted = result->scale_chain.attempted ? 1 : 0;
+    response->settings_scale_recomputed = result->scale_chain.scale_recomputed ? 1 : 0;
+    response->settings_raw_limits_recomputed = result->scale_chain.raw_limits_recomputed ? 1 : 0;
+    response->settings_effective_scale = result->scale_chain.effective_scale;
+    response->settings_raw_zero_position = result->scale_chain.raw_zero_position;
+    response->settings_raw_min_limit = result->scale_chain.raw_min_limit;
+    response->settings_raw_max_limit = result->scale_chain.raw_max_limit;
+    copy_cstr(response->settings_readback_value, sizeof(response->settings_readback_value), result->readback_value);
+    copy_cstr(response->settings_scale_chain_code, sizeof(response->settings_scale_chain_code), result->scale_chain.code);
+}
+
 static int owner_is_allowed(const char *owner)
 {
     return owner &&
@@ -125,9 +183,11 @@ static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5Command
         return;
     }
 
+    linuxcncrsh_lock();
     if (request.kind == V5_COMMAND_FIRST_POINT && strcmp(prepared.owner, "native_first_point") == 0) {
         if (!v5_native_first_point_format_report(&prepared, &request, response->command_line, sizeof(response->command_line))) {
             response->send_status = V5_COMMAND_GATE_SEND_INVALID;
+            linuxcncrsh_unlock();
             return;
         }
         status = v5_native_first_point_send(&g_linuxcncrsh_config, &prepared, &request);
@@ -147,12 +207,14 @@ static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5Command
     } else if (request.kind == V5_COMMAND_RTCP_SET && strcmp(prepared.owner, "native_linuxcncrsh") == 0) {
         if (!v5_linuxcncrsh_format_line(&prepared, &request, response->command_line, sizeof(response->command_line))) {
             response->send_status = V5_COMMAND_GATE_SEND_INVALID;
+            linuxcncrsh_unlock();
             return;
         }
         status = v5_linuxcncrsh_send_rtcp_sequence(&g_linuxcncrsh_config, request.enabled_value);
     } else {
         if (!v5_linuxcncrsh_format_line(&prepared, &request, response->command_line, sizeof(response->command_line))) {
             response->send_status = V5_COMMAND_GATE_SEND_INVALID;
+            linuxcncrsh_unlock();
             return;
         }
         status = v5_linuxcncrsh_send_line(&g_linuxcncrsh_config, response->command_line);
@@ -161,6 +223,52 @@ static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5Command
     response->executed = status == V5_LINUXCNCRSH_SEND_SENT ? 1 : 0;
     if (strcmp(prepared.owner, "native_safety") == 0) {
         fill_safety_readback(response);
+    }
+    linuxcncrsh_unlock();
+}
+
+static void execute_settings_axis_commit(
+    const V5CommandGateIpcRequestFrame *frame,
+    V5CommandGateIpcResponseFrame *response)
+{
+    V5SettingsApplyAxisCommitRequest request;
+    V5SettingsApplyAxisCommitResult result;
+    int ok;
+    response_init(response);
+    if (!fixed_text_has_nul(frame->settings_project_root, sizeof(frame->settings_project_root)) ||
+        !fixed_text_has_nul(frame->settings_axis, sizeof(frame->settings_axis)) ||
+        !fixed_text_has_nul(frame->settings_field_key, sizeof(frame->settings_field_key)) ||
+        !fixed_text_has_nul(frame->settings_field_name, sizeof(frame->settings_field_name)) ||
+        !fixed_text_has_nul(frame->settings_value_text, sizeof(frame->settings_value_text)) ||
+        !frame->settings_project_root[0] ||
+        !frame->settings_axis[0] ||
+        !frame->settings_field_key[0] ||
+        !frame->settings_field_name[0] ||
+        !frame->settings_value_text[0]) {
+        response->send_status = V5_COMMAND_GATE_SEND_INVALID;
+        copy_cstr(response->readback_code, sizeof(response->readback_code), "SETTINGS_AXIS_COMMIT_BAD_REQUEST");
+        return;
+    }
+    memset(&request, 0, sizeof(request));
+    request.project_root = frame->settings_project_root;
+    request.axis = frame->settings_axis;
+    request.axis_index = frame->settings_axis_index;
+    request.field_key = frame->settings_field_key;
+    request.field_name = frame->settings_field_name;
+    request.value_text = frame->settings_value_text;
+    request.owner_generation = frame->settings_owner_generation;
+    request.readback_token = frame->settings_readback_token;
+    ok = v5_settings_apply_commit_axis_value(&request, &result);
+    response_copy_settings_result(response, &result);
+    if (ok && result.source_readback_confirmed) {
+        response->send_status = V5_COMMAND_GATE_SEND_SENT;
+        response->executed = 1;
+        copy_cstr(response->readback_code, sizeof(response->readback_code), "SETTINGS_AXIS_COMMIT_OK");
+    } else {
+        response->send_status = V5_COMMAND_GATE_SEND_INVALID;
+        response->executed = 0;
+        copy_cstr(response->readback_code, sizeof(response->readback_code),
+                  result.scale_chain.code[0] ? result.scale_chain.code : "SETTINGS_AXIS_COMMIT_REJECTED");
     }
 }
 
@@ -181,7 +289,9 @@ static void handle_frame(const V5CommandGateIpcRequestFrame *request, V5CommandG
             copy_cstr(response->readback_code, sizeof(response->readback_code), reject_reason);
             return;
         }
+        linuxcncrsh_lock();
         fill_safety_readback(response);
+        linuxcncrsh_unlock();
         response->send_status = (response->safety_estop_known || response->machine_enable_known) ? V5_COMMAND_GATE_SEND_SENT : V5_COMMAND_GATE_SEND_UNAVAILABLE;
         response->executed = 0;
         return;
@@ -190,23 +300,36 @@ static void handle_frame(const V5CommandGateIpcRequestFrame *request, V5CommandG
         execute_request(request, response);
         return;
     }
+    if (request->op == V5_COMMAND_GATE_IPC_OP_SETTINGS_AXIS_COMMIT) {
+        execute_settings_axis_commit(request, response);
+        return;
+    }
     response->send_status = V5_COMMAND_GATE_SEND_INVALID;
     copy_cstr(response->readback_code, sizeof(response->readback_code), "BAD_OPCODE");
 }
 
 static void serve_client(int client_fd)
 {
-    while (!g_stop_requested) {
-        V5CommandGateIpcRequestFrame request;
-        V5CommandGateIpcResponseFrame response;
-        if (!read_all(client_fd, &request, sizeof(request))) {
-            break;
-        }
-        handle_frame(&request, &response);
-        if (!write_all(client_fd, &response, sizeof(response))) {
-            break;
-        }
+    V5CommandGateIpcRequestFrame request;
+    V5CommandGateIpcResponseFrame response;
+    if (g_stop_requested) {
+        return;
     }
+    if (!read_all(client_fd, &request, sizeof(request))) {
+        return;
+    }
+    handle_frame(&request, &response);
+    if (!write_all(client_fd, &response, sizeof(response))) {
+        return;
+    }
+}
+
+static void *serve_client_thread(void *arg)
+{
+    int client_fd = (int)(intptr_t)arg;
+    serve_client(client_fd);
+    close(client_fd);
+    return 0;
 }
 
 static int make_listener(void)
@@ -227,7 +350,7 @@ static int make_listener(void)
         return -1;
     }
     chmod(g_socket_path, 0660);
-    if (listen(fd, 4) != 0) {
+    if (listen(fd, 16) != 0) {
         close(fd);
         unlink(g_socket_path);
         return -1;
@@ -283,14 +406,19 @@ int main(int argc, char **argv)
     fflush(stdout);
     while (!g_stop_requested) {
         int client_fd = accept(listen_fd, 0, 0);
+        pthread_t thread;
         if (client_fd < 0) {
             if (errno == EINTR) {
                 continue;
             }
             break;
         }
-        serve_client(client_fd);
-        close(client_fd);
+        (void)set_socket_timeout_ms(client_fd, V5_COMMAND_GATE_CLIENT_IO_TIMEOUT_MS);
+        if (pthread_create(&thread, 0, serve_client_thread, (void *)(intptr_t)client_fd) != 0) {
+            close(client_fd);
+            continue;
+        }
+        (void)pthread_detach(thread);
     }
     close(listen_fd);
     unlink(g_socket_path);

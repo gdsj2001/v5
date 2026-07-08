@@ -24,8 +24,7 @@ add_executable(v5_lvgl_shell
     src/v5_lvgl_remote_display.c
     src/v5_ui_first_frame_guard.c
     src/v5_lvgl_remote_input.c
-    src/v5_remote_input_socket.c
-    src/v5_remote_ws.c
+    src/v5_remote_input_ipc.c
     src/v5_remote_metrics.c
     src/v5_lvgl_touch_input.c
     src/v5_main_page.c
@@ -58,8 +57,7 @@ add_executable(v5_program_page_double_click_smoke
     src/v5_lvgl_remote_display.c
     src/v5_ui_first_frame_guard.c
     src/v5_lvgl_remote_input.c
-    src/v5_remote_input_socket.c
-    src/v5_remote_ws.c
+    src/v5_remote_input_ipc.c
     src/v5_remote_metrics.c
     src/v5_lvgl_touch_input.c
     src/v5_main_page.c
@@ -113,12 +111,21 @@ add_executable(v5_touch_diagnostics
     ../services/ui/v5_touch_diagnostics.c
 )
 
-add_library(v5_command_gate_core STATIC
-    src/v5_parameter_table.c
-    src/v5_settings_parameter_store.c
+add_library(v5_command_gate_client STATIC
     ../services/command_gate/v5_command_gate.c
     ../services/command_gate/v5_command_table.c
     ../services/command_gate/v5_command_gate_ipc.c
+)
+
+target_include_directories(v5_command_gate_client PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${V5_ROOT_DIR}/services/command_gate"
+)
+
+add_library(v5_command_gate_core STATIC
+    src/v5_parameter_table.c
+    src/v5_settings_parameter_store.c
     ../services/command_gate/v5_command_gate_validator.c
     ../services/command_gate/v5_linuxcncrsh_client.c
     ../services/command_gate/v5_linuxcncrsh_format.c
@@ -139,6 +146,8 @@ target_include_directories(v5_command_gate_core PUBLIC
     "${V5_ROOT_DIR}/services/command_gate"
     "${V5_ROOT_DIR}/services/state_publisher"
 )
+
+target_link_libraries(v5_command_gate_core PUBLIC v5_command_gate_client)
 
 
 add_library(v5_microkernel_contract STATIC
@@ -187,7 +196,7 @@ target_include_directories(v5_program_commands PUBLIC
 
 target_link_libraries(v5_program_commands PUBLIC
     v5_program_runtime
-    v5_command_gate_core
+    v5_command_gate_client
 )
 
 
@@ -324,7 +333,7 @@ add_executable(v5_command_gate_server
     src/v5_process_residency.c
 )
 
-target_link_libraries(v5_command_gate_server PRIVATE v5_command_gate_core)
+target_link_libraries(v5_command_gate_server PRIVATE v5_command_gate_core Threads::Threads)
 
 add_executable(v5_linuxcncrsh_golden_run
     ../services/command_gate/v5_linuxcncrsh_golden_run.c
@@ -456,4 +465,4 @@ target_compile_definitions(v5_lvgl_shell PRIVATE
     _CRT_SECURE_NO_WARNINGS
 )
 
-target_link_libraries(v5_lvgl_shell PRIVATE lvgl v5_status_shm_projection v5_microkernel_contract v5_program_commands v5_command_gate_core m)
+target_link_libraries(v5_lvgl_shell PRIVATE lvgl v5_status_shm_projection v5_microkernel_contract v5_program_commands v5_command_gate_client m)

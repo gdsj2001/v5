@@ -46,6 +46,7 @@ check_remote_test "v5_touch_diagnostics installed executable" 'test -x /usr/libe
 check_remote_test "v5_linuxcncrsh_probe installed executable" 'test -x /usr/libexec/8ax/v5_linuxcncrsh_probe'
 check_remote_test "v5_command_gate_server installed executable" 'test -x /usr/libexec/8ax/v5_command_gate_server'
 check_remote_test "v5_linuxcncrsh_golden_run installed executable" 'test -x /usr/libexec/8ax/v5_linuxcncrsh_golden_run'
+check_remote_test "v5 remote ui relay installed executable" 'test -x /usr/libexec/8ax/v5_remote_ui_relay.py'
 check_remote_test "state publisher init installed" 'test -x /etc/init.d/v5-state-publisher'
 check_remote_test "rtcp status publisher init installed" 'test -x /etc/init.d/v5-rtcp-status-publisher'
 check_remote_test "g53 geometry memory owner init installed" 'test -x /etc/init.d/v5-g53-geometry-memory-owner'
@@ -227,7 +228,7 @@ else
   warn_msg "input event devices not visible; touch evidence still missing"
 fi
 
-remote 'ps w 2>/dev/null | grep -E "v5_state_publisher|v5_rtcp_status_publisher|v5_g53_geometry_memory_owner|v5_wcs_status_publisher|v5_lvgl_shell|linuxcncrsh|linuxcncsvr|milltask" | grep -v grep || true' |
+remote 'ps w 2>/dev/null | grep -E "v5_state_publisher|v5_rtcp_status_publisher|v5_g53_geometry_memory_owner|v5_wcs_status_publisher|v5_lvgl_shell|v5_remote_ui_relay|linuxcncrsh|linuxcncsvr|milltask" | grep -v grep || true' |
   sed 's/^/INFO process: /'
 
 if [ "$fail" -ne 0 ]; then

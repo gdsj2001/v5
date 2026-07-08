@@ -7,7 +7,12 @@ board_ssh_port="${V5_BOARD_SSH_PORT:-22}"
 golden_local="${V5_GOLDEN_PROGRAM:-$repo_root/gcode/golden/cc.ngc}"
 golden_remote="${V5_REMOTE_GOLDEN_PROGRAM:-/tmp/v5_golden/cc.ngc}"
 linuxcncrsh_port="${V5_LINUXCNCRSH_PORT:-5007}"
-board_build_dir="${V5_BOARD_BUILD_DIR:-$repo_root/build/board}"
+project_root="$repo_root"
+case "$project_root" in
+  */board) project_root="${project_root%/board}" ;;
+  *\\board) project_root="${project_root%\\board}" ;;
+esac
+board_build_dir="${V5_BOARD_BUILD_DIR:-$project_root/build/board}"
 board_build_targets="${V5_BOARD_BUILD_TARGETS:-v5_lvgl_shell v5_state_publisher v5_touch_diagnostics v5_linuxcncrsh_probe v5_linuxcncrsh_golden_run}"
 apply=0
 motion=0
@@ -58,8 +63,8 @@ if [ ! -d "$board_build_dir" ]; then
 fi
 
 cmake --build "$board_build_dir" --target $board_build_targets
-V5_BOARD_SSH="$board_ssh" V5_BOARD_SSH_PORT="$board_ssh_port" "$repo_root/tools/deploy/precheck_v5_board.sh"
-V5_BOARD_SSH="$board_ssh" V5_BOARD_SSH_PORT="$board_ssh_port" "$repo_root/tools/deploy/push_v5_runtime_to_board.sh" --apply
+V5_BOARD_BUILD_DIR="$board_build_dir" V5_BOARD_SSH="$board_ssh" V5_BOARD_SSH_PORT="$board_ssh_port" "$repo_root/tools/deploy/precheck_v5_board.sh"
+V5_BOARD_BUILD_DIR="$board_build_dir" V5_BOARD_SSH="$board_ssh" V5_BOARD_SSH_PORT="$board_ssh_port" "$repo_root/tools/deploy/push_v5_runtime_to_board.sh" --apply
 V5_BOARD_SSH="$board_ssh" V5_BOARD_SSH_PORT="$board_ssh_port" "$repo_root/tools/deploy/verify_v5_board_runtime.sh"
 V5_BOARD_SSH="$board_ssh" V5_BOARD_SSH_PORT="$board_ssh_port" "$repo_root/tools/deploy/capture_v5_board_ui.sh" --apply
 

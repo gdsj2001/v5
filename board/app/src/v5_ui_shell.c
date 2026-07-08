@@ -84,6 +84,7 @@ static char g_program_last_click_path[384];
 static char g_mdi_line[128] = "";
 static int g_ui_ready;
 static int g_main_cache_dirty;
+static V5ShellPageKind g_current_page = V5_SHELL_PAGE_MAIN;
 static lv_obj_t *g_top_status_layer;
 static lv_obj_t *g_top_status_label;
 
@@ -1251,6 +1252,7 @@ static void shell_navigate(void *user_data, V5MainPageActionKind action)
     if (!cache_ok) {
         v5_lvgl_remote_display_render_now();
     }
+    g_current_page = page;
     elapsed = shell_monotonic_ns() - t0;
     log_navigation_perf(shell_page_name(page), cache_ok, elapsed);
 }
@@ -1344,6 +1346,7 @@ static int v5_ui_shell_bootstrap_common(V5ShellBootReport *report, const char *p
     if (g_shell_pages[V5_SHELL_PAGE_MAIN]) {
         lv_obj_clear_flag(g_shell_pages[V5_SHELL_PAGE_MAIN], LV_OBJ_FLAG_HIDDEN);
     }
+    g_current_page = V5_SHELL_PAGE_MAIN;
     if (g_top_status_layer) {
         lv_obj_clear_flag(g_top_status_layer, LV_OBJ_FLAG_HIDDEN);
     }
@@ -1421,11 +1424,11 @@ int v5_ui_shell_refresh_once(void)
     }
     if (flags != 0U) {
         (void)v5_main_page_apply_status_flags(&g_main_page, &g_model.status_view, flags);
-        if ((flags & V5_MAIN_PAGE_REFRESH_DYNAMIC) != 0U) {
+        if ((flags & V5_MAIN_PAGE_REFRESH_DYNAMIC) != 0U && g_current_page == V5_SHELL_PAGE_SETTINGS) {
             (void)v5_settings_page_apply_status(&g_settings_page, &g_model.status_view);
         }
+        lv_timer_handler();
     }
-    lv_timer_handler();
     return 1;
 }
 

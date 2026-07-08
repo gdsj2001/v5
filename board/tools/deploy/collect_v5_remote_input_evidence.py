@@ -28,8 +28,10 @@ def count_remote_lines(host, path):
 
 
 def fetch_delta(host, remote, before, local):
-    ssh(host, f"test -f {remote!r} || :")
-    cmd = f"test -f {remote!r} && tail -n +{before + 1} {remote!r} > /tmp/v5_remote_input_delta.tmp || :"
+    cmd = (
+        ": > /tmp/v5_remote_input_delta.tmp; "
+        f"test -f {remote!r} && tail -n +{before + 1} {remote!r} >> /tmp/v5_remote_input_delta.tmp || :"
+    )
     ssh(host, cmd)
     scp_from(host, "/tmp/v5_remote_input_delta.tmp", local)
 

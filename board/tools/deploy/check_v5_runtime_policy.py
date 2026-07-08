@@ -138,26 +138,65 @@ def check_settings_runtime_schema_guard() -> int:
 def check_remote_relay_access_control() -> int:
     rc = 0
     source = ROOT / "app" / "src" / "v5_lvgl_remote_display.c"
+    relay = ROOT / "services" / "ui" / "v5_remote_ui_relay.py"
     init = ROOT / "services" / "ui" / "init.d" / "v5-ui-relay"
-    if not source.exists() or not init.exists():
+    if not source.exists() or not relay.exists() or not init.exists():
         print("REMOTE_RELAY_ACCESS_CONTROL_MISSING_SOURCE", file=sys.stderr)
         return 1
     source_text = source.read_text(encoding="utf-8", errors="ignore")
+    relay_text = relay.read_text(encoding="utf-8", errors="ignore")
     init_text = init.read_text(encoding="utf-8", errors="ignore")
     required_source = (
-        "V5_UI_REMOTE_ALLOW_CIDRS",
-        "remote_peer_allowed",
-        "remote_peer_not_allowed",
-        "parse_bind_address",
+        "remote_framebuffer.bgra",
+        "remote_dirty",
+        "mkfifo",
+        "mmap",
     )
     for token in required_source:
         if token not in source_text:
             print(f"REMOTE_RELAY_ACCESS_CONTROL_MISSING: {source.relative_to(ROOT)} lacks {token}", file=sys.stderr)
             rc = 1
+    forbidden_source = (
+        "AF_INET",
+        "SOCK_STREAM",
+        "listen(",
+        "accept(",
+        "recv(",
+        "/remote/frame/full",
+        "/remote/input",
+        "V5_UI_REMOTE_ALLOW_CIDRS",
+    )
+    for token in forbidden_source:
+        if token in source_text:
+            print(f"REMOTE_RELAY_UI_NETWORK_SURVIVOR: {source.relative_to(ROOT)} still has {token}", file=sys.stderr)
+            rc = 1
+    required_relay = (
+        "V5_UI_REMOTE_BIND",
+        "V5_UI_REMOTE_ALLOW_CIDRS",
+        "remote_peer_not_allowed",
+        "/remote/info",
+        "/remote/frame/full",
+        "/remote/stream",
+        "/remote/input",
+        "/remote/diagnostics",
+        "remote_framebuffer.bgra",
+        "remote_dirty",
+        "remote_input",
+        "metrics_snapshot",
+        "full_frame_requests",
+        "dirty_rect_frames",
+        "stream_repair_full_frames",
+    )
+    for token in required_relay:
+        if token not in relay_text:
+            print(f"REMOTE_RELAY_PYTHON_BOUNDARY_MISSING: {relay.relative_to(ROOT)} lacks {token}", file=sys.stderr)
+            rc = 1
     required_init = (
         "V5_UI_REMOTE_BIND",
         "V5_UI_REMOTE_ALLOW_CIDRS",
         "REMOTE_ALLOW_CIDRS",
+        "v5_remote_ui_relay.py",
+        "v5_ui_shell.pid",
     )
     for token in required_init:
         if token not in init_text:
@@ -295,7 +334,8 @@ def check_board_owner_refresh_before_bundle() -> int:
         "/opt/8ax/v5/linuxcnc/ini/v5_bus.ini",
         "/opt/8ax/v5/linuxcnc/var/linuxcnc.var",
         "/opt/8ax/v5/linuxcnc/var/tool.tbl",
-        "scp -q -P",
+        "scp_legacy_protocol_opt",
+        "scp $scp_legacy_protocol_opt -q",
         "shutil.copy2(local, backup)",
         "os.replace(tmp_local, local)",
     )
