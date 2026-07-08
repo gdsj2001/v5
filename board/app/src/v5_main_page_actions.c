@@ -166,6 +166,21 @@ static int selection_wcs_single_axis(const V5MainPageSelection *selection, char 
     return selection && selection->space == V5_MAIN_PAGE_SELECT_WCS && selection_single_axis(selection, axis_out);
 }
 
+static int selection_mcs_rotary_axis(const V5MainPageSelection *selection, char *axis_out)
+{
+    char axis;
+    if (!selection || selection->space != V5_MAIN_PAGE_SELECT_MCS || !selection_single_axis(selection, &axis)) {
+        return 0;
+    }
+    if (axis != 'A' && axis != 'C') {
+        return 0;
+    }
+    if (axis_out) {
+        *axis_out = axis;
+    }
+    return 1;
+}
+
 static int native_readback_requests_estop_reset(const V5NativeReadback *readback)
 {
     if (v5_native_readback_safety_estop_known(readback) && readback->safety_estop_active) {
@@ -301,7 +316,11 @@ int v5_main_page_action_prepare(
             ok = v5_command_resume_prepare(&prepared, &request);
             break;
         case V5_MAIN_PAGE_ACTION_HOME:
-            ok = v5_command_home_prepare(&prepared, &request);
+            if (selection_mcs_rotary_axis(selection, &selected_axis)) {
+                ok = v5_command_rotary_equiv_zero_prepare(selected_axis, &prepared, &request);
+            } else {
+                ok = v5_command_home_prepare(&prepared, &request);
+            }
             break;
         case V5_MAIN_PAGE_ACTION_ESTOP_FORCE:
             if (native_readback_requests_estop_reset(native_readback)) {

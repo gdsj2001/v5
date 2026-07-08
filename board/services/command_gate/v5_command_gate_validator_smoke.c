@@ -80,6 +80,20 @@ int main(void)
              "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
     if (!expect_accept(&frame)) return 8;
 
+    init_frame(&frame, V5_COMMAND_ROTARY_EQUIV_ZERO);
+    frame.axis_mask = V5_COMMAND_AXIS_A_MASK;
+    frame.enabled_value = 1;
+    if (!expect_accept(&frame)) return 12;
+
+    init_frame(&frame, V5_COMMAND_ROTARY_EQUIV_ZERO);
+    frame.axis_mask = V5_COMMAND_AXIS_X_MASK;
+    frame.enabled_value = 1;
+    if (!expect_reject(&frame, "bad_rotary_axis")) return 13;
+
+    init_frame(&frame, V5_COMMAND_ROTARY_EQUIV_ZERO);
+    frame.axis_mask = V5_COMMAND_AXIS_C_MASK;
+    if (!expect_reject(&frame, "missing_rotary_confirm")) return 14;
+
     init_frame(&frame, V5_COMMAND_START);
     frame.axis_mask = V5_COMMAND_AXIS_X_MASK;
     if (!expect_reject(&frame, "stray_axis_mask")) return 9;

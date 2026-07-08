@@ -19,6 +19,7 @@ static const V5NativeGateEntry k_gates[] = {
     {"feed_override_set", V5_NATIVE_GATE_OVERRIDE, "native_linuxcncrsh", "Set Feed_Override"},
     {"spindle_override_set", V5_NATIVE_GATE_OVERRIDE, "native_linuxcncrsh", "Set Spindle_Override"},
     {"first_point", V5_NATIVE_GATE_RUN_CONTROL, "native_first_point", "first point AC_XY_Z"},
+    {"rotary_equiv_zero", V5_NATIVE_GATE_RUN_CONTROL, "native_rotary_gate", "A/C G53 G0 wrapped rotary safe zero return"},
     {"settings_apply", V5_NATIVE_GATE_PARAMETER_APPLY, "native_settings_owner", "native memory apply"},
 };
 

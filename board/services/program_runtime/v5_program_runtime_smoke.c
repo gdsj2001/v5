@@ -144,6 +144,14 @@ int main(void)
         v5_program_runtime_destroy(&runtime);
         return 5;
     }
+    if (start_request.kind != V5_COMMAND_START ||
+        !start_request.text_value ||
+        strcmp(start_request.text_value, path) != 0 ||
+        strcmp(prepared.name, "start") != 0 ||
+        strcmp(prepared.owner, "native_linuxcncrsh") != 0) {
+        v5_program_runtime_destroy(&runtime);
+        return 20;
+    }
 
     if (!v5_program_runtime_write_multisegment_input(path)) {
         v5_program_runtime_destroy(&runtime);

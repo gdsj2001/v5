@@ -19,6 +19,7 @@ static const V5CommandEntry kV5Commands[] = {
     {"feed_override_set", "native_linuxcncrsh"},
     {"spindle_override_set", "native_linuxcncrsh"},
     {"first_point", "native_first_point"},
+    {"rotary_equiv_zero", "native_rotary_gate"},
 };
 
 const V5CommandEntry *v5_command_table_entries(size_t *count)

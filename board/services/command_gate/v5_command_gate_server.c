@@ -2,6 +2,7 @@
 #include "v5_command_gate_validator.h"
 #include "v5_linuxcncrsh_client.h"
 #include "v5_native_first_point.h"
+#include "v5_native_rotary_equiv_zero.h"
 #include "v5_native_safety.h"
 #include "v5_process_residency.h"
 #include "v5_settings_apply.h"
@@ -180,7 +181,8 @@ static int owner_is_allowed(const char *owner)
         (strcmp(owner, "native_linuxcncrsh") == 0 ||
          strcmp(owner, "native_home_mode_gate") == 0 ||
          strcmp(owner, "native_safety") == 0 ||
-         strcmp(owner, "native_first_point") == 0);
+         strcmp(owner, "native_first_point") == 0 ||
+         strcmp(owner, "native_rotary_gate") == 0);
 }
 
 static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5CommandGateIpcResponseFrame *response)
@@ -240,6 +242,17 @@ static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5Command
             return;
         }
         status = v5_native_first_point_send(&g_linuxcncrsh_config, &prepared, &request);
+    } else if (request.kind == V5_COMMAND_ROTARY_EQUIV_ZERO && strcmp(prepared.owner, "native_rotary_gate") == 0) {
+        if (!v5_native_rotary_equiv_zero_format_report(&prepared, &request, response->command_line, sizeof(response->command_line))) {
+            response->send_status = V5_COMMAND_GATE_SEND_INVALID;
+            linuxcncrsh_unlock();
+            return;
+        }
+        status = v5_native_rotary_equiv_zero_send(&g_linuxcncrsh_config, &prepared, &request);
+        copy_cstr(
+            response->readback_code,
+            sizeof(response->readback_code),
+            status == V5_LINUXCNCRSH_SEND_SENT ? "ROTARY_EQUIV_ZERO_NATIVE_SENT" : "ROTARY_EQUIV_ZERO_NATIVE_FAILED");
     } else if (request.kind == V5_COMMAND_HOME && strcmp(prepared.owner, "native_home_mode_gate") == 0) {
         (void)v5_linuxcncrsh_format_home_sequence(response->command_line, sizeof(response->command_line));
         status = v5_linuxcncrsh_send_home_sequence(&g_linuxcncrsh_config, 0, 0);

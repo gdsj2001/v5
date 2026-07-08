@@ -74,6 +74,26 @@ static int expect_home_native_gate(V5MainPage *page)
            report.send_status == 0;
 }
 
+static int expect_rotary_equiv_zero(V5MainPage *page, char axis)
+{
+    V5MainPageActionReport report;
+    unsigned int expected_mask = axis == 'A' ? V5_COMMAND_AXIS_A_MASK : V5_COMMAND_AXIS_C_MASK;
+    if (!v5_main_page_trigger_action(page, V5_MAIN_PAGE_ACTION_HOME, &report)) {
+        return 0;
+    }
+    if (report.action != V5_MAIN_PAGE_ACTION_HOME || !report.prepared || report.local_only || report.executed) {
+        return 0;
+    }
+    return same_text(report.command.name, "rotary_equiv_zero") &&
+           same_text(report.command.owner, "native_rotary_gate") &&
+           report.command.accepted &&
+           report.request.kind == V5_COMMAND_ROTARY_EQUIV_ZERO &&
+           report.request.axis_mask == expected_mask &&
+           report.request.enabled_value == 1 &&
+           !report.command_line[0] &&
+           report.send_status == 0;
+}
+
 
 static int expect_first_point(V5MainPage *page, const char *path)
 {
@@ -275,8 +295,12 @@ int main(void)
         return 17;
     }
     if (!v5_main_page_select_axis(&page, V5_MAIN_PAGE_SELECT_MCS, 'A') ||
-        !expect_home_native_gate(&page)) {
+        !expect_rotary_equiv_zero(&page, 'A')) {
         return 18;
+    }
+    if (!v5_main_page_select_axis(&page, V5_MAIN_PAGE_SELECT_MCS, 'C') ||
+        !expect_rotary_equiv_zero(&page, 'C')) {
+        return 36;
     }
     {
         V5NativeReadback readback;
@@ -368,7 +392,7 @@ int main(void)
         unlink(first_point_path);
     }
 
-    printf("v5 main page actions: buttons=%u local=view_3d mdi=start jog=native rtcp=toggle axis_select=prepared first_point=prepared native_lines=prepared missing_gates=0\n",
+    printf("v5 main page actions: buttons=%u local=view_3d mdi=start jog=native rtcp=toggle axis_select=prepared rotary_equiv_zero=prepared first_point=prepared native_lines=prepared missing_gates=0\n",
            page.button_count);
     v5_program_controller_destroy(&controller);
     return 0;

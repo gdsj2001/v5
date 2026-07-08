@@ -43,6 +43,8 @@ static const char *v5_command_gate_name_for_kind(V5CommandKind kind)
         return "spindle_override_set";
     case V5_COMMAND_FIRST_POINT:
         return "first_point";
+    case V5_COMMAND_ROTARY_EQUIV_ZERO:
+        return "rotary_equiv_zero";
     default:
         return 0;
     }

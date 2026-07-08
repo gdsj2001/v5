@@ -190,7 +190,7 @@ int v5_command_gate_validate_execute_frame(
         set_reason(reason, reason_cap, "MODE_TEXT_UNSUPPORTED");
         return 0;
     }
-    if (frame->kind <= (int32_t)V5_COMMAND_UI_LOCAL || frame->kind > (int32_t)V5_COMMAND_FIRST_POINT) {
+    if (frame->kind <= (int32_t)V5_COMMAND_UI_LOCAL || frame->kind > (int32_t)V5_COMMAND_ROTARY_EQUIV_ZERO) {
         set_reason(reason, reason_cap, "UNKNOWN_COMMAND_KIND");
         return 0;
     }
@@ -294,6 +294,16 @@ int v5_command_gate_validate_execute_frame(
                 set_reason(reason, reason_cap, "FIRST_POINT_AXIS_INVALID");
                 return 0;
             }
+        }
+        break;
+    case V5_COMMAND_ROTARY_EQUIV_ZERO:
+        if (frame->axis_mask == 0U ||
+            (frame->axis_mask & ~(V5_COMMAND_AXIS_A_MASK | V5_COMMAND_AXIS_C_MASK)) != 0U ||
+            frame->enabled_value != 1 ||
+            !command_text_ok(frame->text_value, 0, 0, reason, reason_cap) ||
+            !command_text_ok(frame->secondary_text_value, 0, 0, reason, reason_cap)) {
+            set_reason(reason, reason_cap, "ROTARY_EQUIV_ZERO_INVALID");
+            return 0;
         }
         break;
     case V5_COMMAND_PAUSE:

@@ -103,6 +103,14 @@ int main(void)
         !expect_line("jog_minus", "Set Jog_Incr X -100.000 10.000", &prepared, &request)) {
         return 15;
     }
+    if (!v5_command_rotary_equiv_zero_prepare('A', &prepared, &request) ||
+        request.kind != V5_COMMAND_ROTARY_EQUIV_ZERO ||
+        request.axis_mask != V5_COMMAND_AXIS_A_MASK ||
+        request.enabled_value != 1 ||
+        strcmp(prepared.name, "rotary_equiv_zero") != 0 ||
+        strcmp(prepared.owner, "native_rotary_gate") != 0) {
+        return 19;
+    }
     if (!v5_command_feed_override_prepare(120, &prepared, &request) ||
         !expect_line("feed_override", "Set Feed_Override 120", &prepared, &request)) {
         return 9;

@@ -36,6 +36,38 @@ int v5_command_resume_prepare(V5CommandPrepared *prepared, V5CommandRequest *req
     return v5_command_motion_prepare(V5_COMMAND_RESUME, prepared, request);
 }
 
+int v5_command_rotary_equiv_zero_prepare(char axis, V5CommandPrepared *prepared, V5CommandRequest *request)
+{
+    V5CommandRequest local_request;
+    unsigned int mask;
+
+    if (!prepared) {
+        return 0;
+    }
+    if (axis == 'a') {
+        axis = 'A';
+    } else if (axis == 'c') {
+        axis = 'C';
+    }
+    if (axis == 'A') {
+        mask = V5_COMMAND_AXIS_A_MASK;
+    } else if (axis == 'C') {
+        mask = V5_COMMAND_AXIS_C_MASK;
+    } else {
+        return 0;
+    }
+    memset(&local_request, 0, sizeof(local_request));
+    local_request.kind = V5_COMMAND_ROTARY_EQUIV_ZERO;
+    local_request.axis_mask = mask;
+    local_request.enabled_value = 1;
+    if (!v5_command_gate_prepare(&local_request, prepared)) {
+        return 0;
+    }
+    if (request) {
+        *request = local_request;
+    }
+    return 1;
+}
 
 static int v5_command_motion_axis_ok(char axis)
 {

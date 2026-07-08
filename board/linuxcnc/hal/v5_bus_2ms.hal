@@ -4,7 +4,7 @@
 loadrt xyzac-trt-kins coordinates=XYZAC sparm=identityfirst
 loadrt [EMCMOT]TPMOD
 loadrt [EMCMOT]HOMEMOD
-loadrt [EMCMOT]EMCMOT servo_period_nsec=[EMCMOT]SERVO_PERIOD num_joints=[KINS]JOINTS z20_wrapped_rotary_mask=0
+loadrt [EMCMOT]EMCMOT servo_period_nsec=[EMCMOT]SERVO_PERIOD num_joints=[KINS]JOINTS z20_wrapped_rotary_mask=24
 loadrt cia402 count=5
 loadrt bitslice names=x-din,y-din,z-din,a-din,c-din personality=31,31,31,31,31
 

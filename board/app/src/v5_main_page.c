@@ -2754,7 +2754,8 @@ static void execute_prepared_command_if_enabled(V5MainPage *page, V5MainPageActi
     if (strcmp(report->command.owner ? report->command.owner : "", "native_linuxcncrsh") != 0 &&
         strcmp(report->command.owner ? report->command.owner : "", "native_home_mode_gate") != 0 &&
         strcmp(report->command.owner ? report->command.owner : "", "native_safety") != 0 &&
-        strcmp(report->command.owner ? report->command.owner : "", "native_first_point") != 0) {
+        strcmp(report->command.owner ? report->command.owner : "", "native_first_point") != 0 &&
+        strcmp(report->command.owner ? report->command.owner : "", "native_rotary_gate") != 0) {
         report->send_status = 0;
         return;
     }
@@ -2768,7 +2769,7 @@ static void execute_prepared_command_if_enabled(V5MainPage *page, V5MainPageActi
         gate_timeout_ms = 3000U;
     } else if (report->request.kind == V5_COMMAND_RTCP_SET) {
         gate_timeout_ms = 2500U;
-    } else if (report->request.kind == V5_COMMAND_HOME) {
+    } else if (report->request.kind == V5_COMMAND_HOME || report->request.kind == V5_COMMAND_ROTARY_EQUIV_ZERO) {
         gate_timeout_ms = 5000U;
     }
     if (!v5_command_gate_send_prepared(&report->command, &report->request, &gate_result, gate_timeout_ms)) {
