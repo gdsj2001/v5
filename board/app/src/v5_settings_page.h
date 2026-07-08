@@ -37,6 +37,7 @@ typedef struct V5SettingsPage {
     V5MainPageActionReport last_action;
     lv_obj_t *return_home_button_label;
     int restart_pending;
+    char last_axis_table_refresh_run_id[64];
     V5UiNavigationCallback navigation_cb;
     void *navigation_user_data;
 } V5SettingsPage;

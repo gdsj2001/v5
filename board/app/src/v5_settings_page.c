@@ -249,6 +249,32 @@ static int settings_action_sets_restart_pending(const char *action)
             strcmp(action, "settings_axis_zero") == 0);
 }
 
+static int settings_action_refreshes_axis_table(const char *action)
+{
+    return action &&
+           (strcmp(action, "drive_profile_server_download") == 0 ||
+            strcmp(action, "drive_scan_slaves") == 0 ||
+            strcmp(action, "drive_factory_reset") == 0 ||
+            strcmp(action, "drive_parameter_read") == 0 ||
+            strcmp(action, "drive_fault_reset") == 0 ||
+            strcmp(action, "drive_set_parameters") == 0 ||
+            strcmp(action, "settings_axis_zero") == 0);
+}
+
+static void settings_refresh_axis_table_once(V5SettingsPage *page, const V5SettingsActionStatus *status)
+{
+    const char *run_id;
+    if (!page || !status || !status->ok || !settings_action_refreshes_axis_table(status->action)) {
+        return;
+    }
+    run_id = status->run_id[0] ? status->run_id : status->action;
+    if (strcmp(page->last_axis_table_refresh_run_id, run_id) == 0) {
+        return;
+    }
+    snprintf(page->last_axis_table_refresh_run_id, sizeof(page->last_axis_table_refresh_run_id), "%s", run_id);
+    v5_settings_axis_table_reload_current_readback();
+}
+
 static void settings_popup_set_eta(V5SettingsPage *page, int seconds_left)
 {
     char text[32];
@@ -389,6 +415,7 @@ static void settings_status_timer_cb(lv_timer_t *timer)
         if (page->popup_active && !page->popup_final && (!page->popup_action[0] || strcmp(page->popup_action, status.action) == 0)) {
             settings_popup_update_final(page, label, 1, status.code, detail);
         }
+        settings_refresh_axis_table_once(page, &status);
         if (strcmp(status.action, "device_dna_register") == 0) {
             refresh_machine_code_label(page);
         }
@@ -676,6 +703,7 @@ int v5_settings_page_create(V5SettingsPage *page, lv_obj_t *parent)
     }
     v5_settings_page_init(page);
     page->root = lv_obj_create(parent);
+    v5_settings_axis_table_begin_page();
     clear_obj_style(page->root);
     lv_obj_set_pos(page->root, 0, 0);
     lv_obj_set_size(page->root, 1024, 600);

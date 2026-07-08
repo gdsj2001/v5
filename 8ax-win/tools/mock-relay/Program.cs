@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.WebSockets;
 using System.Security.Cryptography;
@@ -61,6 +62,8 @@ internal sealed class MockRelayServer
     private const int Height = 600;
     private const string PixelFormat = RemotePixelFormats.Bgra32;
     private const int Stride = Width * 4;
+    private const int StreamTargetFps = 30;
+    private static readonly long StreamFrameIntervalTicks = (long)Math.Round(Stopwatch.Frequency / (double)StreamTargetFps);
     private const string ProgramDir = "/opt/8ax/phase0_bus5/nc";
     private const long ProgramEditMaxBytes = 1024 * 1024;
     private readonly FrameStore _frameStore = new(Width, Height);
@@ -340,9 +343,10 @@ internal sealed class MockRelayServer
         await SendFrameAsync(socket, FrameMetadata.FullFrame(fullFrame.FrameId, Width, Height, Stride, PixelFormat), fullFrame.Payload, cancellationToken);
 
         int sentCandidate = 0;
+        long nextFrameTicks = Stopwatch.GetTimestamp();
         while (!cancellationToken.IsCancellationRequested && socket.State == WebSocketState.Open)
         {
-            await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken);
+            nextFrameTicks = await PaceToNextStreamFrameAsync(nextFrameTicks, cancellationToken);
             DirtyFrame dirty = _frameStore.NextDirtyFrame();
             sentCandidate++;
             if (_options.DropEvery > 0 && sentCandidate % _options.DropEvery == 0)
@@ -359,6 +363,35 @@ internal sealed class MockRelayServer
                 PixelFormat,
                 new[] { dirty.Rect });
             await SendFrameAsync(socket, metadata, dirty.Payload, cancellationToken);
+        }
+    }
+
+    private static async Task<long> PaceToNextStreamFrameAsync(long previousTargetTicks, CancellationToken cancellationToken)
+    {
+        long targetTicks = previousTargetTicks + StreamFrameIntervalTicks;
+        long nowTicks = Stopwatch.GetTimestamp();
+        if (targetTicks < nowTicks - StreamFrameIntervalTicks)
+        {
+            targetTicks = nowTicks + StreamFrameIntervalTicks;
+        }
+
+        while (true)
+        {
+            long remainingTicks = targetTicks - Stopwatch.GetTimestamp();
+            if (remainingTicks <= 0)
+            {
+                return targetTicks;
+            }
+
+            double remainingMs = remainingTicks * 1000.0 / Stopwatch.Frequency;
+            if (remainingMs > 3.0)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(Math.Max(1.0, remainingMs - 1.0)), cancellationToken);
+            }
+            else
+            {
+                await Task.Yield();
+            }
         }
     }
 

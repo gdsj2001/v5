@@ -542,6 +542,18 @@ static void slave_option_extract_id(const char *text, char *out, size_t cap)
     out[n] = '\0';
 }
 
+static int slave_id_is_nat(const char *id)
+{
+    return id && strcmp(id, "NAT") == 0;
+}
+
+static int slave_option_is_nat(const char *text)
+{
+    char id[V5_AXIS_VALUE_CAP];
+    slave_option_extract_id(text, id, sizeof(id));
+    return slave_id_is_nat(id);
+}
+
 static int slave_option_same_id(const char *a, const char *b)
 {
     char id_a[V5_AXIS_VALUE_CAP];
@@ -1098,6 +1110,29 @@ static const char *row_value(unsigned int row, const char *field_key)
     return g_value_real[row][(unsigned int)c] ? g_values[row][(unsigned int)c] : 0;
 }
 
+static int row_slave_matches_option(unsigned int row, const char *option)
+{
+    char option_id[V5_AXIS_VALUE_CAP];
+    char value_id[V5_AXIS_VALUE_CAP];
+    if (row >= v5_settings_axis_table_row_count()) return 0;
+    slave_option_extract_id(option, option_id, sizeof(option_id));
+    if (!option_id[0] || slave_id_is_nat(option_id)) return 0;
+    slave_option_extract_id(row_value(row, "slave"), value_id, sizeof(value_id));
+    return value_id[0] && !slave_id_is_nat(value_id) && strcmp(option_id, value_id) == 0;
+}
+
+static int slave_option_used_by_other_row(unsigned int current_row, const char *option)
+{
+    unsigned int row;
+    for (row = 0U; row < v5_settings_axis_table_row_count(); ++row) {
+        if (row == current_row) continue;
+        if (row_slave_matches_option(row, option)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static V5SettingsParameterDiskTable disk_table_for_column(const V5SettingsAxisColumnSpec *col)
 {
     if (!col) return V5_SETTINGS_PARAMETER_DISK_NONE;
@@ -1215,9 +1250,9 @@ static const V5SettingsAxisColumnSpec kAxisColumns[] = {
     {"max_acceleration", "加速", 1228, 100, V5_AXIS_FIELD_EDIT, V5_PARAMETER_OWNER_RUNTIME_INI, V5_PARAMETER_READBACK_RUNTIME_INI, 0},
     {"backlash", "反向间隙", 1334, 96, V5_AXIS_FIELD_EDIT, V5_PARAMETER_OWNER_RUNTIME_INI, V5_PARAMETER_READBACK_RUNTIME_INI, 0},
     {"encoder_bits", "bit", 1440, 70, V5_AXIS_FIELD_SELECT, V5_PARAMETER_OWNER_DRIVE_ONLY, V5_PARAMETER_READBACK_DRIVE_PROVIDER, 1},
-    {"egear_numerator", "分子", 1516, 92, V5_AXIS_FIELD_READONLY, V5_PARAMETER_OWNER_SELF_PARAMETER_TABLE, V5_PARAMETER_READBACK_SELF_PARAMETER_TABLE, 0},
-    {"egear_denominator", "分母", 1614, 92, V5_AXIS_FIELD_READONLY, V5_PARAMETER_OWNER_SELF_PARAMETER_TABLE, V5_PARAMETER_READBACK_SELF_PARAMETER_TABLE, 0},
-    {"write_status", "写入状态", 1712, 132, V5_AXIS_FIELD_READONLY, V5_PARAMETER_OWNER_SELF_PARAMETER_TABLE, V5_PARAMETER_READBACK_SELF_PARAMETER_TABLE, 0},
+    {"egear_numerator", "分子", 1516, 92, V5_AXIS_FIELD_READONLY, V5_PARAMETER_OWNER_DRIVE_ONLY, V5_PARAMETER_READBACK_DRIVE_PROVIDER, 1},
+    {"egear_denominator", "分母", 1614, 92, V5_AXIS_FIELD_READONLY, V5_PARAMETER_OWNER_DRIVE_ONLY, V5_PARAMETER_READBACK_DRIVE_PROVIDER, 1},
+    {"write_status", "写入状态", 1712, 132, V5_AXIS_FIELD_READONLY, V5_PARAMETER_OWNER_DRIVE_ONLY, V5_PARAMETER_READBACK_DRIVE_PROVIDER, 1},
 };
 
 static lv_color_t rgb(unsigned char r, unsigned char g, unsigned char b)
@@ -1434,6 +1469,9 @@ int v5_settings_axis_table_start_axis_zero(unsigned int row, const char *home_of
     slave_index[0] = '\0';
     slave_value = row_value(row, "slave");
     slave_option_extract_id(slave_value, slave_index, sizeof(slave_index));
+    if (slave_id_is_nat(slave_index)) {
+        slave_index[0] = '\0';
+    }
     if (!pulse && !slave_index[0]) {
         log_axis_zero_request_event(row_spec, driver_mode, target_scope, apply_mode, "", "", 0);
         return 0;
@@ -1618,9 +1656,23 @@ static int append_dropdown_option(char *out, size_t cap, const char *value)
     return 1;
 }
 
-static int dropdown_options_for_cell(const V5SettingsAxisColumnSpec *col, const char *value, char *out, size_t cap)
+static int append_slave_dropdown_options_for_row(unsigned int row, char *out, size_t cap)
 {
     unsigned int i;
+    int ok = append_dropdown_option(out, cap, "NAT");
+    for (i = 0U; i < g_slave_option_count; ++i) {
+        if (slave_option_is_nat(g_slave_options[i])) continue;
+        if (!row_slave_matches_option(row, g_slave_options[i]) &&
+            slave_option_used_by_other_row(row, g_slave_options[i])) {
+            continue;
+        }
+        ok = append_dropdown_option(out, cap, g_slave_options[i]) && ok;
+    }
+    return ok;
+}
+
+static int dropdown_options_for_cell(const V5SettingsAxisColumnSpec *col, unsigned int row, const char *value, char *out, size_t cap)
+{
     if (!col || !out || cap == 0U) return 0;
     out[0] = '\0';
     if (strcmp(col->field_key, "axis_mode") == 0) {
@@ -1628,9 +1680,7 @@ static int dropdown_options_for_cell(const V5SettingsAxisColumnSpec *col, const 
     } else if (strcmp(col->field_key, "direction_mode") == 0) {
         snprintf(out, cap, "cw\nccw");
     } else if (strcmp(col->field_key, "slave") == 0) {
-        for (i = 0U; i < g_slave_option_count; ++i) {
-            append_dropdown_option(out, cap, g_slave_options[i]);
-        }
+        return append_slave_dropdown_options_for_row(row, out, cap);
     } else if (strcmp(col->field_key, "home_order") == 0) {
         snprintf(out, cap, "禁用\n0\n1\n2\n3\n4\n5\n6\n7");
     } else if (strcmp(col->field_key, "home_direction") == 0) {
@@ -1638,7 +1688,74 @@ static int dropdown_options_for_cell(const V5SettingsAxisColumnSpec *col, const 
     } else if (strcmp(col->field_key, "encoder_bits") == 0) {
         snprintf(out, cap, "24\n23\n22\n21\n20\n19\n18\n17\n16");
     }
+    (void)value;
     return out[0] != '\0';
+}
+
+int v5_settings_axis_table_dropdown_options(unsigned int row, unsigned int col, char *out, size_t cap)
+{
+    if (!out || cap == 0U) return 0;
+    out[0] = '\0';
+    if (row >= v5_settings_axis_table_row_count() || col >= v5_settings_axis_table_column_count()) {
+        return 0;
+    }
+    return dropdown_options_for_cell(&kAxisColumns[col], row, v5_settings_axis_table_value(row, col), out, cap);
+}
+
+static void refresh_axis_cell_ref(V5AxisCellRef *ref)
+{
+    const V5SettingsAxisColumnSpec *col;
+    const char *value;
+    if (!ref) return;
+    if (ref->kind == V5_CELL_KIND_G53) {
+        value = v5_settings_axis_table_g53_value(ref->row, ref->col);
+        if (ref->label) {
+            lv_label_set_text(ref->label, value);
+        }
+        if (ref->obj) {
+            lv_obj_invalidate(ref->obj);
+        }
+        return;
+    }
+    if (ref->row >= v5_settings_axis_table_row_count() ||
+        ref->col >= v5_settings_axis_table_column_count()) {
+        return;
+    }
+    col = &kAxisColumns[ref->col];
+    value = v5_settings_axis_table_value(ref->row, ref->col);
+    if (col->kind == V5_AXIS_FIELD_SELECT && ref->obj) {
+        char options[V5_DROPDOWN_OPTIONS_CAP];
+        if (dropdown_options_for_cell(col, ref->row, value, options, sizeof(options))) {
+            lv_dropdown_set_options(ref->obj, options);
+            lv_dropdown_set_selected(ref->obj, (uint16_t)dropdown_selected_for_value(options, value));
+        }
+    } else if (col->kind == V5_AXIS_FIELD_ACTION && ref->label) {
+        lv_label_set_text(ref->label, current_driver_mode_is_pulse() ? "设零" : "设0");
+    } else if (ref->label) {
+        lv_label_set_text(ref->label, value);
+    }
+    if (ref->obj) {
+        lv_obj_invalidate(ref->obj);
+    }
+}
+
+void v5_settings_axis_table_reload_current_readback(void)
+{
+    char project_root[sizeof(g_project_root)];
+    lv_coord_t scroll_x = 0;
+    unsigned int i;
+    snprintf(project_root, sizeof(project_root), "%s", g_project_root[0] ? g_project_root : ".");
+    if (g_axis_scroll) {
+        scroll_x = lv_obj_get_scroll_x(g_axis_scroll);
+    }
+    v5_settings_axis_table_load_readback(project_root);
+    for (i = 0U; i < g_cell_ref_count; ++i) {
+        refresh_axis_cell_ref(&g_cell_refs[i]);
+    }
+    if (g_axis_scroll) {
+        lv_obj_scroll_to_x(g_axis_scroll, scroll_x, LV_ANIM_OFF);
+        lv_obj_invalidate(g_axis_scroll);
+    }
 }
 
 static void dropdown_changed_cb(lv_event_t *event)
@@ -1675,7 +1792,7 @@ static void dropdown_pressed_cb(lv_event_t *event)
     if (strcmp(col->field_key, "slave") != 0) return;
     reload_slave_options_from_resident_self_table();
     value = v5_settings_axis_table_value(ref->row, ref->col);
-    if (dropdown_options_for_cell(col, value, options, sizeof(options))) {
+    if (dropdown_options_for_cell(col, ref->row, value, options, sizeof(options))) {
         lv_dropdown_set_options(ref->obj, options);
         lv_dropdown_set_selected(ref->obj, (uint16_t)dropdown_selected_for_value(options, value));
     }
@@ -1686,7 +1803,7 @@ static void dropdown_cell(lv_obj_t *parent, unsigned int row, unsigned int col_i
     char options[V5_DROPDOWN_OPTIONS_CAP];
     lv_obj_t *dd;
     (void)debug_id;
-    if (!dropdown_options_for_cell(col, text, options, sizeof(options))) {
+    if (!dropdown_options_for_cell(col, row, text, options, sizeof(options))) {
         value_cell(parent, x, y, w, h, text, text_color, 0, debug_id);
         return;
     }
@@ -2181,7 +2298,9 @@ void v5_settings_axis_table_create(lv_obj_t *root)
             } else if (!disabled && col->kind != V5_AXIS_FIELD_READONLY) {
                 edit_cell(scroll, r, c, col->x, y, col->width, row_h, initial_value(row, col), field_color(row, col), id);
             } else {
-                value_cell(scroll, col->x, y, col->width, row_h, initial_value(row, col), field_color(row, col), disabled, id);
+                lv_obj_t *cell = value_cell(scroll, col->x, y, col->width, row_h, initial_value(row, col), field_color(row, col), disabled, id);
+                lv_obj_t *text_label = lv_obj_get_child(cell, 0);
+                (void)store_cell_ref(V5_CELL_KIND_AXIS, r, c, cell, text_label, id);
             }
         }
     }

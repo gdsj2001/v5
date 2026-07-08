@@ -38,6 +38,7 @@ typedef struct V5SettingsAxisColumnSpec {
 
 void v5_settings_axis_table_load_boot_closure(const V5BootClosure *closure);
 void v5_settings_axis_table_load_readback(const char *project_root);
+void v5_settings_axis_table_reload_current_readback(void);
 void v5_settings_axis_table_begin_page(void);
 void v5_settings_axis_table_create(lv_obj_t *root);
 void v5_settings_axis_table_set_commit_callback(V5SettingsAxisCommitCallback cb, void *user_data);
@@ -62,6 +63,7 @@ const char *v5_settings_axis_table_bus_pulse_value(void);
 int v5_settings_axis_table_bus_pulse_value_is_real(void);
 unsigned int v5_settings_axis_table_slave_option_count(void);
 const char *v5_settings_axis_table_slave_option(unsigned int index);
+int v5_settings_axis_table_dropdown_options(unsigned int row, unsigned int col, char *out, size_t cap);
 int v5_settings_axis_table_commit_value(unsigned int row, unsigned int col, const char *value);
 
 #ifdef __cplusplus

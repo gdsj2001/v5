@@ -429,6 +429,7 @@ int v5_settings_action_poll_status(V5SettingsActionStatus *status)
     status->busy = json_bool_value(response, "busy");
     status->ok = json_bool_value(response, "ok");
     json_string_value(response, "action", status->action, sizeof(status->action));
+    json_string_value(response, "run_id", status->run_id, sizeof(status->run_id));
     json_string_value(response, "code", status->code, sizeof(status->code));
     json_string_value(response, "message_cn", status->message, sizeof(status->message));
     json_string_value(response, "result_path", status->result_path, sizeof(status->result_path));

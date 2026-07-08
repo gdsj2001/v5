@@ -13,6 +13,25 @@ static int same_text(const char *a, const char *b)
     return a && b && strcmp(a, b) == 0;
 }
 
+static int dropdown_has_line(const char *options, const char *line)
+{
+    const char *start;
+    size_t line_len;
+    if (!options || !line) return 0;
+    line_len = strlen(line);
+    start = options;
+    while (*start) {
+        const char *end = strchr(start, '\n');
+        size_t len = end ? (size_t)(end - start) : strlen(start);
+        if (len == line_len && strncmp(start, line, len) == 0) {
+            return 1;
+        }
+        if (!end) break;
+        start = end + 1;
+    }
+    return 0;
+}
+
 static unsigned int g_axis_zero_callback_count;
 static char g_axis_zero_axis[16];
 static char g_axis_zero_mode[24];
@@ -192,14 +211,6 @@ int main(void)
           "C\tslave\t5\n"
           "GANTRY\tslave\t6\n"
           "TOOLMAG\tslave\t7\n"
-          "X\twrite_status\t待写入\n"
-          "Y\twrite_status\t待写入\n"
-          "Z\twrite_status\t待写入\n"
-          "A\twrite_status\t待写入\n"
-          "B\twrite_status\t待写入\n"
-          "C\twrite_status\t待写入\n"
-          "GANTRY\twrite_status\t待写入\n"
-          "TOOLMAG\twrite_status\t待写入\n"
           "G53\ttool_setter_x\t0\n"
           "G53\ttool_setter_y\t0\n"
           "G53\ttool_setter_z\t0\n"
@@ -213,13 +224,37 @@ int main(void)
     }
     fputs("# schema=v5.settings.parameter_table.tsv.v1\n"
           "X\tencoder_bits\t18\n"
+          "X\tegear_numerator\t16384\n"
+          "X\tegear_denominator\t3125\n"
+          "X\twrite_status\t已写入\n"
           "Y\tencoder_bits\t18\n"
+          "Y\tegear_numerator\t16384\n"
+          "Y\tegear_denominator\t3125\n"
+          "Y\twrite_status\t已写入\n"
           "Z\tencoder_bits\t18\n"
+          "Z\tegear_numerator\t16384\n"
+          "Z\tegear_denominator\t3125\n"
+          "Z\twrite_status\t已写入\n"
           "A\tencoder_bits\t18\n"
+          "A\tegear_numerator\t4096\n"
+          "A\tegear_denominator\t5625\n"
+          "A\twrite_status\t已写入\n"
           "B\tencoder_bits\t18\n"
+          "B\tegear_numerator\t4096\n"
+          "B\tegear_denominator\t5625\n"
+          "B\twrite_status\t已写入\n"
           "C\tencoder_bits\t18\n"
+          "C\tegear_numerator\t4096\n"
+          "C\tegear_denominator\t5625\n"
+          "C\twrite_status\t已写入\n"
           "GANTRY\tencoder_bits\t18\n"
-          "TOOLMAG\tencoder_bits\t18\n", fp);
+          "GANTRY\tegear_numerator\t16384\n"
+          "GANTRY\tegear_denominator\t3125\n"
+          "GANTRY\twrite_status\t已写入\n"
+          "TOOLMAG\tencoder_bits\t18\n"
+          "TOOLMAG\tegear_numerator\t4096\n"
+          "TOOLMAG\tegear_denominator\t5625\n"
+          "TOOLMAG\twrite_status\t已写入\n", fp);
     fclose(fp);
     unsigned int rows = v5_settings_axis_table_row_count();
     unsigned int cols = v5_settings_axis_table_column_count();
@@ -288,10 +323,6 @@ int main(void)
                 if (!v5_settings_axis_table_value_is_real(r, c) ||
                     same_text(v5_settings_axis_table_value(r, c), "NAT") ||
                     same_text(v5_settings_axis_table_value(r, c), "--")) {
-                    if (same_text(col[c].field_key, "egear_numerator") ||
-                        same_text(col[c].field_key, "egear_denominator")) {
-                        continue;
-                    }
                     fprintf(stderr, "axis value missing: %s=%s\n", id, v5_settings_axis_table_value(r, c));
                     return 6;
                 }
@@ -315,6 +346,9 @@ int main(void)
         strcmp(v5_settings_axis_table_value(0U, 11U), "500") != 0 ||
         strcmp(v5_settings_axis_table_value(0U, 12U), "10000") != 0 ||
         strcmp(v5_settings_axis_table_value(0U, 15U), "18") != 0 ||
+        strcmp(v5_settings_axis_table_value(0U, 16U), "16384") != 0 ||
+        strcmp(v5_settings_axis_table_value(0U, 17U), "3125") != 0 ||
+        strcmp(v5_settings_axis_table_value(0U, 18U), "已写入") != 0 ||
         strcmp(v5_settings_axis_table_value(3U, 12U), "50000") != 0 ||
         strcmp(v5_settings_axis_table_value(6U, 0U), "直线") != 0 ||
         strcmp(v5_settings_axis_table_value(6U, 9U), "-500") != 0 ||
@@ -342,6 +376,57 @@ int main(void)
                 v5_settings_axis_table_value(7U, 0U),
                 v5_settings_axis_table_value(7U, 15U));
         return 5;
+    }
+
+    {
+        char options[256];
+        if (!v5_settings_axis_table_dropdown_options(0U, 2U, options, sizeof(options)) ||
+            !dropdown_has_line(options, "NAT") ||
+            !dropdown_has_line(options, "0") ||
+            dropdown_has_line(options, "1") ||
+            dropdown_has_line(options, "7")) {
+            fprintf(stderr, "X slave dropdown must keep NAT and own slave only when all scanned slaves are assigned: %s\n", options);
+            return 34;
+        }
+        if (!v5_settings_axis_table_dropdown_options(1U, 2U, options, sizeof(options)) ||
+            !dropdown_has_line(options, "NAT") ||
+            !dropdown_has_line(options, "1") ||
+            dropdown_has_line(options, "0")) {
+            fprintf(stderr, "Y slave dropdown must hide X selected slave: %s\n", options);
+            return 35;
+        }
+    }
+    if (!v5_settings_axis_table_commit_value(0U, 2U, "NAT") ||
+        strcmp(v5_settings_axis_table_value(0U, 2U), "NAT") != 0) {
+        fprintf(stderr, "slave NAT commit failed: X slave=%s\n", v5_settings_axis_table_value(0U, 2U));
+        return 36;
+    }
+    {
+        char self_slave[64];
+        if (!v5_settings_parameter_store_read_axis(".", V5_SETTINGS_PARAMETER_DISK_SELF, "X", "slave", self_slave, sizeof(self_slave)) ||
+            strcmp(self_slave, "NAT") != 0) {
+            fprintf(stderr, "slave NAT self owner readback failed: %s\n", self_slave);
+            return 37;
+        }
+    }
+    if (v5_settings_axis_table_start_axis_zero(0U, 0)) {
+        fprintf(stderr, "BUS axis zero must reject NAT slave binding\n");
+        return 38;
+    }
+    {
+        char options[256];
+        if (!v5_settings_axis_table_dropdown_options(0U, 2U, options, sizeof(options)) ||
+            !dropdown_has_line(options, "NAT") ||
+            !dropdown_has_line(options, "0") ||
+            dropdown_has_line(options, "1")) {
+            fprintf(stderr, "NAT row slave dropdown must expose unassigned scanned slave 0 and hide Y slave 1: %s\n", options);
+            return 39;
+        }
+    }
+    if (!v5_settings_axis_table_commit_value(0U, 2U, "0") ||
+        strcmp(v5_settings_axis_table_value(0U, 2U), "0") != 0) {
+        fprintf(stderr, "slave restore commit failed: X slave=%s\n", v5_settings_axis_table_value(0U, 2U));
+        return 40;
     }
 
     if (!v5_settings_axis_table_commit_value(0U, 12U, "12000")) {
@@ -416,7 +501,7 @@ int main(void)
                     v5_settings_axis_table_value(0U, 11U));
             return 31;
         }
-        if (strcmp(v5_settings_axis_table_value(0U, 18U), "待写入") != 0) {
+        if (strcmp(v5_settings_axis_table_value(0U, 18U), "已写入") != 0) {
             fprintf(stderr, "axis pitch commit must not overwrite drive write_status: status=%s\n", v5_settings_axis_table_value(0U, 18U));
             return 28;
         }
@@ -437,7 +522,7 @@ int main(void)
             fprintf(stderr, "axis bit owner readback failed: drive=%s ui=%s\n", drive, v5_settings_axis_table_value(0U, 15U));
             return 16;
         }
-        if (strcmp(v5_settings_axis_table_value(0U, 18U), "待写入") != 0) {
+        if (strcmp(v5_settings_axis_table_value(0U, 18U), "已写入") != 0) {
             fprintf(stderr, "axis bit commit must not overwrite drive write_status: status=%s\n", v5_settings_axis_table_value(0U, 18U));
             return 29;
         }
@@ -514,6 +599,16 @@ int main(void)
                 v5_settings_axis_table_value(0U, 2U));
         return 24;
     }
+    {
+        char options[256];
+        if (!v5_settings_axis_table_dropdown_options(0U, 2U, options, sizeof(options)) ||
+            !dropdown_has_line(options, "NAT") ||
+            !dropdown_has_line(options, "0 SV630_1Axis_03713") ||
+            dropdown_has_line(options, "1 SV630_1Axis_03715")) {
+            fprintf(stderr, "labeled slave dropdown must keep own label and hide Y label: %s\n", options);
+            return 41;
+        }
+    }
     fp = fopen("config/settings/self_parameter_table.tsv", "wb");
     if (!fp) {
         return 31;
@@ -530,6 +625,14 @@ int main(void)
                 v5_settings_axis_table_slave_option_count(),
                 v5_settings_axis_table_value(0U, 2U));
         return 31;
+    }
+    {
+        char options[256];
+        if (!v5_settings_axis_table_dropdown_options(0U, 2U, options, sizeof(options)) ||
+            strcmp(options, "NAT") != 0) {
+            fprintf(stderr, "slave dropdown without scan candidates must only show NAT: %s\n", options);
+            return 42;
+        }
     }
 
     unlink("linuxcnc/ini/v5_bus.ini");

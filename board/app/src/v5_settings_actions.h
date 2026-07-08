@@ -22,6 +22,7 @@ typedef struct V5SettingsActionStatus {
     int busy;
     int ok;
     char action[64];
+    char run_id[64];
     char code[72];
     char message[768];
     char result_path[192];

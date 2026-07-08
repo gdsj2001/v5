@@ -27,7 +27,7 @@ Current slice:
 
 Default double-click or no-argument launch is the only supported fast operator path. It must use `relay stream` plus `relay input`, with board touch ACK under 50ms and first Win-side visual feedback under 200ms. The old direct `/dev/fb0` capture path is retired because it can produce wrong colors and black regions.
 
-The formal path is board `remote_ui_relay`: HTTP full-frame initialization plus WebSocket dirty-rect stream sourced from LVGL flush rectangles, not high-frequency full-screen sampling or raw fb0 dumps. If `/remote/info` and `/remote/frame/full` are reachable but `WS /remote/stream` cannot be upgraded or disconnects, WinRemote records `relay_stream_unavailable`, schedules a clean reconnect, and does not fall back to relay polling, FIFO, SSH tap, direct board files, or retired `/dev/fb0` capture.
+The formal path is board `remote_ui_relay`: HTTP full-frame initialization plus WebSocket dirty-rect stream sourced from LVGL flush rectangles, not high-frequency full-screen sampling or raw fb0 dumps. WinRemote relay stream presentation targets 30Hz, about 33ms per dirty-rect frame; the client may throttle status and metrics logging to that cadence, but frame delivery remains WebSocket dirty-rect driven and must not switch to HTTP full-frame polling. If `/remote/info` and `/remote/frame/full` are reachable but `WS /remote/stream` cannot be upgraded or disconnects, WinRemote records `relay_stream_unavailable`, schedules a clean reconnect, and does not fall back to relay polling, FIFO, SSH tap, direct board files, or retired `/dev/fb0` capture.
 
 `--board-fb0 true` is retired and must not select a capture mode. The formal
 operator path is relay mode only: WinRemote sends pointer events over the relay

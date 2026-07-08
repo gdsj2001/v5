@@ -8,14 +8,6 @@ B	slave	4
 C	slave	5
 GANTRY	slave	6
 TOOLMAG	slave	7
-X	write_status	待写入
-Y	write_status	待写入
-Z	write_status	待写入
-A	write_status	待写入
-B	write_status	待写入
-C	write_status	待写入
-GANTRY	write_status	待写入
-TOOLMAG	write_status	待写入
 G53	tool_setter_x	0
 G53	tool_setter_y	0
 G53	tool_setter_z	0

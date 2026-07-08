@@ -43,6 +43,7 @@ VerifyAppSettingsConfigFile();
 VerifyUpdateDefaults();
 VerifyRelayReconnectContract();
 VerifyRelayStreamFailureNoFallbackContract();
+VerifyRelayDisplayRefreshRateContract();
 VerifyRelayInputRetryContract();
 VerifyRelayInputStaleSocketRecoveryContract();
 VerifySystemMetricsTopBarContract();
@@ -405,6 +406,26 @@ static void VerifyRelayStreamFailureNoFallbackContract()
     Require(true, relayClient.Contains("WebSocket connect timed out", StringComparison.Ordinal), "websocket timeout is explicit");
     Require(true, readme.Contains("does not fall back to relay polling", StringComparison.Ordinal), "README documents relay polling retirement");
     Require(false, mainWindow.Contains("/dev/fb0", StringComparison.Ordinal), "fallback does not use retired fb0 path");
+}
+
+static void VerifyRelayDisplayRefreshRateContract()
+{
+    string winRoot = FindWinRemoteRoot(AppContext.BaseDirectory);
+    string mainWindow = ReadWinRemoteFile(winRoot, "src", "8ax.WinRemote", "MainWindow.xaml.cs");
+    string mockRelay = ReadWinRemoteFile(winRoot, "tools", "mock-relay", "Program.cs");
+    string readme = ReadWinRemoteFile(winRoot, "README.md");
+    Require(true, mainWindow.Contains("RelayStreamTargetFps = 30", StringComparison.Ordinal), "relay target fps is 30");
+    Require(true, mainWindow.Contains("RelayFrameMetricsMinIntervalMs = 1000.0 / RelayStreamTargetFps", StringComparison.Ordinal), "relay frame metrics cadence derives from target fps");
+    Require(true, mainWindow.Contains("ShouldRecordRelayFrameMetrics", StringComparison.Ordinal), "relay status and metrics are throttled to target cadence");
+    Require(true, mainWindow.Contains("[\"target_fps\"] = RelayStreamTargetFps", StringComparison.Ordinal), "relay target fps is recorded in session evidence");
+    Require(true, mockRelay.Contains("StreamTargetFps = 30", StringComparison.Ordinal), "mock relay target fps is 30");
+    Require(true, mockRelay.Contains("StreamFrameIntervalTicks = (long)Math.Round(Stopwatch.Frequency / (double)StreamTargetFps)", StringComparison.Ordinal), "mock relay frame interval derives from target fps");
+    Require(true, mockRelay.Contains("PaceToNextStreamFrameAsync", StringComparison.Ordinal), "mock relay uses target-time stream pacing");
+    Require(true,
+        readme.Contains("targets 30Hz", StringComparison.Ordinal)
+            && readme.Contains("WebSocket dirty-rect stream", StringComparison.Ordinal)
+            && readme.Contains("must not switch to HTTP full-frame polling", StringComparison.Ordinal),
+        "README documents 30Hz dirty-rect relay stream without full-frame polling");
 }
 
 static void VerifyRelayInputRetryContract()

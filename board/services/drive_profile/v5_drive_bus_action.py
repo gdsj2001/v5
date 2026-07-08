@@ -15,6 +15,7 @@ RUN_DIR = Path("/run/8ax_v5_drive")
 RESIDENT_SNAPSHOT = RUN_DIR / "drive_profile_resident_snapshot.json"
 PROJECT_ROOT = Path(os.environ.get("V5_PROJECT_ROOT", "/opt/8ax/v5"))
 SELF_PARAMETER_TABLE = PROJECT_ROOT / "config/settings/self_parameter_table.tsv"
+DRIVE_PARAMETER_TABLE = PROJECT_ROOT / "config/settings/drive_parameter_table.tsv"
 SETTINGS_RUNTIME_JSON = Path(os.environ.get("V5_SETTINGS_RUNTIME_JSON", "/opt/8ax/phase0_bus5/settings_runtime.json"))
 RUNTIME_SETTINGS_INI = Path(os.environ.get("V5_RUNTIME_SETTINGS_INI", str(PROJECT_ROOT / "linuxcnc/ini/v5_bus.ini")))
 _RESIDENT_SNAPSHOT_CACHE: Dict[str, Any] | None = None
@@ -409,6 +410,88 @@ def write_scan_self_parameter_table(scan: Dict[str, Any]) -> None:
     write_parameter_tsv(SELF_PARAMETER_TABLE, rows)
 
 
+DRIVE_DISPLAY_FIELDS = {"egear_numerator", "egear_denominator", "write_status"}
+
+
+def format_drive_display_int(value: Any) -> str:
+    number = finite_float(value)
+    if number is None or not math.isfinite(number):
+        return ""
+    if abs(number - round(number)) < 1e-6:
+        return str(int(round(number)))
+    return "%.12g" % number
+
+
+def runtime_axis_by_slave_position() -> Dict[str, str]:
+    try:
+        runtime = load_settings_runtime()
+    except DriveActionError:
+        return {}
+    mapping: Dict[str, str] = {}
+    axes = runtime.get("axes") if isinstance(runtime.get("axes"), list) else []
+    for axis_index, axis_cfg in enumerate(axes):
+        if not isinstance(axis_cfg, dict):
+            continue
+        axis = str(axis_cfg.get("axis") or (AXIS_ORDER[axis_index] if axis_index < len(AXIS_ORDER) else "AXIS_%d" % axis_index)).upper()
+        try:
+            position = parse_slave_position_token(axis_cfg.get("slave_index") if axis_cfg.get("slave_index") is not None else axis_cfg.get("slave"))
+        except DriveActionError:
+            continue
+        if axis and position:
+            mapping[position] = axis
+    return mapping
+
+
+def write_drive_parameter_display_rows(updates: List[Dict[str, Any]]) -> Dict[str, Any]:
+    normalized: List[Tuple[str, str, str]] = []
+    touched_axes = set()
+    for item in updates:
+        axis = str(item.get("axis") or "").upper()
+        if axis not in AXIS_ORDER:
+            continue
+        fields: Dict[str, str] = {}
+        numerator = format_drive_display_int(item.get("egear_numerator"))
+        denominator = format_drive_display_int(item.get("egear_denominator"))
+        status = str(item.get("write_status") or "").strip()
+        if numerator:
+            fields["egear_numerator"] = numerator
+        if denominator:
+            fields["egear_denominator"] = denominator
+        if status:
+            fields["write_status"] = status
+        if not fields:
+            continue
+        touched_axes.add(axis)
+        for field in ("egear_numerator", "egear_denominator", "write_status"):
+            value = fields.get(field)
+            if value:
+                normalized.append((axis, field, value))
+    if not touched_axes:
+        return {"ok": False, "code": "DRIVE_DISPLAY_TABLE_NO_UPDATES", "path": str(DRIVE_PARAMETER_TABLE)}
+    rows = [
+        row for row in read_parameter_tsv(DRIVE_PARAMETER_TABLE)
+        if not (row[0].upper() in touched_axes and row[1] in DRIVE_DISPLAY_FIELDS)
+    ]
+    rows.extend(normalized)
+    write_parameter_tsv(DRIVE_PARAMETER_TABLE, rows)
+    return {
+        "ok": True,
+        "code": "DRIVE_DISPLAY_TABLE_UPDATED",
+        "path": str(DRIVE_PARAMETER_TABLE),
+        "axis_count": len(touched_axes),
+        "field_count": len(normalized),
+    }
+
+
+def drive_display_update_from_health(axis: str, health: Dict[str, Any], status: str) -> Dict[str, Any]:
+    return {
+        "axis": axis,
+        "egear_numerator": health.get("egear_numerator"),
+        "egear_denominator": health.get("egear_denominator"),
+        "write_status": status,
+    }
+
+
 def format_scan_slave_display(scan: Dict[str, Any]) -> str:
     slaves = scan.get("slaves", []) if isinstance(scan, dict) else []
     if not isinstance(slaves, list):
@@ -704,6 +787,8 @@ def read_drive(timeout_s: float) -> Dict[str, Any]:
         return {"ok": False, "code": exc.code, "message_cn": exc.message_cn, "detail": exc.detail, "read_attempted": False, "write_executed": False, "motion_executed": False}
     targets: List[Dict[str, Any]] = []
     failures: List[Dict[str, Any]] = []
+    axis_by_position = runtime_axis_by_slave_position()
+    display_updates: List[Dict[str, Any]] = []
     for slave in scan.get("slaves", []):
         position = str(slave.get("position") or "")
         try:
@@ -722,15 +807,23 @@ def read_drive(timeout_s: float) -> Dict[str, Any]:
                 command = commands.get(name)
                 if isinstance(command, dict) and command.get("supported") is not False:
                     reads[name] = read_command(position, name, command, False)
-            targets.append({"ok": target_ok, "position": position, "identity": identity, "profile_id": profile.get("profile_id", ""), "selected_map_path": profile.get("profile_map_path", ""), "selected_map_sha256": profile.get("profile_map_sha256", ""), "map_source": profile.get("map_source", ""), "reads": reads})
+            axis = axis_by_position.get(position, "")
+            health = evaluate_drive_health(reads)
+            if axis:
+                display_updates.append(drive_display_update_from_health(axis, health, "读回实际" if target_ok and health.get("ok") else "读回失败"))
+            targets.append({"ok": target_ok, "axis": axis, "position": position, "identity": identity, "profile_id": profile.get("profile_id", ""), "selected_map_path": profile.get("profile_map_path", ""), "selected_map_sha256": profile.get("profile_map_sha256", ""), "map_source": profile.get("map_source", ""), "reads": reads})
             if not target_ok:
                 failures.append({"position": position, "code": "DRIVE_READ_PARTIAL"})
         except DriveActionError as exc:
             failure = {"position": position, "code": exc.code, "message_cn": exc.message_cn, "detail": exc.detail}
-            targets.append({"ok": False, **failure})
+            axis = axis_by_position.get(position, "")
+            if axis:
+                display_updates.append({"axis": axis, "write_status": "读回失败"})
+            targets.append({"ok": False, "axis": axis, **failure})
             failures.append(failure)
     ok = bool(targets) and not failures
-    return {"ok": ok, "code": "DRIVE_READ_OK" if ok else "DRIVE_READ_PARTIAL", "message_cn": "读取驱动完成。" if ok else "读取驱动未完整闭合。", "targets": targets, "failures": failures, "snapshot_generated_at": snapshot.get("generated_at"), "snapshot_profile_count": snapshot.get("profile_count"), "read_attempted": True, "write_executed": False, "motion_executed": False}
+    display_writeback = write_drive_parameter_display_rows(display_updates) if display_updates else {}
+    return {"ok": ok, "code": "DRIVE_READ_OK" if ok else "DRIVE_READ_PARTIAL", "message_cn": "读取驱动完成。" if ok else "读取驱动未完整闭合。", "targets": targets, "failures": failures, "snapshot_generated_at": snapshot.get("generated_at"), "snapshot_profile_count": snapshot.get("profile_count"), "drive_parameter_display_writeback": display_writeback, "read_attempted": True, "write_executed": False, "motion_executed": False}
 
 
 def parse_slave_position_token(value: Any) -> str:
@@ -1250,19 +1343,11 @@ def assert_drive_write_safety(target: Dict[str, Any], command_names: List[str], 
     return {"ok": True, "statusword": statusword, "velocity": velocity, "no_motion_source": no_motion_source, "status_read": compact_read_item(status_read), "velocity_read": compact_read_item(velocity_read) if velocity_read is not None else None}
 
 
-def target_egear(axis_cfg: Dict[str, Any]) -> Tuple[int, int, Dict[str, Any]]:
-    electronic = axis_cfg.get("electronic_gear") if isinstance(axis_cfg.get("electronic_gear"), dict) else {}
-    candidates = [
-        (axis_cfg.get("egear_numerator"), axis_cfg.get("egear_denominator"), "axis.egear"),
-        (electronic.get("computed_numerator"), electronic.get("computed_denominator"), "electronic_gear.computed"),
-        (electronic.get("numerator"), electronic.get("denominator"), "electronic_gear.target"),
-    ]
-    for raw_num, raw_den, source in candidates:
-        num = finite_float(raw_num)
-        den = finite_float(raw_den)
-        if num is not None and den is not None and num > 0.0 and den > 0.0:
-            return int(round(num)), int(round(den)), {"source": source, "raw_numerator": raw_num, "raw_denominator": raw_den}
-    raise DriveActionError("DRIVE_EGEAR_TARGET_MISSING", "缺少可信电子齿轮目标分子/分母，未写驱动。", {"axis": axis_cfg.get("axis"), "electronic_gear": electronic})
+def target_egear(target: Dict[str, Any]) -> Tuple[int, int, Dict[str, Any]]:
+    axis = str(target.get("axis") or "").upper()
+    axis_index = int(target.get("axis_index") or 0)
+    profile = target.get("profile") if isinstance(target.get("profile"), dict) else {}
+    return target_egear_from_runtime_ini(axis, axis_index, profile)
 
 
 def mark_drive_parameters_invalid(axis_cfg: Dict[str, Any], reason: str, write_status: str) -> None:
@@ -1293,6 +1378,95 @@ def finite_float(value: Any) -> float | None:
 
 def axis_unit(axis: str) -> str:
     return "deg" if str(axis or "").upper() in {"A", "B", "C"} else "mm"
+
+
+def drive_parameter_axis_value(axis: str, field: str) -> str:
+    target_axis = str(axis or "").upper()
+    target_field = str(field or "")
+    for row_axis, row_field, row_value in read_parameter_tsv(DRIVE_PARAMETER_TABLE):
+        if row_axis.upper() == target_axis and row_field == target_field:
+            return row_value
+    return ""
+
+
+def final_encoder_bits(axis: str, profile: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
+    table_value = drive_parameter_axis_value(axis, "encoder_bits")
+    bits = finite_float(table_value)
+    source = "drive_parameter_table.encoder_bits"
+    if bits is None:
+        bits = finite_float(profile.get("encoder_bits")) or finite_float(profile.get("encoder_resolution_bits"))
+        source = "drive_profile.encoder_bits"
+    if bits is None or bits <= 0.0 or bits >= 63.0:
+        raise DriveActionError("DRIVE_ENCODER_BITS_MISSING", "缺少最终 encoder_bits，不能计算电子齿轮。", {"axis": axis, "drive_parameter_table": str(DRIVE_PARAMETER_TABLE), "profile_id": profile.get("profile_id", "")})
+    rounded = int(round(bits))
+    if abs(bits - float(rounded)) > 1e-6:
+        raise DriveActionError("DRIVE_ENCODER_BITS_NON_INTEGER", "encoder_bits 必须是整数，不能计算电子齿轮。", {"axis": axis, "encoder_bits": bits, "source": source})
+    return rounded, {"source": source, "raw_value": table_value if table_value else profile.get("encoder_bits")}
+
+
+def target_egear_from_runtime_ini(axis: str, axis_index: int, profile: Dict[str, Any]) -> Tuple[int, int, Dict[str, Any]]:
+    sections = read_runtime_ini_sections(RUNTIME_SETTINGS_INI)
+    axis_name = "AXIS_%s" % str(axis or "").upper()
+    joint_name = "JOINT_%d" % axis_index
+    scale = runtime_ini_value(sections, [joint_name, axis_name], ["SCALE"])
+    target_precision = runtime_ini_value(sections, [axis_name, joint_name], ["TARGET_PRECISION", "PRECISION", "TARGET_UNIT_PER_COUNT", "UNIT_PER_COUNT"])
+    precision_source = "active_runtime_ini.target_precision"
+    if target_precision is None and scale is not None and scale > 0.0:
+        target_precision = 1.0 / scale
+        precision_source = "active_runtime_ini.SCALE.inverse"
+    pitch = runtime_ini_value(sections, [axis_name, joint_name], ["LEAD_PITCH_MM_PER_REV", "SCREW_PITCH_MM_PER_REV", "ROTARY_DEGREES_PER_REV", "PITCH"])
+    ratio = runtime_ini_value(sections, [axis_name, joint_name], ["MOTOR_REVS_PER_LOAD_REV", "REDUCER_RATIO", "GEAR_RATIO"])
+    ratio_source = "active_runtime_ini.ratio"
+    motor_rev = runtime_ini_value(sections, [axis_name, joint_name], ["MOTOR_REV"])
+    load_rev = runtime_ini_value(sections, [axis_name, joint_name], ["LOAD_REV"])
+    if ratio is None and motor_rev is not None and load_rev is not None and load_rev > 0.0:
+        ratio = motor_rev / load_rev
+        ratio_source = "active_runtime_ini.motor_rev_load_rev"
+    missing: List[str] = []
+    if target_precision is None or target_precision <= 0.0:
+        missing.append("target_precision")
+    if pitch is None or pitch <= 0.0:
+        missing.append("pitch")
+    if ratio is None or ratio <= 0.0:
+        missing.append("motor_rev/load_rev")
+    if missing:
+        raise DriveActionError("DRIVE_EGEAR_SCALE_CHAIN_MISSING", "缺少可信比例链输入，未写驱动。", {"axis": axis, "missing": missing, "runtime_ini": str(RUNTIME_SETTINGS_INI), "axis_section": axis_name, "joint_section": joint_name})
+    bits, bit_source = final_encoder_bits(axis, profile)
+    drive_internal_counts = 1 << bits
+    target_command_counts_float = float(pitch) / float(ratio) / float(target_precision)
+    target_command_counts = int(round(target_command_counts_float))
+    if target_command_counts <= 0:
+        raise DriveActionError("DRIVE_EGEAR_TARGET_COUNTS_INVALID", "电子齿轮目标 count 非法，未写驱动。", {"axis": axis, "target_command_counts": target_command_counts, "target_command_counts_float": target_command_counts_float})
+    divisor = math.gcd(drive_internal_counts, target_command_counts)
+    numerator = drive_internal_counts // divisor
+    denominator = target_command_counts // divisor
+    if numerator <= 0 or denominator <= 0:
+        raise DriveActionError("DRIVE_EGEAR_TARGET_INVALID", "电子齿轮目标分子/分母非法，未写驱动。", {"axis": axis, "numerator": numerator, "denominator": denominator})
+    evidence = {
+        "source": "active_runtime_ini_formula",
+        "axis": axis,
+        "axis_index": axis_index,
+        "runtime_ini": str(RUNTIME_SETTINGS_INI),
+        "axis_section": axis_name,
+        "joint_section": joint_name,
+        "unit": axis_unit(axis),
+        "scale": scale,
+        "target_precision": target_precision,
+        "target_precision_source": precision_source,
+        "pitch_units_per_load_rev": pitch,
+        "motor_rev": motor_rev,
+        "load_rev": load_rev,
+        "motor_revs_per_load_rev": ratio,
+        "ratio_source": ratio_source,
+        "encoder_bits": bits,
+        "encoder_bits_source": bit_source.get("source", ""),
+        "drive_internal_counts_per_motor_rev": drive_internal_counts,
+        "target_command_counts_per_motor_rev": target_command_counts,
+        "target_command_counts_float": target_command_counts_float,
+        "rounding_delta_counts": abs(target_command_counts_float - float(target_command_counts)),
+        "formula": "egear = drive_internal_counts_per_motor_rev / round(pitch / ratio / target_precision)",
+    }
+    return numerator, denominator, evidence
 
 
 def read_runtime_ini_sections(path: Path) -> Dict[str, Dict[str, str]]:
@@ -1758,6 +1932,7 @@ def run_factory_reset(timeout_s: float) -> Dict[str, Any]:
     except DriveActionError as exc:
         return {"ok": False, "code": exc.code, "message_cn": exc.message_cn, "detail": compact_error_detail(exc.detail), "write_executed": False, "drive_write_executed": False, "motion_executed": False, "failed_stage": "precheck"}
     target_results: List[Dict[str, Any]] = []
+    display_updates: List[Dict[str, Any]] = []
     write_executed = False
     for target in targets:
         commands = target.get("commands") if isinstance(target.get("commands"), dict) else {}
@@ -1789,12 +1964,15 @@ def run_factory_reset(timeout_s: float) -> Dict[str, Any]:
                 "egear_numerator_readback": health.get("egear_numerator"),
                 "egear_denominator_readback": health.get("egear_denominator"),
             }
+            display_updates.append(drive_display_update_from_health(str(target.get("axis") or ""), health, "复位失效"))
             item["ok"] = True
             item["code"] = "DRIVE_RESET_TARGET_OK"
         except DriveActionError as exc:
+            display_updates.append({"axis": str(target.get("axis") or ""), "write_status": "复位失败"})
             item.update({"ok": False, "code": exc.code, "message_cn": exc.message_cn, "detail": compact_error_detail(exc.detail)})
         target_results.append(item)
     persist = persist_settings_runtime(runtime) if write_executed else {}
+    display_writeback = write_drive_parameter_display_rows(display_updates) if display_updates else {}
     failures = [item for item in target_results if not item.get("ok")]
     ok = not failures
     return {
@@ -1806,6 +1984,7 @@ def run_factory_reset(timeout_s: float) -> Dict[str, Any]:
         "prechecks": prechecks,
         "scan": scan,
         "settings_runtime_writeback": persist,
+        "drive_parameter_display_writeback": display_writeback,
         "write_executed": write_executed,
         "drive_write_executed": write_executed,
         "motion_executed": False,
@@ -1864,19 +2043,32 @@ def update_axis_drive_set_evidence(axis_cfg: Dict[str, Any],
     health = readback.get("health", {}) if isinstance(readback.get("health"), dict) else {}
     read_num = int(health.get("egear_numerator") or egear[0])
     read_den = int(health.get("egear_denominator") or egear[1])
-    encoder_bits = finite_float(axis_cfg.get("encoder_bits")) or finite_float(axis_cfg.get("encoder_resolution_bits")) or finite_float(axis_cfg.get("raw_encoder_bits")) or finite_float((target.get("profile") or {}).get("encoder_bits"))
+    encoder_bits = finite_float(egear_source.get("encoder_bits")) or finite_float(axis_cfg.get("encoder_bits")) or finite_float(axis_cfg.get("encoder_resolution_bits")) or finite_float(axis_cfg.get("raw_encoder_bits")) or finite_float((target.get("profile") or {}).get("encoder_bits"))
     if encoder_bits is None or encoder_bits <= 0.0 or encoder_bits >= 63.0:
         raise DriveActionError("DRIVE_ENCODER_BITS_MISSING", "缺少最终 encoder_bits，不能刷新设置驱动证据。", {"axis": axis_cfg.get("axis")})
-    drive_internal_counts = 2.0 ** encoder_bits
+    drive_internal_counts = finite_float(egear_source.get("drive_internal_counts_per_motor_rev")) or (2.0 ** encoder_bits)
     feedback_counts = drive_internal_counts * float(read_den) / float(read_num)
-    ratio = finite_float(axis_cfg.get("motor_revs_per_load_rev")) or finite_float(axis_cfg.get("reducer_ratio"))
-    motor_rev = finite_float(axis_cfg.get("motor_rev"))
-    load_rev = finite_float(axis_cfg.get("load_rev"))
+    ratio = finite_float(egear_source.get("motor_revs_per_load_rev"))
+    motor_rev = finite_float(egear_source.get("motor_rev"))
+    load_rev = finite_float(egear_source.get("load_rev"))
+    if ratio is None:
+        ratio = finite_float(axis_cfg.get("motor_revs_per_load_rev")) or finite_float(axis_cfg.get("reducer_ratio"))
+    if motor_rev is None:
+        motor_rev = finite_float(axis_cfg.get("motor_rev"))
+    if load_rev is None:
+        load_rev = finite_float(axis_cfg.get("load_rev"))
     if ratio is None and motor_rev and load_rev and load_rev > 0.0:
         ratio = motor_rev / load_rev
     rotary_load_counts = feedback_counts * ratio if ratio and ratio > 0.0 else None
     axis_cfg["encoder_bits"] = encoder_bits
     axis_cfg["encoder_resolution_bits"] = encoder_bits
+    if motor_rev is not None:
+        axis_cfg["motor_rev"] = motor_rev
+    if load_rev is not None:
+        axis_cfg["load_rev"] = load_rev
+    if ratio is not None:
+        axis_cfg["motor_revs_per_load_rev"] = ratio
+        axis_cfg["reducer_ratio"] = ratio
     axis_cfg["drive_internal_counts_per_motor_rev"] = drive_internal_counts
     axis_cfg["encoder_single_turn_counts"] = int(round(drive_internal_counts))
     axis_cfg["egear_numerator"] = read_num
@@ -1900,6 +2092,15 @@ def update_axis_drive_set_evidence(axis_cfg: Dict[str, Any],
         "actual_counts_per_motor_rev": axis_cfg["feedback_counts_per_motor_rev"],
         "feedback_counts_per_motor_rev": axis_cfg["feedback_counts_per_motor_rev"],
         "feedback_counts_source": "drive_internal_counts_and_egear_readback",
+        "target_command_counts_per_motor_rev": egear_source.get("target_command_counts_per_motor_rev"),
+        "target_command_counts_float": egear_source.get("target_command_counts_float"),
+        "target_precision": egear_source.get("target_precision"),
+        "target_precision_source": egear_source.get("target_precision_source", ""),
+        "target_unit_per_count": egear_source.get("target_precision"),
+        "pitch_units_per_load_rev": egear_source.get("pitch_units_per_load_rev"),
+        "pitch_source": "active_runtime_ini",
+        "ratio_source": egear_source.get("ratio_source", ""),
+        "motor_revs_per_load_rev": ratio,
         "write_status": "write_verified_readback",
         "write_verified_at": now_utc(),
         "target_source": egear_source.get("source", ""),
@@ -1936,6 +2137,11 @@ def update_axis_drive_set_evidence(axis_cfg: Dict[str, Any],
         "mode_of_operation": health.get("mode_of_operation"),
         "drive_internal_counts_per_motor_rev": drive_internal_counts,
         "feedback_counts_per_motor_rev": axis_cfg["feedback_counts_per_motor_rev"],
+        "target_source": egear_source.get("source", ""),
+        "target_command_counts_per_motor_rev": egear_source.get("target_command_counts_per_motor_rev"),
+        "target_precision": egear_source.get("target_precision"),
+        "pitch_units_per_load_rev": egear_source.get("pitch_units_per_load_rev"),
+        "motor_revs_per_load_rev": ratio,
     }
 
 
@@ -1945,17 +2151,18 @@ def run_set_drive(timeout_s: float) -> Dict[str, Any]:
         prechecks = precheck_targets_for_write(targets, ["drive.set_egear", "drive.write_mode"], timeout_s)
         planned: Dict[str, Tuple[Tuple[int, int], Dict[str, Any]]] = {}
         for target in targets:
-            egear = target_egear(target["axis_cfg"])
+            egear = target_egear(target)
             planned[str(target.get("position") or "")] = ((egear[0], egear[1]), egear[2])
     except DriveActionError as exc:
         return {"ok": False, "code": exc.code, "message_cn": exc.message_cn, "detail": compact_error_detail(exc.detail), "write_executed": False, "drive_write_executed": False, "motion_executed": False, "failed_stage": "precheck"}
     target_results: List[Dict[str, Any]] = []
+    display_updates: List[Dict[str, Any]] = []
     write_executed = False
     for target in targets:
         commands = target.get("commands") if isinstance(target.get("commands"), dict) else {}
         position = str(target.get("position") or "")
         egear, egear_source = planned[position]
-        item: Dict[str, Any] = {"axis": target.get("axis"), "position": position, "profile_id": (target.get("profile") or {}).get("profile_id", ""), "target_egear": {"numerator": egear[0], "denominator": egear[1]}, "target_mode": CANONICAL_CSP_MODE}
+        item: Dict[str, Any] = {"axis": target.get("axis"), "position": position, "profile_id": (target.get("profile") or {}).get("profile_id", ""), "target_egear": {"numerator": egear[0], "denominator": egear[1], "source": egear_source}, "target_mode": CANONICAL_CSP_MODE}
         try:
             target_write_started = False
             egear_write = write_command(position, "drive.set_egear", commands.get("drive.set_egear", {}), {"numerator": egear[0], "denominator": egear[1]})
@@ -1989,14 +2196,18 @@ def run_set_drive(timeout_s: float) -> Dict[str, Any]:
             if mode_write is not None and not mode_write.get("ok"):
                 item["mode_write_status"] = "download_sdo_error_but_readback_matched"
             update_axis_drive_set_evidence(target["axis_cfg"], target, egear, readback, egear_source)
+            health = readback.get("health", {}) if isinstance(readback.get("health"), dict) else {}
+            display_updates.append(drive_display_update_from_health(str(target.get("axis") or ""), health, "已写入"))
             item["ok"] = True
             item["code"] = "DRIVE_SET_TARGET_OK"
         except DriveActionError as exc:
             if locals().get("target_write_started"):
                 mark_drive_parameters_invalid(target["axis_cfg"], exc.code.lower(), "write_unverified_readback_failed")
+                display_updates.append({"axis": str(target.get("axis") or ""), "write_status": "写入失败"})
             item.update({"ok": False, "code": exc.code, "message_cn": exc.message_cn, "detail": compact_error_detail(exc.detail)})
         target_results.append(item)
     persist = persist_settings_runtime(runtime) if write_executed else {}
+    display_writeback = write_drive_parameter_display_rows(display_updates) if display_updates else {}
     failures = [item for item in target_results if not item.get("ok")]
     ok = not failures
     return {
@@ -2008,6 +2219,7 @@ def run_set_drive(timeout_s: float) -> Dict[str, Any]:
         "prechecks": prechecks,
         "scan": scan,
         "settings_runtime_writeback": persist,
+        "drive_parameter_display_writeback": display_writeback,
         "write_executed": write_executed,
         "drive_write_executed": write_executed,
         "motion_executed": False,

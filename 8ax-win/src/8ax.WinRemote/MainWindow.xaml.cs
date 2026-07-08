@@ -22,6 +22,8 @@ public partial class MainWindow : Window
     private const int RelayReconnectInitialDelayMs = 700;
     private const int RelayReconnectMaxDelayMs = 5000;
     private const int SystemMetricsRefreshMs = 1000;
+    private const int RelayStreamTargetFps = 30;
+    private const double RelayFrameMetricsMinIntervalMs = 1000.0 / RelayStreamTargetFps;
 
     private readonly AppSettings _settings = AppSettings.LoadFromEnvironment();
     private readonly RemoteFramebuffer _relayFramebuffer = new();
@@ -42,6 +44,10 @@ public partial class MainWindow : Window
     private RemotePoint _lastRelayPoint;
     private bool _haveLastRelayMovePoint;
     private RemotePoint _lastRelayMovePoint;
+    private DateTime _lastRelayFrameMetricsUtc = DateTime.MinValue;
+    private string _connectionStateText = String.Empty;
+    private string _connectionStateBackground = String.Empty;
+    private string _connectionStateForeground = String.Empty;
     private long _relayPointerSeq;
     private int _relayMoveSendActive;
     private int _relayInputEnsureActive;
@@ -603,6 +609,7 @@ public partial class MainWindow : Window
     private async Task<bool> RunRelaySessionAsync(Uri relayBaseUri, RemoteRelayClient relayClient)
     {
         SetConnectionState("connecting", "#28313D", "#D6E3EF");
+        _lastRelayFrameMetricsUtc = DateTime.MinValue;
         RemoteInfoMessage info = await relayClient.GetInfoAsync(_shutdown.Token);
         UpdateSystemMetrics(info.SystemMetrics);
         _evidence.RecordEvent("relay_info", new Dictionary<string, object?>
@@ -613,6 +620,8 @@ public partial class MainWindow : Window
             ["pixel_format"] = info.PixelFormat,
             ["view_only"] = info.ViewOnly,
             ["system_metrics"] = FormatSystemMetrics(info.SystemMetrics),
+            ["target_fps"] = RelayStreamTargetFps,
+            ["target_frame_interval_ms"] = Math.Round(RelayFrameMetricsMinIntervalMs, 1),
         });
         if (_settings.EnableRemoteInput)
         {
@@ -807,6 +816,7 @@ public partial class MainWindow : Window
         RemoteFrameApplyResult result = _relayAssembler.Apply(packet);
         if (result.Status is RemoteFrameApplyStatus.AppliedFullFrame or RemoteFrameApplyStatus.AppliedDirtyRects)
         {
+            bool recordFrameMetrics = ShouldRecordRelayFrameMetrics();
             if (result.Status == RemoteFrameApplyStatus.AppliedDirtyRects)
             {
                 _stats.MarkDirtyRectFrame();
@@ -815,13 +825,16 @@ public partial class MainWindow : Window
             EmptyStateText.Visibility = Visibility.Collapsed;
             _stats.MarkFrame(ToStatsFrameId(result.FrameId), 0);
             SetConnectionState("live", "#263D30", "#A8E8B2");
-            _evidence.RecordEvent("frame_applied", new Dictionary<string, object?>
+            if (recordFrameMetrics)
             {
-                ["source"] = source,
-                ["frame_id"] = result.FrameId,
-                ["status"] = result.Status.ToString(),
-                ["dirty_rects"] = result.DirtyRectCount,
-            });
+                _evidence.RecordEvent("frame_applied", new Dictionary<string, object?>
+                {
+                    ["source"] = source,
+                    ["frame_id"] = result.FrameId,
+                    ["status"] = result.Status.ToString(),
+                    ["dirty_rects"] = result.DirtyRectCount,
+                });
+            }
             if (result.Status == RemoteFrameApplyStatus.AppliedDirtyRects && _awaitingRelayPointerFeedback)
             {
                 _awaitingRelayPointerFeedback = false;
@@ -834,8 +847,11 @@ public partial class MainWindow : Window
                 });
                 PointerText.Text = $"relay feedback: {feedbackMs:0} ms";
             }
-            _evidence.RecordMetrics(_stats, "relay");
-            StatusText.Text = $"frame: {_stats.FrameId:000000}  fps: {_stats.Fps,5:0.0}  relay: {source,-6}  dirty: {result.DirtyRectCount,2}  {CountersText()}  source: {relayBaseUri}  {RemotePointerStatusText}";
+            if (recordFrameMetrics)
+            {
+                _evidence.RecordMetrics(_stats, "relay");
+                StatusText.Text = $"frame: {_stats.FrameId:000000}  fps: {_stats.Fps,5:0.0}  relay: {source,-6}  dirty: {result.DirtyRectCount,2}  {CountersText()}  source: {relayBaseUri}  {RemotePointerStatusText}";
+            }
         }
         else if (result.Status == RemoteFrameApplyStatus.Rejected)
         {
@@ -864,6 +880,18 @@ public partial class MainWindow : Window
 
     private static int ToStatsFrameId(long frameId) =>
         frameId > Int32.MaxValue ? Int32.MaxValue : Math.Max(0, (int)frameId);
+
+    private bool ShouldRecordRelayFrameMetrics()
+    {
+        DateTime now = DateTime.UtcNow;
+        if ((now - _lastRelayFrameMetricsUtc).TotalMilliseconds < RelayFrameMetricsMinIntervalMs)
+        {
+            return false;
+        }
+
+        _lastRelayFrameMetricsUtc = now;
+        return true;
+    }
 
     private string CountersText() =>
         $"full:{_stats.FullFrameRequests} dirty:{_stats.DirtyRectFrames} repair:{_stats.FullFrameRepairs} reject:{_stats.RejectedFrames}";
@@ -967,6 +995,16 @@ public partial class MainWindow : Window
 
     private void SetConnectionState(string text, string background, string foreground)
     {
+        if (String.Equals(_connectionStateText, text, StringComparison.Ordinal)
+            && String.Equals(_connectionStateBackground, background, StringComparison.Ordinal)
+            && String.Equals(_connectionStateForeground, foreground, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _connectionStateText = text;
+        _connectionStateBackground = background;
+        _connectionStateForeground = foreground;
         ConnectionBadge.Background = (Brush)new BrushConverter().ConvertFromString(background)!;
         ConnectionText.Foreground = (Brush)new BrushConverter().ConvertFromString(foreground)!;
         ConnectionText.Text = text;
