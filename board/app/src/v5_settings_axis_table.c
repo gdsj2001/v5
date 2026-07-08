@@ -96,7 +96,8 @@ typedef struct V5AxisCellRef {
 
 enum {
     V5_CELL_KIND_AXIS = 0U,
-    V5_CELL_KIND_G53 = 1U
+    V5_CELL_KIND_G53 = 1U,
+    V5_CELL_KIND_AXIS_LABEL = 2U
 };
 
 #define V5_AXIS_CELL_REF_MAX 192U
@@ -109,6 +110,7 @@ static char g_keyboard_value[64];
 static V5UiFirstFrameGuard g_keyboard_frame_guard;
 static lv_obj_t *g_axis_scroll;
 
+static void refresh_axis_cell_ref(V5AxisCellRef *ref);
 
 static void trim_in_place(char *text)
 {
@@ -1133,6 +1135,39 @@ static int slave_option_used_by_other_row(unsigned int current_row, const char *
     return 0;
 }
 
+static int axis_column_is_slave(unsigned int col)
+{
+    return col < v5_settings_axis_table_column_count() &&
+           kAxisColumns[col].field_key &&
+           strcmp(kAxisColumns[col].field_key, "slave") == 0;
+}
+
+static int axis_row_slave_is_nat(unsigned int row)
+{
+    char slave_id[V5_AXIS_VALUE_CAP];
+    if (row >= v5_settings_axis_table_row_count()) {
+        return 0;
+    }
+    slave_option_extract_id(row_value(row, "slave"), slave_id, sizeof(slave_id));
+    return slave_id_is_nat(slave_id);
+}
+
+static int axis_cell_disabled_by_nat(unsigned int row, unsigned int col)
+{
+    return axis_row_slave_is_nat(row) && !axis_column_is_slave(col);
+}
+
+int v5_settings_axis_table_cell_is_disabled(unsigned int row, unsigned int col)
+{
+    if (row >= v5_settings_axis_table_row_count() || col >= v5_settings_axis_table_column_count()) {
+        return 1;
+    }
+    if (!kAxisRows[row].enabled || kAxisColumns[col].kind == V5_AXIS_FIELD_READONLY) {
+        return 1;
+    }
+    return axis_cell_disabled_by_nat(row, col);
+}
+
 static V5SettingsParameterDiskTable disk_table_for_column(const V5SettingsAxisColumnSpec *col)
 {
     if (!col) return V5_SETTINGS_PARAMETER_DISK_NONE;
@@ -1327,6 +1362,24 @@ static lv_color_t field_color(const V5SettingsAxisRowSpec *row, const V5Settings
     return rgb(226, 238, 246);
 }
 
+static lv_color_t field_color_for_cell(unsigned int row, unsigned int col)
+{
+    if (v5_settings_axis_table_cell_is_disabled(row, col)) {
+        return rgb(150, 170, 190);
+    }
+    return field_color(&kAxisRows[row], &kAxisColumns[col]);
+}
+
+static lv_color_t axis_label_color_for_row(unsigned int row)
+{
+    if (row >= v5_settings_axis_table_row_count() ||
+        !kAxisRows[row].enabled ||
+        axis_row_slave_is_nat(row)) {
+        return rgb(150, 170, 190);
+    }
+    return axis_color(&kAxisRows[row]);
+}
+
 static const char *initial_value(const V5SettingsAxisRowSpec *row, const V5SettingsAxisColumnSpec *col)
 {
     unsigned int r;
@@ -1404,6 +1457,69 @@ static V5AxisCellRef *store_cell_ref(unsigned int kind, unsigned int row, unsign
     return ref;
 }
 
+static void apply_axis_row_label_state(lv_obj_t *obj, lv_obj_t *label_obj, unsigned int row)
+{
+    int disabled = row >= v5_settings_axis_table_row_count() ||
+                   !kAxisRows[row].enabled ||
+                   axis_row_slave_is_nat(row);
+    lv_color_t text_color = axis_label_color_for_row(row);
+    if (!obj) return;
+    lv_obj_set_style_bg_color(obj, rgb(disabled ? 34 : 5, disabled ? 47 : 27, disabled ? 58 : 43), 0);
+    lv_obj_set_style_border_width(obj, 1, 0);
+    lv_obj_set_style_border_color(obj, rgb(disabled ? 54 : 45, disabled ? 66 : 86, disabled ? 76 : 112), 0);
+    if (label_obj) {
+        lv_obj_set_style_text_color(label_obj, text_color, 0);
+    }
+    if (disabled) {
+        lv_obj_add_state(obj, LV_STATE_DISABLED);
+    } else {
+        lv_obj_clear_state(obj, LV_STATE_DISABLED);
+    }
+}
+
+static void apply_axis_cell_state(lv_obj_t *obj, lv_obj_t *label_obj, unsigned int row, unsigned int col)
+{
+    const V5SettingsAxisColumnSpec *col_spec;
+    int disabled;
+    lv_color_t text_color;
+    if (!obj || row >= v5_settings_axis_table_row_count() || col >= v5_settings_axis_table_column_count()) {
+        return;
+    }
+    col_spec = &kAxisColumns[col];
+    disabled = v5_settings_axis_table_cell_is_disabled(row, col);
+    text_color = field_color_for_cell(row, col);
+    lv_obj_set_style_bg_color(obj, rgb(disabled ? 34 : 5, disabled ? 47 : 27, disabled ? 58 : 43), 0);
+    lv_obj_set_style_border_width(obj, 1, 0);
+    lv_obj_set_style_border_color(obj, rgb(disabled ? 54 : 45, disabled ? 66 : 86, disabled ? 76 : 112), 0);
+    lv_obj_set_style_text_color(obj, text_color, 0);
+    if (label_obj) {
+        lv_obj_set_style_text_color(label_obj, text_color, 0);
+    }
+    if (disabled) {
+        lv_obj_add_state(obj, LV_STATE_DISABLED);
+        lv_obj_clear_flag(obj, LV_OBJ_FLAG_CLICKABLE);
+    } else {
+        lv_obj_clear_state(obj, LV_STATE_DISABLED);
+        if (col_spec->kind == V5_AXIS_FIELD_EDIT ||
+            col_spec->kind == V5_AXIS_FIELD_SELECT ||
+            col_spec->kind == V5_AXIS_FIELD_ACTION) {
+            lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE);
+        }
+    }
+}
+
+static void refresh_axis_row_refs(unsigned int row)
+{
+    unsigned int i;
+    for (i = 0U; i < g_cell_ref_count; ++i) {
+        if (g_cell_refs[i].row == row &&
+            (g_cell_refs[i].kind == V5_CELL_KIND_AXIS ||
+             g_cell_refs[i].kind == V5_CELL_KIND_AXIS_LABEL)) {
+            refresh_axis_cell_ref(&g_cell_refs[i]);
+        }
+    }
+}
+
 static void log_axis_param_event(const char *field_id, const char *value, int ok)
 {
     FILE *fp;
@@ -1466,6 +1582,10 @@ int v5_settings_axis_table_start_axis_zero(unsigned int row, const char *home_of
     driver_mode = pulse ? "pulse" : "bus";
     target_scope = pulse ? "pulse_mechanical_home_offset" : "bus_count_domain_zero";
     apply_mode = pulse ? "persist_home_offset" : "count_domain_zero";
+    if (axis_row_slave_is_nat(row)) {
+        log_axis_zero_request_event(row_spec, driver_mode, target_scope, apply_mode, "", "", 0);
+        return 0;
+    }
     slave_index[0] = '\0';
     slave_value = row_value(row, "slave");
     slave_option_extract_id(slave_value, slave_index, sizeof(slave_index));
@@ -1558,7 +1678,7 @@ int v5_settings_axis_table_commit_value(unsigned int row, unsigned int col, cons
     }
     row_spec = &kAxisRows[row];
     col_spec = &kAxisColumns[col];
-    if (!row_spec->enabled || col_spec->kind == V5_AXIS_FIELD_READONLY) {
+    if (v5_settings_axis_table_cell_is_disabled(row, col)) {
         return 0;
     }
     if (strcmp(col_spec->field_key, "zero") == 0) {
@@ -1656,17 +1776,54 @@ static int append_dropdown_option(char *out, size_t cap, const char *value)
     return 1;
 }
 
+static int dropdown_options_contain_slave_id(const char *options, const char *value)
+{
+    const char *start;
+    if (!options || !value || !value[0]) return 0;
+    start = options;
+    while (*start) {
+        const char *end = strchr(start, '\n');
+        char line[V5_SLAVE_OPTION_CAP];
+        size_t len = end ? (size_t)(end - start) : strlen(start);
+        if (len >= sizeof(line)) len = sizeof(line) - 1U;
+        memcpy(line, start, len);
+        line[len] = '\0';
+        if (slave_option_same_id(line, value)) {
+            return 1;
+        }
+        if (!end) break;
+        start = end + 1;
+    }
+    return 0;
+}
+
+static int append_unique_slave_dropdown_option(char *out, size_t cap, const char *value)
+{
+    if (dropdown_options_contain_slave_id(out, value)) {
+        return 1;
+    }
+    return append_dropdown_option(out, cap, value);
+}
+
 static int append_slave_dropdown_options_for_row(unsigned int row, char *out, size_t cap)
 {
     unsigned int i;
+    const char *current_slave;
+    char current_id[V5_AXIS_VALUE_CAP];
     int ok = append_dropdown_option(out, cap, "NAT");
+    current_id[0] = '\0';
+    current_slave = row_value(row, "slave");
+    slave_option_extract_id(current_slave, current_id, sizeof(current_id));
     for (i = 0U; i < g_slave_option_count; ++i) {
         if (slave_option_is_nat(g_slave_options[i])) continue;
         if (!row_slave_matches_option(row, g_slave_options[i]) &&
             slave_option_used_by_other_row(row, g_slave_options[i])) {
             continue;
         }
-        ok = append_dropdown_option(out, cap, g_slave_options[i]) && ok;
+        ok = append_unique_slave_dropdown_option(out, cap, g_slave_options[i]) && ok;
+    }
+    if (g_slave_option_count > 0U && current_id[0] && !slave_id_is_nat(current_id)) {
+        ok = append_unique_slave_dropdown_option(out, cap, current_id) && ok;
     }
     return ok;
 }
@@ -1717,6 +1874,19 @@ static void refresh_axis_cell_ref(V5AxisCellRef *ref)
         }
         return;
     }
+    if (ref->kind == V5_CELL_KIND_AXIS_LABEL) {
+        if (ref->row >= v5_settings_axis_table_row_count()) {
+            return;
+        }
+        if (ref->label) {
+            lv_label_set_text(ref->label, kAxisRows[ref->row].label);
+        }
+        apply_axis_row_label_state(ref->obj, ref->label, ref->row);
+        if (ref->obj) {
+            lv_obj_invalidate(ref->obj);
+        }
+        return;
+    }
     if (ref->row >= v5_settings_axis_table_row_count() ||
         ref->col >= v5_settings_axis_table_column_count()) {
         return;
@@ -1735,6 +1905,7 @@ static void refresh_axis_cell_ref(V5AxisCellRef *ref)
         lv_label_set_text(ref->label, value);
     }
     if (ref->obj) {
+        apply_axis_cell_state(ref->obj, ref->label, ref->row, ref->col);
         lv_obj_invalidate(ref->obj);
     }
 }
@@ -1764,18 +1935,30 @@ static void dropdown_changed_cb(lv_event_t *event)
     char selected[64];
     char committed[V5_AXIS_VALUE_CAP];
     const char *commit_value = selected;
+    int is_slave;
+    int ok;
     if (!ref || !ref->obj || lv_event_get_code(event) != LV_EVENT_VALUE_CHANGED) {
+        return;
+    }
+    if (v5_settings_axis_table_cell_is_disabled(ref->row, ref->col)) {
+        refresh_axis_cell_ref(ref);
         return;
     }
     selected[0] = '\0';
     lv_dropdown_get_selected_str(ref->obj, selected, sizeof(selected));
-    if (ref->col < V5_AXIS_TABLE_MAX_COLS && strcmp(kAxisColumns[ref->col].field_key, "slave") == 0) {
+    is_slave = ref->col < V5_AXIS_TABLE_MAX_COLS && strcmp(kAxisColumns[ref->col].field_key, "slave") == 0;
+    if (is_slave) {
         slave_option_extract_id(selected, committed, sizeof(committed));
         if (committed[0]) {
             commit_value = committed;
         }
     }
-    (void)v5_settings_axis_table_commit_value(ref->row, ref->col, commit_value);
+    ok = v5_settings_axis_table_commit_value(ref->row, ref->col, commit_value);
+    if (ok && is_slave) {
+        refresh_axis_row_refs(ref->row);
+    } else {
+        refresh_axis_cell_ref(ref);
+    }
 }
 
 static void dropdown_pressed_cb(lv_event_t *event)
@@ -1788,6 +1971,7 @@ static void dropdown_pressed_cb(lv_event_t *event)
         return;
     }
     if (ref->col >= v5_settings_axis_table_column_count()) return;
+    if (v5_settings_axis_table_cell_is_disabled(ref->row, ref->col)) return;
     col = &kAxisColumns[ref->col];
     if (strcmp(col->field_key, "slave") != 0) return;
     reload_slave_options_from_resident_self_table();
@@ -1825,6 +2009,7 @@ static void dropdown_cell(lv_obj_t *parent, unsigned int row, unsigned int col_i
         ref = store_cell_ref(V5_CELL_KIND_AXIS, row, col_index, dd, 0, debug_id);
         lv_obj_add_event_cb(dd, dropdown_pressed_cb, LV_EVENT_PRESSED, ref);
         lv_obj_add_event_cb(dd, dropdown_changed_cb, LV_EVENT_VALUE_CHANGED, ref);
+        apply_axis_cell_state(dd, 0, row, col_index);
     }
 }
 
@@ -1901,6 +2086,10 @@ static void keyboard_commit_value(void)
     int ok;
     const char *readback;
     if (!g_keyboard_ref || !g_keyboard_value[0]) {
+        return;
+    }
+    if (g_keyboard_ref->kind == V5_CELL_KIND_AXIS &&
+        v5_settings_axis_table_cell_is_disabled(g_keyboard_ref->row, g_keyboard_ref->col)) {
         return;
     }
     if (g_keyboard_ref->kind == V5_CELL_KIND_G53) {
@@ -2012,6 +2201,10 @@ static void open_keyboard_for_ref(V5AxisCellRef *ref)
     unsigned int i;
 
     if (!ref) return;
+    if (ref->kind == V5_CELL_KIND_AXIS &&
+        v5_settings_axis_table_cell_is_disabled(ref->row, ref->col)) {
+        return;
+    }
     close_keyboard_overlay();
     g_keyboard_ref = ref;
     snprintf(g_keyboard_value, sizeof(g_keyboard_value), "%s", ref->kind == V5_CELL_KIND_G53 ? v5_settings_axis_table_g53_value(ref->row, ref->col) : v5_settings_axis_table_value(ref->row, ref->col));
@@ -2058,6 +2251,7 @@ static void edit_cell_clicked_cb(lv_event_t *event)
 {
     V5AxisCellRef *ref = (V5AxisCellRef *)lv_event_get_user_data(event);
     if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    if (ref && v5_settings_axis_table_cell_is_disabled(ref->row, ref->col)) return;
     open_keyboard_for_ref(ref);
 }
 
@@ -2065,6 +2259,7 @@ static void axis_zero_cell_clicked_cb(lv_event_t *event)
 {
     V5AxisCellRef *ref = (V5AxisCellRef *)lv_event_get_user_data(event);
     if (!ref || lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    if (v5_settings_axis_table_cell_is_disabled(ref->row, ref->col)) return;
     if (current_driver_mode_is_pulse()) {
         open_keyboard_for_ref(ref);
         return;
@@ -2084,6 +2279,7 @@ static void action_cell(lv_obj_t *parent, unsigned int row, unsigned int col_ind
     lv_obj_add_flag(cell, LV_OBJ_FLAG_CLICKABLE);
     ref = store_cell_ref(V5_CELL_KIND_AXIS, row, col_index, cell, text_label, debug_id);
     lv_obj_add_event_cb(cell, axis_zero_cell_clicked_cb, LV_EVENT_CLICKED, ref);
+    apply_axis_cell_state(cell, text_label, row, col_index);
 }
 
 static void edit_cell(lv_obj_t *parent, unsigned int row, unsigned int col_index, int x, int y, int w, int h, const char *text, lv_color_t text_color, const char *debug_id)
@@ -2098,6 +2294,7 @@ static void edit_cell(lv_obj_t *parent, unsigned int row, unsigned int col_index
     lv_obj_add_flag(cell, LV_OBJ_FLAG_CLICKABLE);
     ref = store_cell_ref(V5_CELL_KIND_AXIS, row, col_index, cell, text_label, debug_id);
     lv_obj_add_event_cb(cell, edit_cell_clicked_cb, LV_EVENT_CLICKED, ref);
+    apply_axis_cell_state(cell, text_label, row, col_index);
 }
 
 void v5_settings_axis_table_begin_page(void)
@@ -2258,8 +2455,18 @@ void v5_settings_axis_table_create(lv_obj_t *root)
 
     for (unsigned int r = 0; r < v5_settings_axis_table_row_count(); ++r) {
         const V5SettingsAxisRowSpec *row = &kAxisRows[r];
-        lv_color_t color = axis_color(row);
-        value_cell(root, 30, 318 + (int)r * row_step, 63, row_h, row->label, color, !row->enabled, "axis_label");
+        lv_obj_t *cell = value_cell(root,
+                                    30,
+                                    318 + (int)r * row_step,
+                                    63,
+                                    row_h,
+                                    row->label,
+                                    axis_label_color_for_row(r),
+                                    !row->enabled || axis_row_slave_is_nat(r),
+                                    "axis_label");
+        lv_obj_t *text_label = lv_obj_get_child(cell, 0);
+        (void)store_cell_ref(V5_CELL_KIND_AXIS_LABEL, r, 0, cell, text_label, "axis_label");
+        apply_axis_row_label_state(cell, text_label, r);
     }
 
     scroll = axis_scroll(root);
@@ -2289,18 +2496,20 @@ void v5_settings_axis_table_create(lv_obj_t *root)
         for (unsigned int c = 0; c < v5_settings_axis_table_column_count(); ++c) {
             const V5SettingsAxisColumnSpec *col = &kAxisColumns[c];
             char id[96];
-            int disabled = !row->enabled || col->kind == V5_AXIS_FIELD_READONLY;
+            int structural_disabled = !row->enabled || col->kind == V5_AXIS_FIELD_READONLY;
+            int visual_disabled = structural_disabled || axis_cell_disabled_by_nat(r, c);
             v5_settings_axis_table_field_id(row, col, id, sizeof(id));
-            if (!disabled && col->kind == V5_AXIS_FIELD_SELECT) {
-                dropdown_cell(scroll, r, c, col->x, y, col->width, row_h, initial_value(row, col), col, field_color(row, col), id);
-            } else if (!disabled && col->kind == V5_AXIS_FIELD_ACTION) {
-                action_cell(scroll, r, c, col->x, y, col->width, row_h, current_driver_mode_is_pulse() ? "设零" : "设0", field_color(row, col), id);
-            } else if (!disabled && col->kind != V5_AXIS_FIELD_READONLY) {
-                edit_cell(scroll, r, c, col->x, y, col->width, row_h, initial_value(row, col), field_color(row, col), id);
+            if (!structural_disabled && col->kind == V5_AXIS_FIELD_SELECT) {
+                dropdown_cell(scroll, r, c, col->x, y, col->width, row_h, initial_value(row, col), col, field_color_for_cell(r, c), id);
+            } else if (!structural_disabled && col->kind == V5_AXIS_FIELD_ACTION) {
+                action_cell(scroll, r, c, col->x, y, col->width, row_h, current_driver_mode_is_pulse() ? "设零" : "设0", field_color_for_cell(r, c), id);
+            } else if (!structural_disabled && col->kind != V5_AXIS_FIELD_READONLY) {
+                edit_cell(scroll, r, c, col->x, y, col->width, row_h, initial_value(row, col), field_color_for_cell(r, c), id);
             } else {
-                lv_obj_t *cell = value_cell(scroll, col->x, y, col->width, row_h, initial_value(row, col), field_color(row, col), disabled, id);
+                lv_obj_t *cell = value_cell(scroll, col->x, y, col->width, row_h, initial_value(row, col), field_color_for_cell(r, c), visual_disabled, id);
                 lv_obj_t *text_label = lv_obj_get_child(cell, 0);
                 (void)store_cell_ref(V5_CELL_KIND_AXIS, r, c, cell, text_label, id);
+                apply_axis_cell_state(cell, text_label, r, c);
             }
         }
     }

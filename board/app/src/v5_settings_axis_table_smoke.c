@@ -409,6 +409,17 @@ int main(void)
             return 37;
         }
     }
+    if (!v5_settings_axis_table_cell_is_disabled(0U, 0U) ||
+        v5_settings_axis_table_cell_is_disabled(0U, 2U) ||
+        !v5_settings_axis_table_cell_is_disabled(0U, 10U) ||
+        !v5_settings_axis_table_cell_is_disabled(0U, 15U)) {
+        fprintf(stderr, "NAT row must disable every axis parameter cell except slave\n");
+        return 43;
+    }
+    if (v5_settings_axis_table_commit_value(0U, 12U, "12000")) {
+        fprintf(stderr, "NAT row non-slave parameter commit must be rejected\n");
+        return 44;
+    }
     if (v5_settings_axis_table_start_axis_zero(0U, 0)) {
         fprintf(stderr, "BUS axis zero must reject NAT slave binding\n");
         return 38;
@@ -427,6 +438,13 @@ int main(void)
         strcmp(v5_settings_axis_table_value(0U, 2U), "0") != 0) {
         fprintf(stderr, "slave restore commit failed: X slave=%s\n", v5_settings_axis_table_value(0U, 2U));
         return 40;
+    }
+    if (v5_settings_axis_table_cell_is_disabled(0U, 0U) ||
+        v5_settings_axis_table_cell_is_disabled(0U, 2U) ||
+        v5_settings_axis_table_cell_is_disabled(0U, 10U) ||
+        v5_settings_axis_table_cell_is_disabled(0U, 15U)) {
+        fprintf(stderr, "real slave row must re-enable editable/action cells after restore\n");
+        return 45;
     }
 
     if (!v5_settings_axis_table_commit_value(0U, 12U, "12000")) {

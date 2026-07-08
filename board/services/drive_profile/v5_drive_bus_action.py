@@ -21,6 +21,7 @@ RUNTIME_SETTINGS_INI = Path(os.environ.get("V5_RUNTIME_SETTINGS_INI", str(PROJEC
 _RESIDENT_SNAPSHOT_CACHE: Dict[str, Any] | None = None
 _SETTINGS_RUNTIME_CACHE: Dict[str, Any] | None = None
 _RUNTIME_INI_SECTIONS_CACHE: Dict[str, Dict[str, Dict[str, str]]] = {}
+_SELF_SLAVE_BINDING_CACHE: Dict[str, str] | None = None
 _RESIDENT_PRELOAD_ACTIVE = False
 MAX_COMMAND_OUTPUT_BYTES = 16000
 MAX_RESULT_JSON_BYTES = 65536
@@ -408,6 +409,35 @@ def write_scan_self_parameter_table(scan: Dict[str, Any]) -> None:
     ]
     rows.append(("SETTINGS", "slave_options", ",".join(options)))
     write_parameter_tsv(SELF_PARAMETER_TABLE, rows)
+
+
+def normalize_self_slave_binding(axis: str, value: Any) -> str:
+    raw = str(value if value is not None else "").strip()
+    if not raw:
+        return ""
+    token = re.split(r"[\s:;,|]+", raw, 1)[0].strip()
+    if token.upper() == "NAT":
+        return "NAT"
+    if not re.fullmatch(r"\d+", token):
+        raise DriveActionError("DRIVE_TARGET_SELF_SLAVE_INVALID", "自建参数表中的轴从站号非法，未访问驱动。", {"axis": axis, "slave": value})
+    return str(int(token))
+
+
+def load_self_slave_bindings() -> Dict[str, str]:
+    global _SELF_SLAVE_BINDING_CACHE
+    if _SELF_SLAVE_BINDING_CACHE is not None:
+        return _SELF_SLAVE_BINDING_CACHE
+    if not _RESIDENT_PRELOAD_ACTIVE:
+        raise DriveActionError("SELF_PARAMETER_RESIDENT_NOT_PRELOADED", "self 参数表未在启动/受控刷新阶段载入内存，驱动目标拒绝临时读盘。", str(SELF_PARAMETER_TABLE))
+    bindings: Dict[str, str] = {}
+    for axis, field, value in read_parameter_tsv(SELF_PARAMETER_TABLE):
+        axis_name = str(axis or "").upper()
+        if axis_name in AXIS_ORDER and field == "slave":
+            binding = normalize_self_slave_binding(axis_name, value)
+            if binding:
+                bindings[axis_name] = binding
+    _SELF_SLAVE_BINDING_CACHE = bindings
+    return bindings
 
 
 DRIVE_DISPLAY_FIELDS = {"egear_numerator", "egear_denominator", "write_status"}
@@ -841,6 +871,7 @@ def configured_drive_targets(timeout_s: float) -> Tuple[List[Dict[str, Any]], Di
     if not scan.get("ok"):
         raise DriveActionError(str(scan.get("code") or "DRIVE_SCAN_FAILED"), str(scan.get("message_cn") or "扫描从站失败，未写驱动。"), scan)
     runtime = load_settings_runtime()
+    self_bindings = load_self_slave_bindings()
     snapshot = read_resident_snapshot()
     slaves_by_position: Dict[str, Dict[str, Any]] = {}
     for slave in scan.get("slaves", []):
@@ -857,7 +888,15 @@ def configured_drive_targets(timeout_s: float) -> Tuple[List[Dict[str, Any]], Di
             continue
         axis = str(axis_cfg.get("axis") or (AXIS_ORDER[axis_index] if axis_index < len(AXIS_ORDER) else "AXIS_%d" % axis_index)).upper()
         try:
-            position = parse_slave_position_token(axis_cfg.get("slave_index") if axis_cfg.get("slave_index") is not None else axis_cfg.get("slave"))
+            if axis in self_bindings:
+                binding_source = "self_parameter_table"
+                raw_binding = self_bindings.get(axis, "")
+            else:
+                binding_source = "settings_runtime"
+                raw_binding = axis_cfg.get("slave_index") if axis_cfg.get("slave_index") is not None else axis_cfg.get("slave")
+            if str(raw_binding or "").strip().upper() == "NAT":
+                continue
+            position = parse_slave_position_token(raw_binding)
             if not position:
                 continue
             if position in seen_positions:
@@ -879,6 +918,7 @@ def configured_drive_targets(timeout_s: float) -> Tuple[List[Dict[str, Any]], Di
                 "axis_index": axis_index,
                 "axis_cfg": axis_cfg,
                 "position": position,
+                "axis_slave_binding_source": binding_source,
                 "slave": slaves_by_position[position],
                 "identity": identity,
                 "profile": profile,
@@ -889,7 +929,7 @@ def configured_drive_targets(timeout_s: float) -> Tuple[List[Dict[str, Any]], Di
     if failures:
         raise DriveActionError("DRIVE_TARGET_PRECHECK_FAILED", "驱动目标轴预检失败，未写驱动。", {"failures": failures})
     if not targets:
-        raise DriveActionError("DRIVE_TARGETS_EMPTY", "settings_runtime 没有可写入的 BUS 从站绑定，未写驱动。", {"axis_count": len(axes), "slaves": scan.get("slaves", [])})
+        raise DriveActionError("DRIVE_TARGETS_EMPTY", "当前轴参数从站绑定没有可写入的 BUS 从站，未写驱动。", {"axis_count": len(axes), "self_slave_bindings": self_bindings, "slaves": scan.get("slaves", [])})
     return targets, runtime, scan
 
 
@@ -2255,9 +2295,16 @@ def preload_resident_state() -> Dict[str, Any]:
         except DriveActionError as exc:
             status["runtime_ini_loaded"] = False
             status["runtime_ini_error"] = exc.code
+        try:
+            bindings = load_self_slave_bindings()
+            status["self_slave_bindings_loaded"] = True
+            status["self_slave_binding_count"] = len(bindings)
+        except DriveActionError as exc:
+            status["self_slave_bindings_loaded"] = False
+            status["self_slave_bindings_error"] = exc.code
     finally:
         _RESIDENT_PRELOAD_ACTIVE = old_preload
-    ok = bool(status.get("settings_runtime_loaded") and status.get("drive_snapshot_loaded") and status.get("runtime_ini_loaded"))
+    ok = bool(status.get("settings_runtime_loaded") and status.get("drive_snapshot_loaded") and status.get("runtime_ini_loaded") and status.get("self_slave_bindings_loaded"))
     status["ok"] = ok
     status["preload_complete"] = ok
     if not ok:

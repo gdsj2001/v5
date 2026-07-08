@@ -377,15 +377,24 @@ static void VerifyRelayReconnectContract()
 {
     string repoRoot = FindRepoRoot(AppContext.BaseDirectory);
     string source = File.ReadAllText(Path.Combine(repoRoot, "8ax-win", "src", "8ax.WinRemote", "MainWindow.xaml.cs"));
+    string readme = File.ReadAllText(Path.Combine(repoRoot, "8ax-win", "README.md"));
     Require(true, source.Contains("RunRelayLoopAsync", StringComparison.Ordinal), "relay reconnect loop exists");
     Require(true, source.Contains("relay_reconnect_scheduled", StringComparison.Ordinal), "relay reconnect evidence exists");
     Require(true, source.Contains("RelayReconnectMaxDelayMs", StringComparison.Ordinal), "relay reconnect backoff cap exists");
     Require(true, source.Contains("MarkRelayDisconnected", StringComparison.Ordinal), "relay disconnect state reset exists");
     Require(true, source.Contains("_relaySessionConnected", StringComparison.Ordinal), "relay connected-session guard exists");
     Require(true, source.Contains("reconnectAttempt > 0 && !_relaySessionConnected", StringComparison.Ordinal), "relay reconnect UI only shows after real disconnect");
+    Require(true, source.Contains("RunRelaySessionAsync(relayBaseUri, relayClient, reconnectAttempt > 0)", StringComparison.Ordinal), "relay reconnect attempts do not reset badge to connecting");
+    Require(false, source.Contains("SetConnectionState(\"reconnecting\"", StringComparison.Ordinal), "top-right badge must not jump to reconnecting");
+    Require(true, source.Contains("relay: reconnecting attempt", StringComparison.Ordinal), "reconnect attempt stays in status text");
+    Require(true, source.Contains("connection_state_changed", StringComparison.Ordinal), "connection badge state changes are evidenced");
     Require(true, source.Contains("connectedBeforeEnd = await RunRelaySessionAsync", StringComparison.Ordinal), "relay reconnect detects connected sessions");
     Require(true, source.Contains("reconnectAttempt = 0", StringComparison.Ordinal), "relay reconnect resets attempt after connected session");
-    Require(true, source.Contains("private async Task<bool> RunRelaySessionAsync", StringComparison.Ordinal), "relay session reports connected-before-end state");
+    Require(true, source.Contains("private async Task<bool> RunRelaySessionAsync(Uri relayBaseUri, RemoteRelayClient relayClient, bool isReconnectAttempt)", StringComparison.Ordinal), "relay session reports connected-before-end state");
+    Require(true,
+        readme.Contains("stable `error`", StringComparison.Ordinal)
+            && readme.Contains("retry attempts are shown only in the bottom status text and evidence", StringComparison.Ordinal),
+        "README documents stable top-right error badge");
 }
 
 static void VerifyRelayStreamFailureNoFallbackContract()
@@ -401,6 +410,7 @@ static void VerifyRelayStreamFailureNoFallbackContract()
     Require(true, mainWindow.Contains("ApplyRelayPacket(packet, relayBaseUri, \"stream-retry\")", StringComparison.Ordinal), "dirty frame is replayed after full repair");
     Require(true, mainWindow.Contains("frame_stale", StringComparison.Ordinal), "stale dirty frames are ignored without repair loop");
     Require(false, mainWindow.Contains("SetConnectionState(\"polling\"", StringComparison.Ordinal), "relay polling badge is retired");
+    Require(false, mainWindow.Contains("SetConnectionState(\"recovering\"", StringComparison.Ordinal), "full-frame repair must not make top-right badge jump");
     Require(true, relayClient.Contains("StreamConnectTimeout", StringComparison.Ordinal), "relay stream connect timeout exists");
     Require(true, relayClient.Contains("InputConnectTimeout", StringComparison.Ordinal), "relay input connect timeout exists");
     Require(true, relayClient.Contains("WebSocket connect timed out", StringComparison.Ordinal), "websocket timeout is explicit");

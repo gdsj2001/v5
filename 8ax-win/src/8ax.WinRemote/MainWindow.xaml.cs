@@ -520,7 +520,6 @@ public partial class MainWindow : Window
             {
                 await Dispatcher.InvokeAsync(() =>
                 {
-                    SetConnectionState("reconnecting", "#3B3525", "#F1D79A");
                     InputModeText.Text = PointerInputModeText;
                     PointerText.Text = $"relay reconnecting: attempt {reconnectAttempt}";
                     StatusText.Text = $"source: {relayBaseUri}  relay: reconnecting attempt {reconnectAttempt}  {RemotePointerStatusText}";
@@ -532,7 +531,7 @@ public partial class MainWindow : Window
             bool connectedBeforeEnd = false;
             try
             {
-                connectedBeforeEnd = await RunRelaySessionAsync(relayBaseUri, relayClient);
+                connectedBeforeEnd = await RunRelaySessionAsync(relayBaseUri, relayClient, reconnectAttempt > 0);
                 if (connectedBeforeEnd)
                 {
                     reconnectAttempt = 0;
@@ -606,9 +605,13 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task<bool> RunRelaySessionAsync(Uri relayBaseUri, RemoteRelayClient relayClient)
+    private async Task<bool> RunRelaySessionAsync(Uri relayBaseUri, RemoteRelayClient relayClient, bool isReconnectAttempt)
     {
-        SetConnectionState("connecting", "#28313D", "#D6E3EF");
+        if (!isReconnectAttempt)
+        {
+            SetConnectionState("connecting", "#28313D", "#D6E3EF");
+        }
+
         _lastRelayFrameMetricsUtc = DateTime.MinValue;
         RemoteInfoMessage info = await relayClient.GetInfoAsync(_shutdown.Token);
         UpdateSystemMetrics(info.SystemMetrics);
@@ -651,7 +654,7 @@ public partial class MainWindow : Window
                         ["reason"] = result.Reason,
                         ["local_frame_id"] = result.FrameId,
                     });
-                    SetConnectionState("recovering", "#3B3525", "#F1D79A");
+                    StatusText.Text = $"source: {relayBaseUri}  relay: repairing frame {result.FrameId}  {RemotePointerStatusText}";
                     _stats.MarkFullFrameRepair();
                     _stats.MarkFullFrameRequest();
                     _evidence.RecordEvent("full_frame_request", new Dictionary<string, object?>
@@ -1005,6 +1008,10 @@ public partial class MainWindow : Window
         _connectionStateText = text;
         _connectionStateBackground = background;
         _connectionStateForeground = foreground;
+        _evidence.RecordEvent("connection_state_changed", new Dictionary<string, object?>
+        {
+            ["state"] = text,
+        });
         ConnectionBadge.Background = (Brush)new BrushConverter().ConvertFromString(background)!;
         ConnectionText.Foreground = (Brush)new BrushConverter().ConvertFromString(foreground)!;
         ConnectionText.Text = text;

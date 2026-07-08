@@ -57,6 +57,7 @@ const char *v5_settings_axis_table_g53_value(unsigned int row, unsigned int col)
 int v5_settings_axis_table_g53_value_is_real(unsigned int row, unsigned int col);
 int v5_settings_axis_table_g53_value_is_editable(unsigned int row, unsigned int col);
 int v5_settings_axis_table_commit_g53_value(unsigned int row, unsigned int col, const char *value);
+int v5_settings_axis_table_cell_is_disabled(unsigned int row, unsigned int col);
 const char *v5_settings_axis_table_motion_model_value(void);
 int v5_settings_axis_table_motion_model_value_is_real(void);
 const char *v5_settings_axis_table_bus_pulse_value(void);

@@ -39,11 +39,12 @@ If a cached relay input WebSocket is closed or stale when an operator presses th
 
 When relay stream and relay input are connected, the top-right connection badge
 must stay in the live/connected state. The client must not show or schedule
-`reconnecting` while the current relay session is healthy; reconnect is only for
-stream end, transport error, or startup failure.
+`reconnecting` while the current relay session is healthy. After stream end,
+transport error, or startup failure, the badge must stay as stable `error` while
+retry attempts are shown only in the bottom status text and evidence.
 
 If the dirty-rect WebSocket is unavailable, the connection badge must move to
-error/reconnecting state. HTTP full-frame refresh is only the initial frame and
+stable error state. HTTP full-frame refresh is only the initial frame and
 repair path inside a healthy stream session, not a degraded display mode.
 
 The center of the top bar shows board system usage as `cpu0`, `cpu1`, memory,
