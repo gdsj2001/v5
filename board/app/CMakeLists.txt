@@ -136,6 +136,7 @@ add_library(v5_command_gate_core STATIC
     ../services/command_gate/v5_native_wcs_status.c
     ../services/command_gate/v5_native_g53_geometry_status.c
     ../services/command_gate/v5_native_modal_tool_status.c
+    ../services/command_gate/v5_native_safety.c
     ../services/command_gate/v5_parameter_owner_map.c
     ../services/command_gate/v5_settings_apply.c
 )

@@ -223,7 +223,7 @@ int main(void)
         if (!same_text(button_text_for_action(&page, V5_MAIN_PAGE_ACTION_ESTOP_FORCE), "取消急停")) {
             return 27;
         }
-        if (!expect_command_line(&page, V5_MAIN_PAGE_ACTION_ESTOP_FORCE, "estop_reset", "native_safety", "Set EStop Off | Get Estop | Set Machine On | Get Machine")) {
+        if (!expect_command(&page, V5_MAIN_PAGE_ACTION_ESTOP_FORCE, "estop_reset", "native_safety")) {
             return 24;
         }
         v5_native_readback_set_unavailable(&readback, "smoke_reset");
@@ -235,7 +235,7 @@ int main(void)
         if (!same_text(button_text_for_action(&page, V5_MAIN_PAGE_ACTION_ESTOP_FORCE), "取消急停")) {
             return 29;
         }
-        if (!expect_command_line(&page, V5_MAIN_PAGE_ACTION_ESTOP_FORCE, "estop_reset", "native_safety", "Set EStop Off | Get Estop | Set Machine On | Get Machine")) {
+        if (!expect_command(&page, V5_MAIN_PAGE_ACTION_ESTOP_FORCE, "estop_reset", "native_safety")) {
             return 30;
         }
         v5_native_readback_set_machine_enabled(&readback, 1);
@@ -249,7 +249,7 @@ int main(void)
         v5_native_readback_set_unavailable(&readback, "smoke_reset");
         v5_main_page_set_native_readback(&page, &readback);
         v5_main_page_set_native_readback_refresh_callback(&page, refresh_estop_active, &page);
-        if (!expect_command_line(&page, V5_MAIN_PAGE_ACTION_ESTOP_FORCE, "estop_reset", "native_safety", "Set EStop Off | Get Estop | Set Machine On | Get Machine")) {
+        if (!expect_command(&page, V5_MAIN_PAGE_ACTION_ESTOP_FORCE, "estop_reset", "native_safety")) {
             return 25;
         }
         v5_main_page_set_native_readback_refresh_callback(&page, 0, 0);
@@ -275,7 +275,7 @@ int main(void)
         return 17;
     }
     if (!v5_main_page_select_axis(&page, V5_MAIN_PAGE_SELECT_MCS, 'A') ||
-        !expect_missing_gate(&page, V5_MAIN_PAGE_ACTION_HOME)) {
+        !expect_home_native_gate(&page)) {
         return 18;
     }
     {

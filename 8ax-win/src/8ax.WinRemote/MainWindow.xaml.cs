@@ -79,7 +79,8 @@ public partial class MainWindow : Window
         SourceText.Text = "relay stream";
         EmptyStateText.Text = $"Waiting for relay {_settings.RelayBaseUri}...";
         RemoteImage.Source = _relayFramebuffer.Bitmap;
-        StatusText.Text = $"source: {_settings.RelayBaseUri}  relay: waiting  {RemotePointerStatusText}";
+        StatusText.Text = $"source: {_settings.RelayBaseUri}";
+        UpdateRemotePointerStatusSlot();
         _evidence.RecordEvent("relay_mode_selected", new Dictionary<string, object?>
         {
             ["relay"] = _settings.RelayBaseUri,
@@ -696,6 +697,7 @@ public partial class MainWindow : Window
         }
 
         InputModeText.Text = PointerInputModeText;
+        UpdateRemotePointerStatusSlot();
     }
 
     private async Task EnableRelayInputAsync(RemoteRelayClient relayClient, RemoteInfoMessage info)
@@ -707,6 +709,7 @@ public partial class MainWindow : Window
                 _relayInputReady = false;
                 InputModeText.Text = "remote input blocked";
                 PointerText.Text = "relay is view-only";
+                UpdateRemotePointerStatusSlot();
                 _evidence.RecordEvent("relay_input_blocked", new Dictionary<string, object?>
                 {
                     ["reason"] = "relay_view_only",
@@ -728,6 +731,7 @@ public partial class MainWindow : Window
                 _relayInputReady = true;
                 InputModeText.Text = "relay input";
                 PointerText.Text = "pointer: relay input ready";
+                UpdateRemotePointerStatusSlot();
                 _evidence.RecordEvent("relay_input_granted", new Dictionary<string, object?>
                 {
                     ["session_id"] = _relaySessionId,
@@ -743,6 +747,7 @@ public partial class MainWindow : Window
                 _relayInputReady = false;
                 InputModeText.Text = "remote input failed";
                 PointerText.Text = $"remote input failed: {Compact(ex.Message)}";
+                UpdateRemotePointerStatusSlot();
                 _evidence.RecordEvent("relay_input_failed", new Dictionary<string, object?>
                 {
                     ["session_id"] = _relaySessionId,
@@ -801,6 +806,7 @@ public partial class MainWindow : Window
             _relayInputReady = false;
             InputModeText.Text = "remote input failed";
             PointerText.Text = $"relay input retry failed: {Compact(ex.Message)}";
+            UpdateRemotePointerStatusSlot();
             _evidence.RecordEvent("relay_input_retry_failed", new Dictionary<string, object?>
             {
                 ["session_id"] = _relaySessionId,
@@ -853,7 +859,7 @@ public partial class MainWindow : Window
             if (recordFrameMetrics)
             {
                 _evidence.RecordMetrics(_stats, "relay");
-                StatusText.Text = $"frame: {_stats.FrameId:000000}  fps: {_stats.Fps,5:0.0}  relay: {source,-6}  dirty: {result.DirtyRectCount,2}  {CountersText()}  source: {relayBaseUri}  {RemotePointerStatusText}";
+                UpdateRelayFrameStatus(relayBaseUri, source, result.DirtyRectCount);
             }
         }
         else if (result.Status == RemoteFrameApplyStatus.Rejected)
@@ -866,7 +872,11 @@ public partial class MainWindow : Window
                 ["reason"] = result.Reason,
             });
             _evidence.RecordMetrics(_stats, "relay");
-            StatusText.Text = $"source: {relayBaseUri}  rejected frame: {Compact(result.Reason)}  {RemotePointerStatusText}";
+            StatusRelayText.Text = "relay: reject";
+            StatusDirtyText.Text = "dirty: --";
+            StatusCountersText.Text = CountersText();
+            StatusText.Text = $"source: {relayBaseUri}  rejected frame: {Compact(result.Reason)}";
+            UpdateRemotePointerStatusSlot();
         }
         else if (result.Status == RemoteFrameApplyStatus.StaleFrame)
         {
@@ -897,7 +907,23 @@ public partial class MainWindow : Window
     }
 
     private string CountersText() =>
-        $"full:{_stats.FullFrameRequests} dirty:{_stats.DirtyRectFrames} repair:{_stats.FullFrameRepairs} reject:{_stats.RejectedFrames}";
+        $"full:{_stats.FullFrameRequests,4} dirty:{_stats.DirtyRectFrames,4} repair:{_stats.FullFrameRepairs,4} reject:{_stats.RejectedFrames,3}";
+
+    private void UpdateRelayFrameStatus(Uri relayBaseUri, string source, int dirtyRectCount)
+    {
+        StatusFrameText.Text = $"frame: {_stats.FrameId:000000}";
+        StatusFpsText.Text = $"fps: {_stats.Fps,5:0.0}";
+        StatusRelayText.Text = $"relay: {source}";
+        StatusDirtyText.Text = $"dirty:{dirtyRectCount,3}";
+        StatusCountersText.Text = CountersText();
+        StatusText.Text = $"source: {relayBaseUri}";
+        UpdateRemotePointerStatusSlot();
+    }
+
+    private void UpdateRemotePointerStatusSlot()
+    {
+        StatusRemotePointerText.Text = RemotePointerStatusText;
+    }
 
     private async Task RefreshSystemMetricsAsync()
     {
@@ -1236,6 +1262,7 @@ public partial class MainWindow : Window
         {
             _relayInputReady = false;
             InputModeText.Text = PointerInputModeText;
+            UpdateRemotePointerStatusSlot();
             _evidence.RecordEvent("relay_pointer_failed", new Dictionary<string, object?>
             {
                 ["session_id"] = _relaySessionId,

@@ -66,11 +66,8 @@ int v5_linuxcncrsh_format_line(
         rc = snprintf(out, out_size, "Set Pause");
         return v5_linuxcncrsh_format_ok(rc, out_size);
     case V5_COMMAND_ESTOP_FORCE:
-        rc = snprintf(out, out_size, "Set Machine Off");
-        return v5_linuxcncrsh_format_ok(rc, out_size);
     case V5_COMMAND_ESTOP_RESET:
-        rc = snprintf(out, out_size, "Set EStop Off");
-        return v5_linuxcncrsh_format_ok(rc, out_size);
+        return 0;
     case V5_COMMAND_WCS_SELECT:
         if (request->index_value < 0 || request->index_value > 8) {
             return 0;
@@ -107,14 +104,4 @@ int v5_linuxcncrsh_format_line(
     default:
         return 0;
     }
-}
-
-int v5_linuxcncrsh_format_estop_reset_sequence(char *out, size_t out_size)
-{
-    int rc;
-    if (!out || out_size == 0U) {
-        return 0;
-    }
-    rc = snprintf(out, out_size, "Set EStop Off | Get Estop | Set Machine On | Get Machine");
-    return v5_linuxcncrsh_format_ok(rc, out_size);
 }

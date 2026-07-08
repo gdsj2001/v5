@@ -491,54 +491,6 @@ static int v5_linuxcncrsh_send_request_text(int fd, const char *request, char *o
            !v5_linuxcncrsh_response_has_word(discard, "ERROR");
 }
 
-static int v5_linuxcncrsh_send_request_text_actual_checked(int fd, const char *request)
-{
-    char framed[768];
-    char discard[512];
-    int rc;
-
-    if (fd < 0 || !request || !request[0]) {
-        return 0;
-    }
-    rc = snprintf(framed, sizeof(framed), "%s\n", request);
-    if (!v5_linuxcncrsh_format_ok(rc, sizeof(framed))) {
-        return 0;
-    }
-    v5_linuxcncrsh_drain_pending(fd);
-    if (!v5_linuxcncrsh_send_all(fd, framed)) {
-        return 0;
-    }
-    (void)v5_linuxcncrsh_recv_text(fd, discard, sizeof(discard));
-    return 1;
-}
-
-static int v5_linuxcncrsh_send_control_command_fresh(
-    const V5LinuxcncrshConfig *config,
-    const char *request,
-    int ignore_text_result,
-    unsigned int settle_us)
-{
-    int fd;
-    int ok;
-
-    if (!request || !request[0]) {
-        return 0;
-    }
-    v5_linuxcncrsh_gate_close();
-    fd = v5_linuxcncrsh_gate_connect(config);
-    if (fd < 0) {
-        return 0;
-    }
-    ok = v5_linuxcncrsh_send_request_text(fd, "Set Enable EMCTOO", 0, 0U) &&
-         (ignore_text_result ? v5_linuxcncrsh_send_request_text_actual_checked(fd, request)
-                             : v5_linuxcncrsh_send_request_text(fd, request, 0, 0U));
-    v5_linuxcncrsh_gate_close();
-    if (ok && settle_us > 0U) {
-        usleep(settle_us);
-    }
-    return ok;
-}
-
 static int v5_linuxcncrsh_send_fifo_commands(int fd, const char *line)
 {
     const char *p = line;
@@ -671,17 +623,39 @@ static int v5_linuxcncrsh_wait_machine_enabled_actual(
     return 0;
 }
 
-static int v5_linuxcncrsh_wait_all_homed_actual(unsigned int attempts, unsigned int delay_us)
+static int v5_linuxcncrsh_read_all_homed_actual(int *all_homed_out)
+{
+    V5NativeReadback readback;
+    if (all_homed_out) {
+        *all_homed_out = 0;
+    }
+    v5_native_readback_init(&readback);
+    if (!v5_native_modal_tool_status_read(0, V5_NATIVE_MODAL_TOOL_STATUS_DEFAULT_MAX_AGE_MS, &readback) ||
+        !v5_native_readback_all_homed_known(&readback)) {
+        return 0;
+    }
+    if (all_homed_out) {
+        *all_homed_out = readback.all_homed ? 1 : 0;
+    }
+    return 1;
+}
+
+static int v5_linuxcncrsh_wait_home_completion_actual(unsigned int attempts, unsigned int delay_us, int require_new_cycle)
 {
     unsigned int attempt;
     unsigned int stable = 0U;
+    int saw_unhomed = require_new_cycle ? 0 : 1;
     for (attempt = 0U; attempt < attempts; ++attempt) {
-        V5NativeReadback readback;
-        v5_native_readback_init(&readback);
-        if (v5_native_modal_tool_status_read(0, V5_NATIVE_MODAL_TOOL_STATUS_DEFAULT_MAX_AGE_MS, &readback) &&
-            v5_native_readback_all_homed_known(&readback) &&
-            readback.all_homed) {
-            ++stable;
+        int all_homed = 0;
+        if (v5_linuxcncrsh_read_all_homed_actual(&all_homed)) {
+            if (!all_homed) {
+                saw_unhomed = 1;
+                stable = 0U;
+            } else if (saw_unhomed) {
+                ++stable;
+            } else {
+                stable = 0U;
+            }
         } else {
             stable = 0U;
         }
@@ -797,71 +771,6 @@ V5LinuxcncrshSendStatus v5_linuxcncrsh_send_line(
 #endif
 }
 
-V5LinuxcncrshSendStatus v5_linuxcncrsh_send_estop_reset_sequence(
-    const V5LinuxcncrshConfig *config,
-    int *machine_on_status_out,
-    int *machine_on_requested_out)
-{
-#ifdef _WIN32
-    (void)config;
-    if (machine_on_status_out) {
-        *machine_on_status_out = (int)V5_LINUXCNCRSH_SEND_UNAVAILABLE;
-    }
-    if (machine_on_requested_out) {
-        *machine_on_requested_out = 0;
-    }
-    return V5_LINUXCNCRSH_SEND_UNAVAILABLE;
-#else
-    V5LinuxcncrshSendStatus status;
-    int estop_active = 1;
-    int latch_cleared = 0;
-    char transcript[1024];
-
-    if (machine_on_status_out) {
-        *machine_on_status_out = 0;
-    }
-    if (machine_on_requested_out) {
-        *machine_on_requested_out = 0;
-    }
-
-    if (!v5_linuxcncrsh_send_control_command_fresh(config, "Set EStop Off", 0, 100000U)) {
-        return V5_LINUXCNCRSH_SEND_IO_ERROR;
-    }
-    for (unsigned int attempt = 0U; attempt < 10U; ++attempt) {
-        if (v5_linuxcncrsh_probe_estop(config, &estop_active, transcript, sizeof(transcript)) && !estop_active) {
-            latch_cleared = 1;
-            break;
-        }
-        v5_linuxcncrsh_gate_close();
-        usleep(100000U);
-    }
-    v5_linuxcncrsh_gate_close();
-    if (!latch_cleared) {
-        return V5_LINUXCNCRSH_SEND_IO_ERROR;
-    }
-
-    if (machine_on_requested_out) {
-        *machine_on_requested_out = 1;
-    }
-    status = v5_linuxcncrsh_send_control_command_fresh(config, "Set Machine On", 1, 500000U)
-                 ? V5_LINUXCNCRSH_SEND_SENT
-                 : V5_LINUXCNCRSH_SEND_IO_ERROR;
-    if (machine_on_status_out) {
-        *machine_on_status_out = (int)status;
-    }
-    if (status != V5_LINUXCNCRSH_SEND_SENT) {
-        return status;
-    }
-    if (!v5_linuxcncrsh_wait_machine_enabled_actual(config, 1, 10U, 100000U)) {
-        if (machine_on_status_out) {
-            *machine_on_status_out = (int)V5_LINUXCNCRSH_SEND_IO_ERROR;
-        }
-        return V5_LINUXCNCRSH_SEND_IO_ERROR;
-    }
-    return V5_LINUXCNCRSH_SEND_SENT;
-#endif
-}
-
 V5LinuxcncrshSendStatus v5_linuxcncrsh_send_home_sequence(
     const V5LinuxcncrshConfig *config,
     char *mode_out,
@@ -874,6 +783,8 @@ V5LinuxcncrshSendStatus v5_linuxcncrsh_send_home_sequence(
     return V5_LINUXCNCRSH_SEND_UNAVAILABLE;
 #else
     int fd;
+    int initially_all_homed = 0;
+    int initial_homed_known;
     int ok;
     if (mode_out && mode_out_size > 0U) {
         snprintf(mode_out, mode_out_size, "manual_home_all_joints");
@@ -881,6 +792,7 @@ V5LinuxcncrshSendStatus v5_linuxcncrsh_send_home_sequence(
     if (!v5_linuxcncrsh_wait_machine_enabled_actual(config, 1, 3U, 100000U)) {
         return V5_LINUXCNCRSH_SEND_IO_ERROR;
     }
+    initial_homed_known = v5_linuxcncrsh_read_all_homed_actual(&initially_all_homed);
     fd = v5_linuxcncrsh_gate_connect(config);
     if (fd < 0) {
         return V5_LINUXCNCRSH_SEND_UNAVAILABLE;
@@ -892,32 +804,10 @@ V5LinuxcncrshSendStatus v5_linuxcncrsh_send_home_sequence(
         v5_linuxcncrsh_gate_close();
         return V5_LINUXCNCRSH_SEND_IO_ERROR;
     }
-    if (!v5_linuxcncrsh_wait_all_homed_actual(50U, 100000U)) {
-        return V5_LINUXCNCRSH_SEND_IO_ERROR;
-    }
-    return V5_LINUXCNCRSH_SEND_SENT;
-#endif
-}
-
-V5LinuxcncrshSendStatus v5_linuxcncrsh_send_estop_force_sequence(
-    const V5LinuxcncrshConfig *config)
-{
-#ifdef _WIN32
-    (void)config;
-    return V5_LINUXCNCRSH_SEND_UNAVAILABLE;
-#else
-    V5LinuxcncrshConfig urgent_config;
-
-    memset(&urgent_config, 0, sizeof(urgent_config));
-    if (config) {
-        urgent_config = *config;
-    }
-    if (urgent_config.timeout_ms == 0U || urgent_config.timeout_ms > 250U) {
-        urgent_config.timeout_ms = 250U;
-    }
-
-    if (!v5_linuxcncrsh_send_control_command_fresh(&urgent_config, "Set Machine Off", 1, 50000U) ||
-        !v5_linuxcncrsh_wait_machine_enabled_actual(&urgent_config, 0, 8U, 100000U)) {
+    if (!v5_linuxcncrsh_wait_home_completion_actual(
+            50U,
+            100000U,
+            initial_homed_known && initially_all_homed)) {
         return V5_LINUXCNCRSH_SEND_IO_ERROR;
     }
     return V5_LINUXCNCRSH_SEND_SENT;
@@ -971,13 +861,10 @@ V5LinuxcncrshSendStatus v5_linuxcncrsh_send_prepared(
         strcmp(prepared->owner ? prepared->owner : "", "native_home_mode_gate") == 0) {
         return v5_linuxcncrsh_send_home_sequence(config, 0, 0);
     }
-    if (prepared && request && request->kind == V5_COMMAND_ESTOP_RESET &&
+    if (prepared && request &&
+        (request->kind == V5_COMMAND_ESTOP_RESET || request->kind == V5_COMMAND_ESTOP_FORCE) &&
         strcmp(prepared->owner ? prepared->owner : "", "native_safety") == 0) {
-        return v5_linuxcncrsh_send_estop_reset_sequence(config, 0, 0);
-    }
-    if (prepared && request && request->kind == V5_COMMAND_ESTOP_FORCE &&
-        strcmp(prepared->owner ? prepared->owner : "", "native_safety") == 0) {
-        return v5_linuxcncrsh_send_estop_force_sequence(config);
+        return V5_LINUXCNCRSH_SEND_INVALID;
     }
     if (prepared && request && request->kind == V5_COMMAND_RTCP_SET &&
         strcmp(prepared->owner ? prepared->owner : "", "native_linuxcncrsh") == 0) {

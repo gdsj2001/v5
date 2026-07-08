@@ -29,7 +29,6 @@ int v5_linuxcncrsh_format_line(
     const V5CommandRequest *request,
     char *out,
     size_t out_size);
-int v5_linuxcncrsh_format_estop_reset_sequence(char *out, size_t out_size);
 int v5_linuxcncrsh_format_home_sequence(char *out, size_t out_size);
 
 int v5_linuxcncrsh_probe_machine(
@@ -58,14 +57,6 @@ V5LinuxcncrshSendStatus v5_linuxcncrsh_send_home_sequence(
     const V5LinuxcncrshConfig *config,
     char *mode_out,
     size_t mode_out_size);
-
-V5LinuxcncrshSendStatus v5_linuxcncrsh_send_estop_force_sequence(
-    const V5LinuxcncrshConfig *config);
-
-V5LinuxcncrshSendStatus v5_linuxcncrsh_send_estop_reset_sequence(
-    const V5LinuxcncrshConfig *config,
-    int *machine_on_status_out,
-    int *machine_on_requested_out);
 
 V5LinuxcncrshSendStatus v5_linuxcncrsh_send_rtcp_sequence(
     const V5LinuxcncrshConfig *config,

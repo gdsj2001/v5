@@ -32,17 +32,19 @@ static int check_simple(const char *label, const char *expected, V5PrepareFn fn)
     return fn(&prepared, &request) && expect_line(label, expected, &prepared, &request);
 }
 
-static int expect_estop_reset_sequence(void)
+static int expect_no_linuxcncrsh_line(const char *label, V5PrepareFn fn)
 {
+    V5CommandPrepared prepared;
+    V5CommandRequest request;
     char line[128];
-    if (!v5_linuxcncrsh_format_estop_reset_sequence(line, sizeof(line))) {
+    if (!fn(&prepared, &request)) {
         return 0;
     }
-    if (strcmp(line, "Set EStop Off | Get Estop | Set Machine On | Get Machine") != 0) {
-        printf("estop_reset_sequence mismatch: %s\n", line);
+    if (v5_linuxcncrsh_format_line(&prepared, &request, line, sizeof(line))) {
+        printf("%s unexpectedly formatted as linuxcncrsh line: %s\n", label, line);
         return 0;
     }
-    printf("estop_reset_sequence=%s\n", line);
+    printf("%s=native_safety_no_linuxcncrsh_line\n", label);
     return 1;
 }
 
@@ -68,10 +70,10 @@ int main(void)
         }
         printf("home=%s\n", home_line);
     }
-    if (!check_simple("estop", "Set Machine Off", v5_command_estop_force_prepare)) {
+    if (!expect_no_linuxcncrsh_line("estop", v5_command_estop_force_prepare)) {
         return 3;
     }
-    if (!check_simple("estop_reset", "Set EStop Off", v5_command_estop_reset_prepare) || !expect_estop_reset_sequence()) {
+    if (!expect_no_linuxcncrsh_line("estop_reset", v5_command_estop_reset_prepare)) {
         return 4;
     }
     if (!check_simple("g92_clear", "Set MDI G92.1", v5_command_g92_clear_prepare)) {

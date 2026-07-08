@@ -2,6 +2,7 @@
 #include "v5_command_gate_validator.h"
 #include "v5_linuxcncrsh_client.h"
 #include "v5_native_first_point.h"
+#include "v5_native_safety.h"
 #include "v5_process_residency.h"
 #include "v5_settings_apply.h"
 
@@ -158,6 +159,22 @@ static void response_copy_settings_result(
     copy_cstr(response->settings_scale_chain_code, sizeof(response->settings_scale_chain_code), result->scale_chain.code);
 }
 
+static void response_copy_native_safety_result(
+    V5CommandGateIpcResponseFrame *response,
+    const V5NativeSafetyResult *result)
+{
+    if (!response || !result) {
+        return;
+    }
+    response->safety_estop_known = result->safety_estop_known ? 1 : 0;
+    response->safety_estop_active = result->safety_estop_active ? 1 : 0;
+    response->machine_enable_known = result->machine_enable_known ? 1 : 0;
+    response->machine_enabled = result->machine_enabled ? 1 : 0;
+    response->machine_on_requested = result->machine_on_requested ? 1 : 0;
+    response->machine_on_status = (int32_t)result->machine_on_status;
+    copy_cstr(response->readback_code, sizeof(response->readback_code), result->code);
+}
+
 static int owner_is_allowed(const char *owner)
 {
     return owner &&
@@ -171,7 +188,7 @@ static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5Command
 {
     V5CommandRequest request;
     V5CommandPrepared prepared;
-    V5LinuxcncrshSendStatus status = V5_LINUXCNCRSH_SEND_INVALID;
+    int status = V5_COMMAND_GATE_SEND_INVALID;
     char reject_reason[64];
     response_init(response);
     reject_reason[0] = '\0';
@@ -180,6 +197,25 @@ static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5Command
         response->send_status = V5_COMMAND_GATE_SEND_INVALID;
         copy_cstr(response->readback_code, sizeof(response->readback_code),
                   reject_reason[0] ? reject_reason : "COMMAND_GATE_REJECTED");
+        return;
+    }
+
+    if (request.kind == V5_COMMAND_ESTOP_FORCE && strcmp(prepared.owner, "native_safety") == 0) {
+        V5NativeSafetyResult native_result;
+        copy_cstr(response->command_line, sizeof(response->command_line), "native_safety.estop_force");
+        status = v5_native_safety_estop_force(&native_result);
+        response_copy_native_safety_result(response, &native_result);
+        response->send_status = (int32_t)status;
+        response->executed = status == V5_NATIVE_SAFETY_SEND_SENT ? 1 : 0;
+        return;
+    }
+    if (request.kind == V5_COMMAND_ESTOP_RESET && strcmp(prepared.owner, "native_safety") == 0) {
+        V5NativeSafetyResult native_result;
+        copy_cstr(response->command_line, sizeof(response->command_line), "native_safety.estop_reset");
+        status = v5_native_safety_estop_reset(&native_result);
+        response_copy_native_safety_result(response, &native_result);
+        response->send_status = (int32_t)status;
+        response->executed = status == V5_NATIVE_SAFETY_SEND_SENT ? 1 : 0;
         return;
     }
 
@@ -198,12 +234,6 @@ static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5Command
             response->readback_code,
             sizeof(response->readback_code),
             status == V5_LINUXCNCRSH_SEND_SENT ? "HOME_NATIVE_ALL_HOMED" : "HOME_NATIVE_ALL_HOMED_TIMEOUT");
-    } else if (request.kind == V5_COMMAND_ESTOP_RESET && strcmp(prepared.owner, "native_safety") == 0) {
-        (void)v5_linuxcncrsh_format_estop_reset_sequence(response->command_line, sizeof(response->command_line));
-        status = v5_linuxcncrsh_send_estop_reset_sequence(&g_linuxcncrsh_config, &response->machine_on_status, &response->machine_on_requested);
-    } else if (request.kind == V5_COMMAND_ESTOP_FORCE && strcmp(prepared.owner, "native_safety") == 0) {
-        (void)v5_linuxcncrsh_format_line(&prepared, &request, response->command_line, sizeof(response->command_line));
-        status = v5_linuxcncrsh_send_estop_force_sequence(&g_linuxcncrsh_config);
     } else if (request.kind == V5_COMMAND_RTCP_SET && strcmp(prepared.owner, "native_linuxcncrsh") == 0) {
         if (!v5_linuxcncrsh_format_line(&prepared, &request, response->command_line, sizeof(response->command_line))) {
             response->send_status = V5_COMMAND_GATE_SEND_INVALID;
@@ -221,9 +251,6 @@ static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5Command
     }
     response->send_status = (int32_t)status;
     response->executed = status == V5_LINUXCNCRSH_SEND_SENT ? 1 : 0;
-    if (strcmp(prepared.owner, "native_safety") == 0) {
-        fill_safety_readback(response);
-    }
     linuxcncrsh_unlock();
 }
 
