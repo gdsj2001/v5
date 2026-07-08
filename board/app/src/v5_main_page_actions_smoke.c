@@ -189,7 +189,10 @@ int main(void)
     if (!same_text(button_text_for_action(&page, V5_MAIN_PAGE_ACTION_ESTOP_FORCE), "急停")) {
         return 26;
     }
-    if (!same_text(button_text_for_action(&page, V5_MAIN_PAGE_ACTION_RTCP_TOGGLE), "刀尖\n关")) {
+    if (!same_text(button_text_for_action(&page, V5_MAIN_PAGE_ACTION_AXIS_ALL), "机械全轴")) {
+        return 37;
+    }
+    if (!same_text(button_text_for_action(&page, V5_MAIN_PAGE_ACTION_RTCP_TOGGLE), "RTCP")) {
         return 33;
     }
     v5_program_controller_init(&controller);
@@ -355,10 +358,16 @@ int main(void)
 
     {
         V5NativeReadback readback;
+        const char *modal_text;
         v5_native_readback_init(&readback);
         v5_native_readback_set_rtcp_actual(&readback, 0);
         v5_main_page_set_native_readback(&page, &readback);
-        if (!same_text(button_text_for_action(&page, V5_MAIN_PAGE_ACTION_RTCP_TOGGLE), "刀尖\n关")) {
+        modal_text = lv_label_get_text(page.modal_label);
+        if (!modal_text || !strstr(modal_text, "L--\nRTCP OFF\n")) {
+            v5_program_controller_destroy(&controller);
+            return 38;
+        }
+        if (!same_text(button_text_for_action(&page, V5_MAIN_PAGE_ACTION_RTCP_TOGGLE), "RTCP")) {
             v5_program_controller_destroy(&controller);
             return 34;
         }
@@ -368,7 +377,12 @@ int main(void)
         }
         v5_native_readback_set_rtcp_actual(&readback, 1);
         v5_main_page_set_native_readback(&page, &readback);
-        if (!same_text(button_text_for_action(&page, V5_MAIN_PAGE_ACTION_RTCP_TOGGLE), "刀尖\n开")) {
+        modal_text = lv_label_get_text(page.modal_label);
+        if (!modal_text || !strstr(modal_text, "L--\nRTCP ON\n")) {
+            v5_program_controller_destroy(&controller);
+            return 39;
+        }
+        if (!same_text(button_text_for_action(&page, V5_MAIN_PAGE_ACTION_RTCP_TOGGLE), "RTCP")) {
             v5_program_controller_destroy(&controller);
             return 35;
         }

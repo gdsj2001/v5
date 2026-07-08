@@ -260,7 +260,7 @@ int main(void)
     if (!wcs_text || strcmp(wcs_text, "-00007.500") != 0) {
         return 6;
     }
-    if (!modal_text || strcmp(modal_text, "当前模态\nT7\nL123.456\nG0\nG17\nG21\nG40\nG49\nG54\nG64\nG80\nG90\nG94\nG97") != 0) {
+    if (!modal_text || strcmp(modal_text, "当前模态\nT7\nL123.456\nRTCP OFF\nG0\nG17\nG21\nG40\nG49\nG54\nG64\nG80\nG90\nG94\nG97") != 0) {
         return 13;
     }
     if (!lv_label_get_text(page.toolpath_summary_label) ||

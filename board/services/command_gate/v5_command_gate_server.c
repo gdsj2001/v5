@@ -254,12 +254,19 @@ static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5Command
             sizeof(response->readback_code),
             status == V5_LINUXCNCRSH_SEND_SENT ? "ROTARY_EQUIV_ZERO_NATIVE_SENT" : "ROTARY_EQUIV_ZERO_NATIVE_FAILED");
     } else if (request.kind == V5_COMMAND_HOME && strcmp(prepared.owner, "native_home_mode_gate") == 0) {
+        char home_code[64];
         (void)v5_linuxcncrsh_format_home_sequence(response->command_line, sizeof(response->command_line));
-        status = v5_linuxcncrsh_send_home_sequence(&g_linuxcncrsh_config, 0, 0);
+        home_code[0] = '\0';
+        status = v5_linuxcncrsh_send_home_sequence(
+            &g_linuxcncrsh_config,
+            0,
+            0,
+            home_code,
+            sizeof(home_code));
         copy_cstr(
             response->readback_code,
             sizeof(response->readback_code),
-            status == V5_LINUXCNCRSH_SEND_SENT ? "HOME_NATIVE_ALL_HOMED" : "HOME_NATIVE_ALL_HOMED_TIMEOUT");
+            home_code[0] ? home_code : "BUS_HOME_RESULT_MISSING");
     } else if (request.kind == V5_COMMAND_RTCP_SET && strcmp(prepared.owner, "native_linuxcncrsh") == 0) {
         if (!v5_linuxcncrsh_format_line(&prepared, &request, response->command_line, sizeof(response->command_line))) {
             response->send_status = V5_COMMAND_GATE_SEND_INVALID;

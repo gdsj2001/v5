@@ -59,7 +59,9 @@ V5LinuxcncrshSendStatus v5_linuxcncrsh_send_machine_on_sequence(
 V5LinuxcncrshSendStatus v5_linuxcncrsh_send_home_sequence(
     const V5LinuxcncrshConfig *config,
     char *mode_out,
-    size_t mode_out_size);
+    size_t mode_out_size,
+    char *code_out,
+    size_t code_out_size);
 
 V5LinuxcncrshSendStatus v5_linuxcncrsh_send_rtcp_sequence(
     const V5LinuxcncrshConfig *config,

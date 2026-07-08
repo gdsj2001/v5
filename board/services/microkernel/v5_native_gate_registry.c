@@ -6,7 +6,7 @@ static const V5NativeGateEntry k_gates[] = {
     {"program_start", V5_NATIVE_GATE_RUN_CONTROL, "native_linuxcncrsh", "Set Run"},
     {"program_pause", V5_NATIVE_GATE_RUN_CONTROL, "native_linuxcncrsh", "Set Pause"},
     {"program_resume", V5_NATIVE_GATE_RUN_CONTROL, "native_linuxcncrsh", "Set Resume"},
-    {"home", V5_NATIVE_GATE_RUN_CONTROL, "native_home_mode_gate", "active_driver_mode -> Pulse Set Home / BUS G53 machine zero"},
+    {"home", V5_NATIVE_GATE_RUN_CONTROL, "native_home_mode_gate", "active_driver_mode -> BUS/Pulse real Home cycle; Set Home only after motion proof"},
     {"jog_increment", V5_NATIVE_GATE_RUN_CONTROL, "native_linuxcncrsh", "Set Jog_Incr"},
     {"jog_continuous", V5_NATIVE_GATE_RUN_CONTROL, "native_linuxcncrsh", "Set Jog"},
     {"jog_stop", V5_NATIVE_GATE_RUN_CONTROL, "native_linuxcncrsh", "Set Jog 0"},

@@ -62,10 +62,10 @@ int main(void)
         return 2;
     }
     {
-        char home_line[64];
+        char home_line[128];
         if (!v5_command_home_prepare(&prepared, &request) ||
             !v5_linuxcncrsh_format_home_sequence(home_line, sizeof(home_line)) ||
-            strcmp(home_line, "Set Mode Manual | Set Home -1") != 0) {
+            strcmp(home_line, "native_home_mode_gate BUS real G53 zero move + native MCS readback") != 0) {
             return 12;
         }
         printf("home=%s\n", home_line);

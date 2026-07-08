@@ -121,12 +121,11 @@ int main(int argc, char **argv)
         return 4;
     }
 
-    if (!prepare_program_open(program_path, &prepared, &request) ||
-        !send_prepared_or_report("program_open", &config, &prepared, &request)) {
-        return 5;
-    }
-
     if (!start) {
+        if (!prepare_program_open(program_path, &prepared, &request) ||
+            !send_prepared_or_report("program_open", &config, &prepared, &request)) {
+            return 5;
+        }
         printf("golden program opened without start\n");
         return 0;
     }

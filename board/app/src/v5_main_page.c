@@ -610,6 +610,14 @@ static void append_main_page_modal_tokens(char *out, size_t out_size, const char
     }
 }
 
+static const char *main_page_rtcp_modal_text(const V5NativeReadback *readback)
+{
+    if (!v5_native_readback_rtcp_known(readback)) {
+        return "RTCP --";
+    }
+    return readback->rtcp_enabled ? "RTCP ON" : "RTCP OFF";
+}
+
 static void format_main_page_modal(char *out, size_t out_size, const V5NativeReadback *readback)
 {
     char line[32];
@@ -631,7 +639,19 @@ static void format_main_page_modal(char *out, size_t out_size, const V5NativeRea
         append_main_page_modal_text(out, out_size, "T--\nL--");
     }
     append_main_page_modal_text(out, out_size, "\n");
+    append_main_page_modal_text(out, out_size, main_page_rtcp_modal_text(readback));
+    append_main_page_modal_text(out, out_size, "\n");
     append_main_page_modal_tokens(out, out_size, v5_native_readback_modal_known(readback) ? readback->modal_text : "--");
+}
+
+static void update_main_page_modal_label(V5MainPage *page)
+{
+    char modal_display_text[256];
+    if (!page || !page->modal_label) {
+        return;
+    }
+    format_main_page_modal(modal_display_text, sizeof(modal_display_text), &page->native_readback);
+    set_label_text_if_changed(page->modal_label, modal_display_text);
 }
 
 static void format_main_page_wcs_coordinate(char *out, size_t out_size, const V5UiStatusView *status,
@@ -1939,8 +1959,8 @@ static void make_v3_main_buttons(V5MainPage *page)
     make_button_rgb(page, 510, 306, 50, 20, V5_MAIN_PAGE_ACTION_WCS_G591, "G59.1", 32, 52, 73);
     make_button_rgb(page, 564, 306, 50, 20, V5_MAIN_PAGE_ACTION_WCS_G592, "G59.2", 32, 52, 73);
     make_button_rgb(page, 618, 306, 50, 20, V5_MAIN_PAGE_ACTION_WCS_G593, "G59.3", 32, 52, 73);
-    make_button_rgb(page, 402, 328, 108, 48, V5_MAIN_PAGE_ACTION_AXIS_ALL, "机械\n全轴", 42, 63, 85);
-    make_button_rgb(page, 516, 328, 50, 48, V5_MAIN_PAGE_ACTION_RTCP_TOGGLE, "刀尖\n关", 42, 63, 85);
+    make_button_rgb(page, 402, 328, 108, 48, V5_MAIN_PAGE_ACTION_AXIS_ALL, "机械全轴", 42, 63, 85);
+    make_button_rgb(page, 516, 328, 50, 48, V5_MAIN_PAGE_ACTION_RTCP_TOGGLE, "RTCP", 42, 63, 85);
     make_button_rgb(page, 572, 328, 80, 48, V5_MAIN_PAGE_ACTION_HOME, "回零", 42, 126, 101);
     make_button_rgb(page, 658, 328, 82, 48, V5_MAIN_PAGE_ACTION_WORK_ZERO_X, "归零", 42, 126, 101);
     make_button_rgb(page, 402, 382, 54, 48, V5_MAIN_PAGE_ACTION_JOG_STEP_1, "X1", 29, 151, 104);
@@ -2143,7 +2163,6 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
 {
     V5CoordinatePanelSnapshot panel;
     V5ToolpathDisplaySnapshot dynamic_display;
-    char modal_display_text[256];
     const V5ProgramRuntime *runtime = page && page->program_controller ? v5_program_controller_runtime(page->program_controller) : 0;
     unsigned int preview_count = 0U;
     unsigned int runtime_generation = 0U;
@@ -2200,8 +2219,7 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
     if ((refresh_flags & V5_MAIN_PAGE_REFRESH_SLOW) != 0U) {
         update_main_page_wcs_header(page);
         update_toolpath_status_text(page);
-        format_main_page_modal(modal_display_text, sizeof(modal_display_text), &page->native_readback);
-        set_label_text_if_changed(page->modal_label, modal_display_text);
+        update_main_page_modal_label(page);
         if (page->cpu0_label && page->cpu1_label) {
             char cpu0_text[24];
             char cpu1_text[24];
@@ -2529,13 +2547,10 @@ static void update_estop_button_text(V5MainPage *page)
 
 static void update_rtcp_button_text(V5MainPage *page)
 {
-    const char *text = "刀尖\n关";
+    const char *text = "RTCP";
     unsigned int i;
     if (!page) {
         return;
-    }
-    if (v5_native_readback_rtcp_known(&page->native_readback) && page->native_readback.rtcp_enabled) {
-        text = "刀尖\n开";
     }
     for (i = 0U; i < page->button_count; ++i) {
         if (page->button_actions[i] == V5_MAIN_PAGE_ACTION_RTCP_TOGGLE && page->button_labels[i]) {
@@ -2575,6 +2590,7 @@ void v5_main_page_set_native_readback(V5MainPage *page, const V5NativeReadback *
     update_estop_button_text(page);
     update_rtcp_button_text(page);
     update_main_page_wcs_header(page);
+    update_main_page_modal_label(page);
     update_toolpath_status_text(page);
 }
 
@@ -2769,7 +2785,9 @@ static void execute_prepared_command_if_enabled(V5MainPage *page, V5MainPageActi
         gate_timeout_ms = 3000U;
     } else if (report->request.kind == V5_COMMAND_RTCP_SET) {
         gate_timeout_ms = 2500U;
-    } else if (report->request.kind == V5_COMMAND_HOME || report->request.kind == V5_COMMAND_ROTARY_EQUIV_ZERO) {
+    } else if (report->request.kind == V5_COMMAND_HOME) {
+        gate_timeout_ms = 120000U;
+    } else if (report->request.kind == V5_COMMAND_ROTARY_EQUIV_ZERO) {
         gate_timeout_ms = 5000U;
     }
     if (!v5_command_gate_send_prepared(&report->command, &report->request, &gate_result, gate_timeout_ms)) {
@@ -2808,8 +2826,12 @@ static void execute_prepared_command_if_enabled(V5MainPage *page, V5MainPageActi
         }
     }
     if (report->executed && report->request.kind == V5_COMMAND_RTCP_SET) {
-        v5_native_readback_set_rtcp_actual(&page->native_readback, report->request.enabled_value);
-        update_rtcp_button_text(page);
+        if (page->native_readback_refresh_cb) {
+            page->native_readback_refresh_cb(page->native_readback_refresh_user_data, V5_MAIN_PAGE_ACTION_RTCP_TOGGLE);
+        } else {
+            update_main_page_modal_label(page);
+            update_rtcp_button_text(page);
+        }
     }
 }
 

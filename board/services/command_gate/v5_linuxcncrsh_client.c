@@ -1,8 +1,10 @@
 #include "v5_linuxcncrsh_client.h"
 #include "v5_native_modal_tool_status.h"
+#include "v5_native_sample.h"
 #include "v5_native_rtcp_status.h"
 
 #include <ctype.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 #ifndef _WIN32
@@ -43,13 +45,24 @@ static int v5_linuxcncrsh_format_ok(int rc, size_t out_size)
     return rc > 0 && (size_t)rc < out_size;
 }
 
+static void v5_linuxcncrsh_copy_code(char *out, size_t out_size, const char *code)
+{
+    if (!out || out_size == 0U) {
+        return;
+    }
+    out[0] = '\0';
+    if (code && code[0]) {
+        snprintf(out, out_size, "%s", code);
+    }
+}
+
 int v5_linuxcncrsh_format_home_sequence(char *out, size_t out_size)
 {
     int rc;
     if (!out || out_size == 0U) {
         return 0;
     }
-    rc = snprintf(out, out_size, "Set Mode Manual | Set Home -1");
+    rc = snprintf(out, out_size, "native_home_mode_gate BUS real G53 zero move + native MCS readback");
     return v5_linuxcncrsh_format_ok(rc, out_size);
 }
 
@@ -638,22 +651,14 @@ static int v5_linuxcncrsh_read_all_homed_actual(int *all_homed_out)
     return 1;
 }
 
-static int v5_linuxcncrsh_wait_home_completion_actual(unsigned int attempts, unsigned int delay_us, int require_new_cycle)
+static int v5_linuxcncrsh_wait_home_completion_actual(unsigned int attempts, unsigned int delay_us)
 {
     unsigned int attempt;
     unsigned int stable = 0U;
-    int saw_unhomed = require_new_cycle ? 0 : 1;
     for (attempt = 0U; attempt < attempts; ++attempt) {
         int all_homed = 0;
-        if (v5_linuxcncrsh_read_all_homed_actual(&all_homed)) {
-            if (!all_homed) {
-                saw_unhomed = 1;
-                stable = 0U;
-            } else if (saw_unhomed) {
-                ++stable;
-            } else {
-                stable = 0U;
-            }
+        if (v5_linuxcncrsh_read_all_homed_actual(&all_homed) && all_homed) {
+            ++stable;
         } else {
             stable = 0U;
         }
@@ -665,6 +670,103 @@ static int v5_linuxcncrsh_wait_home_completion_actual(unsigned int attempts, uns
         }
     }
     return 0;
+}
+
+#define V5_BUS_HOME_TARGET_TOLERANCE 0.050
+#define V5_BUS_HOME_MOTION_TOLERANCE 0.010
+
+static int v5_linuxcncrsh_read_native_mcs(V5NativeDisplaySample *sample)
+{
+    return sample &&
+           v5_native_display_sample_read(sample) &&
+           sample->available &&
+           (sample->valid_mask & V5_STATUS_VALID_MCS) != 0U;
+}
+
+static int v5_linuxcncrsh_home_mcs_at_zero(const double mcs[V5_STATUS_AXIS_COUNT], double tolerance)
+{
+    unsigned int i;
+    if (!mcs) {
+        return 0;
+    }
+    for (i = 0U; i < V5_STATUS_AXIS_COUNT; ++i) {
+        if (!isfinite(mcs[i]) || fabs(mcs[i]) > tolerance) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int v5_linuxcncrsh_home_mcs_moved(
+    const double before[V5_STATUS_AXIS_COUNT],
+    const double after[V5_STATUS_AXIS_COUNT],
+    double tolerance)
+{
+    unsigned int i;
+    if (!before || !after) {
+        return 0;
+    }
+    for (i = 0U; i < V5_STATUS_AXIS_COUNT; ++i) {
+        if (!isfinite(before[i]) || !isfinite(after[i])) {
+            return 0;
+        }
+        if (fabs(after[i] - before[i]) > tolerance) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int v5_linuxcncrsh_wait_bus_home_zero_arrival(
+    const double start_mcs[V5_STATUS_AXIS_COUNT],
+    unsigned int attempts,
+    unsigned int delay_us,
+    int *moved_out)
+{
+    unsigned int attempt;
+    unsigned int stable = 0U;
+    int moved = 0;
+    if (moved_out) {
+        *moved_out = 0;
+    }
+    for (attempt = 0U; attempt < attempts; ++attempt) {
+        V5NativeDisplaySample sample;
+        if (v5_linuxcncrsh_read_native_mcs(&sample)) {
+            if (v5_linuxcncrsh_home_mcs_moved(start_mcs, sample.mcs, V5_BUS_HOME_MOTION_TOLERANCE)) {
+                moved = 1;
+            }
+            if (moved && v5_linuxcncrsh_home_mcs_at_zero(sample.mcs, V5_BUS_HOME_TARGET_TOLERANCE)) {
+                ++stable;
+            } else {
+                stable = 0U;
+            }
+            if (stable >= 3U) {
+                if (moved_out) {
+                    *moved_out = 1;
+                }
+                return 1;
+            }
+        } else {
+            stable = 0U;
+        }
+        if (delay_us > 0U) {
+            usleep(delay_us);
+        }
+    }
+    if (moved_out) {
+        *moved_out = moved;
+    }
+    return 0;
+}
+
+static int v5_linuxcncrsh_send_bus_home_g53_zero(int fd)
+{
+    return v5_linuxcncrsh_send_request_text(fd, "Set Mode MDI", 0, 0U) &&
+           v5_linuxcncrsh_send_request_text(
+               fd,
+               "Set MDI G53 G0 X0.000000 Y0.000000 Z0.000000 A0.000000 C0.000000",
+               0,
+               0U);
 }
 #endif
 
@@ -778,42 +880,60 @@ V5LinuxcncrshSendStatus v5_linuxcncrsh_send_machine_on_sequence(
 V5LinuxcncrshSendStatus v5_linuxcncrsh_send_home_sequence(
     const V5LinuxcncrshConfig *config,
     char *mode_out,
-    size_t mode_out_size)
+    size_t mode_out_size,
+    char *code_out,
+    size_t code_out_size)
 {
 #ifdef _WIN32
     (void)config;
     (void)mode_out;
     (void)mode_out_size;
+    v5_linuxcncrsh_copy_code(code_out, code_out_size, "BUS_HOME_UNAVAILABLE_ON_WIN32");
     return V5_LINUXCNCRSH_SEND_UNAVAILABLE;
 #else
+    V5NativeDisplaySample start_sample;
     int fd;
-    int initially_all_homed = 0;
-    int initial_homed_known;
     int ok;
+    int moved = 0;
     if (mode_out && mode_out_size > 0U) {
-        snprintf(mode_out, mode_out_size, "manual_home_all_joints");
+        snprintf(mode_out, mode_out_size, "bus_real_home_g53_zero");
     }
+    v5_linuxcncrsh_copy_code(code_out, code_out_size, "BUS_HOME_NOT_ATTEMPTED");
     if (!v5_linuxcncrsh_wait_machine_enabled_actual(config, 1, 3U, 100000U)) {
+        v5_linuxcncrsh_copy_code(code_out, code_out_size, "BUS_HOME_MACHINE_ENABLE_NOT_CONFIRMED");
         return V5_LINUXCNCRSH_SEND_IO_ERROR;
     }
-    initial_homed_known = v5_linuxcncrsh_read_all_homed_actual(&initially_all_homed);
+    if (!v5_linuxcncrsh_read_native_mcs(&start_sample)) {
+        v5_linuxcncrsh_copy_code(code_out, code_out_size, "BUS_HOME_NATIVE_MCS_UNAVAILABLE");
+        return V5_LINUXCNCRSH_SEND_IO_ERROR;
+    }
+    if (v5_linuxcncrsh_home_mcs_at_zero(start_sample.mcs, V5_BUS_HOME_TARGET_TOLERANCE)) {
+        v5_linuxcncrsh_copy_code(code_out, code_out_size, "BUS_HOME_REAL_MOVE_REQUIRED_AT_ZERO");
+        return V5_LINUXCNCRSH_SEND_IO_ERROR;
+    }
     fd = v5_linuxcncrsh_gate_connect(config);
     if (fd < 0) {
+        v5_linuxcncrsh_copy_code(code_out, code_out_size, "BUS_HOME_LINUXCNCRSH_UNAVAILABLE");
         return V5_LINUXCNCRSH_SEND_UNAVAILABLE;
     }
     ok = v5_linuxcncrsh_send_request_text(fd, "Set Enable EMCTOO", 0, 0U) &&
-         v5_linuxcncrsh_send_request_text(fd, "Set Mode Manual", 0, 0U) &&
-         v5_linuxcncrsh_send_request_text(fd, "Set Home -1", 0, 0U);
+         v5_linuxcncrsh_send_bus_home_g53_zero(fd);
     if (!ok) {
         v5_linuxcncrsh_gate_close();
+        v5_linuxcncrsh_copy_code(code_out, code_out_size, "BUS_HOME_G53_COMMAND_REJECTED");
         return V5_LINUXCNCRSH_SEND_IO_ERROR;
     }
-    if (!v5_linuxcncrsh_wait_home_completion_actual(
-            50U,
-            100000U,
-            initial_homed_known && initially_all_homed)) {
+    if (!v5_linuxcncrsh_wait_bus_home_zero_arrival(start_sample.mcs, 600U, 100000U, &moved) || !moved) {
+        v5_linuxcncrsh_copy_code(code_out, code_out_size, "BUS_HOME_REAL_MOVE_NOT_CONFIRMED");
         return V5_LINUXCNCRSH_SEND_IO_ERROR;
     }
+    ok = v5_linuxcncrsh_send_request_text(fd, "Set Mode Manual", 0, 0U) &&
+         v5_linuxcncrsh_send_request_text(fd, "Set Home -1", 0, 0U);
+    if (!ok || !v5_linuxcncrsh_wait_home_completion_actual(50U, 100000U)) {
+        v5_linuxcncrsh_copy_code(code_out, code_out_size, "BUS_HOME_HOMED_SYNC_FAILED_AFTER_REAL_MOVE");
+        return V5_LINUXCNCRSH_SEND_IO_ERROR;
+    }
+    v5_linuxcncrsh_copy_code(code_out, code_out_size, "BUS_HOME_REAL_MOVE_CONFIRMED");
     return V5_LINUXCNCRSH_SEND_SENT;
 #endif
 }
@@ -863,7 +983,7 @@ V5LinuxcncrshSendStatus v5_linuxcncrsh_send_prepared(
 
     if (prepared && request && request->kind == V5_COMMAND_HOME &&
         strcmp(prepared->owner ? prepared->owner : "", "native_home_mode_gate") == 0) {
-        return v5_linuxcncrsh_send_home_sequence(config, 0, 0);
+        return v5_linuxcncrsh_send_home_sequence(config, 0, 0, 0, 0);
     }
     if (prepared && request &&
         (request->kind == V5_COMMAND_ESTOP_RESET || request->kind == V5_COMMAND_ESTOP_FORCE) &&
