@@ -1,5 +1,7 @@
 #include "v5_linuxcncrsh_client.h"
 #include "v5_native_modal_tool_status.h"
+#include "v5_native_rtcp_control.h"
+#include "v5_native_rtcp_status.h"
 #include "v5_native_sample.h"
 
 #include <ctype.h>
@@ -61,7 +63,7 @@ int v5_linuxcncrsh_format_home_sequence(char *out, size_t out_size)
     if (!out || out_size == 0U) {
         return 0;
     }
-    rc = snprintf(out, out_size, "native_home_mode_gate BUS joint-jog proof + joint-jog zero + native MCS readback");
+    rc = snprintf(out, out_size, "native_home_mode_gate abort + program RTCP latch clear + native RTCP OFF + BUS real home");
     return v5_linuxcncrsh_format_ok(rc, out_size);
 }
 
@@ -685,6 +687,60 @@ static int v5_linuxcncrsh_read_native_mcs(V5NativeDisplaySample *sample)
            (sample->valid_mask & V5_STATUS_VALID_MCS) != 0U;
 }
 
+static int v5_linuxcncrsh_read_rtcp_active_actual(int *active_out)
+{
+    V5NativeReadback readback;
+    if (active_out) {
+        *active_out = 0;
+    }
+    v5_native_readback_init(&readback);
+    if (!v5_native_rtcp_status_read(0, V5_NATIVE_RTCP_STATUS_DEFAULT_MAX_AGE_MS, &readback) ||
+        !v5_native_readback_rtcp_known(&readback)) {
+        return 0;
+    }
+    if (active_out) {
+        *active_out = readback.rtcp_enabled ? 1 : 0;
+    }
+    return 1;
+}
+
+static int v5_linuxcncrsh_clear_interrupted_program_rtcp_latch(int fd)
+{
+    int active = 0;
+    if (!v5_linuxcncrsh_read_rtcp_active_actual(&active) || !active) {
+        return 1;
+    }
+    return v5_linuxcncrsh_send_request_text(fd, "Set Mode MDI", 0, 0U) &&
+           v5_linuxcncrsh_send_request_text(fd, "Set MDI M65 P0", 0, 0U);
+}
+
+static int v5_linuxcncrsh_confirm_home_rtcp_off(char *code_out, size_t code_out_size)
+{
+    V5NativeRtcpControlResult result;
+    int status;
+    int active = 0;
+    for (unsigned int attempt = 0U; attempt < 10U; ++attempt) {
+        if (!v5_linuxcncrsh_read_rtcp_active_actual(&active)) {
+            v5_linuxcncrsh_copy_code(code_out, code_out_size, "BUS_HOME_RTCP_ACTUAL_UNAVAILABLE");
+            return 0;
+        }
+        if (!active) {
+            return 1;
+        }
+        usleep(50000U);
+    }
+
+    status = v5_native_rtcp_control_set(0, &result);
+    if (status == V5_NATIVE_RTCP_CONTROL_SEND_SENT) {
+        return 1;
+    }
+    v5_linuxcncrsh_copy_code(
+        code_out,
+        code_out_size,
+        result.code[0] ? result.code : "BUS_HOME_RTCP_OFF_NOT_CONFIRMED");
+    return 0;
+}
+
 static double v5_linuxcncrsh_axis_target_error(unsigned int axis_i, double current, double target);
 
 static int v5_linuxcncrsh_home_mcs_at_target(
@@ -975,7 +1031,7 @@ V5LinuxcncrshSendStatus v5_linuxcncrsh_send_machine_on_sequence(
     if (status != V5_LINUXCNCRSH_SEND_SENT) {
         return status;
     }
-    return v5_linuxcncrsh_wait_machine_enabled_actual(config, 1, 20U, 25000U)
+    return v5_linuxcncrsh_wait_machine_enabled_actual(config, 1, 40U, 25000U)
         ? V5_LINUXCNCRSH_SEND_SENT
         : V5_LINUXCNCRSH_SEND_IO_ERROR;
 #endif
@@ -1022,8 +1078,18 @@ V5LinuxcncrshSendStatus v5_linuxcncrsh_send_home_sequence(
         v5_linuxcncrsh_copy_code(code_out, code_out_size, "BUS_HOME_ENABLE_REJECTED");
         return V5_LINUXCNCRSH_SEND_IO_ERROR;
     }
-    if (!v5_linuxcncrsh_send_request_text(fd, "Set Abort", 0, 0U) ||
-        !v5_linuxcncrsh_send_request_text(fd, "Set Mode Manual", 0, 0U)) {
+    if (!v5_linuxcncrsh_send_request_text(fd, "Set Abort", 0, 0U)) {
+        v5_linuxcncrsh_copy_code(code_out, code_out_size, "BUS_HOME_ABORT_NOT_CONFIRMED");
+        return V5_LINUXCNCRSH_SEND_IO_ERROR;
+    }
+    if (!v5_linuxcncrsh_clear_interrupted_program_rtcp_latch(fd)) {
+        v5_linuxcncrsh_copy_code(code_out, code_out_size, "BUS_HOME_PROGRAM_RTCP_LATCH_CLEAR_FAILED");
+        return V5_LINUXCNCRSH_SEND_IO_ERROR;
+    }
+    if (!v5_linuxcncrsh_confirm_home_rtcp_off(code_out, code_out_size)) {
+        return V5_LINUXCNCRSH_SEND_IO_ERROR;
+    }
+    if (!v5_linuxcncrsh_send_request_text(fd, "Set Mode Manual", 0, 0U)) {
         v5_linuxcncrsh_copy_code(code_out, code_out_size, "BUS_HOME_MANUAL_MODE_NOT_CONFIRMED");
         return V5_LINUXCNCRSH_SEND_IO_ERROR;
     }
