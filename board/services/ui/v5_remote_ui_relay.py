@@ -19,6 +19,7 @@ import urllib.parse
 from collections import deque
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
+from typing import Union
 
 
 PROTOCOL_VERSION = "8ax-remote-ui/1"
@@ -28,6 +29,21 @@ FRAMEBUFFER_NAME = "remote_framebuffer.bgra"
 DIRTY_FIFO_NAME = "remote_dirty"
 INPUT_FIFO_NAME = "remote_input"
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+
+class PayloadViews:
+    def __init__(self, parts: list[memoryview], total_length: int):
+        self.parts = parts
+        self.total_length = total_length
+
+    def __len__(self) -> int:
+        return self.total_length
+
+    def __bool__(self) -> bool:
+        return self.total_length > 0
+
+
+FramePayload = Union[bytes, bytearray, memoryview, PayloadViews]
 STREAM_TARGET_FPS = 30
 STREAM_COALESCE_SECONDS = 1.0 / STREAM_TARGET_FPS
 DIRTY_EVENT_HISTORY_LIMIT = 512
@@ -35,6 +51,7 @@ MAX_DIRTY_RECTS_PER_FRAME = 64
 LARGE_DIRTY_PIXEL_RATIO = 0.75
 LARGE_DIRTY_MIN_INTERVAL_SECONDS = 0.10
 STREAM_IDLE_PING_SECONDS = 15.0
+DIRTY_FIFO_EMPTY_SLEEP_SECONDS = 0.02
 
 
 def now_ms() -> int:
@@ -263,6 +280,7 @@ class FrameState:
             "dirty_large_pixels": 0,
             "dirty_large_throttle_sleeps": 0,
             "dirty_large_throttle_ms": 0,
+            "dirty_fifo_empty_reads": 0,
             "framebuffer_mmap_refreshes": 0,
             "input_sessions": 0,
             "input_active_sessions": 0,
@@ -430,7 +448,7 @@ class FrameState:
                 time.sleep(delay)
         return time.monotonic()
 
-    def dirty_payload(self, event: dict) -> tuple[bytes, list[dict]] | None:
+    def dirty_payload(self, event: dict) -> tuple[FramePayload, list[dict]] | None:
         rects = self.normalized_dirty_rects(event)
         if not rects:
             return None
@@ -439,40 +457,32 @@ class FrameState:
             return None
         total_bytes = sum(int(rect["w"]) * int(rect["h"]) * 4 for rect in rects)
         total_rows = sum(int(rect["h"]) for rect in rects)
-        payload = bytearray(total_bytes)
-        cursor = 0
-        dst = memoryview(payload)
         src = memoryview(mapped)
-        try:
-            for rect in rects:
-                x = int(rect["x"])
-                y = int(rect["y"])
-                w = int(rect["w"])
-                h = int(rect["h"])
-                row_bytes = w * 4
-                if x == 0 and w == self.width:
-                    start = (y * self.stride) + (x * 4)
-                    end = start + (row_bytes * h)
-                    if end > self.frame_size:
-                        return None
-                    dst[cursor:cursor + (row_bytes * h)] = src[start:end]
-                    cursor += row_bytes * h
-                    self.mark_metric("dirty_payload_contiguous_frames")
-                    continue
-                for row in range(h):
-                    src_start = ((y + row) * self.stride) + (x * 4)
-                    src_end = src_start + row_bytes
-                    if src_end > self.frame_size:
-                        return None
-                    dst[cursor:cursor + row_bytes] = src[src_start:src_end]
-                    cursor += row_bytes
-        finally:
-            del src
-            del dst
+        payload_parts: list[memoryview] = []
+        for rect in rects:
+            x = int(rect["x"])
+            y = int(rect["y"])
+            w = int(rect["w"])
+            h = int(rect["h"])
+            row_bytes = w * 4
+            if x == 0 and w == self.width:
+                start = (y * self.stride) + (x * 4)
+                end = start + (row_bytes * h)
+                if end > self.frame_size:
+                    return None
+                payload_parts.append(src[start:end])
+                self.mark_metric("dirty_payload_contiguous_frames")
+                continue
+            for row in range(h):
+                src_start = ((y + row) * self.stride) + (x * 4)
+                src_end = src_start + row_bytes
+                if src_end > self.frame_size:
+                    return None
+                payload_parts.append(src[src_start:src_end])
         self.mark_metric("dirty_payload_bytes", total_bytes)
         self.mark_metric("dirty_payload_rows", total_rows)
         self.mark_metric("dirty_payload_rects", len(rects))
-        return bytes(payload), rects
+        return PayloadViews(payload_parts, total_bytes), rects
 
     def publish_dirty(self, event: dict) -> None:
         with self.condition:
@@ -562,8 +572,11 @@ class DirtyReader(threading.Thread):
                 try:
                     data = os.read(fd, 4096)
                 except BlockingIOError:
+                    time.sleep(DIRTY_FIFO_EMPTY_SLEEP_SECONDS)
                     continue
                 if not data:
+                    self.state.mark_metric("dirty_fifo_empty_reads")
+                    time.sleep(DIRTY_FIFO_EMPTY_SLEEP_SECONDS)
                     continue
                 buffer += data
                 while b"\n" in buffer:
@@ -600,7 +613,42 @@ def ws_accept_value(key: str) -> str:
     return base64.b64encode(digest).decode("ascii")
 
 
-def send_ws_frame(sock: socket.socket, opcode: int, payload: bytes) -> None:
+def payload_parts(payload: FramePayload) -> list[memoryview]:
+    if isinstance(payload, PayloadViews):
+        return payload.parts
+    return [memoryview(payload)]
+
+
+def send_payload(sock: socket.socket, payload: FramePayload) -> None:
+    if not payload:
+        return
+    parts = payload_parts(payload)
+    if len(parts) == 1:
+        sock.sendall(parts[0])
+        return
+    if not hasattr(sock, "sendmsg"):
+        for part in parts:
+            if part:
+                sock.sendall(part)
+        return
+    views = [part for part in parts if part]
+    max_iov = 256
+    if "SC_IOV_MAX" in os.sysconf_names:
+        max_iov = min(int(os.sysconf("SC_IOV_MAX")), max_iov)
+    while views:
+        chunk = views[:max_iov]
+        sent = sock.sendmsg(chunk)
+        if sent <= 0:
+            raise ConnectionError("socket sendmsg returned no progress")
+        remaining = sent
+        while views and remaining >= len(views[0]):
+            remaining -= len(views[0])
+            views.pop(0)
+        if views and remaining > 0:
+            views[0] = views[0][remaining:]
+
+
+def send_ws_frame(sock: socket.socket, opcode: int, payload: FramePayload) -> None:
     first = bytes([0x80 | opcode])
     size = len(payload)
     if size < 126:
@@ -610,8 +658,7 @@ def send_ws_frame(sock: socket.socket, opcode: int, payload: bytes) -> None:
     else:
         header = first + bytes([127]) + struct.pack("!Q", size)
     sock.sendall(header)
-    if payload:
-        sock.sendall(payload)
+    send_payload(sock, payload)
 
 
 def recv_exact(sock: socket.socket, size: int) -> bytes:
@@ -852,7 +899,7 @@ class RemoteRelayHandler(BaseHTTPRequestHandler):
         }
         send_ws_frame(sock, 0x1, json.dumps(payload, separators=(",", ":")).encode("utf-8"))
 
-    def send_frame(self, sock: socket.socket, meta: dict, payload: bytes) -> None:
+    def send_frame(self, sock: socket.socket, meta: dict, payload: FramePayload) -> None:
         send_ws_frame(sock, 0x1, json.dumps(meta, separators=(",", ":")).encode("utf-8"))
         send_ws_frame(sock, 0x2, payload)
 
@@ -886,7 +933,7 @@ class RemoteRelayHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
-    def write_frame_envelope(self, meta_bytes: bytes, payload: bytes) -> None:
+    def write_frame_envelope(self, meta_bytes: bytes, payload: FramePayload) -> None:
         meta_len = struct.pack("<I", len(meta_bytes))
         self.send_response(200)
         self.send_header("Content-Type", "application/octet-stream")

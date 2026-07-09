@@ -25,8 +25,22 @@ int main(void)
     if (v5_ui_shell_test_program_selected_index() != 0 || v5_ui_shell_test_program_loaded()) {
         return 5;
     }
+    if (!v5_ui_shell_test_click_program_edit()) {
+        return 9;
+    }
+    if (!v5_ui_shell_test_current_page_is_mdi() ||
+        !v5_ui_shell_test_mdi_text() ||
+        !strstr(v5_ui_shell_test_mdi_text(), "RE_V5_CC_LINUXCNC_NATIVE")) {
+        return 10;
+    }
     if (!v5_ui_shell_test_click_program_name(0U)) {
         return 6;
+    }
+    if (v5_ui_shell_test_program_loaded()) {
+        return 13;
+    }
+    if (!v5_ui_shell_test_click_program_name(0U)) {
+        return 14;
     }
     if (!v5_ui_shell_test_program_loaded()) {
         return 7;
@@ -34,6 +48,14 @@ int main(void)
     loaded_path = v5_ui_shell_test_program_loaded_path();
     if (!loaded_path || !strstr(loaded_path, "cc.ngc")) {
         return 8;
+    }
+    if (!v5_ui_shell_test_double_click_main_program_area()) {
+        return 11;
+    }
+    if (!v5_ui_shell_test_current_page_is_mdi() ||
+        !v5_ui_shell_test_mdi_text() ||
+        !strstr(v5_ui_shell_test_mdi_text(), "RE_V5_CC_LINUXCNC_NATIVE")) {
+        return 12;
     }
     printf("v5 program page double click: first_touch=select second_touch=open path=%s\n", loaded_path);
     return 0;

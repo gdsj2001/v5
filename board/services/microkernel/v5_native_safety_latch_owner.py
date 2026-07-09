@@ -15,7 +15,7 @@ VERSION = 1
 FRAME = struct.Struct("<10I")
 DEFAULT_PATH = "/dev/shm/v5_native_safety_latch.bin"
 DEFAULT_COMPONENT = "v5_native_safety"
-DEFAULT_INTERVAL_MS = 2
+DEFAULT_INTERVAL_MS = 5
 
 IDX_MAGIC = 0
 IDX_VERSION = 1

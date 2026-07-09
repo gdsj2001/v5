@@ -395,6 +395,38 @@ static int main_page_program_ac_projection_changed(const V5MainPage *page, const
            fabs(c_deg - page->toolpath_program_ac_c_deg) > 0.0005;
 }
 
+static int main_page_static_pose_changed(const V5MainPage *page, const V5UiStatusView *status)
+{
+    double a_deg = 0.0;
+    double c_deg = 0.0;
+    int valid = main_page_status_ac_display_values(status, &a_deg, &c_deg);
+    if (!page) {
+        return 0;
+    }
+    if (valid != page->toolpath_static_pose_valid) {
+        return 1;
+    }
+    if (!valid) {
+        return 0;
+    }
+    return fabs(a_deg - page->toolpath_static_pose_a_deg) > 0.0005 ||
+           fabs(c_deg - page->toolpath_static_pose_c_deg) > 0.0005;
+}
+
+static void main_page_store_static_pose(V5MainPage *page, const V5UiStatusView *status)
+{
+    double a_deg = 0.0;
+    double c_deg = 0.0;
+    int valid;
+    if (!page) {
+        return;
+    }
+    valid = main_page_status_ac_display_values(status, &a_deg, &c_deg);
+    page->toolpath_static_pose_valid = valid;
+    page->toolpath_static_pose_a_deg = valid ? a_deg : 0.0;
+    page->toolpath_static_pose_c_deg = valid ? c_deg : 0.0;
+}
+
 static void main_page_rotate_xyz_about_axis(
     double point[V5_STATUS_AXIS_COUNT],
     const double center[V5_STATUS_AXIS_COUNT],
@@ -1608,20 +1640,20 @@ static void set_program_preview_row(V5MainPage *page, unsigned int row, const ch
         return;
     }
     if (page->program_line_bg[row]) {
-        lv_obj_set_style_bg_color(
+        set_obj_bg_color_if_changed(
             page->program_line_bg[row],
             highlighted ? rgb(43, 133, 83) : rgb(7, 31, 48),
             0);
     }
     if (page->program_line_labels[row]) {
-        lv_label_set_text(page->program_line_labels[row], text ? text : "");
+        set_label_text_if_changed(page->program_line_labels[row], text ? text : "");
         if (highlighted || has_text) {
-            lv_obj_set_style_text_color(
+            set_obj_text_color_if_changed(
                 page->program_line_labels[row],
                 highlighted ? rgb(226, 238, 246) : rgb(156, 178, 202),
                 0);
         } else {
-            lv_obj_set_style_text_color(page->program_line_labels[row], rgb(95, 116, 138), 0);
+            set_obj_text_color_if_changed(page->program_line_labels[row], rgb(95, 116, 138), 0);
         }
     }
 }
@@ -1649,50 +1681,212 @@ static int trim_line(char *out, size_t out_size, const char *start, size_t len)
     return len > 0U;
 }
 
+static unsigned int count_preview_source_lines(const char *text)
+{
+    const char *cursor;
+    const char *segment;
+    unsigned int count = 0U;
+    if (!text || !text[0]) {
+        return 0U;
+    }
+    cursor = text;
+    segment = text;
+    while (*cursor) {
+        if (*cursor == '\n' || *cursor == '\r') {
+            ++count;
+            if (*cursor == '\r' && cursor[1] == '\n') {
+                ++cursor;
+            }
+            segment = cursor + 1;
+        }
+        ++cursor;
+    }
+    if (segment && *segment) {
+        ++count;
+    }
+    return count;
+}
+
+static int readback_execution_line_active(const V5NativeReadback *readback)
+{
+    if (!readback) {
+        return 0;
+    }
+    if (v5_native_readback_safety_estop_known(readback) && readback->safety_estop_active) {
+        return 0;
+    }
+    if (v5_native_readback_machine_enable_known(readback) && !readback->machine_enabled) {
+        return 0;
+    }
+    if (v5_native_readback_interpreter_idle_known(readback) &&
+        readback->interpreter_idle && !readback->interpreter_paused) {
+        return 0;
+    }
+    return 1;
+}
+
+static int active_preview_line_from_readback(
+    const V5MainPage *page,
+    const V5ProgramRuntime *runtime,
+    const char **native_command_out)
+{
+    const V5NativeReadback *readback;
+    if (native_command_out) {
+        *native_command_out = "";
+    }
+    if (!page || !runtime) {
+        return 0;
+    }
+    readback = &page->native_readback;
+    if (!readback_execution_line_active(readback)) {
+        return 0;
+    }
+    if (v5_program_runtime_has_mdi(runtime) &&
+        v5_native_readback_mdi_run_known(readback) &&
+        readback->mdi_run_active && readback->mdi_run_line > 0) {
+        if (native_command_out) {
+            *native_command_out = readback->mdi_run_command;
+        }
+        return readback->mdi_run_line;
+    }
+    if (v5_native_readback_interpreter_known(readback) && readback->interpreter_paused) {
+        if (v5_native_readback_current_line_known(readback) && readback->current_line > 0) {
+            return readback->current_line;
+        }
+        if (v5_native_readback_motion_line_known(readback) && readback->motion_line > 0) {
+            return readback->motion_line;
+        }
+        return 0;
+    }
+    if (v5_native_readback_current_line_known(readback) && readback->current_line > 0) {
+        return readback->current_line;
+    }
+    if (v5_native_readback_motion_line_known(readback) && readback->motion_line > 0) {
+        return readback->motion_line;
+    }
+    return 0;
+}
+
+static unsigned int preview_start_line(unsigned int total, int active)
+{
+    unsigned int start = 1U;
+    if (active > (int)V5_PROGRAM_PREVIEW_ROWS) {
+        start = (unsigned int)active - (V5_PROGRAM_PREVIEW_ROWS - 1U);
+    }
+    if (total > V5_PROGRAM_PREVIEW_ROWS) {
+        unsigned int max_start = total - (V5_PROGRAM_PREVIEW_ROWS - 1U);
+        if (start > max_start) {
+            start = max_start;
+        }
+    }
+    if (start < 1U) {
+        start = 1U;
+    }
+    return start;
+}
+
+static void refresh_program_preview_from_text(
+    V5MainPage *page,
+    const char *text,
+    const char *native_command,
+    unsigned int total,
+    int active)
+{
+    unsigned int row;
+    unsigned int start_line;
+    int shown[V5_PROGRAM_PREVIEW_ROWS] = {0, 0, 0, 0};
+    const char *segment;
+    const char *cursor;
+    unsigned int source_line = 0U;
+
+    if (active < 0 || (total > 0U && (unsigned int)active > total && (!native_command || !native_command[0]))) {
+        active = 0;
+    }
+    start_line = preview_start_line(total, active);
+    if (!text || !text[0]) {
+        for (row = 0U; row < V5_PROGRAM_PREVIEW_ROWS; ++row) {
+            set_program_preview_row(page, row, "", 0, 0);
+        }
+        return;
+    }
+    segment = text;
+    cursor = text;
+    while (*cursor) {
+        if (*cursor == '\n' || *cursor == '\r') {
+            char code[120];
+            char line[192];
+            ++source_line;
+            (void)trim_line(code, sizeof(code), segment, (size_t)(cursor - segment));
+            if (source_line >= start_line && source_line < start_line + V5_PROGRAM_PREVIEW_ROWS) {
+                row = source_line - start_line;
+                snprintf(line, sizeof(line), "%03u %s", source_line, code);
+                set_program_preview_row(page, row, line, active == (int)source_line, 1);
+                shown[row] = 1;
+            }
+            if (*cursor == '\r' && cursor[1] == '\n') {
+                ++cursor;
+            }
+            segment = cursor + 1;
+        }
+        ++cursor;
+    }
+    if (segment && *segment) {
+        char code[120];
+        char line[192];
+        ++source_line;
+        (void)trim_line(code, sizeof(code), segment, strlen(segment));
+        if (source_line >= start_line && source_line < start_line + V5_PROGRAM_PREVIEW_ROWS) {
+            row = source_line - start_line;
+            snprintf(line, sizeof(line), "%03u %s", source_line, code);
+            set_program_preview_row(page, row, line, active == (int)source_line, 1);
+            shown[row] = 1;
+        }
+    }
+    if (active > 0 && (unsigned int)active >= start_line &&
+        (unsigned int)active < start_line + V5_PROGRAM_PREVIEW_ROWS) {
+        row = (unsigned int)active - start_line;
+        if (!shown[row] && native_command && native_command[0]) {
+            char line[192];
+            snprintf(line, sizeof(line), "%03d %s", active, native_command);
+            set_program_preview_row(page, row, line, 1, 1);
+            shown[row] = 1;
+        }
+    }
+    for (row = 0U; row < V5_PROGRAM_PREVIEW_ROWS; ++row) {
+        if (!shown[row]) {
+            set_program_preview_row(page, row, "", 0, 0);
+        }
+    }
+}
+
 static void refresh_program_preview_rows(V5MainPage *page, const V5ProgramRuntime *runtime)
 {
     unsigned int row;
-    for (row = 0U; row < V5_PROGRAM_PREVIEW_ROWS; ++row) {
-        set_program_preview_row(page, row, "", 0, 0);
-    }
-    if (!page || !runtime) {
+    int active;
+    const char *native_command = "";
+    if (!page) {
         return;
     }
+    if (!runtime) {
+        for (row = 0U; row < V5_PROGRAM_PREVIEW_ROWS; ++row) {
+            set_program_preview_row(page, row, "", 0, 0);
+        }
+        return;
+    }
+    active = active_preview_line_from_readback(page, runtime, &native_command);
     if (v5_program_runtime_has_mdi(runtime)) {
-        char line[192];
-        snprintf(line, sizeof(line), "001 %s", v5_program_runtime_mdi_text(runtime));
-        set_program_preview_row(page, 0U, line, 1, 1);
+        const char *text = v5_program_runtime_mdi_text(runtime);
+        unsigned int total = count_preview_source_lines(text);
+        refresh_program_preview_from_text(page, text, native_command, total, active);
         return;
     }
     if (v5_program_runtime_has_open_program(runtime) && runtime->gcode_text) {
-        const char *segment = runtime->gcode_text;
-        const char *cursor = runtime->gcode_text;
-        unsigned int line_no = 0U;
-        row = 0U;
-        while (*cursor && row < V5_PROGRAM_PREVIEW_ROWS) {
-            if (*cursor == '\n' || *cursor == '\r') {
-                char code[120];
-                char line[192];
-                ++line_no;
-                (void)trim_line(code, sizeof(code), segment, (size_t)(cursor - segment));
-                snprintf(line, sizeof(line), "%03u %s", line_no, code);
-                set_program_preview_row(page, row, line, row == 0U, 1);
-                ++row;
-                if (*cursor == '\r' && cursor[1] == '\n') {
-                    ++cursor;
-                }
-                segment = cursor + 1;
-            }
-            ++cursor;
-        }
-        if (*segment && row < V5_PROGRAM_PREVIEW_ROWS) {
-            char code[120];
-            char line[192];
-            ++line_no;
-            (void)trim_line(code, sizeof(code), segment, strlen(segment));
-            snprintf(line, sizeof(line), "%03u %s", line_no, code);
-            set_program_preview_row(page, row, line, row == 0U, 1);
-        }
+        unsigned int total = count_preview_source_lines(runtime->gcode_text);
+        refresh_program_preview_from_text(page, runtime->gcode_text, native_command, total, active);
+        return;
+    }
+    for (row = 0U; row < V5_PROGRAM_PREVIEW_ROWS; ++row) {
+        set_program_preview_row(page, row, "", 0, 0);
     }
 }
 
@@ -1906,6 +2100,60 @@ static void make_override_reset_hit(V5MainPage *page, int x, int y, int w, int h
     lv_obj_move_foreground(hit);
 }
 
+static void main_program_edit_hit_event_cb(lv_event_t *event)
+{
+    V5MainPage *page = (V5MainPage *)lv_event_get_user_data(event);
+    uint32_t now;
+    if (!page || lv_event_get_code(event) != LV_EVENT_CLICKED) {
+        return;
+    }
+    now = lv_tick_get();
+    if (page->program_edit_last_click_tick != 0U &&
+        (uint32_t)(now - page->program_edit_last_click_tick) <= 550U) {
+        V5MainPageActionReport report;
+        int ok;
+        page->program_edit_last_click_tick = 0U;
+        ok = v5_main_page_trigger_action(page, V5_MAIN_PAGE_ACTION_NAV_MDI_EDIT, &report);
+        log_button_event(V5_MAIN_PAGE_ACTION_NAV_MDI_EDIT, ok, ok ? &report : 0);
+        return;
+    }
+    page->program_edit_last_click_tick = now;
+}
+
+static void create_main_program_edit_hit_area(V5MainPage *page)
+{
+    lv_obj_t *hit;
+    if (!page || !page->root) {
+        return;
+    }
+    hit = lv_obj_create(page->root);
+    clear_obj_style(hit);
+    lv_obj_set_pos(hit, 0, 441);
+    lv_obj_set_size(hit, 560, 154);
+    lv_obj_set_style_bg_opa(hit, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(hit, 0, 0);
+    lv_obj_add_flag(hit, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(hit, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(hit, main_program_edit_hit_event_cb, LV_EVENT_CLICKED, page);
+    lv_obj_move_foreground(hit);
+    page->program_edit_hit_area = hit;
+}
+
+static void clear_button_pressed_visual_now(lv_obj_t *button)
+{
+    if (!button) {
+        return;
+    }
+    lv_obj_clear_state(button, LV_STATE_PRESSED);
+    lv_obj_invalidate(button);
+    lv_refr_now(NULL);
+}
+
+static void button_release_visual_cb(lv_event_t *event)
+{
+    clear_button_pressed_visual_now(lv_event_get_target(event));
+}
+
 static int action_needs_native_readback_refresh(V5MainPageActionKind action)
 {
     switch (action) {
@@ -1934,7 +2182,9 @@ static void button_event_cb(lv_event_t *event)
     for (i = 0; i < page->button_count; ++i) {
         if (page->buttons[i] == target) {
             V5MainPageActionReport report;
-            int ok = v5_main_page_trigger_action(page, page->button_actions[i], &report);
+            int ok;
+            clear_button_pressed_visual_now(target);
+            ok = v5_main_page_trigger_action(page, page->button_actions[i], &report);
             log_button_event(page->button_actions[i], ok, ok ? &report : 0);
             return;
         }
@@ -1958,6 +2208,7 @@ static void make_button_rgb(V5MainPage *page, int x, int y, int w, int h, V5Main
     lv_obj_set_style_border_width(button, 1, 0);
     lv_obj_set_style_border_color(button, rgb(76, 119, 146), 0);
     lv_obj_set_style_border_color(button, rgb(255, 232, 120), LV_STATE_PRESSED);
+    lv_obj_add_event_cb(button, button_release_visual_cb, LV_EVENT_RELEASED, 0);
     lv_obj_add_event_cb(button, button_event_cb, LV_EVENT_CLICKED, page);
 
     label = lv_label_create(button);
@@ -2146,6 +2397,32 @@ static void update_rtcp_button_visuals(V5MainPage *page)
     }
 }
 
+static void update_home_button_visuals(V5MainPage *page)
+{
+    unsigned int i;
+    if (!page) {
+        return;
+    }
+    for (i = 0U; i < page->button_count; ++i) {
+        if (page->button_actions[i] == V5_MAIN_PAGE_ACTION_HOME) {
+            set_button_state_color(page->buttons[i], page->home_transaction_active, 29, 151, 104, 42, 63, 85);
+            return;
+        }
+    }
+}
+
+static void set_home_transaction_active(V5MainPage *page, int active, int flush)
+{
+    if (!page) {
+        return;
+    }
+    page->home_transaction_active = active ? 1 : 0;
+    update_home_button_visuals(page);
+    if (flush) {
+        lv_refr_now(NULL);
+    }
+}
+
 static void update_main_page_state_button_visuals(V5MainPage *page)
 {
     update_toolpath_view_button_visuals(page);
@@ -2153,6 +2430,7 @@ static void update_main_page_state_button_visuals(V5MainPage *page)
     update_jog_step_button_visuals(page);
     update_axis_all_button_visuals(page);
     update_rtcp_button_visuals(page);
+    update_home_button_visuals(page);
 }
 
 static void make_v3_main_buttons(V5MainPage *page)
@@ -2370,6 +2648,7 @@ int v5_main_page_create(V5MainPage *page, lv_obj_t *parent)
         page->program_line_bg[i] = make_panel(page->root, 14, y, 540, 26, i == 0U ? 43 : 7, i == 0U ? 133 : 31, i == 0U ? 83 : 48);
         page->program_line_labels[i] = make_label_ex(page->root, 24, 480 + (int)i * 26 + (i > 0U ? 1 : 0), 520, 20, "", i == 0U ? 226 : 156, i == 0U ? 238 : 178, i == 0U ? 246 : 202, LV_TEXT_ALIGN_LEFT);
     }
+    create_main_program_edit_hit_area(page);
 
     make_v3_main_buttons(page);
     update_main_page_state_button_visuals(page);
@@ -2391,6 +2670,7 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
     int program_projection_dirty = 0;
     int static_toolpath_due = 0;
     int program_ac_changed = 0;
+    int static_pose_changed = 0;
     int program_refresh_due = 0;
     int runtime_has_program = runtime && v5_program_runtime_has_open_program(runtime);
     unsigned int i;
@@ -2461,6 +2741,7 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
             !page->toolpath_fit.valid ||
             page->toolpath_program_view_generation != page->toolpath_view_generation;
         program_ac_changed = main_page_program_ac_projection_changed(page, status);
+        static_pose_changed = main_page_static_pose_changed(page, status);
         program_refresh_due = static_toolpath_due || program_ac_changed;
 
         if (!page->toolpath_fit.valid && status) {
@@ -2567,7 +2848,11 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
         page->toolpath_program_ac_c_deg = 0.0;
     }
 
-    update_toolpath_state_lines(page, status);
+    if (static_toolpath_due || program_ac_changed || static_pose_changed ||
+        (refresh_flags & V5_MAIN_PAGE_REFRESH_SLOW) != 0U) {
+        update_toolpath_state_lines(page, status);
+        main_page_store_static_pose(page, status);
+    }
 
     v5_toolpath_display_from_status_with_fit(
         status,
@@ -2688,7 +2973,6 @@ int v5_main_page_handle_touch_points(V5MainPage *page, const lv_point_t *points,
 void v5_main_page_refresh_program_status(V5MainPage *page)
 {
     const V5ProgramRuntime *runtime;
-    char text[96];
 
     if (!page) {
         return;
@@ -2697,15 +2981,15 @@ void v5_main_page_refresh_program_status(V5MainPage *page)
     refresh_program_preview_rows(page, runtime);
     if (runtime && v5_program_runtime_has_mdi(runtime)) {
         if (page->program_name_label) {
-            lv_label_set_text(page->program_name_label, "手动输入");
+            set_label_text_if_changed(page->program_name_label, "手动输入");
         }
     } else if (runtime && v5_program_runtime_has_open_program(runtime)) {
         if (page->program_name_label) {
-            lv_label_set_text(page->program_name_label, runtime->display_name);
+            set_label_text_if_changed(page->program_name_label, runtime->display_name);
         }
     } else {
         if (page->program_name_label) {
-            lv_label_set_text(page->program_name_label, "手动输入");
+            set_label_text_if_changed(page->program_name_label, "手动输入");
         }
     }
 }
@@ -2803,6 +3087,7 @@ void v5_main_page_set_native_readback(V5MainPage *page, const V5NativeReadback *
     update_main_page_wcs_header(page);
     update_main_page_modal_label(page);
     update_toolpath_status_text(page);
+    v5_main_page_refresh_program_status(page);
     if (page->last_status_valid) {
         update_toolpath_state_lines(page, &page->last_status);
     }
@@ -2978,6 +3263,7 @@ static void execute_prepared_command_if_enabled(V5MainPage *page, V5MainPageActi
 {
     V5CommandGateResult gate_result;
     unsigned int gate_timeout_ms = 1000U;
+    int home_button_transaction = 0;
 
     if (!page || !report || report->local_only || !report->prepared || !report->command.accepted) {
         return;
@@ -3006,7 +3292,15 @@ static void execute_prepared_command_if_enabled(V5MainPage *page, V5MainPageActi
     } else if (report->request.kind == V5_COMMAND_ROTARY_EQUIV_ZERO) {
         gate_timeout_ms = 5000U;
     }
+    home_button_transaction = report->action == V5_MAIN_PAGE_ACTION_HOME &&
+        (report->request.kind == V5_COMMAND_HOME || report->request.kind == V5_COMMAND_ROTARY_EQUIV_ZERO);
+    if (home_button_transaction) {
+        set_home_transaction_active(page, 1, 1);
+    }
     if (!v5_command_gate_send_prepared(&report->command, &report->request, &gate_result, gate_timeout_ms)) {
+        if (home_button_transaction) {
+            set_home_transaction_active(page, 0, 1);
+        }
         report->send_status = gate_result.send_status;
         return;
     }
@@ -3018,6 +3312,9 @@ static void execute_prepared_command_if_enabled(V5MainPage *page, V5MainPageActi
              (int)sizeof(report->command_line) - 1, gate_result.command_line);
     snprintf(report->readback_code, sizeof(report->readback_code), "%.*s",
              (int)sizeof(report->readback_code) - 1, gate_result.readback_code);
+    if (home_button_transaction) {
+        set_home_transaction_active(page, 0, 1);
+    }
 
     if (report->executed &&
         (report->request.kind == V5_COMMAND_WCS_SELECT || report->request.kind == V5_COMMAND_WORK_ZERO)) {
@@ -3101,6 +3398,7 @@ static void apply_local_action_state(V5MainPage *page, const V5MainPageActionRep
         case V5_MAIN_PAGE_ACTION_NAV_NETWORK:
         case V5_MAIN_PAGE_ACTION_NAV_PROGRAM:
         case V5_MAIN_PAGE_ACTION_NAV_MDI:
+        case V5_MAIN_PAGE_ACTION_NAV_MDI_EDIT:
             page->navigation_cb(page->navigation_user_data, report->action);
             break;
         default:

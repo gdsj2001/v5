@@ -237,7 +237,10 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         "rtapi_app",
         "taskset -a -pc 0",
         "Cpus_allowed_list",
-        "RTAPI realtime threads pinned to CPU0",
+        "ethercat_irq_affinity_ok",
+        "ethercat_kernel_affinity_ok",
+        "set_ethercat_realtime_affinity",
+        "RTAPI and EtherCAT realtime paths pinned to CPU0",
     )
     rc = 0
     for token in required:

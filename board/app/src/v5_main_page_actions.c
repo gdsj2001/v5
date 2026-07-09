@@ -120,6 +120,8 @@ const char *v5_main_page_action_label(V5MainPageActionKind action)
         return "3D";
     case V5_MAIN_PAGE_ACTION_FIRST_POINT:
         return "First Pt";
+    case V5_MAIN_PAGE_ACTION_NAV_MDI_EDIT:
+        return "MDI Edit";
     default:
         return "Unknown";
     }
@@ -286,6 +288,8 @@ int v5_main_page_action_prepare(
         return v5_main_page_local_action_prepare(action, "nav_program", 0.0, report);
     case V5_MAIN_PAGE_ACTION_NAV_MDI:
         return v5_main_page_local_action_prepare(action, "nav_mdi", 0.0, report);
+    case V5_MAIN_PAGE_ACTION_NAV_MDI_EDIT:
+        return v5_main_page_local_action_prepare(action, "nav_mdi_edit", 0.0, report);
     case V5_MAIN_PAGE_ACTION_AXIS_ALL:
         return v5_main_page_local_action_prepare(action, "axis_all", 0.0, report);
     default:

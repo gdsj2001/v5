@@ -16,6 +16,7 @@ extern "C" {
 #define V5_NATIVE_READBACK_G53_CENTER_B 1U
 #define V5_NATIVE_READBACK_G53_CENTER_C 2U
 #define V5_NATIVE_READBACK_MODAL_TEXT_CAP 128U
+#define V5_NATIVE_READBACK_MDI_COMMAND_CAP 128U
 
 typedef struct V5NativeReadback {
     int rtcp_actual_available;
@@ -33,6 +34,14 @@ typedef struct V5NativeReadback {
     int interpreter_paused;
     int interpreter_idle_available;
     int interpreter_idle;
+    int current_line_available;
+    int current_line;
+    int motion_line_available;
+    int motion_line;
+    int mdi_run_available;
+    int mdi_run_active;
+    int mdi_run_line;
+    char mdi_run_command[V5_NATIVE_READBACK_MDI_COMMAND_CAP];
     int homed_available;
     int all_homed;
     int safety_estop_available;
@@ -74,6 +83,13 @@ void v5_native_readback_set_g53_geometry(
 const double *v5_native_readback_g53_center(const V5NativeReadback *readback, unsigned int center_index);
 void v5_native_readback_set_interpreter_paused(V5NativeReadback *readback, int paused);
 void v5_native_readback_set_interpreter_idle(V5NativeReadback *readback, int idle);
+void v5_native_readback_set_current_line(V5NativeReadback *readback, int line);
+void v5_native_readback_set_motion_line(V5NativeReadback *readback, int line);
+void v5_native_readback_set_mdi_run_actual(
+    V5NativeReadback *readback,
+    int active,
+    int line,
+    const char *command);
 void v5_native_readback_set_all_homed(V5NativeReadback *readback, int all_homed);
 void v5_native_readback_set_safety_estop(V5NativeReadback *readback, int active);
 void v5_native_readback_set_machine_enabled(V5NativeReadback *readback, int enabled);
@@ -90,6 +106,9 @@ int v5_native_readback_wcs_table_known(const V5NativeReadback *readback);
 int v5_native_readback_g53_geometry_known(const V5NativeReadback *readback);
 int v5_native_readback_interpreter_known(const V5NativeReadback *readback);
 int v5_native_readback_interpreter_idle_known(const V5NativeReadback *readback);
+int v5_native_readback_current_line_known(const V5NativeReadback *readback);
+int v5_native_readback_motion_line_known(const V5NativeReadback *readback);
+int v5_native_readback_mdi_run_known(const V5NativeReadback *readback);
 int v5_native_readback_all_homed_known(const V5NativeReadback *readback);
 int v5_native_readback_safety_estop_known(const V5NativeReadback *readback);
 int v5_native_readback_machine_enable_known(const V5NativeReadback *readback);

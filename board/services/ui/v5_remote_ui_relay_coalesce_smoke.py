@@ -101,7 +101,7 @@ def main() -> int:
         if prepared_union is None:
             print("union dirty payload missing")
             return 11
-        _, union_rects = prepared_union
+        union_payload, union_rects = prepared_union
         union_metrics = wide_state.metrics_snapshot()
         expected_union = [{"x": 0, "y": 0, "w": relay.MAX_DIRTY_RECTS_PER_FRAME + 1, "h": 1, "codec": "raw"}]
         if union_rects != expected_union or union_metrics.get("dirty_payload_union_frames") != 1:
@@ -118,6 +118,10 @@ def main() -> int:
         if not gap or not gap.get("needs_full"):
             print("missing full repair signal", gap)
             return 4
+        del union_payload
+        del prepared_union
+        del payload
+        del prepared
         wide_state.close_framebuffer_map()
         state.close_framebuffer_map()
     print("v5 remote ui relay coalesce smoke: dirty coalescing ok")

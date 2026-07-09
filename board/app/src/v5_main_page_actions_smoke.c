@@ -12,6 +12,14 @@ static int same_text(const char *left, const char *right)
     return left && right && strcmp(left, right) == 0;
 }
 
+static void capture_nav_action(void *user_data, V5MainPageActionKind action)
+{
+    V5MainPageActionKind *out = (V5MainPageActionKind *)user_data;
+    if (out) {
+        *out = action;
+    }
+}
+
 static int expect_local(V5MainPage *page, V5MainPageActionKind action, const char *name)
 {
     V5MainPageActionReport report;
@@ -165,6 +173,32 @@ static int button_bg_matches(V5MainPage *page, V5MainPageActionKind action, int 
     return lv_color_to32(actual) == lv_color_to32(expected);
 }
 
+static int program_row_bg_matches(V5MainPage *page, unsigned int row, int r, int g, int b)
+{
+    lv_color_t actual;
+    lv_color_t expected;
+    if (!page || row >= 4U || !page->program_line_bg[row]) {
+        return 0;
+    }
+    actual = lv_obj_get_style_bg_color(page->program_line_bg[row], LV_PART_MAIN);
+    expected = lv_color_make((uint8_t)r, (uint8_t)g, (uint8_t)b);
+    return lv_color_to32(actual) == lv_color_to32(expected);
+}
+
+static int button_pressed_state_clears_on_click(V5MainPage *page, V5MainPageActionKind action, int r, int g, int b)
+{
+    lv_obj_t *button = button_for_action(page, action);
+    if (!button) {
+        return 0;
+    }
+    lv_obj_add_state(button, LV_STATE_PRESSED);
+    if (!lv_obj_has_state(button, LV_STATE_PRESSED)) {
+        return 0;
+    }
+    lv_event_send(button, LV_EVENT_CLICKED, 0);
+    return !lv_obj_has_state(button, LV_STATE_PRESSED) && button_bg_matches(page, action, r, g, b);
+}
+
 static void refresh_estop_active(void *user_data, V5MainPageActionKind action)
 {
     V5MainPage *page = (V5MainPage *)user_data;
@@ -236,6 +270,9 @@ int main(void)
         !button_bg_matches(&page, V5_MAIN_PAGE_ACTION_JOG_STEP_10, 32, 52, 73)) {
         return 44;
     }
+    if (!button_pressed_state_clears_on_click(&page, V5_MAIN_PAGE_ACTION_HOME, 42, 63, 85)) {
+        return 50;
+    }
     v5_program_controller_init(&controller);
     v5_main_page_bind_program_controller(&page, &controller);
 
@@ -243,8 +280,27 @@ int main(void)
         !expect_local(&page, V5_MAIN_PAGE_ACTION_NAV_SETTINGS, "nav_settings") ||
         !expect_local(&page, V5_MAIN_PAGE_ACTION_NAV_PROGRAM, "nav_program") ||
         !expect_local(&page, V5_MAIN_PAGE_ACTION_NAV_MDI, "nav_mdi") ||
+        !expect_local(&page, V5_MAIN_PAGE_ACTION_NAV_MDI_EDIT, "nav_mdi_edit") ||
         !expect_local(&page, V5_MAIN_PAGE_ACTION_AXIS_ALL, "axis_all")) {
         return 4;
+    }
+    {
+        V5MainPageActionKind nav_action = 0;
+        if (!page.program_edit_hit_area) {
+            return 51;
+        }
+        v5_main_page_set_navigation_callback(&page, capture_nav_action, &nav_action);
+        lv_tick_inc(1);
+        lv_event_send(page.program_edit_hit_area, LV_EVENT_CLICKED, 0);
+        if (nav_action != 0) {
+            return 52;
+        }
+        lv_tick_inc(100);
+        lv_event_send(page.program_edit_hit_area, LV_EVENT_CLICKED, 0);
+        if (nav_action != V5_MAIN_PAGE_ACTION_NAV_MDI_EDIT) {
+            return 53;
+        }
+        v5_main_page_set_navigation_callback(&page, 0, 0);
     }
     if (!expect_local(&page, V5_MAIN_PAGE_ACTION_JOG_STEP_10, "jog_step") || page.jog_step != 10.0) {
         return 5;
@@ -403,6 +459,29 @@ int main(void)
     if (!v5_main_page_set_mdi_text(&page, "G4 P0")) {
         v5_program_controller_destroy(&controller);
         return 10;
+    }
+    if (!program_row_bg_matches(&page, 0U, 7, 31, 48)) {
+        v5_program_controller_destroy(&controller);
+        return 50;
+    }
+    {
+        V5NativeReadback line_readback;
+        v5_native_readback_init(&line_readback);
+        v5_native_readback_set_safety_estop(&line_readback, 0);
+        v5_native_readback_set_machine_enabled(&line_readback, 1);
+        v5_native_readback_set_interpreter_idle(&line_readback, 0);
+        v5_native_readback_set_current_line(&line_readback, 1);
+        v5_main_page_set_native_readback(&page, &line_readback);
+        if (!program_row_bg_matches(&page, 0U, 43, 133, 83)) {
+            v5_program_controller_destroy(&controller);
+            return 51;
+        }
+        v5_native_readback_set_interpreter_idle(&line_readback, 1);
+        v5_main_page_set_native_readback(&page, &line_readback);
+        if (!program_row_bg_matches(&page, 0U, 7, 31, 48)) {
+            v5_program_controller_destroy(&controller);
+            return 52;
+        }
     }
     if (!expect_command(&page, V5_MAIN_PAGE_ACTION_START, "mdi_run", "native_linuxcncrsh")) {
         v5_program_controller_destroy(&controller);

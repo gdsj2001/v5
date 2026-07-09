@@ -1,7 +1,7 @@
 <masters>
   <master idx="0" appTimePeriod="2000000" refClockSyncCycles="5">
     <slave idx="0" type="generic" vid="0x00100000" pid="0x000c0112" name="x" configPdos="true">
-      <dcConf assignActivate="300" sync0Cycle="*1" sync0Shift="-25000"/>
+      <dcConf assignActivate="300" sync0Cycle="*1" sync0Shift="0"/>
       <sdoConfig idx="6060" subIdx="00">
         <sdoDataRaw data="08"/>
       </sdoConfig>
@@ -28,7 +28,7 @@
       </syncManager>
     </slave>
     <slave idx="1" type="generic" vid="0x00100000" pid="0x000c0112" name="y" configPdos="true">
-      <dcConf assignActivate="300" sync0Cycle="*1" sync0Shift="-25000"/>
+      <dcConf assignActivate="300" sync0Cycle="*1" sync0Shift="0"/>
       <sdoConfig idx="6060" subIdx="00">
         <sdoDataRaw data="08"/>
       </sdoConfig>
@@ -55,7 +55,7 @@
       </syncManager>
     </slave>
     <slave idx="2" type="generic" vid="0x00100000" pid="0x000c0112" name="z" configPdos="true">
-      <dcConf assignActivate="300" sync0Cycle="*1" sync0Shift="-25000"/>
+      <dcConf assignActivate="300" sync0Cycle="*1" sync0Shift="0"/>
       <sdoConfig idx="6060" subIdx="00">
         <sdoDataRaw data="08"/>
       </sdoConfig>
@@ -82,7 +82,7 @@
       </syncManager>
     </slave>
     <slave idx="3" type="generic" vid="0x00100000" pid="0x000c0112" name="a" configPdos="true">
-      <dcConf assignActivate="300" sync0Cycle="*1" sync0Shift="-25000"/>
+      <dcConf assignActivate="300" sync0Cycle="*1" sync0Shift="0"/>
       <sdoConfig idx="6060" subIdx="00">
         <sdoDataRaw data="08"/>
       </sdoConfig>
@@ -109,7 +109,7 @@
       </syncManager>
     </slave>
     <slave idx="4" type="generic" vid="0x00100000" pid="0x000c0112" name="c" configPdos="true">
-      <dcConf assignActivate="300" sync0Cycle="*1" sync0Shift="-25000"/>
+      <dcConf assignActivate="300" sync0Cycle="*1" sync0Shift="0"/>
       <sdoConfig idx="6060" subIdx="00">
         <sdoDataRaw data="08"/>
       </sdoConfig>

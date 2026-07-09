@@ -10,6 +10,8 @@
 #include "v5_toolpath_display.h"
 #include "v5_ui_status_view.h"
 
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -88,6 +90,7 @@ typedef struct V5MainPage {
     lv_obj_t *program_name_label;
     lv_obj_t *program_line_bg[4];
     lv_obj_t *program_line_labels[4];
+    lv_obj_t *program_edit_hit_area;
     lv_obj_t *buttons[V5_MAIN_PAGE_BUTTON_COUNT];
     lv_obj_t *button_labels[V5_MAIN_PAGE_BUTTON_COUNT];
     V5MainPageActionKind button_actions[V5_MAIN_PAGE_BUTTON_COUNT];
@@ -96,6 +99,8 @@ typedef struct V5MainPage {
     V5ProgramController *program_controller;
     V5NativeReadback native_readback;
     int command_execution_enabled;
+    int home_transaction_active;
+    uint32_t program_edit_last_click_tick;
     V5UiNavigationCallback navigation_cb;
     void *navigation_user_data;
     V5MainPageNativeReadbackRefreshCallback native_readback_refresh_cb;
@@ -140,6 +145,9 @@ typedef struct V5MainPage {
     int toolpath_program_ac_valid;
     double toolpath_program_ac_a_deg;
     double toolpath_program_ac_c_deg;
+    int toolpath_static_pose_valid;
+    double toolpath_static_pose_a_deg;
+    double toolpath_static_pose_c_deg;
     V5StatusPoint toolpath_program_points[V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT];
     V5StatusPoint toolpath_program_project_points[V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT];
     V5ToolpathScreenPoint toolpath_program_screen_points[V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT];

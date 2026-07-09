@@ -58,6 +58,40 @@ set_non_microkernel_affinity() {
   fi
 }
 
+cpu1_available() {
+  grep -qw 1 /sys/devices/system/cpu/online 2>/dev/null || grep -q '0-1' /sys/devices/system/cpu/online 2>/dev/null
+}
+
+default_route_iface() {
+  awk '$2 == "00000000" {print $1; exit}' /proc/net/route 2>/dev/null || true
+}
+
+set_irq_affinity_by_label() {
+  label="$1"
+  cpu="$2"
+  [ -n "$label" ] || return 0
+  [ -n "$cpu" ] || return 0
+  [ -r /proc/interrupts ] || return 0
+  awk -v label="$label" '$0 ~ label {irq=$1; sub(":", "", irq); print irq}' /proc/interrupts |
+  while read -r irq; do
+    [ -n "$irq" ] || continue
+    [ -w "/proc/irq/$irq/smp_affinity_list" ] || continue
+    if echo "$cpu" >"/proc/irq/$irq/smp_affinity_list" 2>/dev/null; then
+      readback=$(cat "/proc/irq/$irq/smp_affinity_list" 2>/dev/null || true)
+      echo "v5_ui_relay irq_affinity label=$label irq=$irq cpu=$cpu readback=$readback" >>"$LOGFILE"
+    fi
+  done
+}
+
+set_non_microkernel_irq_affinity() {
+  cpu1_available || return 0
+  route_iface=$(default_route_iface)
+  if [ -n "$route_iface" ]; then
+    set_irq_affinity_by_label "$route_iface" 1
+  fi
+  set_irq_affinity_by_label "xilinx_framebuffer" 1
+}
+
 
 build_profile_snapshot() {
   if [ -x "$PROFILE_SNAPSHOT" ]; then
@@ -250,6 +284,7 @@ start_service() {
   stop_stale_processes
   build_profile_snapshot
   wait_boot_inputs_ready
+  set_non_microkernel_irq_affinity
   clear_framebuffer
   V5_PROJECT_ROOT="$PROJECT_ROOT" V5_UI_REMOTE_INPUT="$REMOTE_INPUT" setsid "$UI_DAEMON" --serve >>"$LOGFILE" 2>&1 &
   echo "$!" >"$UI_PIDFILE"
@@ -270,6 +305,7 @@ start_service() {
   if is_running; then
     set_non_microkernel_affinity "$(cat "$UI_PIDFILE")"
     set_non_microkernel_affinity "$(cat "$PIDFILE")"
+    set_non_microkernel_irq_affinity
     ensure_machine_on_after_microkernel_ready
     echo "v5_ui_relay started relay_pid=$(cat "$PIDFILE") ui_pid=$(cat "$UI_PIDFILE") port=$PORT bind=$REMOTE_BIND allow_cidrs=$REMOTE_ALLOW_CIDRS remote_input=$REMOTE_INPUT project_root=$PROJECT_ROOT"
     return 0

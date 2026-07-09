@@ -30,8 +30,18 @@ int v5_native_modal_tool_status_write_ex(
     double tool_length_mm,
     int interpreter_idle_valid,
     int interpreter_idle,
+    int interpreter_paused_valid,
+    int interpreter_paused,
     int all_homed_valid,
-    int all_homed);
+    int all_homed,
+    int current_line_valid,
+    int current_line,
+    int motion_line_valid,
+    int motion_line,
+    int mdi_run_valid,
+    int mdi_run_active,
+    int mdi_run_line,
+    const char *mdi_run_command);
 
 #ifdef __cplusplus
 }

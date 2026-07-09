@@ -26,8 +26,17 @@ void v5_native_readback_set_unavailable(V5NativeReadback *readback, const char *
     readback->g53_geometry_epoch = 0U;
     memset(readback->g53_centers, 0, sizeof(readback->g53_centers));
     readback->interpreter_state_available = 0;
+    readback->interpreter_paused = 0;
     readback->interpreter_idle_available = 0;
     readback->interpreter_idle = 0;
+    readback->current_line_available = 0;
+    readback->current_line = 0;
+    readback->motion_line_available = 0;
+    readback->motion_line = 0;
+    readback->mdi_run_available = 0;
+    readback->mdi_run_active = 0;
+    readback->mdi_run_line = 0;
+    readback->mdi_run_command[0] = '\0';
     readback->homed_available = 0;
     readback->all_homed = 0;
     readback->safety_estop_available = 0;
@@ -205,6 +214,39 @@ void v5_native_readback_set_interpreter_idle(V5NativeReadback *readback, int idl
     readback->interpreter_idle = idle ? 1 : 0;
 }
 
+void v5_native_readback_set_current_line(V5NativeReadback *readback, int line)
+{
+    if (!readback) {
+        return;
+    }
+    readback->current_line_available = 1;
+    readback->current_line = line > 0 ? line : 0;
+}
+
+void v5_native_readback_set_motion_line(V5NativeReadback *readback, int line)
+{
+    if (!readback) {
+        return;
+    }
+    readback->motion_line_available = 1;
+    readback->motion_line = line > 0 ? line : 0;
+}
+
+void v5_native_readback_set_mdi_run_actual(
+    V5NativeReadback *readback,
+    int active,
+    int line,
+    const char *command)
+{
+    if (!readback) {
+        return;
+    }
+    readback->mdi_run_available = 1;
+    readback->mdi_run_active = active ? 1 : 0;
+    readback->mdi_run_line = line > 0 ? line : 0;
+    snprintf(readback->mdi_run_command, sizeof(readback->mdi_run_command), "%s", command ? command : "");
+}
+
 void v5_native_readback_set_all_homed(V5NativeReadback *readback, int all_homed)
 {
     if (!readback) {
@@ -303,6 +345,21 @@ int v5_native_readback_interpreter_known(const V5NativeReadback *readback)
 int v5_native_readback_interpreter_idle_known(const V5NativeReadback *readback)
 {
     return readback && readback->interpreter_idle_available;
+}
+
+int v5_native_readback_current_line_known(const V5NativeReadback *readback)
+{
+    return readback && readback->current_line_available;
+}
+
+int v5_native_readback_motion_line_known(const V5NativeReadback *readback)
+{
+    return readback && readback->motion_line_available;
+}
+
+int v5_native_readback_mdi_run_known(const V5NativeReadback *readback)
+{
+    return readback && readback->mdi_run_available;
 }
 
 int v5_native_readback_all_homed_known(const V5NativeReadback *readback)

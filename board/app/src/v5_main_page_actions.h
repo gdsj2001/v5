@@ -62,7 +62,8 @@ typedef enum V5MainPageActionKind {
     V5_MAIN_PAGE_ACTION_VIEW_XZ,
     V5_MAIN_PAGE_ACTION_VIEW_YZ,
     V5_MAIN_PAGE_ACTION_VIEW_3D,
-    V5_MAIN_PAGE_ACTION_FIRST_POINT
+    V5_MAIN_PAGE_ACTION_FIRST_POINT,
+    V5_MAIN_PAGE_ACTION_NAV_MDI_EDIT
 } V5MainPageActionKind;
 
 typedef enum V5MainPageSelectionSpace {

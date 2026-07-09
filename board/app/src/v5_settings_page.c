@@ -330,10 +330,26 @@ static void settings_popup_update_final(V5SettingsPage *page, const char *title,
     settings_popup_show(page, page->popup_action, title, body, 1, ok);
 }
 
+static void clear_button_pressed_visual_now(lv_obj_t *button)
+{
+    if (!button) {
+        return;
+    }
+    lv_obj_clear_state(button, LV_STATE_PRESSED);
+    lv_obj_invalidate(button);
+    lv_refr_now(NULL);
+}
+
+static void button_release_visual_cb(lv_event_t *event)
+{
+    clear_button_pressed_visual_now(lv_event_get_target(event));
+}
+
 static void settings_popup_close_cb(lv_event_t *event)
 {
     V5SettingsPage *page = (V5SettingsPage *)lv_event_get_user_data(event);
     if (!page || lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    clear_button_pressed_visual_now(lv_event_get_target(event));
     if (page->popup_overlay) {
         lv_obj_add_flag(page->popup_overlay, LV_OBJ_FLAG_HIDDEN);
     }
@@ -374,6 +390,7 @@ static void settings_popup_create(V5SettingsPage *page)
     lv_obj_set_style_bg_color(page->popup_close, rgb(245, 214, 82), LV_STATE_PRESSED);
     lv_obj_set_style_border_width(page->popup_close, 1, 0);
     lv_obj_set_style_border_color(page->popup_close, rgb(76, 119, 146), 0);
+    lv_obj_add_event_cb(page->popup_close, button_release_visual_cb, LV_EVENT_RELEASED, 0);
     lv_obj_add_event_cb(page->popup_close, settings_popup_close_cb, LV_EVENT_CLICKED, page);
     close_label = lv_label_create(page->popup_close);
     lv_label_set_text(close_label, "关闭");
@@ -541,6 +558,7 @@ static void button_event_cb(lv_event_t *event)
     for (i = 0; i < page->button_count; ++i) {
         if (page->buttons[i] == target) {
             V5MainPageActionReport report;
+            clear_button_pressed_visual_now(target);
             if (v5_settings_page_trigger_action(page, page->button_actions[i], &report)) {
                 log_button_event(report.action, &report);
             }
@@ -564,6 +582,7 @@ static lv_obj_t *make_button(V5SettingsPage *page, const char *text, int x, int 
     lv_obj_set_style_bg_color(button, rgb(245, 214, 82), LV_STATE_PRESSED);
     lv_obj_set_style_border_width(button, 1, 0);
     lv_obj_set_style_border_color(button, rgb(76, 119, 146), 0);
+    lv_obj_add_event_cb(button, button_release_visual_cb, LV_EVENT_RELEASED, 0);
     lv_obj_add_event_cb(button, button_event_cb, LV_EVENT_CLICKED, page);
     label = lv_label_create(button);
     lv_label_set_text(label, text ? text : "");

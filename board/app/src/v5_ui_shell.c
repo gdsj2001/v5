@@ -33,6 +33,7 @@
 #define V5_PROGRAM_SCAN_MAX 256U
 #define V5_PROGRAM_ROW_HIT_H 32
 #define V5_PROGRAM_DOUBLE_CLICK_NS 800000000ULL
+#define V5_MDI_TEXT_CAP 8192U
 
 typedef enum V5ShellPageKind {
     V5_SHELL_PAGE_MAIN = 0,
@@ -69,6 +70,7 @@ static lv_obj_t *g_program_row_name_labels[V5_PROGRAM_ROWS_MAX];
 static lv_obj_t *g_program_row_size_labels[V5_PROGRAM_ROWS_MAX];
 static lv_obj_t *g_program_row_created_labels[V5_PROGRAM_ROWS_MAX];
 static lv_obj_t *g_program_row_modified_labels[V5_PROGRAM_ROWS_MAX];
+static lv_obj_t *g_program_edit_button;
 static int g_program_row_indices[V5_PROGRAM_ROWS_MAX];
 static lv_obj_t *g_mdi_line_label;
 static lv_obj_t *g_mdi_status_label;
@@ -82,7 +84,10 @@ static char g_program_confirm_selected_path[384];
 static int g_program_last_click_index = -1;
 static unsigned long long g_program_last_click_ns;
 static char g_program_last_click_path[384];
-static char g_mdi_line[128] = "";
+static char g_mdi_line[V5_MDI_TEXT_CAP] = "";
+static char g_mdi_edit_program_name[168];
+static char g_mdi_edit_program_path[384];
+static int g_mdi_edit_prepared;
 static int g_ui_ready;
 static int g_main_cache_dirty;
 static V5ShellPageKind g_current_page = V5_SHELL_PAGE_MAIN;
@@ -98,6 +103,8 @@ static lv_color_t shell_rgb(uint8_t r, uint8_t g, uint8_t b);
 static unsigned long long shell_monotonic_ns(void);
 static int shell_toolpath_touch_points(const lv_point_t *points, int count, int pressed, int *changed, void *user_data);
 static void shell_update_top_status_label(void);
+static void shell_clear_mdi_edit_metadata(void);
+static int shell_load_current_program_for_mdi_edit(void);
 
 #define V5_UI_DYNAMIC_REFRESH_NS 33333333ULL
 #define V5_UI_BUTTON_REFRESH_NS 100000000ULL
@@ -176,9 +183,35 @@ static int shell_refresh_native_readback(int force)
         if (v5_native_readback_interpreter_idle_known(&modal_tool_readback)) {
             v5_native_readback_set_interpreter_idle(&readback, modal_tool_readback.interpreter_idle);
         }
+        if (v5_native_readback_interpreter_known(&modal_tool_readback)) {
+            v5_native_readback_set_interpreter_paused(&readback, modal_tool_readback.interpreter_paused);
+        }
+        if (v5_native_readback_current_line_known(&modal_tool_readback)) {
+            v5_native_readback_set_current_line(&readback, modal_tool_readback.current_line);
+        } else {
+            v5_native_readback_set_current_line(&readback, 0);
+        }
+        if (v5_native_readback_motion_line_known(&modal_tool_readback)) {
+            v5_native_readback_set_motion_line(&readback, modal_tool_readback.motion_line);
+        } else {
+            v5_native_readback_set_motion_line(&readback, 0);
+        }
+        if (v5_native_readback_mdi_run_known(&modal_tool_readback)) {
+            v5_native_readback_set_mdi_run_actual(
+                &readback,
+                modal_tool_readback.mdi_run_active,
+                modal_tool_readback.mdi_run_line,
+                modal_tool_readback.mdi_run_command);
+        } else {
+            v5_native_readback_set_mdi_run_actual(&readback, 0, 0, "");
+        }
         if (v5_native_readback_all_homed_known(&modal_tool_readback)) {
             v5_native_readback_set_all_homed(&readback, modal_tool_readback.all_homed);
         }
+    } else {
+        v5_native_readback_set_current_line(&readback, 0);
+        v5_native_readback_set_motion_line(&readback, 0);
+        v5_native_readback_set_mdi_run_actual(&readback, 0, 0, "");
     }
 
     v5_main_page_set_native_readback(&g_main_page, &readback);
@@ -463,7 +496,13 @@ static void shell_update_mdi_line(void)
         lv_label_set_text(g_mdi_line_label, g_mdi_line[0] ? g_mdi_line : "MDI>");
     }
     if (g_mdi_status_label) {
-        lv_label_set_text(g_mdi_status_label, "Native MDI");
+        if (g_mdi_edit_program_path[0]) {
+            char status[220];
+            snprintf(status, sizeof(status), "修改区: %s", g_mdi_edit_program_name[0] ? g_mdi_edit_program_name : "G-code");
+            lv_label_set_text(g_mdi_status_label, status);
+        } else {
+            lv_label_set_text(g_mdi_status_label, "Native MDI");
+        }
     }
 }
 
@@ -476,6 +515,7 @@ static void shell_mdi_load_cb(lv_event_t *event)
     ok = v5_main_page_set_mdi_text(&g_main_page, g_mdi_line);
     shell_log_mdi_event("load", g_mdi_line, ok);
     if (ok) {
+        shell_clear_mdi_edit_metadata();
         g_main_cache_dirty = 1;
         shell_navigate(0, V5_MAIN_PAGE_ACTION_NAV_MAIN);
     } else if (g_mdi_status_label) {
@@ -535,6 +575,109 @@ static int shell_safe_program_basename(const char *name)
         }
     }
     return shell_has_program_extension(name);
+}
+
+static void shell_trim_trailing_line_end(char *text)
+{
+    size_t len;
+    if (!text) {
+        return;
+    }
+    len = strlen(text);
+    while (len > 0U && (text[len - 1U] == '\n' || text[len - 1U] == '\r')) {
+        text[--len] = '\0';
+    }
+}
+
+static void shell_clear_mdi_edit_metadata(void)
+{
+    g_mdi_edit_program_name[0] = '\0';
+    g_mdi_edit_program_path[0] = '\0';
+    g_mdi_edit_prepared = 0;
+}
+
+static int shell_program_path_allowed(const char *path)
+{
+    char dir_path[384];
+    size_t dir_len;
+    const char *base;
+    if (!path || !path[0]) {
+        return 0;
+    }
+    shell_program_dir_path(dir_path, sizeof(dir_path));
+    if (!dir_path[0]) {
+        return 0;
+    }
+    dir_len = strlen(dir_path);
+    if (strncmp(path, dir_path, dir_len) != 0 || path[dir_len] != '/') {
+        return 0;
+    }
+    base = path + dir_len + 1U;
+    if (!base[0] || strchr(base, '/') || strchr(base, '\\')) {
+        return 0;
+    }
+    return shell_safe_program_basename(base);
+}
+
+static void shell_set_mdi_edit_metadata(const char *program_name, const char *path)
+{
+    snprintf(g_mdi_edit_program_name, sizeof(g_mdi_edit_program_name), "%s", program_name && program_name[0] ? program_name : "opened program");
+    snprintf(g_mdi_edit_program_path, sizeof(g_mdi_edit_program_path), "%s", path && path[0] ? path : "");
+}
+
+static int shell_load_mdi_edit_text(
+    const char *program_name,
+    const char *path,
+    const char *text,
+    size_t size,
+    int editable_file,
+    const char *event_name)
+{
+    char detail[512];
+    if (!text) {
+        snprintf(detail, sizeof(detail), "%s missing text", event_name ? event_name : "mdi_edit");
+        shell_log_mdi_event("program_edit_rejected", detail, 0);
+        return 0;
+    }
+    if (size == 0U) {
+        size = strlen(text);
+    }
+    if (size == 0U || size >= sizeof(g_mdi_line)) {
+        snprintf(detail, sizeof(detail), "%s bytes=%u", event_name ? event_name : "mdi_edit", (unsigned)size);
+        shell_log_mdi_event("program_edit_oversize_or_empty", detail, 0);
+        return 0;
+    }
+    if (editable_file && !shell_program_path_allowed(path)) {
+        snprintf(detail, sizeof(detail), "%s path=%s", event_name ? event_name : "mdi_edit", path ? path : "");
+        shell_log_mdi_event("program_edit_bad_path", detail, 0);
+        return 0;
+    }
+    memcpy(g_mdi_line, text, size);
+    g_mdi_line[size] = '\0';
+    shell_trim_trailing_line_end(g_mdi_line);
+    if (!g_mdi_line[0]) {
+        shell_log_mdi_event("program_edit_empty_after_trim", event_name ? event_name : "mdi_edit", 0);
+        return 0;
+    }
+    if (editable_file) {
+        shell_set_mdi_edit_metadata(program_name, path);
+    } else {
+        shell_clear_mdi_edit_metadata();
+    }
+    g_mdi_edit_prepared = 1;
+    shell_update_mdi_line();
+    if (g_mdi_status_label) {
+        if (g_mdi_edit_program_path[0]) {
+            char status[220];
+            snprintf(status, sizeof(status), "修改区: %s", g_mdi_edit_program_name[0] ? g_mdi_edit_program_name : "G-code");
+            lv_label_set_text(g_mdi_status_label, status);
+        } else {
+            lv_label_set_text(g_mdi_status_label, "Native MDI");
+        }
+    }
+    snprintf(detail, sizeof(detail), "%s bytes=%u path=%s", event_name ? event_name : "mdi_edit", (unsigned)strlen(g_mdi_line), g_mdi_edit_program_path);
+    shell_log_mdi_event("program_edit_loaded", detail, 1);
+    return 1;
 }
 
 static int shell_compare_program_rows(const void *left, const void *right)
@@ -726,6 +869,77 @@ static void shell_open_program_row_for_run(int idx)
     }
 }
 
+static int shell_load_program_row_for_edit(int idx, const char *event_name)
+{
+    FILE *fp;
+    struct stat st;
+    char text[V5_MDI_TEXT_CAP];
+    size_t n;
+    if (idx < 0 || (unsigned int)idx >= g_program_row_count || !g_program_rows[idx].exists) {
+        shell_log_mdi_event("program_edit_rejected", "no selected program", 0);
+        return 0;
+    }
+    if (!shell_program_path_allowed(g_program_rows[idx].path)) {
+        shell_log_mdi_event("program_edit_bad_path", g_program_rows[idx].path, 0);
+        return 0;
+    }
+    if (stat(g_program_rows[idx].path, &st) != 0 || !S_ISREG(st.st_mode)) {
+        shell_log_mdi_event("program_edit_unavailable", g_program_rows[idx].path, 0);
+        return 0;
+    }
+    if (st.st_size <= 0 || st.st_size >= (off_t)sizeof(text)) {
+        shell_log_mdi_event("program_edit_oversize_or_empty", g_program_rows[idx].path, 0);
+        return 0;
+    }
+    fp = fopen(g_program_rows[idx].path, "rb");
+    if (!fp) {
+        shell_log_mdi_event("program_edit_open_failed", g_program_rows[idx].path, 0);
+        return 0;
+    }
+    n = fread(text, 1, sizeof(text) - 1U, fp);
+    if (ferror(fp)) {
+        fclose(fp);
+        shell_log_mdi_event("program_edit_read_failed", g_program_rows[idx].path, 0);
+        return 0;
+    }
+    fclose(fp);
+    text[n] = '\0';
+    return shell_load_mdi_edit_text(
+        g_program_rows[idx].name,
+        g_program_rows[idx].path,
+        text,
+        n,
+        1,
+        event_name ? event_name : "program_edit");
+}
+
+static void shell_open_program_row_for_edit(int idx)
+{
+    if (shell_load_program_row_for_edit(idx, "program_edit_button")) {
+        shell_clear_program_selection_confirm();
+        shell_navigate(0, V5_MAIN_PAGE_ACTION_NAV_MDI_EDIT);
+        return;
+    }
+    if (g_program_source_label) {
+        lv_label_set_text(g_program_source_label, "打开修改失败");
+    }
+}
+
+static void shell_program_edit_cb(lv_event_t *event)
+{
+    if (!event || lv_event_get_code(event) != LV_EVENT_CLICKED) {
+        return;
+    }
+    if (g_program_selected_index < 0 || (unsigned int)g_program_selected_index >= g_program_row_count) {
+        shell_log_mdi_event("program_edit_rejected", "no selected program", 0);
+        if (g_program_source_label) {
+            lv_label_set_text(g_program_source_label, "未选择G代码文件");
+        }
+        return;
+    }
+    shell_open_program_row_for_edit(g_program_selected_index);
+}
+
 static int shell_program_row_matches_recent_click(int idx)
 {
     unsigned long long now;
@@ -781,6 +995,32 @@ static void shell_bind_program_row_child_hit(lv_obj_t *obj, int *index_ptr)
     lv_obj_add_event_cb(obj, shell_program_row_cb, LV_EVENT_CLICKED, index_ptr);
 }
 
+static int shell_load_current_program_for_mdi_edit(void)
+{
+    const V5ProgramRuntime *runtime = v5_program_controller_runtime(&g_program_controller);
+    if (runtime && v5_program_runtime_has_open_program(runtime) && runtime->gcode_text && runtime->gcode_size > 0U) {
+        return shell_load_mdi_edit_text(
+            runtime->display_name,
+            runtime->source_path,
+            runtime->gcode_text,
+            runtime->gcode_size,
+            1,
+            "main_program_area");
+    }
+    if (runtime && v5_program_runtime_has_mdi(runtime)) {
+        const char *text = v5_program_runtime_mdi_text(runtime);
+        return shell_load_mdi_edit_text("手动输入", 0, text, strlen(text), 0, "main_program_area_mdi");
+    }
+    if (g_mdi_line[0]) {
+        g_mdi_edit_prepared = 1;
+        shell_update_mdi_line();
+        shell_log_mdi_event("mdi_edit_existing_text", "main_program_area", 1);
+        return 1;
+    }
+    shell_log_mdi_event("program_edit_rejected", "no opened program metadata", 0);
+    return 0;
+}
+
 static void shell_clear_style(lv_obj_t *obj)
 {
     lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
@@ -820,6 +1060,21 @@ static lv_obj_t *shell_make_panel(lv_obj_t *parent, int x, int y, int w, int h, 
     return panel;
 }
 
+static void shell_clear_button_pressed_visual_now(lv_obj_t *button)
+{
+    if (!button) {
+        return;
+    }
+    lv_obj_clear_state(button, LV_STATE_PRESSED);
+    lv_obj_invalidate(button);
+    lv_refr_now(NULL);
+}
+
+static void shell_button_release_visual_cb(lv_event_t *event)
+{
+    shell_clear_button_pressed_visual_now(lv_event_get_target(event));
+}
+
 static lv_obj_t *shell_text_button(lv_obj_t *parent, const char *text, int x, int y, int w, int h, uint8_t r, uint8_t g, uint8_t b, lv_event_cb_t cb)
 {
     lv_obj_t *button = lv_btn_create(parent);
@@ -832,6 +1087,8 @@ static lv_obj_t *shell_text_button(lv_obj_t *parent, const char *text, int x, in
     lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(button, 1, 0);
     lv_obj_set_style_border_color(button, shell_rgb(76, 119, 146), 0);
+    lv_obj_add_event_cb(button, shell_button_release_visual_cb, LV_EVENT_RELEASED, 0);
+    lv_obj_add_event_cb(button, shell_button_release_visual_cb, LV_EVENT_CLICKED, 0);
     if (cb) {
         lv_obj_add_event_cb(button, cb, LV_EVENT_CLICKED, 0);
     }
@@ -889,7 +1146,84 @@ static void shell_mdi_clear_cb(lv_event_t *event)
 {
     if (lv_event_get_code(event) == LV_EVENT_CLICKED) {
         g_mdi_line[0] = '\0';
+        shell_clear_mdi_edit_metadata();
         shell_update_mdi_line();
+    }
+}
+
+static void shell_mdi_save_cb(lv_event_t *event)
+{
+    char tmp_path[512];
+    FILE *fp;
+    size_t len;
+    int rc;
+    if (!event || lv_event_get_code(event) != LV_EVENT_CLICKED) {
+        return;
+    }
+    if (!g_mdi_edit_program_path[0] || !shell_program_path_allowed(g_mdi_edit_program_path)) {
+        shell_log_mdi_event("program_save_rejected", "no editable program path", 0);
+        if (g_mdi_status_label) {
+            lv_label_set_text(g_mdi_status_label, "当前没有可写回的G代码文件");
+        }
+        return;
+    }
+    if (!g_mdi_line[0]) {
+        shell_log_mdi_event("program_save_rejected", "empty mdi text", 0);
+        if (g_mdi_status_label) {
+            lv_label_set_text(g_mdi_status_label, "修改区为空，已拒绝覆盖");
+        }
+        return;
+    }
+    rc = snprintf(tmp_path, sizeof(tmp_path), "%s.tmp.%ld", g_mdi_edit_program_path, (long)getpid());
+    if (rc <= 0 || (size_t)rc >= sizeof(tmp_path)) {
+        shell_log_mdi_event("program_save_rejected", "tmp path too long", 0);
+        if (g_mdi_status_label) {
+            lv_label_set_text(g_mdi_status_label, "保存路径过长");
+        }
+        return;
+    }
+    fp = fopen(tmp_path, "wb");
+    if (!fp) {
+        shell_log_mdi_event("program_save_failed", "open tmp failed", 0);
+        if (g_mdi_status_label) {
+            lv_label_set_text(g_mdi_status_label, "保存失败，无法写入");
+        }
+        return;
+    }
+    fputs(g_mdi_line, fp);
+    len = strlen(g_mdi_line);
+    if (len == 0U || g_mdi_line[len - 1U] != '\n') {
+        fputc('\n', fp);
+    }
+    if (fflush(fp) != 0) {
+        fclose(fp);
+        remove(tmp_path);
+        shell_log_mdi_event("program_save_failed", "flush failed", 0);
+        if (g_mdi_status_label) {
+            lv_label_set_text(g_mdi_status_label, "保存失败，写入未完成");
+        }
+        return;
+    }
+    if (fclose(fp) != 0) {
+        remove(tmp_path);
+        shell_log_mdi_event("program_save_failed", "close failed", 0);
+        if (g_mdi_status_label) {
+            lv_label_set_text(g_mdi_status_label, "保存失败，关闭文件失败");
+        }
+        return;
+    }
+    if (rename(tmp_path, g_mdi_edit_program_path) != 0) {
+        remove(tmp_path);
+        shell_log_mdi_event("program_save_failed", "rename failed", 0);
+        if (g_mdi_status_label) {
+            lv_label_set_text(g_mdi_status_label, "保存失败，未覆盖原文件");
+        }
+        return;
+    }
+    shell_log_mdi_event("program_saved", g_mdi_edit_program_path, 1);
+    shell_update_program_row();
+    if (g_mdi_status_label) {
+        lv_label_set_text(g_mdi_status_label, "G代码文件已保存");
     }
 }
 
@@ -1067,7 +1401,7 @@ static lv_obj_t *shell_create_program_page(lv_obj_t *screen)
     shell_text_button(root, "刷新", 392, 37, 118, 40, 20, 62, 91, shell_refresh_program_cb);
     shell_text_button(root, "本机", 18, 517, 110, 54, 43, 133, 83, shell_refresh_program_cb);
     shell_text_button(root, "删除", 136, 517, 110, 54, 199, 70, 46, 0);
-    shell_text_button(root, "打开修改", 254, 517, 128, 54, 74, 91, 111, 0);
+    g_program_edit_button = shell_text_button(root, "打开修改", 254, 517, 128, 54, 74, 91, 111, shell_program_edit_cb);
     shell_text_button(root, "返回", 390, 517, 128, 54, 20, 62, 91, shell_return_button_cb);
 
     shell_update_program_row();
@@ -1100,7 +1434,7 @@ static lv_obj_t *shell_create_mdi_page(lv_obj_t *screen)
     shell_create_cnc_keyboard_panel(root, 554, 28, 1);
     shell_text_button(root, "清空", 828, 418, 86, 54, 244, 242, 237, shell_mdi_clear_cb);
     shell_text_button(root, "发送", 930, 418, 86, 54, 216, 193, 160, shell_mdi_load_cb);
-    shell_text_button(root, "保存", 708, 514, 98, 54, 244, 242, 237, 0);
+    shell_text_button(root, "保存", 708, 514, 98, 54, 244, 242, 237, shell_mdi_save_cb);
     shell_text_button(root, "关闭", 920, 514, 98, 54, 244, 242, 237, shell_return_button_cb);
     shell_update_mdi_line();
     return root;
@@ -1175,6 +1509,7 @@ static V5ShellPageKind shell_page_for_action(V5MainPageActionKind action)
     case V5_MAIN_PAGE_ACTION_NAV_PROGRAM:
         return V5_SHELL_PAGE_PROGRAM;
     case V5_MAIN_PAGE_ACTION_NAV_MDI:
+    case V5_MAIN_PAGE_ACTION_NAV_MDI_EDIT:
         return V5_SHELL_PAGE_MDI;
     case V5_MAIN_PAGE_ACTION_NAV_MAIN:
     default:
@@ -1240,7 +1575,15 @@ static void shell_navigate(void *user_data, V5MainPageActionKind action)
     t0 = shell_monotonic_ns();
     page = shell_page_for_action(action);
     if (page == V5_SHELL_PAGE_MDI) {
-        g_mdi_line[0] = '\0';
+        if (action == V5_MAIN_PAGE_ACTION_NAV_MDI_EDIT) {
+            if (!g_mdi_edit_prepared && !shell_load_current_program_for_mdi_edit()) {
+                return;
+            }
+            g_mdi_edit_prepared = 0;
+        } else {
+            g_mdi_line[0] = '\0';
+            shell_clear_mdi_edit_metadata();
+        }
         shell_update_mdi_line();
     } else if (page == V5_SHELL_PAGE_PROGRAM) {
         shell_update_program_row();
@@ -1529,11 +1872,18 @@ int v5_ui_shell_refresh_once(void)
         flags |= V5_MAIN_PAGE_REFRESH_SLOW;
     }
     if (flags != 0U) {
-        (void)v5_main_page_apply_status_flags(&g_main_page, &g_model.status_view, flags);
+        int applied = 0;
+        if (g_current_page == V5_SHELL_PAGE_MAIN) {
+            (void)v5_main_page_apply_status_flags(&g_main_page, &g_model.status_view, flags);
+            applied = 1;
+        }
         if ((flags & V5_MAIN_PAGE_REFRESH_DYNAMIC) != 0U && g_current_page == V5_SHELL_PAGE_SETTINGS) {
             (void)v5_settings_page_apply_status(&g_settings_page, &g_model.status_view);
+            applied = 1;
         }
-        lv_timer_handler();
+        if (applied) {
+            lv_timer_handler();
+        }
     }
     return 1;
 }
@@ -1564,5 +1914,38 @@ int v5_ui_shell_test_click_program_name(unsigned int idx)
     lv_event_send(g_program_row_name_labels[idx], LV_EVENT_CLICKED, 0);
     lv_timer_handler();
     return 1;
+}
+
+int v5_ui_shell_test_click_program_edit(void)
+{
+    if (!g_program_edit_button) {
+        return 0;
+    }
+    lv_event_send(g_program_edit_button, LV_EVENT_CLICKED, 0);
+    lv_timer_handler();
+    return 1;
+}
+
+int v5_ui_shell_test_double_click_main_program_area(void)
+{
+    if (!g_main_page.program_edit_hit_area) {
+        return 0;
+    }
+    lv_tick_inc(1);
+    lv_event_send(g_main_page.program_edit_hit_area, LV_EVENT_CLICKED, 0);
+    lv_tick_inc(100);
+    lv_event_send(g_main_page.program_edit_hit_area, LV_EVENT_CLICKED, 0);
+    lv_timer_handler();
+    return 1;
+}
+
+int v5_ui_shell_test_current_page_is_mdi(void)
+{
+    return g_current_page == V5_SHELL_PAGE_MDI;
+}
+
+const char *v5_ui_shell_test_mdi_text(void)
+{
+    return g_mdi_line;
 }
 #endif

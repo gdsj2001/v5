@@ -2390,8 +2390,21 @@ static void axis_page_button_cb(lv_event_t *event)
     if (lv_event_get_code(event) != LV_EVENT_CLICKED) {
         return;
     }
+    lv_obj_clear_state(lv_event_get_target(event), LV_STATE_PRESSED);
+    lv_refr_now(NULL);
     direction = (intptr_t)lv_event_get_user_data(event);
     axis_scroll_page(direction > 0 ? 1 : -1);
+}
+
+static void axis_page_button_release_visual_cb(lv_event_t *event)
+{
+    lv_obj_t *button = lv_event_get_target(event);
+    if (!button) {
+        return;
+    }
+    lv_obj_clear_state(button, LV_STATE_PRESSED);
+    lv_obj_invalidate(button);
+    lv_refr_now(NULL);
 }
 
 static void make_axis_page_button(lv_obj_t *parent, int x, int y, int w, int h, int direction)
@@ -2410,6 +2423,7 @@ static void make_axis_page_button(lv_obj_t *parent, int x, int y, int w, int h, 
     lv_obj_set_style_border_color(button, rgb(76, 119, 146), 0);
     lv_obj_add_flag(button, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_clear_flag(button, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(button, axis_page_button_release_visual_cb, LV_EVENT_RELEASED, 0);
     lv_obj_add_event_cb(button, axis_page_button_cb, LV_EVENT_CLICKED, (void *)(intptr_t)direction);
 
     line = lv_line_create(button);
