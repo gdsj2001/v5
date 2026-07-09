@@ -187,6 +187,30 @@ static int owner_is_allowed(const char *owner)
          strcmp(owner, "native_rtcp_control") == 0);
 }
 
+static int restore_machine_on_after_estop_reset(V5NativeSafetyResult *native_result)
+{
+    V5LinuxcncrshSendStatus machine_on_status;
+
+    if (native_result) {
+        native_result->machine_on_requested = 1;
+        native_result->machine_on_status = (int)V5_LINUXCNCRSH_SEND_UNAVAILABLE;
+    }
+
+    linuxcncrsh_lock();
+    machine_on_status = v5_linuxcncrsh_send_machine_on_sequence(&g_linuxcncrsh_config);
+    linuxcncrsh_unlock();
+    if (native_result) {
+        native_result->machine_on_status = (int)machine_on_status;
+    }
+    if (machine_on_status != V5_LINUXCNCRSH_SEND_SENT) {
+        copy_cstr(native_result ? native_result->code : 0,
+                  native_result ? sizeof(native_result->code) : 0,
+                  "NATIVE_SAFETY_MACHINE_ON_FAILED");
+        return V5_NATIVE_SAFETY_SEND_IO_ERROR;
+    }
+    return v5_native_safety_wait_reset_confirmed(native_result, 10U, 50000U);
+}
+
 static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5CommandGateIpcResponseFrame *response)
 {
     V5CommandRequest request;
@@ -214,21 +238,10 @@ static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5Command
     }
     if (request.kind == V5_COMMAND_ESTOP_RESET && strcmp(prepared.owner, "native_safety") == 0) {
         V5NativeSafetyResult native_result;
-        V5LinuxcncrshSendStatus machine_on_status = V5_LINUXCNCRSH_SEND_UNAVAILABLE;
         copy_cstr(response->command_line, sizeof(response->command_line), "native_safety.estop_reset | Set Machine On");
         status = v5_native_safety_estop_reset_latch(&native_result);
         if (status == V5_NATIVE_SAFETY_SEND_SENT) {
-            native_result.machine_on_requested = 1;
-            linuxcncrsh_lock();
-            machine_on_status = v5_linuxcncrsh_send_machine_on_sequence(&g_linuxcncrsh_config);
-            linuxcncrsh_unlock();
-            native_result.machine_on_status = (int)machine_on_status;
-            if (machine_on_status == V5_LINUXCNCRSH_SEND_SENT) {
-                status = v5_native_safety_wait_reset_confirmed(&native_result, 20U, 50000U);
-            } else {
-                copy_cstr(native_result.code, sizeof(native_result.code), "NATIVE_SAFETY_MACHINE_ON_FAILED");
-                status = V5_NATIVE_SAFETY_SEND_IO_ERROR;
-            }
+            status = restore_machine_on_after_estop_reset(&native_result);
         }
         response_copy_native_safety_result(response, &native_result);
         response->send_status = (int32_t)status;
@@ -269,14 +282,26 @@ static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5Command
             status == V5_LINUXCNCRSH_SEND_SENT ? "ROTARY_EQUIV_ZERO_NATIVE_SENT" : "ROTARY_EQUIV_ZERO_NATIVE_FAILED");
     } else if (request.kind == V5_COMMAND_HOME && strcmp(prepared.owner, "native_home_mode_gate") == 0) {
         char home_code[64];
-        (void)v5_linuxcncrsh_format_home_sequence(response->command_line, sizeof(response->command_line));
+        V5NativeRtcpControlResult rtcp_result;
+        char home_line[128];
+        (void)v5_linuxcncrsh_format_home_sequence(home_line, sizeof(home_line));
+        copy_cstr(response->command_line, sizeof(response->command_line), "native_rtcp_control.set OFF | ");
+        strncat(
+            response->command_line,
+            home_line,
+            sizeof(response->command_line) - strlen(response->command_line) - 1U);
         home_code[0] = '\0';
-        status = v5_linuxcncrsh_send_home_sequence(
-            &g_linuxcncrsh_config,
-            0,
-            0,
-            home_code,
-            sizeof(home_code));
+        status = (V5LinuxcncrshSendStatus)v5_native_rtcp_control_set(0, &rtcp_result);
+        if (status == V5_LINUXCNCRSH_SEND_SENT) {
+            status = v5_linuxcncrsh_send_home_sequence(
+                &g_linuxcncrsh_config,
+                0,
+                0,
+                home_code,
+                sizeof(home_code));
+        } else {
+            copy_cstr(home_code, sizeof(home_code), rtcp_result.code[0] ? rtcp_result.code : "BUS_HOME_RTCP_OFF_NOT_CONFIRMED");
+        }
         copy_cstr(
             response->readback_code,
             sizeof(response->readback_code),

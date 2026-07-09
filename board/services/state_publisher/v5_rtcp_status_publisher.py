@@ -152,29 +152,15 @@ class ControlLatch:
 def set_switchkins_actual(hal_module, active: int) -> None:
     value = '1' if active else '0'
     errors = []
-    set_p = getattr(hal_module, 'set_p', None)
-    if callable(set_p):
-        try:
-            set_p('mux2.0.sel', value)
-            return
-        except Exception as exc:
-            errors.append(f'set_p mux2.0.sel: {exc}')
     for fn_name in ('set_s', 'sets'):
         fn = getattr(hal_module, fn_name, None)
         if callable(fn):
             try:
-                fn('re-switchkins-select', value)
+                fn('v5-rtcp-ui-request', value)
                 return
             except Exception as exc:
                 errors.append(f'{fn_name}: {exc}')
-    if callable(set_p):
-        for name in ('re-switchkins-select', 'motion.switchkins-type'):
-            try:
-                set_p(name, value)
-                return
-            except Exception as exc:
-                errors.append(f'set_p {name}: {exc}')
-    raise RuntimeError('native HAL switchkins write failed: ' + '; '.join(errors))
+    raise RuntimeError('native HAL RTCP UI request write failed: ' + '; '.join(errors))
 
 
 def handle_control_or_poll(hal_module, latch: ControlLatch, path: str) -> Tuple[int, int]:

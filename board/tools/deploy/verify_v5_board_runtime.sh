@@ -3,6 +3,7 @@ set -eu
 
 board_ssh="${V5_BOARD_SSH:-}"
 board_ssh_port="${V5_BOARD_SSH_PORT:-22}"
+ssh_bin="${V5_SSH:-ssh}"
 state_path="${V5_STATUS_SHM_PATH:-/dev/shm/v3_status_shm}"
 linuxcncrsh_port="${V5_LINUXCNCRSH_PORT:-5007}"
 fail=0
@@ -19,7 +20,7 @@ if [ -z "$board_ssh" ]; then
 fi
 
 remote() {
-  ssh -o BatchMode=yes -o LogLevel=ERROR -o ConnectTimeout=5 -p "$board_ssh_port" "$board_ssh" "$@"
+  "$ssh_bin" -o BatchMode=yes -o LogLevel=ERROR -o ConnectTimeout=5 -p "$board_ssh_port" "$board_ssh" "$@"
 }
 
 if ! remote 'true' >/dev/null 2>&1; then
@@ -208,11 +209,21 @@ else
   remote 'for p in /proc/[0-9]*/cmdline; do c=$(tr "\000" " " < "$p" 2>/dev/null || true); case "$c" in *linuxcnc*|*milltask*|*linuxcncrsh*|*v5_bus.ini*) printf "%s\n" "$c";; esac; done; halcmd show comp 2>/dev/null | grep -E "lcec|cia402|zynq_stepgen_hw" || true' | sed 's/^/INFO bus runtime: /'
 fi
 
-if remote "/etc/init.d/v5-linuxcnc-command-gate status && /usr/libexec/8ax/v5_linuxcncrsh_probe --host 127.0.0.1 --port '$linuxcncrsh_port' --password EMC --timeout-ms 1000 >/tmp/v5_linuxcncrsh_probe.out 2>&1" >/dev/null 2>&1; then
-  ok "linuxcncrsh machine probe ok: $linuxcncrsh_port"
+rtapi_affinity_check='pids=$(pidof rtapi_app 2>/dev/null || true); test -n "$pids"; for pid in $pids; do for status in /proc/$pid/task/[0-9]*/status; do test -r "$status"; tid=${status%/status}; tid=${tid##*/}; comm=$(cat /proc/$pid/task/$tid/comm 2>/dev/null || true); cpus=$(awk -F: '"'"'/^Cpus_allowed_list:/ {gsub(/[ \t]/, "", $2); print $2}'"'"' "$status"); printf "pid=%s tid=%s comm=%s Cpus_allowed_list=%s\n" "$pid" "$tid" "$comm" "$cpus"; test "$cpus" = 0; done; done'
+if remote "$rtapi_affinity_check" >/tmp/v5_rtapi_affinity.out 2>&1; then
+  ok "LinuxCNC RTAPI realtime threads pinned to CPU0"
+  sed 's/^/INFO rtapi affinity: /' /tmp/v5_rtapi_affinity.out
+else
+  fail_msg "LinuxCNC RTAPI realtime threads pinned to CPU0"
+  sed 's/^/INFO rtapi affinity: /' /tmp/v5_rtapi_affinity.out
+fi
+rm -f /tmp/v5_rtapi_affinity.out
+
+if remote "/etc/init.d/v5-linuxcnc-command-gate status && /usr/libexec/8ax/v5_linuxcncrsh_probe --host 127.0.0.1 --port '$linuxcncrsh_port' --password EMC --timeout-ms 1000 >/tmp/v5_linuxcncrsh_probe.out 2>&1 && grep -q 'MACHINE ON' /tmp/v5_linuxcncrsh_probe.out" >/dev/null 2>&1; then
+  ok "linuxcncrsh machine auto-on confirmed: $linuxcncrsh_port"
   remote 'tail -n 5 /tmp/v5_linuxcncrsh_probe.out 2>/dev/null || true' | sed 's/^/INFO linuxcncrsh: /'
 else
-  fail_msg "linuxcncrsh machine probe ok: $linuxcncrsh_port"
+  fail_msg "linuxcncrsh machine auto-on confirmed: $linuxcncrsh_port"
   remote 'tail -n 10 /tmp/v5_linuxcncrsh_probe.out 2>/dev/null || true' | sed 's/^/INFO linuxcncrsh: /'
 fi
 

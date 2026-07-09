@@ -9,7 +9,7 @@ DAEMON=/usr/libexec/8ax/v5_rtcp_status_publisher.py
 PIDFILE=/run/8ax/v5_rtcp_status_publisher.pid
 LOGFILE=/run/8ax/v5_rtcp_status_publisher.log
 STATUS_PATH=${V5_RTCP_STATUS_PATH:-/dev/shm/v5_native_rtcp_status.bin}
-INTERVAL_MS=${V5_RTCP_STATUS_INTERVAL_MS:-100}
+INTERVAL_MS=${V5_RTCP_STATUS_INTERVAL_MS:-200}
 PYTHONPATH=/usr/lib/python3/dist-packages${PYTHONPATH:+:$PYTHONPATH}
 LINUXCNC_PY_HOME=${V5_LINUXCNC_PY_HOME:-}
 if [ -z "$LINUXCNC_PY_HOME" ]; then

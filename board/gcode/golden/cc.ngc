@@ -1,5 +1,5 @@
 (RE_V5_CC_LINUXCNC_NATIVE)
-(RS274/NGC LinuxCNC only: G0/G1/G4/G17/G21/G40/G43/G49/G53/G54/G64/G80/G90/G91.1/G94/F/H/M30)
+(RS274/NGC LinuxCNC only: G0/G1/G4/G17/G21/G40/G43/G49/G53/G54/G64/G80/G90/G91.1/G94/F/H/M64/M65/M30)
 (Program is fed to LinuxCNC/microkernel exactly as opened; no UI G-code rewrite)
 (Program model: five-turn cylindrical spring, radius 10mm, Z 0 to -50mm)
 (A axis swings 45 +/- 10 deg during cutting; C axis rotates with the spring)
@@ -9,15 +9,19 @@ G64 P0.500 Q0.050
 
 (Restart-safe visible return to program beginning in machine coordinates)
 G53 G0 Z0.000
+(RTCP/switchkins is controlled by this G-code program only across the spring segment)
+G43 H1
+G4 P0.050
 (Rapid rotary normalization before cutting)
 G53 G0 A0.000 C0.000
 G53 G0 X0.000 Y0.000
 
-G43 H1
-G4 P0.050
-
 (Rapid non-cut positioning; first feed segment starts from this spring anchor)
 G0 X0.000 Y10.000 Z0.000 A45.000 C0.000
+
+(Spring start: enable RTCP before the first spring feed)
+M64 P0
+G4 P0.050
 
 (Cutting trajectory: G1 sampled five-turn helix in WCS; X/C phase keeps the live current point on top)
 F1500
@@ -102,6 +106,10 @@ G1 X9.239 Y3.827 Z-48.125 A35.761 C-1732.500
 G1 X7.071 Y7.071 Z-48.750 A37.929 C-1755.000
 G1 X3.827 Y9.239 Z-49.375 A41.173 C-1777.500
 G1 X0.000 Y10.000 Z-50.000 A45.000 C-1800.000
+
+(Spring end: release RTCP before machine-coordinate return)
+M65 P0
+G4 P0.050
 
 (Machine-coordinate return)
 G49

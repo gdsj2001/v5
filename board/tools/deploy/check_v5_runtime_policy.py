@@ -183,9 +183,20 @@ def check_remote_relay_access_control() -> int:
         "remote_dirty",
         "remote_input",
         "metrics_snapshot",
+        "cpu_samples_snapshot",
+        "process_diagnostics",
         "full_frame_requests",
+        "stream_active_sessions",
         "dirty_rect_frames",
+        "framebuffer_mmap_refreshes",
+        "dirty_payload_bytes",
+        "dirty_payload_rects",
+        "dirty_large_throttle_sleeps",
+        "dirty_payload_union_frames",
         "stream_repair_full_frames",
+        "stream_idle_pings",
+        "stream_send_failures",
+        "input_active_sessions",
     )
     for token in required_relay:
         if token not in relay_text:
@@ -202,6 +213,256 @@ def check_remote_relay_access_control() -> int:
         if token not in init_text:
             print(f"REMOTE_RELAY_INIT_ALLOWLIST_MISSING: {init.relative_to(ROOT)} lacks {token}", file=sys.stderr)
             rc = 1
+    return rc
+
+
+def check_linuxcnc_rtapi_affinity_owner() -> int:
+    init = ROOT / "services" / "command_gate" / "init.d" / "v5-linuxcnc-command-gate"
+    ui_init = ROOT / "services" / "ui" / "init.d" / "v5-ui-relay"
+    probe = ROOT / "services" / "command_gate" / "v5_linuxcncrsh_probe.c"
+    if not init.exists():
+        print("LINUXCNC_RTAPI_AFFINITY_INIT_MISSING: services/command_gate/init.d/v5-linuxcnc-command-gate", file=sys.stderr)
+        return 1
+    if not probe.exists():
+        print("LINUXCNC_MACHINE_ON_PROBE_MISSING: services/command_gate/v5_linuxcncrsh_probe.c", file=sys.stderr)
+        return 1
+    if not ui_init.exists():
+        print("LINUXCNC_MACHINE_ON_UI_INIT_MISSING: services/ui/init.d/v5-ui-relay", file=sys.stderr)
+        return 1
+    text = init.read_text(encoding="utf-8", errors="ignore")
+    required = (
+        "linuxcnc_realtime_pids",
+        "linuxcnc_realtime_affinity_ok",
+        "set_linuxcnc_realtime_affinity",
+        "rtapi_app",
+        "taskset -a -pc 0",
+        "Cpus_allowed_list",
+        "RTAPI realtime threads pinned to CPU0",
+    )
+    rc = 0
+    for token in required:
+        if token not in text:
+            print(f"LINUXCNC_RTAPI_AFFINITY_OWNER_MISSING: {init.relative_to(ROOT)} lacks {token}", file=sys.stderr)
+            rc = 1
+    for token in ("ensure_machine_on_at_boot", "--machine-on"):
+        if token in text:
+            print(f"LINUXCNC_MACHINE_ON_EARLY_INIT_SURVIVOR: {init.relative_to(ROOT)} contains {token}", file=sys.stderr)
+            rc = 1
+    ui_text = ui_init.read_text(encoding="utf-8", errors="ignore")
+    required_ui = (
+        "wait_boot_inputs_ready",
+        "drive_faults_clear",
+        "wait_drive_faults_clear_for_machine_on",
+        "joint.$joint.amp-fault-in",
+        "ensure_machine_on_after_microkernel_ready",
+        "--machine-on",
+        "Machine On confirmed after microkernel ready",
+    )
+    for token in required_ui:
+        if token not in ui_text:
+            print(f"LINUXCNC_MACHINE_ON_UI_INIT_CONTRACT_MISSING: {ui_init.relative_to(ROOT)} lacks {token}", file=sys.stderr)
+            rc = 1
+    probe_text = probe.read_text(encoding="utf-8", errors="ignore")
+    required_probe = (
+        "--machine-on",
+        "ensure_machine_on",
+        "v5_linuxcncrsh_send_machine_on_sequence",
+        "machine on confirmed",
+    )
+    for token in required_probe:
+        if token not in probe_text:
+            print(f"LINUXCNC_MACHINE_ON_PROBE_CONTRACT_MISSING: {probe.relative_to(ROOT)} lacks {token}", file=sys.stderr)
+            rc = 1
+    verify = ROOT / "tools" / "deploy" / "verify_v5_board_runtime.sh"
+    if not verify.exists():
+        print("LINUXCNC_MACHINE_ON_VERIFY_MISSING: tools/deploy/verify_v5_board_runtime.sh", file=sys.stderr)
+        rc = 1
+    else:
+        verify_text = verify.read_text(encoding="utf-8", errors="ignore")
+        for token in ("MACHINE ON", "machine auto-on confirmed"):
+            if token not in verify_text:
+                print(f"LINUXCNC_MACHINE_ON_VERIFY_CONTRACT_MISSING: {verify.relative_to(ROOT)} lacks {token}", file=sys.stderr)
+                rc = 1
+    return rc
+
+
+def _strip_gcode_comment(line: str) -> str:
+    out = []
+    in_paren = False
+    for char in line:
+        if char == "(":
+            in_paren = True
+            continue
+        if char == ")":
+            in_paren = False
+            continue
+        if not in_paren:
+            out.append(char)
+    return "".join(out)
+
+
+def check_cc_golden_rtcp_before_ac_motion() -> int:
+    program = ROOT / "gcode" / "golden" / "cc.ngc"
+    runner = ROOT / "services" / "command_gate" / "v5_linuxcncrsh_golden_run.c"
+    hal = ROOT / "linuxcnc" / "hal" / "v5_bus_2ms.hal"
+    rtcp_publisher = ROOT / "services" / "state_publisher" / "v5_rtcp_status_publisher.py"
+    if not program.exists():
+        print("CC_GOLDEN_PROGRAM_MISSING: gcode/golden/cc.ngc", file=sys.stderr)
+        return 1
+    if not runner.exists():
+        print("CC_GOLDEN_RUNNER_MISSING: services/command_gate/v5_linuxcncrsh_golden_run.c", file=sys.stderr)
+        return 1
+    if not hal.exists():
+        print("CC_GOLDEN_RTCP_HAL_MISSING: linuxcnc/hal/v5_bus_2ms.hal", file=sys.stderr)
+        return 1
+    if not rtcp_publisher.exists():
+        print("CC_GOLDEN_RTCP_PUBLISHER_MISSING: services/state_publisher/v5_rtcp_status_publisher.py", file=sys.stderr)
+        return 1
+    pending_spring_anchor = False
+    seen_spring_anchor = False
+    seen_cutting_trajectory = False
+    seen_spring_feed = False
+    seen_program_rtcp_on = False
+    seen_program_rtcp_off = False
+    seen_machine_return = False
+    for line_no, raw in enumerate(program.read_text(encoding="ascii", errors="ignore").splitlines(), 1):
+        raw_upper = raw.upper()
+        if "SPRING ANCHOR" in raw_upper:
+            pending_spring_anchor = True
+        if "CUTTING TRAJECTORY" in raw_upper:
+            seen_cutting_trajectory = True
+        if raw_upper.strip().startswith("(MACHINE-COORDINATE RETURN"):
+            if not seen_program_rtcp_off:
+                print(
+                    f"CC_GOLDEN_PROGRAM_SPRING_END_RTCP_OFF_MISSING: {program.relative_to(ROOT)}:{line_no}: {raw.strip()}",
+                    file=sys.stderr,
+                )
+                return 1
+            seen_machine_return = True
+        line = _strip_gcode_comment(raw).strip().upper()
+        if not line:
+            continue
+        if re.search(r"\bG43\.4\b", line):
+            print(f"CC_GOLDEN_UNSUPPORTED_G43_4: {program.relative_to(ROOT)}:{line_no}: {raw.strip()}", file=sys.stderr)
+            return 1
+        has_motion = re.search(r"\bG(?:0|00|1|01)\b", line) is not None
+        has_spring_feed = re.search(r"\bG(?:1|01)\b", line) is not None
+        has_g53 = re.search(r"\bG53\b", line) is not None
+        if pending_spring_anchor and has_motion:
+            seen_spring_anchor = True
+            pending_spring_anchor = False
+        if re.search(r"\bM64\b", line) and re.search(r"\bP0\b", line):
+            if seen_program_rtcp_on:
+                print(f"CC_GOLDEN_PROGRAM_RTCP_ON_DUPLICATE: {program.relative_to(ROOT)}:{line_no}: {raw.strip()}", file=sys.stderr)
+                return 1
+            if seen_program_rtcp_off:
+                print(f"CC_GOLDEN_PROGRAM_RTCP_ON_AFTER_RTCP_OFF: {program.relative_to(ROOT)}:{line_no}: {raw.strip()}", file=sys.stderr)
+                return 1
+            if not seen_spring_anchor:
+                print(
+                    f"CC_GOLDEN_PROGRAM_RTCP_ON_BEFORE_SPRING_START: {program.relative_to(ROOT)}:{line_no}: {raw.strip()}",
+                    file=sys.stderr,
+                )
+                return 1
+            if seen_spring_feed:
+                print(
+                    f"CC_GOLDEN_PROGRAM_RTCP_ON_AFTER_SPRING_FEED: {program.relative_to(ROOT)}:{line_no}: {raw.strip()}",
+                    file=sys.stderr,
+                )
+                return 1
+            seen_program_rtcp_on = True
+            continue
+        if re.search(r"\bM65\b", line) and re.search(r"\bP0\b", line):
+            if seen_program_rtcp_off:
+                print(f"CC_GOLDEN_PROGRAM_RTCP_OFF_DUPLICATE: {program.relative_to(ROOT)}:{line_no}: {raw.strip()}", file=sys.stderr)
+                return 1
+            if seen_machine_return:
+                print(
+                    f"CC_GOLDEN_PROGRAM_RTCP_OFF_AFTER_MACHINE_RETURN: {program.relative_to(ROOT)}:{line_no}: {raw.strip()}",
+                    file=sys.stderr,
+                )
+                return 1
+            if not seen_spring_feed:
+                print(
+                    f"CC_GOLDEN_PROGRAM_RTCP_OFF_BEFORE_SPRING_FEED: {program.relative_to(ROOT)}:{line_no}: {raw.strip()}",
+                    file=sys.stderr,
+                )
+                return 1
+            seen_program_rtcp_off = True
+            continue
+        has_z_zero = re.search(r"(?<![A-Z])Z\s*[-+]?0(?:\.0*)?(?![0-9.])", line) is not None
+        if seen_cutting_trajectory and has_spring_feed:
+            if not seen_program_rtcp_on:
+                print(
+                    f"CC_GOLDEN_PROGRAM_RTCP_ON_AFTER_SPRING_START: {program.relative_to(ROOT)}:{line_no}: {raw.strip()}",
+                    file=sys.stderr,
+                )
+                return 1
+            seen_spring_feed = True
+        if seen_machine_return and has_motion and has_z_zero and has_g53 and not seen_program_rtcp_off:
+            print(
+                f"CC_GOLDEN_RTCP_OFF_AFTER_FINAL_Z_RETURN: {program.relative_to(ROOT)}:{line_no}: {raw.strip()}",
+                file=sys.stderr,
+            )
+            return 1
+        if seen_program_rtcp_off and has_motion and not has_g53:
+            print(
+                f"CC_GOLDEN_RTCP_OFF_NON_G53_MOTION: {program.relative_to(ROOT)}:{line_no}: {raw.strip()}",
+                file=sys.stderr,
+            )
+            return 1
+    if not seen_spring_anchor:
+        print("CC_GOLDEN_PROGRAM_SPRING_ANCHOR_MISSING: gcode/golden/cc.ngc lacks spring anchor motion", file=sys.stderr)
+        return 1
+    if not seen_spring_feed:
+        print("CC_GOLDEN_PROGRAM_SPRING_FEED_MISSING: gcode/golden/cc.ngc lacks spring G1 feed", file=sys.stderr)
+        return 1
+    if not seen_program_rtcp_on:
+        print("CC_GOLDEN_PROGRAM_RTCP_ON_MISSING: gcode/golden/cc.ngc lacks M64 P0", file=sys.stderr)
+        return 1
+    if not seen_program_rtcp_off:
+        print("CC_GOLDEN_PROGRAM_RTCP_OFF_MISSING: gcode/golden/cc.ngc lacks M65 P0", file=sys.stderr)
+        return 1
+
+    rc = 0
+    runner_text = runner.read_text(encoding="utf-8", errors="ignore")
+    forbidden_runner = (
+        "v5_native_rtcp_control_set(1",
+        "ensure_rtcp_on_before_golden_motion",
+        "rtcp on confirmed before golden motion",
+    )
+    for token in forbidden_runner:
+        if token in runner_text:
+            print(f"CC_GOLDEN_RUNNER_EXTERNAL_RTCP_SURVIVOR: {runner.relative_to(ROOT)} contains {token}", file=sys.stderr)
+            rc = 1
+
+    hal_text = hal.read_text(encoding="utf-8", errors="ignore")
+    required_hal = (
+        "loadrt or2 count=1",
+        "addf or2.0 servo-thread",
+        "v5-rtcp-ui-request",
+        "v5-rtcp-gcode-request motion.digital-out-00 => or2.0.in1",
+        "v5-rtcp-selected or2.0.out => mux2.0.sel",
+        "re-switchkins-select mux2.0.out => motion.switchkins-type",
+    )
+    for token in required_hal:
+        if token not in hal_text:
+            print(f"CC_GOLDEN_RTCP_HAL_CONTRACT_MISSING: {hal.relative_to(ROOT)} lacks {token}", file=sys.stderr)
+            rc = 1
+
+    publisher_text = rtcp_publisher.read_text(encoding="utf-8", errors="ignore")
+    if "v5-rtcp-ui-request" not in publisher_text:
+        print(
+            f"CC_GOLDEN_RTCP_UI_LATCH_SIGNAL_MISSING: {rtcp_publisher.relative_to(ROOT)} lacks v5-rtcp-ui-request",
+            file=sys.stderr,
+        )
+        rc = 1
+    if "set_p('mux2.0.sel'" in publisher_text or 'set_p("mux2.0.sel"' in publisher_text:
+        print(
+            f"CC_GOLDEN_RTCP_DIRECT_MUX_WRITE_SURVIVOR: {rtcp_publisher.relative_to(ROOT)} still writes mux2.0.sel",
+            file=sys.stderr,
+        )
+        rc = 1
     return rc
 
 
@@ -374,8 +635,10 @@ def main() -> int:
         check_shm_consumers() |
         check_shm_abi() |
         check_cpu_policy() |
+        check_linuxcnc_rtapi_affinity_owner() |
         check_settings_runtime_schema_guard() |
         check_remote_relay_access_control() |
+        check_cc_golden_rtcp_before_ac_motion() |
         check_settings_parameter_table_deploy_kind() |
         check_settings_parameter_table_backup_before_merge() |
         check_board_owner_refresh_before_bundle()

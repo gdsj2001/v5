@@ -263,7 +263,16 @@ int v5_coordinate_digits_set_value(V5CoordinateDigits *digits, unsigned int col,
     snprintf(cached_text, 24, "%s", safe);
     *cached_color = color;
     *cached_valid = 1U;
-    lv_obj_invalidate(digits->canvas);
+    {
+        lv_area_t coords;
+        lv_area_t dirty;
+        lv_obj_get_coords(digits->canvas, &coords);
+        dirty.x1 = coords.x1 + (lv_coord_t)base_x;
+        dirty.y1 = coords.y1 + (lv_coord_t)y;
+        dirty.x2 = dirty.x1 + (lv_coord_t)digits->value_width - 1;
+        dirty.y2 = dirty.y1 + (lv_coord_t)digits->row_height - 1;
+        lv_obj_invalidate_area(digits->canvas, &dirty);
+    }
     return 1;
 }
 

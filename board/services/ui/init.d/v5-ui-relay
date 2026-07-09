@@ -18,6 +18,8 @@ REMOTE_WIDTH=${V5_UI_REMOTE_WIDTH:-1024}
 REMOTE_HEIGHT=${V5_UI_REMOTE_HEIGHT:-600}
 PROJECT_ROOT=${V5_PROJECT_ROOT:-/opt/8ax/v5}
 PROFILE_SNAPSHOT=/usr/libexec/8ax/drive_profile/v5_drive_profile_resident_snapshot.py
+LINUXCNCRSH_PORT=${V5_LINUXCNCRSH_PORT:-5007}
+LINUXCNCRSH_CONNECTPW=${V5_LINUXCNCRSH_CONNECTPW:-EMC}
 
 read_pidfile() {
   file="$1"
@@ -139,6 +141,51 @@ raise SystemExit(1)
 PY
 }
 
+drive_faults_clear() {
+  for joint in 0 1 2 3 4; do
+    value=$(halcmd getp "joint.$joint.amp-fault-in" 2>/dev/null || true)
+    [ "$value" = "FALSE" ] || return 1
+  done
+  return 0
+}
+
+wait_drive_faults_clear_for_machine_on() {
+  i=0
+  stable=0
+  while [ "$i" -lt 120 ]; do
+    if drive_faults_clear; then
+      stable=$((stable + 1))
+      if [ "$stable" -ge 5 ]; then
+        echo "v5_ui_relay drive fault inputs clear before Machine On" >>"$LOGFILE"
+        return 0
+      fi
+    else
+      stable=0
+    fi
+    i=$((i + 1))
+    sleep 0.25
+  done
+  echo "v5_ui_relay drive fault inputs were not clear before Machine On" >&2
+  halcmd show pin 'joint.*.amp-fault-in' 'cia402.*.drv-fault' 2>/dev/null || true
+  return 1
+}
+
+ensure_machine_on_after_microkernel_ready() {
+  wait_drive_faults_clear_for_machine_on
+  i=0
+  while [ "$i" -lt 30 ]; do
+    if /usr/libexec/8ax/v5_linuxcncrsh_probe --host 127.0.0.1 --port "$LINUXCNCRSH_PORT" --password "$LINUXCNCRSH_CONNECTPW" --timeout-ms 1000 --machine-on >>"$LOGFILE" 2>&1; then
+      echo "v5_ui_relay Machine On confirmed after microkernel ready"
+      return 0
+    fi
+    i=$((i + 1))
+    sleep 0.2
+  done
+  echo "v5_ui_relay Machine On was not confirmed after microkernel ready" >&2
+  tail -n 80 "$LOGFILE" 2>/dev/null || true
+  return 1
+}
+
 clear_framebuffer() {
   [ -w /dev/fb0 ] || return 0
   stride=$(cat /sys/class/graphics/fb0/stride 2>/dev/null || true)
@@ -223,6 +270,7 @@ start_service() {
   if is_running; then
     set_non_microkernel_affinity "$(cat "$UI_PIDFILE")"
     set_non_microkernel_affinity "$(cat "$PIDFILE")"
+    ensure_machine_on_after_microkernel_ready
     echo "v5_ui_relay started relay_pid=$(cat "$PIDFILE") ui_pid=$(cat "$UI_PIDFILE") port=$PORT bind=$REMOTE_BIND allow_cidrs=$REMOTE_ALLOW_CIDRS remote_input=$REMOTE_INPUT project_root=$PROJECT_ROOT"
     return 0
   fi

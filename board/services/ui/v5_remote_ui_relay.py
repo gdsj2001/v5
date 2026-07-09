@@ -6,6 +6,7 @@ import base64
 import hashlib
 import ipaddress
 import json
+import mmap
 import os
 import select
 import socket
@@ -30,6 +31,10 @@ WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 STREAM_TARGET_FPS = 30
 STREAM_COALESCE_SECONDS = 1.0 / STREAM_TARGET_FPS
 DIRTY_EVENT_HISTORY_LIMIT = 512
+MAX_DIRTY_RECTS_PER_FRAME = 64
+LARGE_DIRTY_PIXEL_RATIO = 0.75
+LARGE_DIRTY_MIN_INTERVAL_SECONDS = 0.10
+STREAM_IDLE_PING_SECONDS = 15.0
 
 
 def now_ms() -> int:
@@ -73,6 +78,18 @@ def system_metrics() -> dict:
     }
 
 
+def cpu_samples_snapshot() -> dict:
+    samples = {}
+    for name in ("cpu0", "cpu1"):
+        sample = read_cpu_sample(name)
+        if sample is None:
+            samples[name] = None
+        else:
+            total, idle = sample
+            samples[name] = {"total": total, "idle": idle}
+    return samples
+
+
 def read_cpu_sample(name: str) -> tuple[int, int] | None:
     try:
         for line in Path("/proc/stat").read_text(encoding="ascii").splitlines():
@@ -87,6 +104,64 @@ def read_cpu_sample(name: str) -> tuple[int, int] | None:
     except OSError:
         return None
     return None
+
+
+def read_proc_stat_ticks(path: Path) -> int | None:
+    try:
+        text = path.read_text(encoding="ascii", errors="ignore")
+    except OSError:
+        return None
+    end = text.rfind(")")
+    if end < 0:
+        return None
+    fields = text[end + 2:].split()
+    if len(fields) <= 12:
+        return None
+    try:
+        return int(fields[11]) + int(fields[12])
+    except ValueError:
+        return None
+
+
+def read_status_field(path: Path, field: str) -> str:
+    try:
+        for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if line.startswith(field + ":"):
+                return line.split(":", 1)[1].strip()
+    except OSError:
+        pass
+    return ""
+
+
+def process_diagnostics() -> dict:
+    pid = os.getpid()
+    task_dir = Path(f"/proc/{pid}/task")
+    threads = []
+    try:
+        tasks = sorted(task_dir.glob("[0-9]*"), key=lambda item: int(item.name))
+    except OSError:
+        tasks = []
+    for task in tasks:
+        try:
+            tid = int(task.name)
+        except ValueError:
+            continue
+        try:
+            comm = (task / "comm").read_text(encoding="utf-8", errors="ignore").strip()
+        except OSError:
+            comm = ""
+        threads.append({
+            "tid": tid,
+            "comm": comm,
+            "cpu_ticks": read_proc_stat_ticks(task / "stat"),
+            "cpus_allowed_list": read_status_field(task / "status", "Cpus_allowed_list"),
+        })
+    return {
+        "pid": pid,
+        "cpu_ticks": read_proc_stat_ticks(Path(f"/proc/{pid}/stat")),
+        "cpus_allowed_list": read_status_field(Path(f"/proc/{pid}/status"), "Cpus_allowed_list"),
+        "threads": threads,
+    }
 
 
 class CpuUsageSampler:
@@ -168,17 +243,36 @@ class FrameState:
         self.metrics = {
             "full_frame_requests": 0,
             "stream_sessions": 0,
+            "stream_active_sessions": 0,
             "stream_initial_full_frames": 0,
             "stream_repair_full_frames": 0,
             "stream_repair_missing_dirty_events": 0,
+            "stream_idle_pings": 0,
+            "stream_disconnects": 0,
+            "stream_send_failures": 0,
             "dirty_events": 0,
             "dirty_coalesced_events": 0,
             "dirty_rect_frames": 0,
+            "dirty_payload_bytes": 0,
+            "dirty_payload_rows": 0,
+            "dirty_payload_rects": 0,
+            "dirty_payload_contiguous_frames": 0,
+            "dirty_payload_union_frames": 0,
+            "dirty_payload_union_source_rects": 0,
+            "dirty_large_frames": 0,
+            "dirty_large_pixels": 0,
+            "dirty_large_throttle_sleeps": 0,
+            "dirty_large_throttle_ms": 0,
+            "framebuffer_mmap_refreshes": 0,
             "input_sessions": 0,
+            "input_active_sessions": 0,
+            "input_disconnects": 0,
             "input_messages": 0,
             "input_accepted": 0,
             "input_rejected": 0,
         }
+        self._framebuffer_mmap: mmap.mmap | None = None
+        self._framebuffer_key: tuple[int, int, int] | None = None
 
     @property
     def framebuffer_path(self) -> Path:
@@ -196,12 +290,50 @@ class FrameState:
     def frame_size(self) -> int:
         return self.stride * self.height
 
-    def full_frame(self) -> tuple[int, bytes] | None:
+    def close_framebuffer_map(self) -> None:
+        if self._framebuffer_mmap is not None:
+            try:
+                self._framebuffer_mmap.close()
+            except BufferError:
+                return
+            except OSError:
+                pass
+        self._framebuffer_mmap = None
+        self._framebuffer_key = None
+
+    def framebuffer_map(self) -> mmap.mmap | None:
         try:
-            with self.framebuffer_path.open("rb") as fp:
-                data = fp.read(self.frame_size)
+            st = self.framebuffer_path.stat()
+        except OSError:
+            self.close_framebuffer_map()
+            return None
+        if st.st_size < self.frame_size:
+            self.close_framebuffer_map()
+            return None
+        key = (int(st.st_dev), int(st.st_ino), int(st.st_size))
+        if self._framebuffer_mmap is not None and self._framebuffer_key == key:
+            return self._framebuffer_mmap
+        self.close_framebuffer_map()
+        try:
+            fd = os.open(self.framebuffer_path, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0))
         except OSError:
             return None
+        try:
+            mapped = mmap.mmap(fd, self.frame_size, access=mmap.ACCESS_READ)
+        except OSError:
+            os.close(fd)
+            return None
+        os.close(fd)
+        self._framebuffer_mmap = mapped
+        self._framebuffer_key = key
+        self.mark_metric("framebuffer_mmap_refreshes")
+        return mapped
+
+    def full_frame(self) -> tuple[int, bytes] | None:
+        mapped = self.framebuffer_map()
+        if mapped is None:
+            return None
+        data = mapped[:self.frame_size]
         if len(data) != self.frame_size:
             return None
         with self.condition:
@@ -212,29 +344,135 @@ class FrameState:
         with self.metrics_lock:
             self.metrics[name] = int(self.metrics.get(name, 0)) + delta
 
+    def decrement_metric_floor(self, name: str) -> None:
+        with self.metrics_lock:
+            self.metrics[name] = max(0, int(self.metrics.get(name, 0)) - 1)
+
     def metrics_snapshot(self) -> dict:
         with self.metrics_lock:
             return dict(self.metrics)
 
-    def dirty_payload(self, event: dict) -> bytes | None:
-        x = int(event["x"])
-        y = int(event["y"])
-        w = int(event["w"])
-        h = int(event["h"])
-        if x < 0 or y < 0 or w <= 0 or h <= 0 or x + w > self.width or y + h > self.height:
+    def _single_union_rect(self, rects: list[dict]) -> dict | None:
+        if not rects:
             return None
-        payload = bytearray()
+        x1 = self.width
+        y1 = self.height
+        x2 = 0
+        y2 = 0
+        for rect in rects:
+            x = int(rect["x"])
+            y = int(rect["y"])
+            w = int(rect["w"])
+            h = int(rect["h"])
+            x1 = min(x1, x)
+            y1 = min(y1, y)
+            x2 = max(x2, x + w)
+            y2 = max(y2, y + h)
+        if x1 >= x2 or y1 >= y2:
+            return None
+        return {"x": x1, "y": y1, "w": x2 - x1, "h": y2 - y1, "codec": "raw"}
+
+    def normalized_dirty_rects(self, event: dict) -> list[dict] | None:
+        source_rects = event.get("rects")
+        if source_rects is None:
+            source_rects = [event]
+        rects = []
+        for source in source_rects:
+            x = int(source["x"])
+            y = int(source["y"])
+            w = int(source["w"])
+            h = int(source["h"])
+            if x < 0 or y < 0 or w <= 0 or h <= 0 or x + w > self.width or y + h > self.height:
+                return None
+            rects.append({"x": x, "y": y, "w": w, "h": h, "codec": "raw"})
+        if len(rects) > MAX_DIRTY_RECTS_PER_FRAME:
+            union = self._single_union_rect(rects)
+            self.mark_metric("dirty_payload_union_frames")
+            self.mark_metric("dirty_payload_union_source_rects", len(rects))
+            return [union] if union else None
+        return rects
+
+    def dirty_area_pixels(self, event: dict) -> int:
+        source_rects = event.get("rects")
+        if source_rects is None:
+            source_rects = [event]
+        rects = []
+        for source in source_rects:
+            rects.append({
+                "x": int(source["x"]),
+                "y": int(source["y"]),
+                "w": int(source["w"]),
+                "h": int(source["h"]),
+            })
+        if len(rects) > MAX_DIRTY_RECTS_PER_FRAME:
+            union = self._single_union_rect(rects)
+            if union is None:
+                return 0
+            return max(0, int(union["w"])) * max(0, int(union["h"]))
+        return sum(max(0, int(rect["w"])) * max(0, int(rect["h"])) for rect in rects)
+
+    def is_large_dirty(self, event: dict) -> bool:
+        frame_pixels = max(1, self.width * self.height)
+        threshold = max(1, int(frame_pixels * LARGE_DIRTY_PIXEL_RATIO))
+        return self.dirty_area_pixels(event) >= threshold
+
+    def throttle_large_dirty(self, event: dict, last_sent_at: float) -> float:
+        if not self.is_large_dirty(event):
+            return last_sent_at
+        pixels = self.dirty_area_pixels(event)
+        self.mark_metric("dirty_large_frames")
+        self.mark_metric("dirty_large_pixels", pixels)
+        if last_sent_at > 0.0:
+            delay = LARGE_DIRTY_MIN_INTERVAL_SECONDS - (time.monotonic() - last_sent_at)
+            if delay > 0.0:
+                self.mark_metric("dirty_large_throttle_sleeps")
+                self.mark_metric("dirty_large_throttle_ms", int(round(delay * 1000.0)))
+                time.sleep(delay)
+        return time.monotonic()
+
+    def dirty_payload(self, event: dict) -> tuple[bytes, list[dict]] | None:
+        rects = self.normalized_dirty_rects(event)
+        if not rects:
+            return None
+        mapped = self.framebuffer_map()
+        if mapped is None:
+            return None
+        total_bytes = sum(int(rect["w"]) * int(rect["h"]) * 4 for rect in rects)
+        total_rows = sum(int(rect["h"]) for rect in rects)
+        payload = bytearray(total_bytes)
+        cursor = 0
+        dst = memoryview(payload)
+        src = memoryview(mapped)
         try:
-            with self.framebuffer_path.open("rb") as fp:
-                for row in range(h):
-                    fp.seek(((y + row) * self.stride) + (x * 4))
-                    chunk = fp.read(w * 4)
-                    if len(chunk) != w * 4:
+            for rect in rects:
+                x = int(rect["x"])
+                y = int(rect["y"])
+                w = int(rect["w"])
+                h = int(rect["h"])
+                row_bytes = w * 4
+                if x == 0 and w == self.width:
+                    start = (y * self.stride) + (x * 4)
+                    end = start + (row_bytes * h)
+                    if end > self.frame_size:
                         return None
-                    payload.extend(chunk)
-        except OSError:
-            return None
-        return bytes(payload)
+                    dst[cursor:cursor + (row_bytes * h)] = src[start:end]
+                    cursor += row_bytes * h
+                    self.mark_metric("dirty_payload_contiguous_frames")
+                    continue
+                for row in range(h):
+                    src_start = ((y + row) * self.stride) + (x * 4)
+                    src_end = src_start + row_bytes
+                    if src_end > self.frame_size:
+                        return None
+                    dst[cursor:cursor + row_bytes] = src[src_start:src_end]
+                    cursor += row_bytes
+        finally:
+            del src
+            del dst
+        self.mark_metric("dirty_payload_bytes", total_bytes)
+        self.mark_metric("dirty_payload_rows", total_rows)
+        self.mark_metric("dirty_payload_rects", len(rects))
+        return bytes(payload), rects
 
     def publish_dirty(self, event: dict) -> None:
         with self.condition:
@@ -270,10 +508,7 @@ class FrameState:
         events.sort(key=lambda event: int(event["frame_id"]))
         expected_base = int(base_frame_id)
         latest_frame = expected_base
-        x1 = self.width
-        y1 = self.height
-        x2 = 0
-        y2 = 0
+        rects = []
         merged = 0
         for event in events:
             event_frame = int(event["frame_id"])
@@ -291,10 +526,7 @@ class FrameState:
             y = int(event["y"])
             w = int(event["w"])
             h = int(event["h"])
-            x1 = min(x1, x)
-            y1 = min(y1, y)
-            x2 = max(x2, x + w)
-            y2 = max(y2, y + h)
+            rects.append({"x": x, "y": y, "w": w, "h": h, "codec": "raw"})
             expected_base = event_frame
             latest_frame = event_frame
             merged += 1
@@ -303,10 +535,7 @@ class FrameState:
         return {
             "frame_id": latest_frame,
             "base_frame_id": int(base_frame_id),
-            "x": x1,
-            "y": y1,
-            "w": x2 - x1,
-            "h": y2 - y1,
+            "rects": rects,
             "merged_events": merged,
         }
 
@@ -380,7 +609,9 @@ def send_ws_frame(sock: socket.socket, opcode: int, payload: bytes) -> None:
         header = first + bytes([126]) + struct.pack("!H", size)
     else:
         header = first + bytes([127]) + struct.pack("!Q", size)
-    sock.sendall(header + payload)
+    sock.sendall(header)
+    if payload:
+        sock.sendall(payload)
 
 
 def recv_exact(sock: socket.socket, size: int) -> bytes:
@@ -464,6 +695,8 @@ class RemoteRelayHandler(BaseHTTPRequestHandler):
                 "input_fifo": str(self.state.input_fifo_path),
                 "frame_id": self.state.frame_id,
                 "metrics": self.state.metrics_snapshot(),
+                "cpu_samples": cpu_samples_snapshot(),
+                "process": process_diagnostics(),
             })
         else:
             self.write_json(404, {"ok": False, "error": "unsupported_remote_path"})
@@ -490,84 +723,101 @@ class RemoteRelayHandler(BaseHTTPRequestHandler):
         frame_id, payload = frame
         meta = frame_metadata("full_frame", frame_id, 0, self.state.width, self.state.height, self.state.stride, [])
         meta_bytes = json.dumps(meta, separators=(",", ":")).encode("utf-8")
-        envelope = struct.pack("<I", len(meta_bytes)) + meta_bytes + payload
-        self.write_bytes(200, "application/octet-stream", envelope)
+        self.write_frame_envelope(meta_bytes, payload)
 
     def handle_stream(self) -> None:
         if not self.accept_websocket():
             return
         self.state.mark_metric("stream_sessions")
+        self.state.mark_metric("stream_active_sessions")
         sock = self.connection
-        frame = self.state.full_frame()
-        if frame is None:
-            return
-        frame_id, payload = frame
-        self.state.mark_metric("stream_initial_full_frames")
-        self.send_frame(sock, frame_metadata("full_frame", frame_id, 0, self.state.width, self.state.height, self.state.stride, []), payload)
-        last_sent = frame_id
-        while True:
-            batch = self.state.wait_dirty_batch_after(last_sent, 15.0, STREAM_COALESCE_SECONDS)
-            if batch is None:
-                continue
-            if batch.get("needs_full"):
-                frame = self.state.full_frame()
-                if frame is None:
+        last_large_dirty_sent_at = 0.0
+        try:
+            frame = self.state.full_frame()
+            if frame is None:
+                return
+            frame_id, payload = frame
+            self.state.mark_metric("stream_initial_full_frames")
+            self.send_frame(sock, frame_metadata("full_frame", frame_id, 0, self.state.width, self.state.height, self.state.stride, []), payload)
+            last_sent = frame_id
+            while True:
+                batch = self.state.wait_dirty_batch_after(last_sent, STREAM_IDLE_PING_SECONDS, STREAM_COALESCE_SECONDS)
+                if batch is None:
+                    send_ws_frame(sock, 0x9, b"")
+                    self.state.mark_metric("stream_idle_pings")
                     continue
-                frame_id, payload = frame
-                self.state.mark_metric("stream_repair_missing_dirty_events")
-                self.state.mark_metric("stream_repair_full_frames")
-                self.send_frame(sock, frame_metadata("full_frame", frame_id, 0, self.state.width, self.state.height, self.state.stride, []), payload)
-                last_sent = frame_id
-                continue
-            payload = self.state.dirty_payload(batch)
-            if payload is None:
-                continue
-            merged = int(batch.get("merged_events", 1))
-            if merged > 1:
-                self.state.mark_metric("dirty_coalesced_events", merged - 1)
-            rect = {"x": batch["x"], "y": batch["y"], "w": batch["w"], "h": batch["h"], "codec": "raw"}
-            meta = frame_metadata("dirty_rects", int(batch["frame_id"]), int(batch["base_frame_id"]), self.state.width, self.state.height, self.state.stride, [rect])
-            self.state.mark_metric("dirty_rect_frames")
-            self.send_frame(sock, meta, payload)
-            last_sent = int(batch["frame_id"])
+                if batch.get("needs_full"):
+                    frame = self.state.full_frame()
+                    if frame is None:
+                        continue
+                    frame_id, payload = frame
+                    self.state.mark_metric("stream_repair_missing_dirty_events")
+                    self.state.mark_metric("stream_repair_full_frames")
+                    self.send_frame(sock, frame_metadata("full_frame", frame_id, 0, self.state.width, self.state.height, self.state.stride, []), payload)
+                    last_sent = frame_id
+                    continue
+                last_large_dirty_sent_at = self.state.throttle_large_dirty(batch, last_large_dirty_sent_at)
+                prepared = self.state.dirty_payload(batch)
+                if prepared is None:
+                    continue
+                payload, rects = prepared
+                merged = int(batch.get("merged_events", 1))
+                if merged > 1:
+                    self.state.mark_metric("dirty_coalesced_events", merged - 1)
+                meta = frame_metadata("dirty_rects", int(batch["frame_id"]), int(batch["base_frame_id"]), self.state.width, self.state.height, self.state.stride, rects)
+                self.state.mark_metric("dirty_rect_frames")
+                self.send_frame(sock, meta, payload)
+                last_sent = int(batch["frame_id"])
+        except (BrokenPipeError, ConnectionError, ConnectionResetError, OSError):
+            self.state.mark_metric("stream_send_failures")
+        finally:
+            self.state.mark_metric("stream_disconnects")
+            self.state.decrement_metric_floor("stream_active_sessions")
 
     def handle_input(self) -> None:
         if not self.accept_websocket():
             return
         self.state.mark_metric("input_sessions")
+        self.state.mark_metric("input_active_sessions")
         input_enabled = os.environ.get("V5_UI_REMOTE_INPUT", "off") == "layout_only"
         session_id = ""
         sock = self.connection
-        while True:
-            opcode, payload = recv_ws_frame(sock)
-            if opcode == 0x8:
-                return
-            if opcode != 0x1:
-                return
-            self.state.mark_metric("input_messages")
-            try:
-                message = json.loads(payload.decode("utf-8"))
-            except json.JSONDecodeError:
-                self.send_ack(sock, "pointer_reject", session_id, 0, "unknown", False, "invalid_json")
-                continue
-            msg_type = str(message.get("type") or "")
-            if msg_type == "control_request":
-                session_id = str(message.get("session_id") or "")
-                self.send_ack(sock, "control_grant" if input_enabled and session_id else "control_revoke", session_id, 0, "control", input_enabled and bool(session_id), None if input_enabled and session_id else "remote_input_disabled")
-            elif msg_type == "pointer_event":
-                seq = int(message.get("seq") or 0)
-                phase = str(message.get("phase") or "unknown")
-                message_session = str(message.get("session_id") or "")
-                if not input_enabled:
-                    self.send_ack(sock, "pointer_reject", message_session, seq, phase, False, "remote_input_disabled")
-                elif session_id and message_session != session_id:
-                    self.send_ack(sock, "pointer_reject", message_session, seq, phase, False, "session_mismatch")
-                elif self.write_input_event(message):
-                    self.send_ack(sock, "pointer_ack", message_session, seq, phase, True, None)
+        try:
+            while True:
+                opcode, payload = recv_ws_frame(sock)
+                if opcode == 0x8:
+                    return
+                if opcode != 0x1:
+                    return
+                self.state.mark_metric("input_messages")
+                try:
+                    message = json.loads(payload.decode("utf-8"))
+                except json.JSONDecodeError:
+                    self.send_ack(sock, "pointer_reject", session_id, 0, "unknown", False, "invalid_json")
+                    continue
+                msg_type = str(message.get("type") or "")
+                if msg_type == "control_request":
+                    session_id = str(message.get("session_id") or "")
+                    self.send_ack(sock, "control_grant" if input_enabled and session_id else "control_revoke", session_id, 0, "control", input_enabled and bool(session_id), None if input_enabled and session_id else "remote_input_disabled")
+                elif msg_type == "pointer_event":
+                    seq = int(message.get("seq") or 0)
+                    phase = str(message.get("phase") or "unknown")
+                    message_session = str(message.get("session_id") or "")
+                    if not input_enabled:
+                        self.send_ack(sock, "pointer_reject", message_session, seq, phase, False, "remote_input_disabled")
+                    elif session_id and message_session != session_id:
+                        self.send_ack(sock, "pointer_reject", message_session, seq, phase, False, "session_mismatch")
+                    elif self.write_input_event(message):
+                        self.send_ack(sock, "pointer_ack", message_session, seq, phase, True, None)
+                    else:
+                        self.send_ack(sock, "pointer_reject", message_session, seq, phase, False, "remote_input_ipc_unavailable")
                 else:
-                    self.send_ack(sock, "pointer_reject", message_session, seq, phase, False, "remote_input_ipc_unavailable")
-            else:
-                self.send_ack(sock, "pointer_reject", session_id, 0, "unknown", False, "unsupported_type")
+                    self.send_ack(sock, "pointer_reject", session_id, 0, "unknown", False, "unsupported_type")
+        except (BrokenPipeError, ConnectionError, ConnectionResetError, OSError):
+            pass
+        finally:
+            self.state.mark_metric("input_disconnects")
+            self.state.decrement_metric_floor("input_active_sessions")
 
     def write_input_event(self, message: dict) -> bool:
         try:
@@ -636,6 +886,17 @@ class RemoteRelayHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
+    def write_frame_envelope(self, meta_bytes: bytes, payload: bytes) -> None:
+        meta_len = struct.pack("<I", len(meta_bytes))
+        self.send_response(200)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Length", str(len(meta_len) + len(meta_bytes) + len(payload)))
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(meta_len)
+        self.wfile.write(meta_bytes)
+        self.wfile.write(payload)
+
 
 class RemoteRelayServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     allow_reuse_address = True
@@ -669,6 +930,7 @@ def main() -> int:
             return 0
         finally:
             dirty_reader.stop_requested.set()
+            state.close_framebuffer_map()
     return 0
 
 

@@ -62,6 +62,42 @@ set_command_gate_affinity() {
   fi
 }
 
+linuxcnc_realtime_pids() {
+  pidof rtapi_app 2>/dev/null || true
+}
+
+linuxcnc_realtime_affinity_ok() {
+  pids=$(linuxcnc_realtime_pids | xargs 2>/dev/null || true)
+  [ -n "$pids" ] || return 1
+  for pid in $pids; do
+    [ -d "/proc/$pid/task" ] || return 1
+    for task in /proc/"$pid"/task/[0-9]*; do
+      [ -r "$task/status" ] || return 1
+      cpus=$(awk -F: '/^Cpus_allowed_list:/ {gsub(/[ \t]/, "", $2); print $2}' "$task/status")
+      [ "$cpus" = "0" ] || return 1
+    done
+  done
+  return 0
+}
+
+set_linuxcnc_realtime_affinity() {
+  pids=$(linuxcnc_realtime_pids | xargs 2>/dev/null || true)
+  [ -n "$pids" ] || return 1
+  command -v taskset >/dev/null 2>&1 || {
+    echo "taskset missing; cannot pin LinuxCNC RTAPI realtime threads to CPU0" >&2
+    return 1
+  }
+  for pid in $pids; do
+    taskset -a -pc 0 "$pid" >>"$LINUXCNC_LOG" 2>&1 || {
+      for task in /proc/"$pid"/task/[0-9]*; do
+        [ -e "$task" ] || continue
+        taskset -pc 0 "${task##*/}" >>"$LINUXCNC_LOG" 2>&1 || return 1
+      done
+    }
+  done
+  linuxcnc_realtime_affinity_ok
+}
+
 command_gate_pids() {
   for cmdline in /proc/[0-9]*/cmdline; do
     [ -r "$cmdline" ] || continue
@@ -141,8 +177,10 @@ start_backend() {
   i=0
   while [ "$i" -lt 80 ]; do
     if backend_running; then
-      echo "LinuxCNC backend running"
-      return 0
+      if set_linuxcnc_realtime_affinity; then
+        echo "LinuxCNC backend running; RTAPI realtime threads pinned to CPU0"
+        return 0
+      fi
     fi
     if [ -r "$LINUXCNC_PID" ] && ! kill -0 "$(cat "$LINUXCNC_PID")" 2>/dev/null; then
       break
@@ -150,7 +188,7 @@ start_backend() {
     i=$((i + 1))
     sleep 0.25
   done
-  echo "LinuxCNC backend failed to start" >&2
+  echo "LinuxCNC backend failed to start or RTAPI CPU0 affinity was not confirmed" >&2
   tail -n 80 "$LINUXCNC_LOG" 2>/dev/null || true
   return 1
 }

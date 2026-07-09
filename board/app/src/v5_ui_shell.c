@@ -20,6 +20,7 @@
 
 #include <ctype.h>
 #include <dirent.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -310,21 +311,41 @@ static void shell_create_top_status_layer(lv_obj_t *screen)
     lv_label_set_text(g_top_status_label, "未回零: 开机后需回零一次");
 }
 
+static void shell_set_label_text_if_changed(lv_obj_t *label, const char *text)
+{
+    const char *safe = text ? text : "";
+    const char *current;
+    if (!label) {
+        return;
+    }
+    current = lv_label_get_text(label);
+    if (!current || strcmp(current, safe) != 0) {
+        lv_label_set_text(label, safe);
+    }
+}
+
+static void shell_set_text_color_if_changed(lv_obj_t *obj, lv_color_t color, uint32_t selector)
+{
+    if (obj && lv_color_to32(lv_obj_get_style_text_color(obj, selector)) != lv_color_to32(color)) {
+        lv_obj_set_style_text_color(obj, color, selector);
+    }
+}
+
 static void shell_update_top_status_label(void)
 {
     if (!g_top_status_label) {
         return;
     }
-    lv_obj_set_style_text_color(g_top_status_label, lv_color_make(255, 86, 86), 0);
+    shell_set_text_color_if_changed(g_top_status_label, lv_color_make(255, 86, 86), 0);
     if (!v5_native_readback_all_homed_known(&g_main_page.native_readback)) {
-        lv_label_set_text(g_top_status_label, "回零状态未知");
+        shell_set_label_text_if_changed(g_top_status_label, "回零状态未知");
         return;
     }
     if (g_main_page.native_readback.all_homed) {
-        lv_label_set_text(g_top_status_label, "");
+        shell_set_label_text_if_changed(g_top_status_label, "");
         return;
     }
-    lv_label_set_text(g_top_status_label, "未回零: 开机后需回零一次");
+    shell_set_label_text_if_changed(g_top_status_label, "未回零: 开机后需回零一次");
 }
 
 static void shell_return_button_cb(lv_event_t *event)
@@ -1398,6 +1419,88 @@ static int shell_refresh_due(unsigned long long now, unsigned long long *last, u
     return 0;
 }
 
+static long long shell_quantized_display_value(double value, double scale)
+{
+    double scaled;
+    if (!isfinite(value)) {
+        return 0LL;
+    }
+    scaled = value * scale;
+    return (long long)(scaled >= 0.0 ? scaled + 0.5 : scaled - 0.5);
+}
+
+static int shell_quantized_values_equal(double left, double right, double scale)
+{
+    return shell_quantized_display_value(left, scale) == shell_quantized_display_value(right, scale);
+}
+
+static int shell_axis_values_equal(const double left[V5_STATUS_AXIS_COUNT],
+                                   const double right[V5_STATUS_AXIS_COUNT],
+                                   double scale)
+{
+    unsigned int i;
+    for (i = 0U; i < V5_STATUS_AXIS_COUNT; ++i) {
+        if (!shell_quantized_values_equal(left[i], right[i], scale)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int shell_trajectory_equal(const V5UiStatusView *before, const V5UiStatusView *after)
+{
+    uint32_t i;
+    if (before->trajectory_count != after->trajectory_count) {
+        return 0;
+    }
+    for (i = 0U; i < before->trajectory_count && i < V5_STATUS_TRAJECTORY_POINT_COUNT; ++i) {
+        if (!shell_axis_values_equal(before->trajectory[i].axis, after->trajectory[i].axis, 1000.0)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int shell_status_display_equal(const V5UiStatusView *before, const V5UiStatusView *after)
+{
+    uint32_t changed_mask;
+    if (!before || !after) {
+        return 0;
+    }
+    if (before->valid_mask != after->valid_mask || before->frame_flags != after->frame_flags) {
+        return 0;
+    }
+    changed_mask = before->valid_mask | after->valid_mask;
+    if ((changed_mask & V5_STATUS_VALID_MCS) != 0U &&
+        !shell_axis_values_equal(before->mcs, after->mcs, 1000.0)) {
+        return 0;
+    }
+    if ((changed_mask & V5_STATUS_VALID_CMD_MCS) != 0U &&
+        !shell_axis_values_equal(before->cmd_mcs, after->cmd_mcs, 1000.0)) {
+        return 0;
+    }
+    if ((changed_mask & V5_STATUS_VALID_TRAJECTORY) != 0U && !shell_trajectory_equal(before, after)) {
+        return 0;
+    }
+    if ((changed_mask & V5_STATUS_VALID_SPINDLE_SPEED) != 0U &&
+        !shell_quantized_values_equal(before->spindle_speed_rpm, after->spindle_speed_rpm, 10.0)) {
+        return 0;
+    }
+    if ((changed_mask & V5_STATUS_VALID_LINEAR_VELOCITY) != 0U &&
+        !shell_quantized_values_equal(before->linear_velocity_mm_per_min, after->linear_velocity_mm_per_min, 10.0)) {
+        return 0;
+    }
+    if ((changed_mask & V5_STATUS_VALID_FEED_OVERRIDE) != 0U &&
+        !shell_quantized_values_equal(before->feedrate_override, after->feedrate_override, 10.0)) {
+        return 0;
+    }
+    if ((changed_mask & V5_STATUS_VALID_SPINDLE_OVERRIDE) != 0U &&
+        !shell_quantized_values_equal(before->spindle_override, after->spindle_override, 10.0)) {
+        return 0;
+    }
+    return 1;
+}
+
 int v5_ui_shell_refresh_once(void)
 {
     unsigned long long now;
@@ -1408,8 +1511,11 @@ int v5_ui_shell_refresh_once(void)
     }
     now = shell_monotonic_ns();
     if (shell_refresh_due(now, &g_ui_dynamic_last_refresh_ns, V5_UI_DYNAMIC_REFRESH_NS)) {
+        V5UiStatusView before = g_model.status_view;
         (void)v5_ui_model_refresh_status_from_shm(&g_model, V5_STATUS_SHM_PATH);
-        flags |= V5_MAIN_PAGE_REFRESH_DYNAMIC;
+        if (!shell_status_display_equal(&before, &g_model.status_view)) {
+            flags |= V5_MAIN_PAGE_REFRESH_DYNAMIC;
+        }
     }
     if (shell_refresh_due(now, &g_ui_estop_last_refresh_ns, V5_UI_ESTOP_REFRESH_NS)) {
         (void)shell_refresh_safety_readback(0);

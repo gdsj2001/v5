@@ -47,6 +47,32 @@ static void set_label_text_if_changed(lv_obj_t *label, const char *text)
     }
 }
 
+static int main_color_equal(lv_color_t left, lv_color_t right)
+{
+    return lv_color_to32(left) == lv_color_to32(right);
+}
+
+static void set_obj_bg_color_if_changed(lv_obj_t *obj, lv_color_t color, uint32_t selector)
+{
+    if (obj && !main_color_equal(lv_obj_get_style_bg_color(obj, selector), color)) {
+        lv_obj_set_style_bg_color(obj, color, selector);
+    }
+}
+
+static void set_obj_border_color_if_changed(lv_obj_t *obj, lv_color_t color, uint32_t selector)
+{
+    if (obj && !main_color_equal(lv_obj_get_style_border_color(obj, selector), color)) {
+        lv_obj_set_style_border_color(obj, color, selector);
+    }
+}
+
+static void set_obj_text_color_if_changed(lv_obj_t *obj, lv_color_t color, uint32_t selector)
+{
+    if (obj && !main_color_equal(lv_obj_get_style_text_color(obj, selector), color)) {
+        lv_obj_set_style_text_color(obj, color, selector);
+    }
+}
+
 static int point_equal(const lv_point_t *a, const lv_point_t *b)
 {
     return a && b && a->x == b->x && a->y == b->y;
@@ -453,6 +479,41 @@ static void main_page_update_program_project_points(
         main_page_rotate_xyz_about_axis(page->toolpath_program_project_points[i].axis, a_center, a_axis, a_rad);
         main_page_rotate_xyz_about_axis(page->toolpath_program_project_points[i].axis, c_center, c_axis, c_rad);
     }
+}
+
+static int main_page_rtcp_rotates_current_wcs(const V5MainPage *page)
+{
+    return page &&
+        v5_native_readback_rtcp_known(&page->native_readback) &&
+        page->native_readback.rtcp_enabled;
+}
+
+static int main_page_apply_ac_projection_to_world(
+    const V5MainPage *page,
+    const V5UiStatusView *status,
+    double world[V5_STATUS_AXIS_COUNT])
+{
+    double a_deg = 0.0;
+    double c_deg = 0.0;
+    double a_center[V5_STATUS_AXIS_COUNT];
+    double c_center[V5_STATUS_AXIS_COUNT];
+    double a_axis[3] = {1.0, 0.0, 0.0};
+    double c_axis[3] = {0.0, 0.0, 1.0};
+    double a_rad;
+    double c_rad;
+
+    if (!world ||
+        !main_page_program_ac_projection_available(page, status, &a_deg, &c_deg, a_center, c_center)) {
+        return 0;
+    }
+
+    a_rad = a_deg * M_PI / 180.0;
+    c_rad = c_deg * M_PI / 180.0;
+    c_axis[1] = -sin(a_rad);
+    c_axis[2] = cos(a_rad);
+    main_page_rotate_xyz_about_axis(world, a_center, a_axis, a_rad);
+    main_page_rotate_xyz_about_axis(world, c_center, c_axis, c_rad);
+    return 1;
 }
 
 static void main_page_expand_static_geometry_fit(V5MainPage *page, const V5UiStatusView *status)
@@ -1249,6 +1310,7 @@ static void update_toolpath_state_lines(V5MainPage *page, const V5UiStatusView *
     double wcs_axis[3][V5_STATUS_AXIS_COUNT];
     int mcs_valid;
     int wcs_valid;
+    int wcs_projection_valid = 1;
     int axis_ok[3] = {0, 0, 0};
     unsigned int i;
 
@@ -1317,6 +1379,23 @@ static void update_toolpath_state_lines(V5MainPage *page, const V5UiStatusView *
         for (i = 0U; i < 3U; ++i) {
             memcpy(wcs_axis[i], wcs_origin, sizeof(wcs_axis[i]));
             wcs_axis[i][i] += 40.0;
+        }
+        if (main_page_rtcp_rotates_current_wcs(page)) {
+            wcs_projection_valid = main_page_apply_ac_projection_to_world(page, status, wcs_origin);
+            for (i = 0U; i < 3U && wcs_projection_valid; ++i) {
+                wcs_projection_valid = main_page_apply_ac_projection_to_world(page, status, wcs_axis[i]);
+            }
+        }
+        if (!wcs_projection_valid) {
+            hide_toolpath_line(page->toolpath_wcs_origin_line);
+            for (i = 0U; i < 3U; ++i) {
+                hide_toolpath_line(page->toolpath_wcs_axis_lines[i]);
+            }
+            if (page->toolpath_wcs_label) {
+                set_label_text_if_changed(page->toolpath_wcs_label, "WCS");
+                clear_hidden_flag_if_hidden(page->toolpath_wcs_label);
+            }
+            return;
         }
         if (v5_toolpath_display_project_world_point(wcs_origin, &page->toolpath_fit, (double)V5_TOOLPATH_W, (double)V5_TOOLPATH_H, &wcs_origin_point)) {
             wcs_origin_point = apply_toolpath_view_transform(page, wcs_origin_point);
@@ -1688,20 +1767,26 @@ static void refresh_main_coordinate_digits(V5MainPage *page)
         return;
     }
     for (i = 0U; i < V5_MAIN_PAGE_AXIS_COUNT; ++i) {
-        if (page->mcs_labels[i]) {
+        const char *mcs_text = page->coordinate_digits.value_valid[0][i]
+            ? page->coordinate_digits.value_text[0][i]
+            : (page->mcs_labels[i] ? lv_label_get_text(page->mcs_labels[i]) : "");
+        const char *cmd_text = page->coordinate_digits.value_valid[1][i]
+            ? page->coordinate_digits.value_text[1][i]
+            : (page->cmd_labels[i] ? lv_label_get_text(page->cmd_labels[i]) : "");
+        if (mcs_text) {
             v5_coordinate_digits_set_value(
                 &page->coordinate_digits,
                 0U,
                 i,
-                lv_label_get_text(page->mcs_labels[i]),
+                mcs_text,
                 main_coordinate_digit_color(page, i, 0));
         }
-        if (page->cmd_labels[i]) {
+        if (cmd_text) {
             v5_coordinate_digits_set_value(
                 &page->coordinate_digits,
                 1U,
                 i,
-                lv_label_get_text(page->cmd_labels[i]),
+                cmd_text,
                 main_coordinate_digit_color(page, i, 1));
         }
     }
@@ -1929,11 +2014,11 @@ static void update_toolpath_view_button_visuals(V5MainPage *page)
             continue;
         }
         if (view_action_matches_plane(page->button_actions[i], page->view_plane)) {
-            lv_obj_set_style_bg_color(page->buttons[i], rgb(39, 113, 164), 0);
+            set_obj_bg_color_if_changed(page->buttons[i], rgb(39, 113, 164), 0);
         } else {
-            lv_obj_set_style_bg_color(page->buttons[i], rgb(16, 48, 77), 0);
+            set_obj_bg_color_if_changed(page->buttons[i], rgb(16, 48, 77), 0);
         }
-        lv_obj_set_style_border_color(page->buttons[i], rgb(76, 119, 146), 0);
+        set_obj_border_color_if_changed(page->buttons[i], rgb(76, 119, 146), 0);
     }
 }
 
@@ -1980,8 +2065,8 @@ static void set_button_state_color(lv_obj_t *button, int active, uint8_t ar, uin
     if (!button) {
         return;
     }
-    lv_obj_set_style_bg_color(button, active ? rgb(ar, ag, ab) : rgb(ir, ig, ib), 0);
-    lv_obj_set_style_border_color(button, active ? rgb(86, 228, 153) : rgb(76, 119, 146), 0);
+    set_obj_bg_color_if_changed(button, active ? rgb(ar, ag, ab) : rgb(ir, ig, ib), 0);
+    set_obj_border_color_if_changed(button, active ? rgb(86, 228, 153) : rgb(76, 119, 146), 0);
 }
 
 static void update_wcs_button_visuals(V5MainPage *page)
@@ -2053,7 +2138,7 @@ static void update_rtcp_button_visuals(V5MainPage *page)
         if (page->button_actions[i] == V5_MAIN_PAGE_ACTION_RTCP_TOGGLE) {
             if (page->button_labels[i]) {
                 set_label_text_if_changed(page->button_labels[i], text);
-                lv_obj_set_style_text_color(page->button_labels[i], rgb(238, 245, 248), 0);
+                set_obj_text_color_if_changed(page->button_labels[i], rgb(238, 245, 248), 0);
             }
             set_button_state_color(page->buttons[i], highlighted, 29, 151, 104, 42, 63, 85);
             return;
@@ -2328,13 +2413,21 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
                 char axis[2] = {panel.lines[i].axis ? panel.lines[i].axis : '-', '\0'};
                 set_label_text_if_changed(page->axis_labels[i], axis);
             }
-            if (page->mcs_labels[i]) {
-                set_label_text_if_changed(page->mcs_labels[i], panel.lines[i].mcs_text);
-            }
-            if (page->cmd_labels[i]) {
+            {
                 char wcs_text[32];
                 format_main_page_wcs_coordinate(wcs_text, sizeof(wcs_text), status, &page->native_readback, i);
-                set_label_text_if_changed(page->cmd_labels[i], wcs_text);
+                v5_coordinate_digits_set_value(
+                    &page->coordinate_digits,
+                    0U,
+                    i,
+                    panel.lines[i].mcs_text,
+                    main_coordinate_digit_color(page, i, 0));
+                v5_coordinate_digits_set_value(
+                    &page->coordinate_digits,
+                    1U,
+                    i,
+                    wcs_text,
+                    main_coordinate_digit_color(page, i, 1));
             }
             if (page->error_labels[i]) {
                 char error_text[32];
@@ -2342,7 +2435,6 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
                 set_label_text_if_changed(page->error_labels[i], error_text);
             }
         }
-        refresh_main_coordinate_digits(page);
         set_label_text_if_changed(page->spindle_speed_label, panel.spindle_speed_text);
         set_label_text_if_changed(page->linear_velocity_label, panel.linear_velocity_text);
         set_label_text_if_changed(page->feed_override_label, panel.feed_override_text);
@@ -2711,6 +2803,9 @@ void v5_main_page_set_native_readback(V5MainPage *page, const V5NativeReadback *
     update_main_page_wcs_header(page);
     update_main_page_modal_label(page);
     update_toolpath_status_text(page);
+    if (page->last_status_valid) {
+        update_toolpath_state_lines(page, &page->last_status);
+    }
 }
 
 void v5_main_page_set_navigation_callback(V5MainPage *page, V5UiNavigationCallback cb, void *user_data)

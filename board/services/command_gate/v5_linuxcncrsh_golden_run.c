@@ -4,6 +4,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef _WIN32
+#include <unistd.h>
+#endif
+
 static unsigned int parse_u32(const char *text, unsigned int default_value)
 {
     char *end = 0;
@@ -21,7 +25,16 @@ static unsigned int parse_u32(const char *text, unsigned int default_value)
 static void usage(void)
 {
     printf("usage: v5_linuxcncrsh_golden_run --program /tmp/v5_golden/cc.ngc [--start] [--host 127.0.0.1] [--port 5007] [--password TEXT] [--timeout-ms 1000]\n");
-    printf("opens the exact LinuxCNC native program path through command gate; --start also requires V5_ALLOW_MOTION=1\n");
+    printf("opens the exact LinuxCNC native program path through command gate; --start also requires V5_ALLOW_MOTION=1 and confirms Machine On\n");
+}
+
+static void poll_sleep_ms(unsigned int delay_ms)
+{
+#ifndef _WIN32
+    usleep(delay_ms * 1000U);
+#else
+    (void)delay_ms;
+#endif
 }
 
 static int prepare_program_open(
@@ -71,6 +84,78 @@ static int send_prepared_or_report(
         return 0;
     }
     printf("%s sent: %s\n", label, line);
+    return 1;
+}
+
+static int ensure_machine_on(const V5LinuxcncrshConfig *config)
+{
+    char transcript[1024];
+    int enabled = 0;
+    unsigned int attempt;
+    V5LinuxcncrshSendStatus status;
+
+    transcript[0] = '\0';
+    if (!v5_linuxcncrsh_probe_machine_enabled(config, &enabled, transcript, sizeof(transcript))) {
+        fprintf(stderr, "machine state probe failed before start\n");
+        return 0;
+    }
+    if (enabled) {
+        printf("machine already on\n");
+        return 1;
+    }
+
+    status = v5_linuxcncrsh_send_machine_on_sequence(config);
+    if (status != V5_LINUXCNCRSH_SEND_SENT) {
+        fprintf(stderr, "machine on send failed status=%d state=%s\n", (int)status, transcript);
+        return 0;
+    }
+
+    for (attempt = 0U; attempt < 30U; ++attempt) {
+        transcript[0] = '\0';
+        if (v5_linuxcncrsh_probe_machine_enabled(config, &enabled, transcript, sizeof(transcript)) && enabled) {
+            printf("machine on confirmed\n");
+            return 1;
+        }
+        poll_sleep_ms(100U);
+    }
+
+    fprintf(stderr, "machine on not confirmed after Set Machine On state=%s\n", transcript);
+    return 0;
+}
+
+static int run_home_precondition(const V5LinuxcncrshConfig *config)
+{
+    char mode[96];
+    char code[96];
+    V5LinuxcncrshSendStatus status;
+
+    mode[0] = '\0';
+    code[0] = '\0';
+    status = v5_linuxcncrsh_send_home_sequence(config, mode, sizeof(mode), code, sizeof(code));
+    if (status != V5_LINUXCNCRSH_SEND_SENT) {
+        fprintf(stderr, "home precondition failed status=%d mode=%s code=%s\n", (int)status, mode, code);
+        return 0;
+    }
+    printf("home precondition confirmed mode=%s code=%s\n", mode, code);
+    return 1;
+}
+
+static int reset_auto_state_before_home(const V5LinuxcncrshConfig *config)
+{
+    V5LinuxcncrshSendStatus abort_status;
+    V5LinuxcncrshSendStatus manual_status;
+
+    abort_status = v5_linuxcncrsh_send_line(config, "Set Abort");
+    if (abort_status != V5_LINUXCNCRSH_SEND_SENT) {
+        fprintf(stderr, "abort before home failed status=%d\n", (int)abort_status);
+        return 0;
+    }
+    manual_status = v5_linuxcncrsh_send_line(config, "Set Mode Manual");
+    if (manual_status != V5_LINUXCNCRSH_SEND_SENT) {
+        fprintf(stderr, "manual mode before home failed status=%d\n", (int)manual_status);
+        return 0;
+    }
+    printf("auto state reset before home\n");
     return 1;
 }
 
@@ -130,9 +215,19 @@ int main(int argc, char **argv)
         return 0;
     }
 
+    if (!ensure_machine_on(&config)) {
+        return 6;
+    }
+    if (!reset_auto_state_before_home(&config)) {
+        return 7;
+    }
+    if (!run_home_precondition(&config)) {
+        return 8;
+    }
+
     if (!prepare_start(program_path, &prepared, &request) ||
         !send_prepared_or_report("start", &config, &prepared, &request)) {
-        return 6;
+        return 9;
     }
 
     printf("golden start submitted\n");

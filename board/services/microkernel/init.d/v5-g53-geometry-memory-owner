@@ -10,7 +10,7 @@ PIDFILE=/run/8ax/v5_g53_geometry_memory_owner.pid
 LOGFILE=/run/8ax/v5_g53_geometry_memory_owner.log
 STATUS_PATH=${V5_G53_GEOMETRY_STATUS_PATH:-/dev/shm/v5_native_g53_geometry_status.bin}
 LINUXCNC_INI=${V5_LINUXCNC_INI:-/opt/8ax/v5/linuxcnc/ini/v5_bus.ini}
-INTERVAL_MS=${V5_G53_GEOMETRY_INTERVAL_MS:-100}
+INTERVAL_MS=${V5_G53_GEOMETRY_INTERVAL_MS:-200}
 
 is_running() {
   [ -r "$PIDFILE" ] || return 1
@@ -39,12 +39,16 @@ start_service() {
   rm -f "$PIDFILE" "$STATUS_PATH"
   setsid "$DAEMON" --path "$STATUS_PATH" --ini "$LINUXCNC_INI" --interval-ms "$INTERVAL_MS" >>"$LOGFILE" 2>&1 &
   echo "$!" >"$PIDFILE"
-  sleep 1
-  if is_running && [ -s "$STATUS_PATH" ]; then
-    set_non_microkernel_affinity "$(cat "$PIDFILE")"
-    echo "v5_g53_geometry_memory_owner started pid=$(cat "$PIDFILE") path=$STATUS_PATH ini=$LINUXCNC_INI interval_ms=$INTERVAL_MS"
-    return 0
-  fi
+  i=0
+  while is_running && [ "$i" -lt 40 ]; do
+    if [ -s "$STATUS_PATH" ]; then
+      set_non_microkernel_affinity "$(cat "$PIDFILE")"
+      echo "v5_g53_geometry_memory_owner started pid=$(cat "$PIDFILE") path=$STATUS_PATH ini=$LINUXCNC_INI interval_ms=$INTERVAL_MS"
+      return 0
+    fi
+    i=$((i + 1))
+    sleep 0.1
+  done
   echo "v5_g53_geometry_memory_owner failed to start" >&2
   tail -n 20 "$LOGFILE" 2>/dev/null || true
   return 1

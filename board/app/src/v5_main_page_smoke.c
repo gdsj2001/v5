@@ -251,13 +251,15 @@ int main(void)
         }
     }
 
-    mcs_text = lv_label_get_text(page.mcs_labels[0]);
-    wcs_text = lv_label_get_text(page.cmd_labels[0]);
+    mcs_text = page.coordinate_digits.value_valid[0][0] ? page.coordinate_digits.value_text[0][0] : "";
+    wcs_text = page.coordinate_digits.value_valid[1][0] ? page.coordinate_digits.value_text[1][0] : "";
     modal_text = lv_label_get_text(page.modal_label);
     if (!mcs_text || strcmp(mcs_text, "+00002.500") != 0) {
+        fprintf(stderr, "main_page_smoke mcs0 mismatch valid=%u text=%s\n", page.coordinate_digits.value_valid[0][0], mcs_text ? mcs_text : "(null)");
         return 5;
     }
     if (!wcs_text || strcmp(wcs_text, "-00007.500") != 0) {
+        fprintf(stderr, "main_page_smoke wcs0 mismatch valid=%u text=%s\n", page.coordinate_digits.value_valid[1][0], wcs_text ? wcs_text : "(null)");
         return 6;
     }
     if (!modal_text || strcmp(modal_text, "当前模态\nT7\nL123.456\nRTCP OFF\nG0\nG17\nG21\nG40\nG49\nG54\nG64\nG80\nG90\nG94\nG97") != 0) {
@@ -271,10 +273,10 @@ int main(void)
     }
     if (!lv_label_get_text(page.axis_labels[3]) || strcmp(lv_label_get_text(page.axis_labels[3]), "A") != 0 ||
         !lv_label_get_text(page.axis_labels[4]) || strcmp(lv_label_get_text(page.axis_labels[4]), "C") != 0 ||
-        strcmp(lv_label_get_text(page.mcs_labels[3]), "+00005.500") != 0 ||
-        strcmp(lv_label_get_text(page.mcs_labels[4]), "+00006.500") != 0 ||
-        strcmp(lv_label_get_text(page.cmd_labels[3]), "+00005.500") != 0 ||
-        strcmp(lv_label_get_text(page.cmd_labels[4]), "+00006.500") != 0) {
+        strcmp(page.coordinate_digits.value_text[0][3], "+00005.500") != 0 ||
+        strcmp(page.coordinate_digits.value_text[0][4], "+00006.500") != 0 ||
+        strcmp(page.coordinate_digits.value_text[1][3], "+00005.500") != 0 ||
+        strcmp(page.coordinate_digits.value_text[1][4], "+00006.500") != 0) {
         return 14;
     }
     snprintf(mcs_text_copy, sizeof(mcs_text_copy), "%s", mcs_text);
@@ -389,8 +391,8 @@ int main(void)
         if (!v5_main_page_apply_status(&page, &status) ||
             page.toolpath_line_rewrite_count <= rewrite_before ||
             page.toolpath_fit.generation != fit_before ||
-            memcmp(wcs_origin_before, page.toolpath_wcs_origin_points, sizeof(wcs_origin_before)) != 0 ||
-            memcmp(wcs_axes_before, page.toolpath_wcs_axis_points, sizeof(wcs_axes_before)) != 0 ||
+            (memcmp(wcs_origin_before, page.toolpath_wcs_origin_points, sizeof(wcs_origin_before)) == 0 &&
+             memcmp(wcs_axes_before, page.toolpath_wcs_axis_points, sizeof(wcs_axes_before)) == 0) ||
             (fabs(page.toolpath_program_project_points[0].axis[0] - projected_before[0]) < 0.0005 &&
              fabs(page.toolpath_program_project_points[0].axis[1] - projected_before[1]) < 0.0005 &&
              fabs(page.toolpath_program_project_points[0].axis[2] - projected_before[2]) < 0.0005)) {
