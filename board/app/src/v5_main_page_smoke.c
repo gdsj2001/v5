@@ -280,6 +280,36 @@ int main(void)
         strcmp(page.coordinate_digits.value_text[1][4], "+00006.500") != 0) {
         return 14;
     }
+    {
+        char selected_wcs_text[24];
+        snprintf(selected_wcs_text, sizeof(selected_wcs_text), "%s", page.coordinate_digits.value_text[1][4]);
+        lv_refr_now(NULL);
+        v5_lvgl_headless_reset_flush_count();
+        if (!v5_main_page_select_axis(&page, V5_MAIN_PAGE_SELECT_WCS, 'C')) {
+            return 42;
+        }
+        lv_refr_now(NULL);
+        if (v5_lvgl_headless_flush_count() == 0U) {
+            return 45;
+        }
+        if (strcmp(page.coordinate_digits.value_text[1][4], selected_wcs_text) != 0) {
+            fprintf(stderr, "main_page_smoke selected WCS text lost: before=%s after=%s\n",
+                    selected_wcs_text, page.coordinate_digits.value_text[1][4]);
+            return 43;
+        }
+        v5_lvgl_headless_reset_flush_count();
+        v5_main_page_select_all_axes(&page);
+        lv_refr_now(NULL);
+        if (page.selection.space != V5_MAIN_PAGE_SELECT_MCS ||
+            page.selection.axis != '*' || !page.selection.all_axes) {
+            return 46;
+        }
+        if (strcmp(page.coordinate_digits.value_text[1][4], selected_wcs_text) != 0) {
+            fprintf(stderr, "main_page_smoke deselected WCS text lost: before=%s after=%s\n",
+                    selected_wcs_text, page.coordinate_digits.value_text[1][4]);
+            return 44;
+        }
+    }
     snprintf(mcs_text_copy, sizeof(mcs_text_copy), "%s", mcs_text);
     snprintf(modal_text_copy, sizeof(modal_text_copy), "%s", modal_text);
     if (page.trajectory_point_count != 0u ||

@@ -3,6 +3,7 @@
 #include "v5_linuxcncrsh_client.h"
 #include "v5_native_axis_zero_position.h"
 #include "v5_native_first_point.h"
+#include "v5_native_home.h"
 #include "v5_native_motion_parameters.h"
 #include "v5_native_rtcp_control.h"
 #include "v5_native_safety.h"
@@ -313,24 +314,18 @@ static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5Command
             &native_result);
         copy_cstr(response->readback_code, sizeof(response->readback_code), native_result.code);
     } else if (request.kind == V5_COMMAND_HOME && strcmp(prepared.owner, "native_home_mode_gate") == 0) {
-        char home_code[64];
+        V5NativeHomeResult native_result;
         snprintf(
             response->command_line,
             sizeof(response->command_line),
             "native_home_mode_gate %s real Home",
             v5_native_driver_mode_text(g_motion_parameters.driver_mode));
-        home_code[0] = '\0';
-        if (g_motion_parameters.driver_mode == V5_NATIVE_DRIVER_MODE_BUS) {
-            status = v5_linuxcncrsh_send_home_sequence(
-                &g_linuxcncrsh_config, 0, 0, home_code, sizeof(home_code));
-        } else {
-            status = V5_LINUXCNCRSH_SEND_UNAVAILABLE;
-            copy_cstr(home_code, sizeof(home_code), "PULSE_HOME_COLD_STAGED_NOT_RUNTIME_SELECTABLE");
-        }
+        status = v5_native_home_send(
+            &g_linuxcncrsh_config, &g_motion_parameters, &native_result);
         copy_cstr(
             response->readback_code,
             sizeof(response->readback_code),
-            home_code[0] ? home_code : "BUS_HOME_RESULT_MISSING");
+            native_result.code[0] ? native_result.code : "HOME_RESULT_MISSING");
     } else {
         char jog_code[64];
         if ((request.kind == V5_COMMAND_JOG_INCREMENT ||

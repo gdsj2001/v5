@@ -470,10 +470,75 @@ int v5_linuxcncrsh_gate_preconnect(const V5LinuxcncrshConfig *config)
 #endif
 }
 
+static int v5_linuxcncrsh_has_non_echo_line(const char *text, const char *request)
+{
+    const char *p;
+    if (!text || !request) {
+        return 0;
+    }
+    p = text;
+    while (*p) {
+        const char *start;
+        const char *end;
+        while (*p == '\r' || *p == '\n') {
+            ++p;
+        }
+        start = p;
+        while (*p && *p != '\r' && *p != '\n') {
+            ++p;
+        }
+        end = p;
+        while (start < end && isspace((unsigned char)*start)) {
+            ++start;
+        }
+        while (end > start && isspace((unsigned char)*(end - 1))) {
+            --end;
+        }
+        if (start < end && !v5_linuxcncrsh_line_span_equals(start, end, request)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int v5_linuxcncrsh_recv_request_text(
+    int fd,
+    const char *request,
+    char *out,
+    size_t out_size)
+{
+    size_t used = 0U;
+    int require_non_echo;
+    if (fd < 0 || !request || !out || out_size == 0U) {
+        return 0;
+    }
+    require_non_echo = strncasecmp(request, "Get ", 4U) == 0;
+    out[0] = '\0';
+    while (used + 1U < out_size) {
+        ssize_t rc = recv(fd, out + used, out_size - used - 1U, 0);
+        if (rc <= 0) {
+            break;
+        }
+        used += (size_t)rc;
+        out[used] = '\0';
+        if (!require_non_echo || v5_linuxcncrsh_has_non_echo_line(out, request)) {
+            break;
+        }
+    }
+    if (used == 0U || (require_non_echo && !v5_linuxcncrsh_has_non_echo_line(out, request))) {
+        return 0;
+    }
+    usleep(50000U);
+    v5_linuxcncrsh_recv_available(fd, out, &used, out_size);
+    return 1;
+}
+
 static int v5_linuxcncrsh_send_request_text(int fd, const char *request, char *out, size_t out_size)
 {
     char framed[768];
     char discard[512];
+    char *response = out;
+    size_t response_size = out_size;
     int rc;
 
     if (fd < 0 || !request || !request[0]) {
@@ -487,18 +552,15 @@ static int v5_linuxcncrsh_send_request_text(int fd, const char *request, char *o
     if (!v5_linuxcncrsh_send_all(fd, framed)) {
         return 0;
     }
-    if (out && out_size > 0U) {
-        if (!v5_linuxcncrsh_recv_text(fd, out, out_size)) {
-            return 0;
-        }
-        return !v5_linuxcncrsh_response_has_word(out, "NAK") &&
-               !v5_linuxcncrsh_response_has_word(out, "ERROR");
+    if (!response || response_size == 0U) {
+        response = discard;
+        response_size = sizeof(discard);
     }
-    if (!v5_linuxcncrsh_recv_text(fd, discard, sizeof(discard))) {
+    if (!v5_linuxcncrsh_recv_request_text(fd, request, response, response_size)) {
         return 0;
     }
-    return !v5_linuxcncrsh_response_has_word(discard, "NAK") &&
-           !v5_linuxcncrsh_response_has_word(discard, "ERROR");
+    return !v5_linuxcncrsh_response_has_word(response, "NAK") &&
+           !v5_linuxcncrsh_response_has_word(response, "ERROR");
 }
 
 static int v5_linuxcncrsh_axis_letter_ok(char axis)
@@ -593,6 +655,79 @@ int v5_linuxcncrsh_get_axis_position(
 #endif
 }
 
+int v5_linuxcncrsh_get_joint_position(
+    const V5LinuxcncrshConfig *config,
+    unsigned int joint,
+    double *position_out)
+{
+#ifdef _WIN32
+    (void)config;
+    (void)joint;
+    (void)position_out;
+    return 0;
+#else
+    int fd;
+    int rc;
+    char command[64];
+    char response[512];
+    const char *scan;
+    unsigned int response_joint = 0U;
+    double position = 0.0;
+    if (!position_out) {
+        return 0;
+    }
+    fd = v5_linuxcncrsh_gate_connect(config);
+    if (fd < 0) {
+        return 0;
+    }
+    rc = snprintf(command, sizeof(command), "Get Joint_Pos %u", joint);
+    if (!v5_linuxcncrsh_format_ok(rc, sizeof(command)) ||
+        !v5_linuxcncrsh_send_request_text(fd, command, response, sizeof(response))) {
+        v5_linuxcncrsh_gate_close();
+        return 0;
+    }
+    scan = response;
+    while ((scan = strstr(scan, "JOINT_POS")) != 0) {
+        if (sscanf(scan, "JOINT_POS %u %lf", &response_joint, &position) == 2 &&
+            response_joint == joint && isfinite(position)) {
+            *position_out = position;
+            return 1;
+        }
+        scan += strlen("JOINT_POS");
+    }
+    return 0;
+#endif
+}
+
+static int v5_linuxcncrsh_parse_joint_homed(
+    const char *response,
+    unsigned int expected_joint,
+    int *homed_out)
+{
+    const char *scan;
+    int joint = -1;
+    char state[16];
+    if (homed_out) {
+        *homed_out = 0;
+    }
+    if (!response) {
+        return 0;
+    }
+    scan = response;
+    while ((scan = strstr(scan, "JOINT_HOMED")) != 0) {
+        if (sscanf(scan, "JOINT_HOMED %d %15s", &joint, state) == 2 &&
+            joint == (int)expected_joint &&
+            (strcasecmp(state, "YES") == 0 || strcasecmp(state, "NO") == 0)) {
+            if (homed_out) {
+                *homed_out = strcasecmp(state, "YES") == 0;
+            }
+            return 1;
+        }
+        scan += strlen("JOINT_HOMED");
+    }
+    return 0;
+}
+
 int v5_linuxcncrsh_get_all_homed(
     const V5LinuxcncrshConfig *config,
     unsigned int expected_joint_count,
@@ -607,10 +742,9 @@ int v5_linuxcncrsh_get_all_homed(
     return 0;
 #else
     int fd;
+    char command[64];
     char response[512];
-    char *token;
-    char *save = 0;
-    unsigned int count = 0U;
+    unsigned int joint;
     int all_homed = 1;
     if (all_homed_out) {
         *all_homed_out = 0;
@@ -619,28 +753,21 @@ int v5_linuxcncrsh_get_all_homed(
         return 0;
     }
     fd = v5_linuxcncrsh_gate_connect(config);
-    if (fd < 0 ||
-        !v5_linuxcncrsh_send_request_text(fd, "Get Joint_Homed -1", response, sizeof(response))) {
-        if (fd >= 0) {
+    if (fd < 0) {
+        return 0;
+    }
+    for (joint = 0U; joint < expected_joint_count; ++joint) {
+        int homed = 0;
+        int rc = snprintf(command, sizeof(command), "Get Joint_Homed %u", joint);
+        if (!v5_linuxcncrsh_format_ok(rc, sizeof(command)) ||
+            !v5_linuxcncrsh_send_request_text(fd, command, response, sizeof(response)) ||
+            !v5_linuxcncrsh_parse_joint_homed(response, joint, &homed)) {
             v5_linuxcncrsh_gate_close();
+            return 0;
         }
-        return 0;
-    }
-    token = strtok_r(response, " \t\r\n", &save);
-    if (!token || strcasecmp(token, "JOINT_HOMED") != 0) {
-        return 0;
-    }
-    while ((token = strtok_r(0, " \t\r\n", &save)) != 0) {
-        if (strcasecmp(token, "YES") != 0 && strcasecmp(token, "NO") != 0) {
-            continue;
-        }
-        if (strcasecmp(token, "YES") != 0) {
+        if (!homed) {
             all_homed = 0;
         }
-        ++count;
-    }
-    if (count != expected_joint_count) {
-        return 0;
     }
     if (all_homed_out) {
         *all_homed_out = all_homed;

@@ -1,4 +1,6 @@
 #include "v5_linuxcncrsh_client.h"
+#include "v5_native_home.h"
+#include "v5_native_motion_parameters.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,7 +26,7 @@ static unsigned int parse_u32(const char *text, unsigned int default_value)
 
 static void usage(void)
 {
-    printf("usage: v5_linuxcncrsh_golden_run --program /tmp/v5_golden/cc.ngc [--start] [--host 127.0.0.1] [--port 5007] [--password TEXT] [--timeout-ms 1000]\n");
+    printf("usage: v5_linuxcncrsh_golden_run --program /tmp/v5_golden/cc.ngc [--start --ini PATH] [--host 127.0.0.1] [--port 5007] [--password TEXT] [--timeout-ms 1000]\n");
     printf("opens the exact LinuxCNC native program path through command gate; --start also requires V5_ALLOW_MOTION=1 and confirms Machine On\n");
 }
 
@@ -123,39 +125,20 @@ static int ensure_machine_on(const V5LinuxcncrshConfig *config)
     return 0;
 }
 
-static int run_home_precondition(const V5LinuxcncrshConfig *config)
+static int run_home_precondition(
+    const V5LinuxcncrshConfig *config,
+    const V5NativeMotionParameters *parameters)
 {
-    char mode[96];
-    char code[96];
+    V5NativeHomeResult result;
     V5LinuxcncrshSendStatus status;
 
-    mode[0] = '\0';
-    code[0] = '\0';
-    status = v5_linuxcncrsh_send_home_sequence(config, mode, sizeof(mode), code, sizeof(code));
+    status = v5_native_home_send(config, parameters, &result);
     if (status != V5_LINUXCNCRSH_SEND_SENT) {
-        fprintf(stderr, "home precondition failed status=%d mode=%s code=%s\n", (int)status, mode, code);
+        fprintf(stderr, "home precondition failed status=%d mode=%s code=%s\n",
+                (int)status, result.mode, result.code);
         return 0;
     }
-    printf("home precondition confirmed mode=%s code=%s\n", mode, code);
-    return 1;
-}
-
-static int reset_auto_state_before_home(const V5LinuxcncrshConfig *config)
-{
-    V5LinuxcncrshSendStatus abort_status;
-    V5LinuxcncrshSendStatus manual_status;
-
-    abort_status = v5_linuxcncrsh_send_line(config, "Set Abort");
-    if (abort_status != V5_LINUXCNCRSH_SEND_SENT) {
-        fprintf(stderr, "abort before home failed status=%d\n", (int)abort_status);
-        return 0;
-    }
-    manual_status = v5_linuxcncrsh_send_line(config, "Set Mode Manual");
-    if (manual_status != V5_LINUXCNCRSH_SEND_SENT) {
-        fprintf(stderr, "manual mode before home failed status=%d\n", (int)manual_status);
-        return 0;
-    }
-    printf("auto state reset before home\n");
+    printf("home precondition confirmed mode=%s code=%s\n", result.mode, result.code);
     return 1;
 }
 
@@ -164,7 +147,10 @@ int main(int argc, char **argv)
     V5LinuxcncrshConfig config;
     V5CommandPrepared prepared;
     V5CommandRequest request;
+    V5NativeMotionParameters motion_parameters;
     const char *program_path = 0;
+    const char *ini_path = getenv("V5_LINUXCNC_INI");
+    char motion_code[64];
     int start = 0;
     int i;
 
@@ -174,6 +160,7 @@ int main(int argc, char **argv)
     config.connect_password = "EMC";
     config.client_name = "v5_golden";
     config.timeout_ms = 1000U;
+    motion_code[0] = '\0';
 
     for (i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--program") == 0 && i + 1 < argc) {
@@ -188,6 +175,8 @@ int main(int argc, char **argv)
             config.connect_password = argv[++i];
         } else if (strcmp(argv[i], "--timeout-ms") == 0 && i + 1 < argc) {
             config.timeout_ms = parse_u32(argv[++i], config.timeout_ms);
+        } else if (strcmp(argv[i], "--ini") == 0 && i + 1 < argc) {
+            ini_path = argv[++i];
         } else if (strcmp(argv[i], "--help") == 0) {
             usage();
             return 0;
@@ -205,6 +194,13 @@ int main(int argc, char **argv)
         fprintf(stderr, "V5_ALLOW_MOTION=1 is required for --start\n");
         return 4;
     }
+    if (start && (!ini_path || !ini_path[0] ||
+                  !v5_native_motion_parameters_load(
+                      ini_path, &motion_parameters, motion_code, sizeof(motion_code)))) {
+        fprintf(stderr, "--ini with complete native motion parameters is required for --start: %s\n",
+                motion_code[0] ? motion_code : "MOTION_PARAMETERS_INI_REQUIRED");
+        return 10;
+    }
 
     if (!start) {
         if (!prepare_program_open(program_path, &prepared, &request) ||
@@ -218,10 +214,7 @@ int main(int argc, char **argv)
     if (!ensure_machine_on(&config)) {
         return 6;
     }
-    if (!reset_auto_state_before_home(&config)) {
-        return 7;
-    }
-    if (!run_home_precondition(&config)) {
+    if (!run_home_precondition(&config, &motion_parameters)) {
         return 8;
     }
 

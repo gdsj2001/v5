@@ -1761,7 +1761,8 @@ static int v5_ui_shell_bootstrap_common(V5ShellBootReport *report, const char *p
     if (settings_page_created) {
         (void)v5_settings_page_apply_status(&g_settings_page, &g_model.status_view);
     }
-    lv_timer_handler();
+    lv_obj_invalidate(screen);
+    lv_refr_now(NULL);
     (void)v5_lvgl_remote_display_cache_capture(V5_REMOTE_DISPLAY_CACHE_MAIN);
     if (settings_page_created && main_page_created) {
         shell_hide_all_pages();
@@ -1769,7 +1770,8 @@ static int v5_ui_shell_bootstrap_common(V5ShellBootReport *report, const char *p
         if (g_top_status_layer) {
             lv_obj_add_flag(g_top_status_layer, LV_OBJ_FLAG_HIDDEN);
         }
-        lv_timer_handler();
+        lv_obj_invalidate(screen);
+        lv_refr_now(NULL);
         (void)v5_lvgl_remote_display_cache_capture(V5_REMOTE_DISPLAY_CACHE_SETTINGS);
         shell_hide_all_pages();
         lv_obj_clear_flag(g_shell_pages[V5_SHELL_PAGE_MAIN], LV_OBJ_FLAG_HIDDEN);
@@ -1777,6 +1779,9 @@ static int v5_ui_shell_bootstrap_common(V5ShellBootReport *report, const char *p
             lv_obj_clear_flag(g_top_status_layer, LV_OBJ_FLAG_HIDDEN);
         }
         (void)v5_lvgl_remote_display_cache_blit(V5_REMOTE_DISPLAY_CACHE_MAIN);
+        lv_obj_invalidate(screen);
+        lv_refr_now(NULL);
+        (void)v5_lvgl_remote_display_cache_capture(V5_REMOTE_DISPLAY_CACHE_MAIN);
     }
     fill_report(report, &closure, status_refresh_ok, main_page_created, main_page_applied);
     g_ui_ready = g_model.lvgl_initialized;

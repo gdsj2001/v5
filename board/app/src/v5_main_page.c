@@ -2345,6 +2345,14 @@ static void update_coordinate_selection_style(V5MainPage *page)
     refresh_main_coordinate_digits(page);
 }
 
+static void refresh_coordinate_selection_now(V5MainPage *page)
+{
+    update_coordinate_selection_style(page);
+    if (page && page->coordinate_digits.canvas) {
+        lv_obj_invalidate(page->coordinate_digits.canvas);
+    }
+}
+
 static void log_coordinate_select_event(const V5MainPage *page)
 {
     FILE *fp;
@@ -2514,7 +2522,6 @@ static void clear_button_pressed_visual_now(lv_obj_t *button)
     }
     lv_obj_clear_state(button, LV_STATE_PRESSED);
     lv_obj_invalidate(button);
-    lv_refr_now(NULL);
 }
 
 static void reset_selection_idle_timer(V5MainPage *page)
@@ -2943,14 +2950,12 @@ static void update_home_button_visuals(V5MainPage *page)
 
 static void set_home_transaction_active(V5MainPage *page, int active, int flush)
 {
+    (void)flush;
     if (!page) {
         return;
     }
     page->home_transaction_active = active ? 1 : 0;
     update_home_button_visuals(page);
-    if (flush) {
-        lv_refr_now(NULL);
-    }
 }
 
 static void update_main_page_state_button_visuals(V5MainPage *page)
@@ -3674,7 +3679,7 @@ void v5_main_page_select_all_axes(V5MainPage *page)
     if (page->selection_idle_timer) {
         lv_timer_pause(page->selection_idle_timer);
     }
-    update_coordinate_selection_style(page);
+    refresh_coordinate_selection_now(page);
     update_axis_all_button_visuals(page);
 }
 
@@ -3704,7 +3709,7 @@ int v5_main_page_select_axis(V5MainPage *page, V5MainPageSelectionSpace space, c
     page->selection.axis = up;
     page->selection.all_axes = 0;
     reset_selection_idle_timer(page);
-    update_coordinate_selection_style(page);
+    refresh_coordinate_selection_now(page);
     update_axis_all_button_visuals(page);
     return 1;
 }

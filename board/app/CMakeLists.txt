@@ -11,6 +11,25 @@ set(LV_LVGL_H_INCLUDE_SIMPLE ON CACHE BOOL "Use simple LVGL include" FORCE)
 
 add_subdirectory("${V5_LVGL_DIR}" "${CMAKE_BINARY_DIR}/third_party/lvgl" EXCLUDE_FROM_ALL)
 
+add_executable(v5_coordinate_digits_smoke
+    src/lv_font_zh_16.c
+    src/v5_coordinate_digits_smoke.c
+    src/v5_coordinate_digits.c
+    src/v5_lvgl_headless.c
+)
+
+target_include_directories(v5_coordinate_digits_smoke PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+
+target_compile_definitions(v5_coordinate_digits_smoke PRIVATE
+    LV_CONF_INCLUDE_SIMPLE
+    LV_LVGL_H_INCLUDE_SIMPLE
+)
+
+target_link_libraries(v5_coordinate_digits_smoke PRIVATE lvgl)
+
 add_executable(v5_lvgl_shell
     src/lv_font_zh_16.c
     src/v5_layout_icon_masks.c
@@ -154,6 +173,9 @@ target_include_directories(v5_command_gate_core PUBLIC
 )
 
 target_link_libraries(v5_command_gate_core PUBLIC v5_command_gate_client)
+if(NOT MSVC)
+    target_link_libraries(v5_command_gate_core PUBLIC m)
+endif()
 
 
 add_library(v5_microkernel_contract STATIC

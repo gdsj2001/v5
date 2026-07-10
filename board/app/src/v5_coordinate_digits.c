@@ -241,15 +241,18 @@ int v5_coordinate_digits_create_settings(V5CoordinateDigits *digits, lv_obj_t *p
 
 int v5_coordinate_digits_set_value(V5CoordinateDigits *digits, unsigned int col, unsigned int axis, const char *text, lv_color_t color)
 {
+    char text_snapshot[24];
     char *cached_text;
     lv_color_t *cached_color;
     unsigned char *cached_valid;
-    const char *safe = text ? text : "";
+    const char *safe;
     int base_x;
     int y;
     if (!digits || !digits->canvas || !digits->buffer || col >= (unsigned int)digits->col_count || axis >= V5_COORD_DIGITS_AXIS_COUNT) {
         return 0;
     }
+    snprintf(text_snapshot, sizeof(text_snapshot), "%s", text ? text : "");
+    safe = text_snapshot;
     cached_text = digits->value_text[col][axis];
     cached_color = &digits->value_color[col][axis];
     cached_valid = &digits->value_valid[col][axis];
