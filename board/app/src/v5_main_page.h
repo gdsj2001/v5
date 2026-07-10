@@ -101,6 +101,14 @@ typedef struct V5MainPage {
     int command_execution_enabled;
     int home_transaction_active;
     uint32_t program_edit_last_click_tick;
+    unsigned int program_preview_scroll_start_line;
+    int program_preview_highlight_line;
+    unsigned int program_preview_highlight_loaded_epoch;
+    unsigned int program_preview_started_loaded_epoch;
+    int program_preview_touch_active;
+    lv_point_t program_preview_touch_last_point;
+    int program_preview_touch_accum_y;
+    int program_preview_dragged;
     V5UiNavigationCallback navigation_cb;
     void *navigation_user_data;
     V5MainPageNativeReadbackRefreshCallback native_readback_refresh_cb;
@@ -143,9 +151,11 @@ typedef struct V5MainPage {
     int toolpath_program_visible;
     unsigned int toolpath_program_point_count;
     int toolpath_program_ac_valid;
+    int toolpath_program_model_kind;
     double toolpath_program_ac_a_deg;
     double toolpath_program_ac_c_deg;
     int toolpath_static_pose_valid;
+    int toolpath_static_model_kind;
     double toolpath_static_pose_a_deg;
     double toolpath_static_pose_c_deg;
     V5StatusPoint toolpath_program_points[V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT];

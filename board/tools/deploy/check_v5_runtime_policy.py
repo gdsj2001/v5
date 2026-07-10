@@ -289,6 +289,88 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
     return rc
 
 
+def check_rotary_wrapped_mask_policy() -> int:
+    rc = 0
+    bus_hal = ROOT / "linuxcnc" / "hal" / "v5_bus_2ms.hal"
+    bus_ini = ROOT / "linuxcnc" / "ini" / "v5_bus.ini"
+    if not bus_hal.exists() or not bus_ini.exists():
+        print("ROTARY_WRAPPED_MASK_BUS_SOURCE_MISSING", file=sys.stderr)
+        rc = 1
+    else:
+        hal_text = bus_hal.read_text(encoding="utf-8", errors="ignore")
+        ini_text = bus_ini.read_text(encoding="utf-8", errors="ignore")
+        required_hal = (
+            "loadrt [RTCP]KINS_MODULE coordinates=[RTCP]KINS_COORDINATES sparm=identityfirst",
+            "z20_wrapped_rotary_mask=[RTCP]WRAPPED_ROTARY_MASK",
+            "motion.tooloffset.z => [RTCP]KINS_TOOL_OFFSET_PIN",
+            "setp [RTCP]KINS_X_ROT_POINT_PIN [RTCP]X_ROT_POINT",
+        )
+        for token in required_hal:
+            if token not in hal_text:
+                print(f"ACTIVE_MODEL_KINS_HAL_CONTRACT_MISSING: {bus_hal.relative_to(ROOT)} lacks {token}", file=sys.stderr)
+                rc = 1
+        forbidden_hal = (
+            "loadrt xyzac-trt-kins",
+            "xyzac-trt-kins.tool-offset",
+            "setp xyzac-trt-kins.",
+        )
+        for token in forbidden_hal:
+            if token in hal_text:
+                print(f"ACTIVE_MODEL_KINS_HAL_HARDCODED_AC: {bus_hal.relative_to(ROOT)} contains {token}", file=sys.stderr)
+                rc = 1
+        required_ini = (
+            "MODEL = XYZAC_TRT",
+            "KINS_MODULE = xyzac-trt-kins",
+            "KINS_COORDINATES = XYZAC",
+            "KINS_PREFIX = xyzac-trt-kins",
+            "KINS_TOOL_OFFSET_PIN = xyzac-trt-kins.tool-offset",
+            "KINS_X_ROT_POINT_PIN = xyzac-trt-kins.x-rot-point",
+            "WRAPPED_ROTARY_MASK = 24",
+        )
+        for token in required_ini:
+            if token not in ini_text:
+                print(f"ACTIVE_MODEL_KINS_INI_DEFAULT_MISSING: {bus_ini.relative_to(ROOT)} lacks {token}", file=sys.stderr)
+                rc = 1
+
+    expected = (
+        (
+            ROOT / "linuxcnc" / "hal" / "v5_pulse.hal",
+            "loadrt motmod",
+            "z20_wrapped_rotary_mask=40",
+            "Pulse xyzabc A/C wrapped rotary mask must be 0x28",
+        ),
+    )
+    for path, loadrt_token, mask_token, reason in expected:
+        if not path.exists():
+            print(f"ROTARY_WRAPPED_MASK_HAL_MISSING: {path.relative_to(ROOT)}", file=sys.stderr)
+            rc = 1
+            continue
+        matched_line = None
+        for line_no, line in enumerate(path.read_text(encoding="utf-8", errors="ignore").splitlines(), 1):
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            if loadrt_token in line:
+                matched_line = (line_no, line)
+                break
+        if matched_line is None:
+            print(
+                f"ROTARY_WRAPPED_MASK_LOADRT_MISSING: {path.relative_to(ROOT)} lacks {loadrt_token}",
+                file=sys.stderr,
+            )
+            rc = 1
+            continue
+        line_no, line = matched_line
+        if "z20_wrapped_rotary_mask=0" in line or mask_token not in line:
+            print(
+                f"ROTARY_WRAPPED_MASK_WRONG: {path.relative_to(ROOT)}:{line_no}: "
+                f"{reason}; line must contain {mask_token}: {line.strip()}",
+                file=sys.stderr,
+            )
+            rc = 1
+    return rc
+
+
 def _strip_gcode_comment(line: str) -> str:
     out = []
     in_paren = False
@@ -642,6 +724,7 @@ def main() -> int:
         check_settings_runtime_schema_guard() |
         check_remote_relay_access_control() |
         check_cc_golden_rtcp_before_ac_motion() |
+        check_rotary_wrapped_mask_policy() |
         check_settings_parameter_table_deploy_kind() |
         check_settings_parameter_table_backup_before_merge() |
         check_board_owner_refresh_before_bundle()

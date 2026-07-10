@@ -66,6 +66,8 @@ class Latch:
         if fields[IDX_MAGIC] != MAGIC or fields[IDX_VERSION] != VERSION:
             self.map[:] = FRAME.pack(MAGIC, VERSION, 0, 0, 0, 0, 1, 0, 0, 0)
             self.map.flush()
+        else:
+            self.acknowledge_current_epochs()
 
     def close(self):
         self.map.close()
@@ -75,6 +77,14 @@ class Latch:
 
     def write_field(self, index, value):
         struct.pack_into("<I", self.map, index * 4, int(value) & 0xFFFFFFFF)
+
+    def acknowledge_current_epochs(self):
+        fields = self.read()
+        if fields[IDX_FORCE_ACK] == fields[IDX_FORCE_EPOCH] and fields[IDX_RESET_ACK] == fields[IDX_RESET_EPOCH]:
+            return
+        self.write_field(IDX_FORCE_ACK, fields[IDX_FORCE_EPOCH])
+        self.write_field(IDX_RESET_ACK, fields[IDX_RESET_EPOCH])
+        self.map.flush()
 
     def set_status(self, estop_active, machine_enable_known=0, machine_enabled=0):
         values = (

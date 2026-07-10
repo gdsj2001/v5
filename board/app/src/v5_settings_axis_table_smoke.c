@@ -430,6 +430,64 @@ int main(void)
     unsigned int select_cols = 0U;
 
     v5_settings_axis_table_load_readback(".");
+    if (!v5_settings_axis_table_motion_model_value_is_real() ||
+        v5_settings_axis_table_motion_model_value()[0] == '\0' ||
+        strcmp(v5_settings_axis_table_motion_model_value(), "--") == 0) {
+        fprintf(stderr, "motion model must load from RTCP native owner readback: %s\n",
+                v5_settings_axis_table_motion_model_value());
+        return 50;
+    }
+    if (!v5_settings_axis_table_commit_motion_model("BC摇篮")) {
+        fprintf(stderr, "motion model native owner commit failed\n");
+        return 51;
+    }
+    {
+        char model[64];
+        char display[64];
+        char kins_module[64];
+        char kins_coordinates[64];
+        char kins_prefix[64];
+        char kins_tool_offset_pin[96];
+        char kins_x_rot_point_pin[96];
+        char wrapped_mask[64];
+        char kinematics[128];
+        char traj_coordinates[64];
+        if (!read_rtcp_ini_key("linuxcnc/ini/v5_bus.ini", "MODEL", model, sizeof(model)) ||
+            !read_rtcp_ini_key("linuxcnc/ini/v5_bus.ini", "MOTION_MODEL", display, sizeof(display)) ||
+            !read_rtcp_ini_key("linuxcnc/ini/v5_bus.ini", "KINS_MODULE", kins_module, sizeof(kins_module)) ||
+            !read_rtcp_ini_key("linuxcnc/ini/v5_bus.ini", "KINS_COORDINATES", kins_coordinates, sizeof(kins_coordinates)) ||
+            !read_rtcp_ini_key("linuxcnc/ini/v5_bus.ini", "KINS_PREFIX", kins_prefix, sizeof(kins_prefix)) ||
+            !read_rtcp_ini_key("linuxcnc/ini/v5_bus.ini", "KINS_TOOL_OFFSET_PIN", kins_tool_offset_pin, sizeof(kins_tool_offset_pin)) ||
+            !read_rtcp_ini_key("linuxcnc/ini/v5_bus.ini", "KINS_X_ROT_POINT_PIN", kins_x_rot_point_pin, sizeof(kins_x_rot_point_pin)) ||
+            !read_rtcp_ini_key("linuxcnc/ini/v5_bus.ini", "WRAPPED_ROTARY_MASK", wrapped_mask, sizeof(wrapped_mask)) ||
+            !read_section_ini_key("linuxcnc/ini/v5_bus.ini", "KINS", "KINEMATICS", kinematics, sizeof(kinematics)) ||
+            !read_section_ini_key("linuxcnc/ini/v5_bus.ini", "TRAJ", "COORDINATES", traj_coordinates, sizeof(traj_coordinates)) ||
+            strcmp(model, "XYZBC_TRT") != 0 ||
+            strstr(display, "BC") == 0 ||
+            strcmp(kins_module, "xyzbc-trt-kins") != 0 ||
+            strcmp(kins_coordinates, "XYZBC") != 0 ||
+            strcmp(kins_prefix, "xyzbc-trt-kins") != 0 ||
+            strcmp(kins_tool_offset_pin, "xyzbc-trt-kins.tool-offset") != 0 ||
+            strcmp(kins_x_rot_point_pin, "xyzbc-trt-kins.x-rot-point") != 0 ||
+            strcmp(wrapped_mask, "24") != 0 ||
+            strcmp(kinematics, "xyzbc-trt-kins coordinates=XYZBC sparm=identityfirst") != 0 ||
+            strcmp(traj_coordinates, "X Y Z B C") != 0 ||
+            strstr(v5_settings_axis_table_motion_model_value(), "BC") == 0) {
+            fprintf(stderr, "motion model readback mismatch: model=%s display=%s kins=%s coords=%s prefix=%s tool_pin=%s xrot_pin=%s mask=%s line=%s traj=%s ui=%s\n",
+                    model,
+                    display,
+                    kins_module,
+                    kins_coordinates,
+                    kins_prefix,
+                    kins_tool_offset_pin,
+                    kins_x_rot_point_pin,
+                    wrapped_mask,
+                    kinematics,
+                    traj_coordinates,
+                    v5_settings_axis_table_motion_model_value());
+            return 52;
+        }
+    }
     if (strcmp(v5_settings_axis_table_value(0U, 16U), "777") != 0 ||
         strcmp(v5_settings_axis_table_value(0U, 17U), "888") != 0 ||
         strcmp(v5_settings_axis_table_value(0U, 18U), "slave-ok") != 0) {

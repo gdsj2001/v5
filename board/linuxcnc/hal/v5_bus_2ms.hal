@@ -1,10 +1,12 @@
 # v5_bus_2ms.hal
 # v5 BUS/EtherCAT native HAL. Motion feedback is lcec/CiA402 actual position.
 
-loadrt xyzac-trt-kins coordinates=XYZAC sparm=identityfirst
+loadrt [RTCP]KINS_MODULE coordinates=[RTCP]KINS_COORDINATES sparm=identityfirst
 loadrt [EMCMOT]TPMOD
 loadrt [EMCMOT]HOMEMOD
-loadrt [EMCMOT]EMCMOT servo_period_nsec=[EMCMOT]SERVO_PERIOD num_joints=[KINS]JOINTS z20_wrapped_rotary_mask=24
+# Active model equivalent-zero uses motmod wrapped rotary normalization:
+# first rotary joint=3, C joint=4 => 0x18.
+loadrt [EMCMOT]EMCMOT servo_period_nsec=[EMCMOT]SERVO_PERIOD num_joints=[KINS]JOINTS z20_wrapped_rotary_mask=[RTCP]WRAPPED_ROTARY_MASK
 loadrt cia402 count=5
 loadrt bitslice names=x-din,y-din,z-din,a-din,c-din personality=31,31,31,31,31
 loadrt mux2 count=1
@@ -51,13 +53,13 @@ net v5-rtcp-ui-request or2.0.in0
 net v5-rtcp-gcode-request motion.digital-out-00 => or2.0.in1
 net v5-rtcp-selected or2.0.out => mux2.0.sel
 net re-switchkins-select mux2.0.out => motion.switchkins-type
-net re-kins-tool-offset motion.tooloffset.z => xyzac-trt-kins.tool-offset
-setp xyzac-trt-kins.x-rot-point [RTCP]X_ROT_POINT
-setp xyzac-trt-kins.y-rot-point [RTCP]Y_ROT_POINT
-setp xyzac-trt-kins.z-rot-point [RTCP]Z_ROT_POINT
-setp xyzac-trt-kins.x-offset [RTCP]X_OFFSET
-setp xyzac-trt-kins.y-offset [RTCP]Y_OFFSET
-setp xyzac-trt-kins.z-offset [RTCP]Z_OFFSET
+net re-kins-tool-offset motion.tooloffset.z => [RTCP]KINS_TOOL_OFFSET_PIN
+setp [RTCP]KINS_X_ROT_POINT_PIN [RTCP]X_ROT_POINT
+setp [RTCP]KINS_Y_ROT_POINT_PIN [RTCP]Y_ROT_POINT
+setp [RTCP]KINS_Z_ROT_POINT_PIN [RTCP]Z_ROT_POINT
+setp [RTCP]KINS_X_OFFSET_PIN [RTCP]X_OFFSET
+setp [RTCP]KINS_Y_OFFSET_PIN [RTCP]Y_OFFSET
+setp [RTCP]KINS_Z_OFFSET_PIN [RTCP]Z_OFFSET
 
 setp cia402.0.csp-mode true
 setp cia402.1.csp-mode true

@@ -185,6 +185,16 @@ static int program_row_bg_matches(V5MainPage *page, unsigned int row, int r, int
     return lv_color_to32(actual) == lv_color_to32(expected);
 }
 
+static int program_row_text_has(V5MainPage *page, unsigned int row, const char *needle)
+{
+    const char *text;
+    if (!page || row >= 4U || !page->program_line_labels[row] || !needle) {
+        return 0;
+    }
+    text = lv_label_get_text(page->program_line_labels[row]);
+    return text && strstr(text, needle) != 0;
+}
+
 static int button_pressed_state_clears_on_click(V5MainPage *page, V5MainPageActionKind action, int r, int g, int b)
 {
     lv_obj_t *button = button_for_action(page, action);
@@ -219,6 +229,16 @@ static int write_first_point_program(const char *path)
         return 0;
     }
     fputs("G21\nG90\nG1 X1 Y2 Z3 A4 C5\n", fp);
+    return fclose(fp) == 0;
+}
+
+static int write_preview_scroll_program(const char *path)
+{
+    FILE *fp = fopen(path, "wb");
+    if (!fp) {
+        return 0;
+    }
+    fputs("G21\nG90\nG1 X1\nG1 X2\nG1 X3\nG1 X4\nG1 X5\nG1 X6\n", fp);
     return fclose(fp) == 0;
 }
 
@@ -460,7 +480,7 @@ int main(void)
         v5_program_controller_destroy(&controller);
         return 10;
     }
-    if (!program_row_bg_matches(&page, 0U, 7, 31, 48)) {
+    if (!program_row_bg_matches(&page, 0U, 43, 133, 83)) {
         v5_program_controller_destroy(&controller);
         return 50;
     }
@@ -478,7 +498,7 @@ int main(void)
         }
         v5_native_readback_set_interpreter_idle(&line_readback, 1);
         v5_main_page_set_native_readback(&page, &line_readback);
-        if (!program_row_bg_matches(&page, 0U, 7, 31, 48)) {
+        if (!program_row_bg_matches(&page, 0U, 43, 133, 83)) {
             v5_program_controller_destroy(&controller);
             return 52;
         }
@@ -555,6 +575,107 @@ int main(void)
             return 15;
         }
         unlink(first_point_path);
+    }
+
+    {
+        const char *preview_scroll_path = "v5_preview_scroll_smoke.ngc";
+        V5ProgramOpenResult open_result;
+        V5NativeReadback idle_readback;
+        V5NativeReadback line_readback;
+        V5NativeReadback stopped_readback;
+        lv_point_t preview_touch_start = {120, 535};
+        lv_point_t preview_touch_move = {120, 505};
+        int preview_changed = 0;
+        memset(&open_result, 0, sizeof(open_result));
+        if (!write_preview_scroll_program(preview_scroll_path) ||
+            !v5_main_page_open_program(&page, preview_scroll_path, &open_result)) {
+            unlink(preview_scroll_path);
+            v5_program_controller_destroy(&controller);
+            return 56;
+        }
+        v5_native_readback_init(&idle_readback);
+        v5_native_readback_set_interpreter_idle(&idle_readback, 1);
+        v5_main_page_set_native_readback(&page, &idle_readback);
+        if (!program_row_text_has(&page, 0U, "001 ") ||
+            !program_row_bg_matches(&page, 0U, 43, 133, 83)) {
+            unlink(preview_scroll_path);
+            v5_program_controller_destroy(&controller);
+            return 61;
+        }
+        v5_native_readback_set_current_line(&idle_readback, 8);
+        v5_main_page_set_native_readback(&page, &idle_readback);
+        if (!program_row_text_has(&page, 0U, "001 ") ||
+            !program_row_bg_matches(&page, 0U, 43, 133, 83)) {
+            unlink(preview_scroll_path);
+            v5_program_controller_destroy(&controller);
+            return 63;
+        }
+        if (!v5_main_page_handle_touch_points(&page, &preview_touch_start, 1, 1, &preview_changed) ||
+            !v5_main_page_handle_touch_points(&page, &preview_touch_move, 1, 1, &preview_changed) ||
+            !preview_changed ||
+            !program_row_text_has(&page, 0U, "002 ") ||
+            !program_row_text_has(&page, 3U, "005 ") ||
+            !program_row_bg_matches(&page, 0U, 43, 133, 83)) {
+            unlink(preview_scroll_path);
+            v5_program_controller_destroy(&controller);
+            return 57;
+        }
+        if (!v5_main_page_handle_touch_points(&page, 0, 0, 0, &preview_changed)) {
+            unlink(preview_scroll_path);
+            v5_program_controller_destroy(&controller);
+            return 58;
+        }
+        v5_native_readback_init(&line_readback);
+        v5_native_readback_set_safety_estop(&line_readback, 0);
+        v5_native_readback_set_machine_enabled(&line_readback, 1);
+        v5_native_readback_set_interpreter_idle(&line_readback, 0);
+        v5_native_readback_set_current_line(&line_readback, 8);
+        v5_native_readback_set_motion_line(&line_readback, 3);
+        v5_main_page_set_native_readback(&page, &line_readback);
+        if (!program_row_text_has(&page, 0U, "003 ") ||
+            !program_row_text_has(&page, 3U, "006 ") ||
+            !program_row_bg_matches(&page, 0U, 43, 133, 83)) {
+            unlink(preview_scroll_path);
+            v5_program_controller_destroy(&controller);
+            return 64;
+        }
+        v5_native_readback_init(&line_readback);
+        v5_native_readback_set_safety_estop(&line_readback, 0);
+        v5_native_readback_set_machine_enabled(&line_readback, 1);
+        v5_native_readback_set_interpreter_idle(&line_readback, 0);
+        v5_native_readback_set_current_line(&line_readback, 5);
+        v5_main_page_set_native_readback(&page, &line_readback);
+        if (!program_row_text_has(&page, 0U, "005 ") ||
+            !program_row_text_has(&page, 3U, "008 ") ||
+            !program_row_bg_matches(&page, 0U, 43, 133, 83)) {
+            unlink(preview_scroll_path);
+            v5_program_controller_destroy(&controller);
+            return 59;
+        }
+        v5_native_readback_set_current_line(&line_readback, 8);
+        v5_main_page_set_native_readback(&page, &line_readback);
+        if (!program_row_text_has(&page, 0U, "005 ") ||
+            !program_row_text_has(&page, 3U, "008 ") ||
+            !program_row_bg_matches(&page, 3U, 43, 133, 83)) {
+            unlink(preview_scroll_path);
+            v5_program_controller_destroy(&controller);
+            return 62;
+        }
+        v5_native_readback_init(&stopped_readback);
+        v5_native_readback_set_safety_estop(&stopped_readback, 1);
+        v5_native_readback_set_machine_enabled(&stopped_readback, 0);
+        v5_native_readback_set_interpreter_idle(&stopped_readback, 1);
+        v5_native_readback_set_current_line(&stopped_readback, 0);
+        v5_native_readback_set_motion_line(&stopped_readback, 0);
+        v5_main_page_set_native_readback(&page, &stopped_readback);
+        if (!program_row_text_has(&page, 0U, "005 ") ||
+            !program_row_text_has(&page, 3U, "008 ") ||
+            !program_row_bg_matches(&page, 3U, 43, 133, 83)) {
+            unlink(preview_scroll_path);
+            v5_program_controller_destroy(&controller);
+            return 60;
+        }
+        unlink(preview_scroll_path);
     }
 
     printf("v5 main page actions: buttons=%u local=view_3d mdi=start jog=native rtcp=toggle axis_select=prepared rotary_equiv_zero=prepared first_point=prepared native_lines=prepared missing_gates=0\n",

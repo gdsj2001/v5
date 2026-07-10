@@ -13,6 +13,7 @@ extern "C" {
 #define V5_NATIVE_G53_GEOMETRY_STATUS_DEFAULT_MAX_AGE_MS 1000U
 #define V5_NATIVE_G53_GEOMETRY_STATUS_CENTER_COUNT V5_NATIVE_READBACK_G53_CENTER_COUNT
 #define V5_NATIVE_G53_GEOMETRY_STATUS_AXIS_COUNT V5_NATIVE_READBACK_G53_AXIS_COUNT
+#define V5_NATIVE_G53_GEOMETRY_STATUS_MOTION_MODEL_CAP V5_NATIVE_READBACK_MOTION_MODEL_CAP
 
 int v5_native_g53_geometry_status_read(const char *path, unsigned int max_age_ms, V5NativeReadback *readback);
 int v5_native_g53_geometry_status_write(
@@ -21,7 +22,8 @@ int v5_native_g53_geometry_status_write(
     const double *centers,
     size_t center_count,
     size_t axis_count,
-    unsigned int epoch);
+    unsigned int epoch,
+    const char *motion_model);
 
 #ifdef __cplusplus
 }

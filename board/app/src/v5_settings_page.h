@@ -19,6 +19,7 @@ typedef struct V5SettingsPage {
     unsigned int button_count;
     lv_obj_t *status_label;
     lv_obj_t *machine_code_label;
+    lv_obj_t *motion_model_dropdown;
     lv_obj_t *mcs_labels[V5_MAIN_PAGE_AXIS_COUNT];
     V5CoordinateDigits mcs_digits;
     lv_color_t mcs_digits_buffer[V5_COORD_DIGITS_SETTINGS_W * V5_COORD_DIGITS_SETTINGS_H];

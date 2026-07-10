@@ -1622,6 +1622,33 @@ int v5_settings_axis_table_commit_g53_value(unsigned int row, unsigned int col, 
     return ok;
 }
 
+int v5_settings_axis_table_commit_motion_model(const char *value)
+{
+    V5SettingsApplyAxisCommitRequest request;
+    V5SettingsApplyAxisCommitResult commit_result;
+    int ok;
+    if (!value || !value[0]) {
+        return 0;
+    }
+    memset(&request, 0, sizeof(request));
+    memset(&commit_result, 0, sizeof(commit_result));
+    request.project_root = g_project_root;
+    request.axis = "RTCP";
+    request.axis_index = 0U;
+    request.field_key = "motion_model";
+    request.field_name = "motion_model";
+    request.value_text = value;
+    request.owner_generation = settings_axis_owner_generation("motion_model");
+    request.readback_token = settings_axis_readback_token("motion_model", value);
+    ok = v5_command_gate_settings_axis_commit(&request, &commit_result, 3000U);
+    log_axis_param_event("motion_model", value, ok);
+    if (ok) {
+        set_motion_model_value(commit_result.readback_value, 1);
+        notify_settings_axis_commit_success();
+    }
+    return ok;
+}
+
 int v5_settings_axis_table_commit_value(unsigned int row, unsigned int col, const char *value)
 {
     const V5SettingsAxisRowSpec *row_spec;

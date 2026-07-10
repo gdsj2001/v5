@@ -12,7 +12,7 @@ STATUS_PATH=${V5_WCS_STATUS_PATH:-/dev/shm/v5_native_wcs_status.bin}
 LINUXCNC_INI=${V5_LINUXCNC_INI:-/opt/8ax/v5/linuxcnc/ini/v5_bus.ini}
 MODAL_TOOL_PATH=${V5_MODAL_TOOL_STATUS_PATH:-/dev/shm/v5_native_modal_tool_status.bin}
 RETIRED_STATUS_PATHS="/run/8ax_v5_product_ui/v3_native_wcs_status.bin /run/8ax_v5_product_ui/v3_native_position_status.bin /run/8ax_v5_product_ui/v3_native_modal_tool_status.bin"
-INTERVAL_MS=${V5_WCS_STATUS_INTERVAL_MS:-200}
+INTERVAL_MS=${V5_WCS_STATUS_INTERVAL_MS:-33}
 PYTHONPATH=/usr/lib/python3/dist-packages${PYTHONPATH:+:$PYTHONPATH}
 LINUXCNC_PY_HOME=${V5_LINUXCNC_PY_HOME:-}
 if [ -z "$LINUXCNC_PY_HOME" ]; then

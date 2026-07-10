@@ -1375,6 +1375,189 @@ static const char *settings_apply_g53_rtcp_key(const char *field_name)
     return 0;
 }
 
+static void settings_apply_upper_ascii(const char *text, char *out, size_t out_cap)
+{
+    size_t i;
+    if (!out || out_cap == 0U) {
+        return;
+    }
+    out[0] = '\0';
+    if (!text) {
+        return;
+    }
+    for (i = 0U; i + 1U < out_cap && text[i]; ++i) {
+        out[i] = (char)toupper((unsigned char)text[i]);
+    }
+    out[i] = '\0';
+}
+
+static int settings_apply_motion_model_values(
+    const char *value_text,
+    char *canonical,
+    size_t canonical_cap,
+    char *display,
+    size_t display_cap,
+    char *kins_module,
+    size_t kins_module_cap,
+    char *kins_coordinates,
+    size_t kins_coordinates_cap,
+    char *traj_coordinates,
+    size_t traj_coordinates_cap,
+    unsigned int *wrapped_rotary_mask)
+{
+    char normalized[64];
+    if (!value_text || !value_text[0] || !canonical || canonical_cap == 0U ||
+        !display || display_cap == 0U ||
+        !kins_module || kins_module_cap == 0U ||
+        !kins_coordinates || kins_coordinates_cap == 0U ||
+        !traj_coordinates || traj_coordinates_cap == 0U ||
+        !wrapped_rotary_mask) {
+        return 0;
+    }
+    settings_apply_upper_ascii(value_text, normalized, sizeof(normalized));
+    if (strncmp(normalized, "BC", 2U) == 0 ||
+        strstr(normalized, "XYZBC") != 0 ||
+        strstr(normalized, "_BC") != 0 ||
+        strstr(normalized, "-BC") != 0) {
+        snprintf(canonical, canonical_cap, "XYZBC_TRT");
+        snprintf(display, display_cap, "BC摇篮");
+        snprintf(kins_module, kins_module_cap, "xyzbc-trt-kins");
+        snprintf(kins_coordinates, kins_coordinates_cap, "XYZBC");
+        snprintf(traj_coordinates, traj_coordinates_cap, "X Y Z B C");
+        *wrapped_rotary_mask = 24U;
+        return 1;
+    }
+    if (strncmp(normalized, "AC", 2U) == 0 ||
+        strstr(normalized, "XYZAC") != 0 ||
+        strstr(normalized, "_AC") != 0 ||
+        strstr(normalized, "-AC") != 0) {
+        snprintf(canonical, canonical_cap, "XYZAC_TRT");
+        snprintf(display, display_cap, "AC摇篮");
+        snprintf(kins_module, kins_module_cap, "xyzac-trt-kins");
+        snprintf(kins_coordinates, kins_coordinates_cap, "XYZAC");
+        snprintf(traj_coordinates, traj_coordinates_cap, "X Y Z A C");
+        *wrapped_rotary_mask = 24U;
+        return 1;
+    }
+    return 0;
+}
+
+static int settings_apply_commit_motion_model(
+    const V5SettingsApplyAxisCommitRequest *request,
+    V5SettingsApplyAxisCommitResult *result)
+{
+    char ini_path[512];
+    char canonical[32];
+    char display[32];
+    char kins_module[32];
+    char kins_coordinates[16];
+    char kins_prefix[32];
+    char kins_tool_offset_pin[64];
+    char kins_x_rot_point_pin[64];
+    char kins_y_rot_point_pin[64];
+    char kins_z_rot_point_pin[64];
+    char kins_x_offset_pin[64];
+    char kins_y_offset_pin[64];
+    char kins_z_offset_pin[64];
+    char traj_coordinates[32];
+    char kinematics[96];
+    char wrapped_mask[16];
+    char canonical_readback[64];
+    char display_readback[64];
+    char kins_module_readback[64];
+    char kins_coordinates_readback[64];
+    char kins_prefix_readback[64];
+    char kins_tool_offset_pin_readback[96];
+    char kins_x_rot_point_pin_readback[96];
+    char kins_y_rot_point_pin_readback[96];
+    char kins_z_rot_point_pin_readback[96];
+    char kins_x_offset_pin_readback[96];
+    char kins_y_offset_pin_readback[96];
+    char kins_z_offset_pin_readback[96];
+    char traj_coordinates_readback[64];
+    char kinematics_readback[128];
+    char wrapped_mask_readback[32];
+    unsigned int wrapped_rotary_mask = 0U;
+    if (!request || !request->value_text ||
+        !settings_apply_motion_model_values(
+            request->value_text,
+            canonical,
+            sizeof(canonical),
+            display,
+            sizeof(display),
+            kins_module,
+            sizeof(kins_module),
+            kins_coordinates,
+            sizeof(kins_coordinates),
+            traj_coordinates,
+            sizeof(traj_coordinates),
+            &wrapped_rotary_mask) ||
+        !build_runtime_ini_path(ini_path, sizeof(ini_path), request->project_root)) {
+        return 0;
+    }
+    snprintf(kins_prefix, sizeof(kins_prefix), "%s", kins_module);
+    snprintf(kins_tool_offset_pin, sizeof(kins_tool_offset_pin), "%s.tool-offset", kins_prefix);
+    snprintf(kins_x_rot_point_pin, sizeof(kins_x_rot_point_pin), "%s.x-rot-point", kins_prefix);
+    snprintf(kins_y_rot_point_pin, sizeof(kins_y_rot_point_pin), "%s.y-rot-point", kins_prefix);
+    snprintf(kins_z_rot_point_pin, sizeof(kins_z_rot_point_pin), "%s.z-rot-point", kins_prefix);
+    snprintf(kins_x_offset_pin, sizeof(kins_x_offset_pin), "%s.x-offset", kins_prefix);
+    snprintf(kins_y_offset_pin, sizeof(kins_y_offset_pin), "%s.y-offset", kins_prefix);
+    snprintf(kins_z_offset_pin, sizeof(kins_z_offset_pin), "%s.z-offset", kins_prefix);
+    snprintf(kinematics, sizeof(kinematics), "%s coordinates=%s sparm=identityfirst", kins_module, kins_coordinates);
+    snprintf(wrapped_mask, sizeof(wrapped_mask), "%u", wrapped_rotary_mask);
+    if (!ini_write_section_text(ini_path, "RTCP", "MODEL", canonical, 0, canonical_readback, sizeof(canonical_readback)) ||
+        !ini_write_section_text(ini_path, "RTCP", "MOTION_MODEL", display, 0, display_readback, sizeof(display_readback)) ||
+        !ini_write_section_text(ini_path, "RTCP", "KINS_MODULE", kins_module, 0, kins_module_readback, sizeof(kins_module_readback)) ||
+        !ini_write_section_text(ini_path, "RTCP", "KINS_COORDINATES", kins_coordinates, 0, kins_coordinates_readback, sizeof(kins_coordinates_readback)) ||
+        !ini_write_section_text(ini_path, "RTCP", "KINS_PREFIX", kins_prefix, 0, kins_prefix_readback, sizeof(kins_prefix_readback)) ||
+        !ini_write_section_text(ini_path, "RTCP", "KINS_TOOL_OFFSET_PIN", kins_tool_offset_pin, 0, kins_tool_offset_pin_readback, sizeof(kins_tool_offset_pin_readback)) ||
+        !ini_write_section_text(ini_path, "RTCP", "KINS_X_ROT_POINT_PIN", kins_x_rot_point_pin, 0, kins_x_rot_point_pin_readback, sizeof(kins_x_rot_point_pin_readback)) ||
+        !ini_write_section_text(ini_path, "RTCP", "KINS_Y_ROT_POINT_PIN", kins_y_rot_point_pin, 0, kins_y_rot_point_pin_readback, sizeof(kins_y_rot_point_pin_readback)) ||
+        !ini_write_section_text(ini_path, "RTCP", "KINS_Z_ROT_POINT_PIN", kins_z_rot_point_pin, 0, kins_z_rot_point_pin_readback, sizeof(kins_z_rot_point_pin_readback)) ||
+        !ini_write_section_text(ini_path, "RTCP", "KINS_X_OFFSET_PIN", kins_x_offset_pin, 0, kins_x_offset_pin_readback, sizeof(kins_x_offset_pin_readback)) ||
+        !ini_write_section_text(ini_path, "RTCP", "KINS_Y_OFFSET_PIN", kins_y_offset_pin, 0, kins_y_offset_pin_readback, sizeof(kins_y_offset_pin_readback)) ||
+        !ini_write_section_text(ini_path, "RTCP", "KINS_Z_OFFSET_PIN", kins_z_offset_pin, 0, kins_z_offset_pin_readback, sizeof(kins_z_offset_pin_readback)) ||
+        !ini_write_section_text(ini_path, "RTCP", "WRAPPED_ROTARY_MASK", wrapped_mask, 0, wrapped_mask_readback, sizeof(wrapped_mask_readback)) ||
+        !ini_write_section_text(ini_path, "KINS", "KINEMATICS", kinematics, 0, kinematics_readback, sizeof(kinematics_readback)) ||
+        !ini_write_section_text(ini_path, "TRAJ", "COORDINATES", traj_coordinates, 0, traj_coordinates_readback, sizeof(traj_coordinates_readback)) ||
+        !ini_read_section_text(ini_path, "RTCP", "MODEL", canonical_readback, sizeof(canonical_readback)) ||
+        !ini_read_section_text(ini_path, "RTCP", "MOTION_MODEL", display_readback, sizeof(display_readback)) ||
+        !ini_read_section_text(ini_path, "RTCP", "KINS_MODULE", kins_module_readback, sizeof(kins_module_readback)) ||
+        !ini_read_section_text(ini_path, "RTCP", "KINS_COORDINATES", kins_coordinates_readback, sizeof(kins_coordinates_readback)) ||
+        !ini_read_section_text(ini_path, "RTCP", "KINS_PREFIX", kins_prefix_readback, sizeof(kins_prefix_readback)) ||
+        !ini_read_section_text(ini_path, "RTCP", "KINS_TOOL_OFFSET_PIN", kins_tool_offset_pin_readback, sizeof(kins_tool_offset_pin_readback)) ||
+        !ini_read_section_text(ini_path, "RTCP", "KINS_X_ROT_POINT_PIN", kins_x_rot_point_pin_readback, sizeof(kins_x_rot_point_pin_readback)) ||
+        !ini_read_section_text(ini_path, "RTCP", "KINS_Y_ROT_POINT_PIN", kins_y_rot_point_pin_readback, sizeof(kins_y_rot_point_pin_readback)) ||
+        !ini_read_section_text(ini_path, "RTCP", "KINS_Z_ROT_POINT_PIN", kins_z_rot_point_pin_readback, sizeof(kins_z_rot_point_pin_readback)) ||
+        !ini_read_section_text(ini_path, "RTCP", "KINS_X_OFFSET_PIN", kins_x_offset_pin_readback, sizeof(kins_x_offset_pin_readback)) ||
+        !ini_read_section_text(ini_path, "RTCP", "KINS_Y_OFFSET_PIN", kins_y_offset_pin_readback, sizeof(kins_y_offset_pin_readback)) ||
+        !ini_read_section_text(ini_path, "RTCP", "KINS_Z_OFFSET_PIN", kins_z_offset_pin_readback, sizeof(kins_z_offset_pin_readback)) ||
+        !ini_read_section_text(ini_path, "RTCP", "WRAPPED_ROTARY_MASK", wrapped_mask_readback, sizeof(wrapped_mask_readback)) ||
+        !ini_read_section_text(ini_path, "KINS", "KINEMATICS", kinematics_readback, sizeof(kinematics_readback)) ||
+        !ini_read_section_text(ini_path, "TRAJ", "COORDINATES", traj_coordinates_readback, sizeof(traj_coordinates_readback)) ||
+        !settings_apply_values_match(canonical_readback, canonical) ||
+        !settings_apply_values_match(display_readback, display) ||
+        !settings_apply_values_match(kins_module_readback, kins_module) ||
+        !settings_apply_values_match(kins_coordinates_readback, kins_coordinates) ||
+        !settings_apply_values_match(kins_prefix_readback, kins_prefix) ||
+        !settings_apply_values_match(kins_tool_offset_pin_readback, kins_tool_offset_pin) ||
+        !settings_apply_values_match(kins_x_rot_point_pin_readback, kins_x_rot_point_pin) ||
+        !settings_apply_values_match(kins_y_rot_point_pin_readback, kins_y_rot_point_pin) ||
+        !settings_apply_values_match(kins_z_rot_point_pin_readback, kins_z_rot_point_pin) ||
+        !settings_apply_values_match(kins_x_offset_pin_readback, kins_x_offset_pin) ||
+        !settings_apply_values_match(kins_y_offset_pin_readback, kins_y_offset_pin) ||
+        !settings_apply_values_match(kins_z_offset_pin_readback, kins_z_offset_pin) ||
+        !settings_apply_values_match(wrapped_mask_readback, wrapped_mask) ||
+        !settings_apply_values_match(kinematics_readback, kinematics) ||
+        !settings_apply_values_match(traj_coordinates_readback, traj_coordinates)) {
+        return 0;
+    }
+    if (result) {
+        snprintf(result->readback_value, sizeof(result->readback_value), "%s", display_readback);
+    }
+    return 1;
+}
+
 static int settings_apply_commit_g53_geometry(
     const V5SettingsApplyAxisCommitRequest *request,
     V5SettingsApplyAxisCommitResult *result)
@@ -1382,8 +1565,13 @@ static int settings_apply_commit_g53_geometry(
     char ini_path[512];
     char raw[64];
     const char *ini_key;
-    if (!request || !request->field_name || !request->value_text ||
-        !settings_apply_numeric_text(request->value_text) ||
+    if (!request || !request->field_name || !request->value_text) {
+        return 0;
+    }
+    if (strcmp(request->field_name, "motion_model") == 0) {
+        return settings_apply_commit_motion_model(request, result);
+    }
+    if (!settings_apply_numeric_text(request->value_text) ||
         !build_runtime_ini_path(ini_path, sizeof(ini_path), request->project_root)) {
         return 0;
     }

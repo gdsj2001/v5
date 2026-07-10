@@ -188,6 +188,7 @@ int main(void)
         V5_NATIVE_READBACK_G53_CENTER_COUNT,
         V5_NATIVE_READBACK_G53_AXIS_COUNT,
         23U);
+    v5_native_readback_set_motion_model(&readback, "XYZAC_TRT");
     v5_native_readback_set_rtcp_actual(&readback, 0);
     v5_native_readback_set_modal_actual(&readback, "G0 G17 G21 G40 G49 G54 G64 G80 G90 G94 G97");
     v5_native_readback_set_tool_actual(&readback, 7, 1, 123.456);
@@ -398,6 +399,38 @@ int main(void)
              fabs(page.toolpath_program_project_points[0].axis[2] - projected_before[2]) < 0.0005)) {
             v5_program_controller_destroy(&controller);
             return 38;
+        }
+
+        v5_native_readback_set_motion_model(&readback, "XYZBC_TRT");
+        v5_main_page_set_native_readback(&page, &readback);
+        if (!v5_main_page_apply_status(&page, &status) || !page.toolpath_program_ac_valid ||
+            strcmp(lv_label_get_text(page.axis_labels[3]), "B") != 0) {
+            v5_program_controller_destroy(&controller);
+            return 39;
+        }
+        memcpy(wcs_origin_before, page.toolpath_wcs_origin_points, sizeof(wcs_origin_before));
+        memcpy(wcs_axes_before, page.toolpath_wcs_axis_points, sizeof(wcs_axes_before));
+        projected_before[0] = page.toolpath_program_project_points[0].axis[0];
+        projected_before[1] = page.toolpath_program_project_points[0].axis[1];
+        projected_before[2] = page.toolpath_program_project_points[0].axis[2];
+        status.mcs[3] += 10.0;
+        status.mcs[4] += 10.0;
+        if (!v5_main_page_apply_status(&page, &status) ||
+            !page.toolpath_program_ac_valid ||
+            (memcmp(wcs_origin_before, page.toolpath_wcs_origin_points, sizeof(wcs_origin_before)) == 0 &&
+             memcmp(wcs_axes_before, page.toolpath_wcs_axis_points, sizeof(wcs_axes_before)) == 0) ||
+            (fabs(page.toolpath_program_project_points[0].axis[0] - projected_before[0]) < 0.0005 &&
+             fabs(page.toolpath_program_project_points[0].axis[1] - projected_before[1]) < 0.0005 &&
+             fabs(page.toolpath_program_project_points[0].axis[2] - projected_before[2]) < 0.0005)) {
+            v5_program_controller_destroy(&controller);
+            return 40;
+        }
+        v5_native_readback_set_motion_model(&readback, "XYZAC_TRT");
+        v5_main_page_set_native_readback(&page, &readback);
+        if (!v5_main_page_apply_status(&page, &status) || !page.toolpath_program_ac_valid ||
+            strcmp(lv_label_get_text(page.axis_labels[3]), "A") != 0) {
+            v5_program_controller_destroy(&controller);
+            return 41;
         }
     }
     gesture_start[0].x = 160;

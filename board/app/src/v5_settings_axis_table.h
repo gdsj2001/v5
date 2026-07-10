@@ -60,6 +60,7 @@ int v5_settings_axis_table_commit_g53_value(unsigned int row, unsigned int col, 
 int v5_settings_axis_table_cell_is_disabled(unsigned int row, unsigned int col);
 const char *v5_settings_axis_table_motion_model_value(void);
 int v5_settings_axis_table_motion_model_value_is_real(void);
+int v5_settings_axis_table_commit_motion_model(const char *value);
 const char *v5_settings_axis_table_bus_pulse_value(void);
 int v5_settings_axis_table_bus_pulse_value_is_real(void);
 unsigned int v5_settings_axis_table_slave_option_count(void);

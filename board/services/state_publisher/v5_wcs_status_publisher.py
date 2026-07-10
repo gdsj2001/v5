@@ -45,7 +45,7 @@ MODAL_TOOL_BLOCK_STRUCT = struct.Struct('<IIIIIIIIIiIIQ128sdIIIiIiIIi128sIII')
 DEFAULT_PATH = '/dev/shm/v5_native_wcs_status.bin'
 DEFAULT_POSITION_PATH = '/dev/shm/v5_native_position_status.bin'
 DEFAULT_MODAL_TOOL_PATH = '/dev/shm/v5_native_modal_tool_status.bin'
-DEFAULT_INTERVAL_MS = 100
+DEFAULT_INTERVAL_MS = 33
 DEFAULT_T0_TOOL_HOLDER_LENGTH_MM = 15.0
 
 V5_STATUS_VALID_MCS = 1 << 0
@@ -726,6 +726,8 @@ def main() -> int:
     consecutive_failures = 0
     interval = max(args.interval_ms, 20) / 1000.0
     invalid_after_failures = max(1, int(math.ceil(1.0 / interval)))
+    next_status_log = 0.0
+    last_status_log = None
     stat = None
     while True:
         try:
@@ -741,7 +743,12 @@ def main() -> int:
                 interpreter_idle_value,
                 interpreter_paused_value)
             consecutive_failures = 0
-            print(f'v5_wcs_status_publisher valid={valid} wcs_index={wcs_index}', flush=True)
+            status_log = (valid, wcs_index)
+            now = time.monotonic()
+            if args.once or status_log != last_status_log or now >= next_status_log:
+                print(f'v5_wcs_status_publisher valid={valid} wcs_index={wcs_index}', flush=True)
+                last_status_log = status_log
+                next_status_log = now + 5.0
             if args.once:
                 return 0
         except Exception as exc:

@@ -18,6 +18,11 @@
 #define V5_TOOLPATH_W 388
 #define V5_TOOLPATH_H 378
 #define V5_PROGRAM_PREVIEW_ROWS 4
+#define V5_PROGRAM_PREVIEW_X 0
+#define V5_PROGRAM_PREVIEW_Y 441
+#define V5_PROGRAM_PREVIEW_W 560
+#define V5_PROGRAM_PREVIEW_H 154
+#define V5_PROGRAM_PREVIEW_LINE_STEP 26
 #define V5_TOOLPATH_GESTURE_MIN_SCALE 0.35
 #define V5_TOOLPATH_GESTURE_MAX_SCALE 4.0
 #define V5_TOOLPATH_GESTURE_LEFT_INSET 132
@@ -186,6 +191,23 @@ static int toolpath_points_in_graphics_zone(const lv_point_t *points, int count)
     return 1;
 }
 
+static int point_in_program_preview_zone(const lv_point_t *point)
+{
+    if (!point) {
+        return 0;
+    }
+    return point->x >= V5_PROGRAM_PREVIEW_X &&
+           point->x < V5_PROGRAM_PREVIEW_X + V5_PROGRAM_PREVIEW_W &&
+           point->y >= V5_PROGRAM_PREVIEW_Y &&
+           point->y < V5_PROGRAM_PREVIEW_Y + V5_PROGRAM_PREVIEW_H;
+}
+
+static int main_page_handle_program_preview_touch(
+    V5MainPage *page,
+    const lv_point_t *point,
+    int pressed,
+    int *changed);
+
 static V5ToolpathScreenPoint apply_toolpath_view_transform(const V5MainPage *page, V5ToolpathScreenPoint point)
 {
     const double cx = (double)V5_TOOLPATH_W * 0.5;
@@ -286,8 +308,76 @@ static void main_page_fit_expand_world_point(V5ToolpathDisplayFit *fit, const do
 
 static int main_page_tool_length_mm(const V5MainPage *page, double *out);
 
-static int main_page_g53_ac_center_world(const V5MainPage *page, unsigned int index, double center[V5_STATUS_AXIS_COUNT])
+typedef enum V5MainPageMotionModelKind {
+    V5_MAIN_PAGE_MOTION_MODEL_UNKNOWN = 0,
+    V5_MAIN_PAGE_MOTION_MODEL_AC,
+    V5_MAIN_PAGE_MOTION_MODEL_BC,
+} V5MainPageMotionModelKind;
+
+static void main_page_motion_model_normalize(const char *model, char *out, size_t out_cap)
 {
+    size_t i;
+    if (!out || out_cap == 0U) {
+        return;
+    }
+    out[0] = '\0';
+    if (!model || !model[0]) {
+        return;
+    }
+    for (i = 0U; i + 1U < out_cap && model[i]; ++i) {
+        out[i] = (char)toupper((unsigned char)model[i]);
+    }
+    out[i] = '\0';
+}
+
+static V5MainPageMotionModelKind main_page_motion_model_kind_from_text(const char *model)
+{
+    char normalized[V5_NATIVE_READBACK_MOTION_MODEL_CAP];
+    main_page_motion_model_normalize(model, normalized, sizeof(normalized));
+    if (!normalized[0]) {
+        return V5_MAIN_PAGE_MOTION_MODEL_UNKNOWN;
+    }
+    if (strncmp(normalized, "BC", 2U) == 0 ||
+        strstr(normalized, "XYZBC") != 0 ||
+        strstr(normalized, "_BC") != 0 ||
+        strstr(normalized, "-BC") != 0) {
+        return V5_MAIN_PAGE_MOTION_MODEL_BC;
+    }
+    if (strncmp(normalized, "AC", 2U) == 0 ||
+        strstr(normalized, "XYZAC") != 0 ||
+        strstr(normalized, "_AC") != 0 ||
+        strstr(normalized, "-AC") != 0) {
+        return V5_MAIN_PAGE_MOTION_MODEL_AC;
+    }
+    return V5_MAIN_PAGE_MOTION_MODEL_UNKNOWN;
+}
+
+static V5MainPageMotionModelKind main_page_active_motion_model(const V5MainPage *page)
+{
+    if (!page || !v5_native_readback_motion_model_known(&page->native_readback)) {
+        return V5_MAIN_PAGE_MOTION_MODEL_UNKNOWN;
+    }
+    return main_page_motion_model_kind_from_text(page->native_readback.motion_model);
+}
+
+static char main_page_axis_display_char(const V5MainPage *page, unsigned int axis_index)
+{
+    static const char axes[V5_MAIN_PAGE_AXIS_COUNT] = {'X', 'Y', 'Z', 'A', 'C'};
+    if (axis_index >= V5_MAIN_PAGE_AXIS_COUNT) {
+        return '-';
+    }
+    if (axis_index == 3U && main_page_active_motion_model(page) == V5_MAIN_PAGE_MOTION_MODEL_BC) {
+        return 'B';
+    }
+    return axes[axis_index];
+}
+
+static int main_page_g53_active_center_world(
+    const V5MainPage *page,
+    unsigned int index,
+    double center[V5_STATUS_AXIS_COUNT])
+{
+    V5MainPageMotionModelKind model;
     const double *source;
     const double *active_offsets;
     unsigned int native_center;
@@ -295,14 +385,26 @@ static int main_page_g53_ac_center_world(const V5MainPage *page, unsigned int in
     if (!page || !center) {
         return 0;
     }
+    model = main_page_active_motion_model(page);
+    if (model == V5_MAIN_PAGE_MOTION_MODEL_UNKNOWN) {
+        return 0;
+    }
     if (index > 1U) {
         return 0;
     }
     active_offsets = v5_native_readback_active_wcs_offsets(&page->native_readback);
-    if (!active_offsets || !isfinite(active_offsets[0]) || !isfinite(active_offsets[2])) {
+    if (!active_offsets ||
+        !isfinite(active_offsets[0]) ||
+        !isfinite(active_offsets[1]) ||
+        !isfinite(active_offsets[2])) {
         return 0;
     }
-    native_center = index == 0U ? V5_NATIVE_READBACK_G53_CENTER_A : V5_NATIVE_READBACK_G53_CENTER_C;
+    if (index == 0U) {
+        native_center = model == V5_MAIN_PAGE_MOTION_MODEL_BC ?
+            V5_NATIVE_READBACK_G53_CENTER_B : V5_NATIVE_READBACK_G53_CENTER_A;
+    } else {
+        native_center = V5_NATIVE_READBACK_G53_CENTER_C;
+    }
     source = v5_native_readback_g53_center(&page->native_readback, native_center);
     if (!source) {
         return 0;
@@ -316,7 +418,11 @@ static int main_page_g53_ac_center_world(const V5MainPage *page, unsigned int in
         center[i] = source[i];
     }
     if (index == 0U) {
-        center[0] = active_offsets[0];
+        if (model == V5_MAIN_PAGE_MOTION_MODEL_BC) {
+            center[1] = active_offsets[1];
+        } else {
+            center[0] = active_offsets[0];
+        }
     } else {
         center[2] = active_offsets[2];
     }
@@ -336,38 +442,43 @@ static int main_page_project_world_point_transformed(
     return 1;
 }
 
-static int main_page_status_ac_display_values(const V5UiStatusView *status, double *a_deg, double *c_deg)
+static int main_page_status_active_model_display_values(
+    const V5UiStatusView *status,
+    double *first_deg,
+    double *second_deg)
 {
-    if (a_deg) {
-        *a_deg = 0.0;
+    if (first_deg) {
+        *first_deg = 0.0;
     }
-    if (c_deg) {
-        *c_deg = 0.0;
+    if (second_deg) {
+        *second_deg = 0.0;
     }
     if (!status || (status->valid_mask & V5_STATUS_VALID_MCS) == 0U ||
         !isfinite(status->mcs[3]) || !isfinite(status->mcs[4])) {
         return 0;
     }
-    if (a_deg) {
-        *a_deg = status->mcs[3];
+    if (first_deg) {
+        *first_deg = status->mcs[3];
     }
-    if (c_deg) {
-        *c_deg = status->mcs[4];
+    if (second_deg) {
+        *second_deg = status->mcs[4];
     }
     return 1;
 }
 
-static int main_page_program_ac_projection_available(
+static int main_page_program_active_model_projection_available(
     const V5MainPage *page,
     const V5UiStatusView *status,
-    double *a_deg,
-    double *c_deg,
-    double a_center[V5_STATUS_AXIS_COUNT],
-    double c_center[V5_STATUS_AXIS_COUNT])
+    double *first_deg,
+    double *second_deg,
+    double first_center[V5_STATUS_AXIS_COUNT],
+    double second_center[V5_STATUS_AXIS_COUNT])
 {
-    if (!page || !main_page_status_ac_display_values(status, a_deg, c_deg) ||
-        !main_page_g53_ac_center_world(page, 0U, a_center) ||
-        !main_page_g53_ac_center_world(page, 1U, c_center)) {
+    if (!page ||
+        main_page_active_motion_model(page) == V5_MAIN_PAGE_MOTION_MODEL_UNKNOWN ||
+        !main_page_status_active_model_display_values(status, first_deg, second_deg) ||
+        !main_page_g53_active_center_world(page, 0U, first_center) ||
+        !main_page_g53_active_center_world(page, 1U, second_center)) {
         return 0;
     }
     return 1;
@@ -375,31 +486,39 @@ static int main_page_program_ac_projection_available(
 
 static int main_page_program_ac_projection_changed(const V5MainPage *page, const V5UiStatusView *status)
 {
-    double a_deg = 0.0;
-    double c_deg = 0.0;
-    double a_center[V5_STATUS_AXIS_COUNT];
-    double c_center[V5_STATUS_AXIS_COUNT];
+    double first_deg = 0.0;
+    double second_deg = 0.0;
+    double first_center[V5_STATUS_AXIS_COUNT];
+    double second_center[V5_STATUS_AXIS_COUNT];
+    V5MainPageMotionModelKind model;
     int valid;
 
     if (!page || !page->toolpath_program_visible || page->toolpath_program_point_count == 0U) {
         return 0;
     }
-    valid = main_page_program_ac_projection_available(page, status, &a_deg, &c_deg, a_center, c_center);
+    model = main_page_active_motion_model(page);
+    valid = main_page_program_active_model_projection_available(
+        page, status, &first_deg, &second_deg, first_center, second_center);
     if (valid != page->toolpath_program_ac_valid) {
         return 1;
     }
     if (!valid) {
         return 0;
     }
-    return fabs(a_deg - page->toolpath_program_ac_a_deg) > 0.0005 ||
-           fabs(c_deg - page->toolpath_program_ac_c_deg) > 0.0005;
+    if (page->toolpath_program_model_kind != (int)model) {
+        return 1;
+    }
+    return fabs(first_deg - page->toolpath_program_ac_a_deg) > 0.0005 ||
+           fabs(second_deg - page->toolpath_program_ac_c_deg) > 0.0005;
 }
 
 static int main_page_static_pose_changed(const V5MainPage *page, const V5UiStatusView *status)
 {
-    double a_deg = 0.0;
-    double c_deg = 0.0;
-    int valid = main_page_status_ac_display_values(status, &a_deg, &c_deg);
+    double first_deg = 0.0;
+    double second_deg = 0.0;
+    V5MainPageMotionModelKind model = page ? main_page_active_motion_model(page) : V5_MAIN_PAGE_MOTION_MODEL_UNKNOWN;
+    int valid = page && main_page_active_motion_model(page) != V5_MAIN_PAGE_MOTION_MODEL_UNKNOWN &&
+        main_page_status_active_model_display_values(status, &first_deg, &second_deg);
     if (!page) {
         return 0;
     }
@@ -409,22 +528,29 @@ static int main_page_static_pose_changed(const V5MainPage *page, const V5UiStatu
     if (!valid) {
         return 0;
     }
-    return fabs(a_deg - page->toolpath_static_pose_a_deg) > 0.0005 ||
-           fabs(c_deg - page->toolpath_static_pose_c_deg) > 0.0005;
+    if (page->toolpath_static_model_kind != (int)model) {
+        return 1;
+    }
+    return fabs(first_deg - page->toolpath_static_pose_a_deg) > 0.0005 ||
+           fabs(second_deg - page->toolpath_static_pose_c_deg) > 0.0005;
 }
 
 static void main_page_store_static_pose(V5MainPage *page, const V5UiStatusView *status)
 {
-    double a_deg = 0.0;
-    double c_deg = 0.0;
+    double first_deg = 0.0;
+    double second_deg = 0.0;
+    V5MainPageMotionModelKind model;
     int valid;
     if (!page) {
         return;
     }
-    valid = main_page_status_ac_display_values(status, &a_deg, &c_deg);
+    model = main_page_active_motion_model(page);
+    valid = model != V5_MAIN_PAGE_MOTION_MODEL_UNKNOWN &&
+        main_page_status_active_model_display_values(status, &first_deg, &second_deg);
     page->toolpath_static_pose_valid = valid;
-    page->toolpath_static_pose_a_deg = valid ? a_deg : 0.0;
-    page->toolpath_static_pose_c_deg = valid ? c_deg : 0.0;
+    page->toolpath_static_model_kind = valid ? (int)model : (int)V5_MAIN_PAGE_MOTION_MODEL_UNKNOWN;
+    page->toolpath_static_pose_a_deg = valid ? first_deg : 0.0;
+    page->toolpath_static_pose_c_deg = valid ? second_deg : 0.0;
 }
 
 static void main_page_rotate_xyz_about_axis(
@@ -471,20 +597,82 @@ static void main_page_rotate_xyz_about_axis(
     point[2] = center[2] + (vz * c) + (cross_z * s) + (kz * dot * (1.0 - c));
 }
 
+static void main_page_apply_active_model_pose_to_world_point(
+    V5MainPageMotionModelKind model,
+    double point[V5_STATUS_AXIS_COUNT],
+    const double first_center[V5_STATUS_AXIS_COUNT],
+    const double second_center[V5_STATUS_AXIS_COUNT],
+    double first_deg,
+    double second_deg)
+{
+    double first_axis[3] = {1.0, 0.0, 0.0};
+    double c_axis[3] = {0.0, 0.0, 1.0};
+    double first_rad;
+    double c_rad;
+
+    if (!point || !first_center || !second_center ||
+        !isfinite(first_deg) || !isfinite(second_deg) ||
+        model == V5_MAIN_PAGE_MOTION_MODEL_UNKNOWN) {
+        return;
+    }
+    if (model == V5_MAIN_PAGE_MOTION_MODEL_BC) {
+        first_axis[0] = 0.0;
+        first_axis[1] = 1.0;
+        first_axis[2] = 0.0;
+    }
+    first_rad = first_deg * M_PI / 180.0;
+    c_rad = second_deg * M_PI / 180.0;
+    if (model == V5_MAIN_PAGE_MOTION_MODEL_BC) {
+        c_axis[0] = sin(first_rad);
+        c_axis[1] = 0.0;
+        c_axis[2] = cos(first_rad);
+    } else {
+        c_axis[0] = 0.0;
+        c_axis[1] = -sin(first_rad);
+        c_axis[2] = cos(first_rad);
+    }
+    main_page_rotate_xyz_about_axis(point, first_center, first_axis, first_rad);
+    main_page_rotate_xyz_about_axis(point, second_center, c_axis, c_rad);
+}
+
+static int main_page_rtcp_wcs_follow_active_model_available(
+    const V5MainPage *page,
+    const V5UiStatusView *status,
+    V5MainPageMotionModelKind *model,
+    double *first_deg,
+    double *second_deg,
+    double first_center[V5_STATUS_AXIS_COUNT],
+    double second_center[V5_STATUS_AXIS_COUNT])
+{
+    V5MainPageMotionModelKind active_model;
+    if (!page ||
+        !v5_native_readback_rtcp_known(&page->native_readback) ||
+        !page->native_readback.rtcp_enabled) {
+        return 0;
+    }
+    active_model = main_page_active_motion_model(page);
+    if (active_model == V5_MAIN_PAGE_MOTION_MODEL_UNKNOWN ||
+        !main_page_program_active_model_projection_available(
+            page, status, first_deg, second_deg, first_center, second_center)) {
+        return 0;
+    }
+    if (model) {
+        *model = active_model;
+    }
+    return 1;
+}
+
 static void main_page_update_program_project_points(
     V5MainPage *page,
     const V5UiStatusView *status,
     unsigned int count)
 {
-    double a_deg = 0.0;
-    double c_deg = 0.0;
-    int ac_valid;
-    double a_center[V5_STATUS_AXIS_COUNT];
-    double c_center[V5_STATUS_AXIS_COUNT];
-    double a_axis[3] = {1.0, 0.0, 0.0};
-    double c_axis[3] = {0.0, 0.0, 1.0};
-    double a_rad;
-    double c_rad;
+    V5MainPageMotionModelKind model;
+    double first_deg = 0.0;
+    double second_deg = 0.0;
+    int model_valid;
+    double first_center[V5_STATUS_AXIS_COUNT];
+    double second_center[V5_STATUS_AXIS_COUNT];
     unsigned int i;
 
     if (!page) {
@@ -496,66 +684,42 @@ static void main_page_update_program_project_points(
     for (i = 0U; i < count; ++i) {
         page->toolpath_program_project_points[i] = page->toolpath_program_points[i];
     }
-    ac_valid = main_page_program_ac_projection_available(page, status, &a_deg, &c_deg, a_center, c_center);
-    page->toolpath_program_ac_valid = ac_valid;
-    page->toolpath_program_ac_a_deg = ac_valid ? a_deg : 0.0;
-    page->toolpath_program_ac_c_deg = ac_valid ? c_deg : 0.0;
-    if (!ac_valid) {
+    model = main_page_active_motion_model(page);
+    model_valid = main_page_program_active_model_projection_available(
+        page, status, &first_deg, &second_deg, first_center, second_center);
+    page->toolpath_program_ac_valid = model_valid;
+    page->toolpath_program_model_kind = model_valid ? (int)model : (int)V5_MAIN_PAGE_MOTION_MODEL_UNKNOWN;
+    page->toolpath_program_ac_a_deg = model_valid ? first_deg : 0.0;
+    page->toolpath_program_ac_c_deg = model_valid ? second_deg : 0.0;
+    if (!model_valid) {
         return;
     }
-    a_rad = a_deg * M_PI / 180.0;
-    c_rad = c_deg * M_PI / 180.0;
-    c_axis[1] = -sin(a_rad);
-    c_axis[2] = cos(a_rad);
     for (i = 0U; i < count; ++i) {
-        main_page_rotate_xyz_about_axis(page->toolpath_program_project_points[i].axis, a_center, a_axis, a_rad);
-        main_page_rotate_xyz_about_axis(page->toolpath_program_project_points[i].axis, c_center, c_axis, c_rad);
+        main_page_apply_active_model_pose_to_world_point(
+            model,
+            page->toolpath_program_project_points[i].axis,
+            first_center,
+            second_center,
+            first_deg,
+            second_deg);
     }
-}
-
-static int main_page_rtcp_rotates_current_wcs(const V5MainPage *page)
-{
-    return page &&
-        v5_native_readback_rtcp_known(&page->native_readback) &&
-        page->native_readback.rtcp_enabled;
-}
-
-static int main_page_apply_ac_projection_to_world(
-    const V5MainPage *page,
-    const V5UiStatusView *status,
-    double world[V5_STATUS_AXIS_COUNT])
-{
-    double a_deg = 0.0;
-    double c_deg = 0.0;
-    double a_center[V5_STATUS_AXIS_COUNT];
-    double c_center[V5_STATUS_AXIS_COUNT];
-    double a_axis[3] = {1.0, 0.0, 0.0};
-    double c_axis[3] = {0.0, 0.0, 1.0};
-    double a_rad;
-    double c_rad;
-
-    if (!world ||
-        !main_page_program_ac_projection_available(page, status, &a_deg, &c_deg, a_center, c_center)) {
-        return 0;
-    }
-
-    a_rad = a_deg * M_PI / 180.0;
-    c_rad = c_deg * M_PI / 180.0;
-    c_axis[1] = -sin(a_rad);
-    c_axis[2] = cos(a_rad);
-    main_page_rotate_xyz_about_axis(world, a_center, a_axis, a_rad);
-    main_page_rotate_xyz_about_axis(world, c_center, c_axis, c_rad);
-    return 1;
 }
 
 static void main_page_expand_static_geometry_fit(V5MainPage *page, const V5UiStatusView *status)
 {
     double point[V5_STATUS_AXIS_COUNT];
-    double a_center[V5_STATUS_AXIS_COUNT];
-    double c_center[V5_STATUS_AXIS_COUNT];
+    double wcs_origin[V5_STATUS_AXIS_COUNT];
+    double wcs_axis[3][V5_STATUS_AXIS_COUNT];
+    V5MainPageMotionModelKind model;
+    double first_center[V5_STATUS_AXIS_COUNT];
+    double second_center[V5_STATUS_AXIS_COUNT];
+    double first_deg = 0.0;
+    double second_deg = 0.0;
     double angle;
+    double c_vec_x;
     double c_vec_y;
     double c_vec_z;
+    int wcs_follow_model;
     unsigned int i;
     if (!page || !page->toolpath_fit.valid) {
         return;
@@ -565,31 +729,68 @@ static void main_page_expand_static_geometry_fit(V5MainPage *page, const V5UiSta
         if (!active_offsets) {
             return;
         }
-        memset(point, 0, sizeof(point));
+        memset(wcs_origin, 0, sizeof(wcs_origin));
         for (i = 0U; i < V5_STATUS_AXIS_COUNT && i < V5_NATIVE_READBACK_WCS_OFFSET_COUNT; ++i) {
-            point[i] = active_offsets[i];
+            wcs_origin[i] = active_offsets[i];
         }
-        main_page_fit_expand_world_point(&page->toolpath_fit, point);
         for (i = 0U; i < 3U; ++i) {
-            point[i] += 40.0;
-            main_page_fit_expand_world_point(&page->toolpath_fit, point);
-            point[i] -= 40.0;
+            memcpy(wcs_axis[i], wcs_origin, sizeof(wcs_axis[i]));
+            wcs_axis[i][i] += 40.0;
+        }
+        wcs_follow_model = main_page_rtcp_wcs_follow_active_model_available(
+            page, status, &model, &first_deg, &second_deg, first_center, second_center);
+        if (wcs_follow_model) {
+            main_page_apply_active_model_pose_to_world_point(
+                model, wcs_origin, first_center, second_center, first_deg, second_deg);
+        }
+        main_page_fit_expand_world_point(&page->toolpath_fit, wcs_origin);
+        for (i = 0U; i < 3U; ++i) {
+            if (wcs_follow_model) {
+                main_page_apply_active_model_pose_to_world_point(
+                    model, wcs_axis[i], first_center, second_center, first_deg, second_deg);
+            }
+            main_page_fit_expand_world_point(&page->toolpath_fit, wcs_axis[i]);
         }
     }
-    if (main_page_g53_ac_center_world(page, 0U, a_center)) {
-        point[0] = a_center[0] - 40.0; point[1] = a_center[1]; point[2] = a_center[2]; point[3] = 0.0; point[4] = 0.0;
+    model = main_page_active_motion_model(page);
+    if (main_page_g53_active_center_world(page, 0U, first_center)) {
+        point[0] = first_center[0];
+        point[1] = first_center[1];
+        point[2] = first_center[2];
+        point[3] = 0.0;
+        point[4] = 0.0;
+        if (model == V5_MAIN_PAGE_MOTION_MODEL_BC) {
+            point[1] -= 40.0;
+        } else {
+            point[0] -= 40.0;
+        }
         main_page_fit_expand_world_point(&page->toolpath_fit, point);
-        point[0] = a_center[0] + 40.0;
+        point[0] = first_center[0];
+        point[1] = first_center[1];
+        point[2] = first_center[2];
+        if (model == V5_MAIN_PAGE_MOTION_MODEL_BC) {
+            point[1] += 40.0;
+        } else {
+            point[0] += 40.0;
+        }
         main_page_fit_expand_world_point(&page->toolpath_fit, point);
     }
-    if (main_page_g53_ac_center_world(page, 1U, c_center)) {
+    if (main_page_g53_active_center_world(page, 1U, second_center)) {
         angle = (status && (status->valid_mask & V5_STATUS_VALID_MCS) && isfinite(status->mcs[3])) ? status->mcs[3] * M_PI / 180.0 : 0.0;
-        c_vec_y = -sin(angle) * 40.0;
-        c_vec_z = cos(angle) * 40.0;
-        point[0] = c_center[0]; point[1] = c_center[1] - c_vec_y; point[2] = c_center[2] - c_vec_z; point[3] = 0.0; point[4] = 0.0;
+        if (model == V5_MAIN_PAGE_MOTION_MODEL_BC) {
+            c_vec_x = sin(angle) * 40.0;
+            c_vec_y = 0.0;
+            c_vec_z = cos(angle) * 40.0;
+        } else {
+            c_vec_x = 0.0;
+            c_vec_y = -sin(angle) * 40.0;
+            c_vec_z = cos(angle) * 40.0;
+        }
+        point[0] = second_center[0] - c_vec_x; point[1] = second_center[1] - c_vec_y; point[2] = second_center[2] - c_vec_z; point[3] = 0.0; point[4] = 0.0;
         main_page_fit_expand_world_point(&page->toolpath_fit, point);
-        point[1] = c_center[1] + c_vec_y;
-        point[2] = c_center[2] + c_vec_z;
+        point[0] = second_center[0] + c_vec_x;
+        point[1] = second_center[1] + c_vec_y;
+        point[2] = second_center[2] + c_vec_z;
         main_page_fit_expand_world_point(&page->toolpath_fit, point);
     }
 }
@@ -771,39 +972,64 @@ static void format_main_page_wcs_coordinate(char *out, size_t out_size, const V5
     snprintf(out, out_size, "%+010.3f", value);
 }
 
-static int format_toolpath_g53_ac_text(char *out, size_t out_size, const V5NativeReadback *readback)
+static int format_toolpath_g53_active_model_text(char *out, size_t out_size, const V5NativeReadback *readback)
 {
-    const double *a_center;
+    V5MainPageMotionModelKind model;
+    const double *first_center;
     const double *c_center;
     const double *active_offsets;
     if (!out || out_size == 0U || !readback) {
         return 0;
     }
-    a_center = v5_native_readback_g53_center(readback, V5_NATIVE_READBACK_G53_CENTER_A);
-    c_center = v5_native_readback_g53_center(readback, V5_NATIVE_READBACK_G53_CENTER_C);
-    active_offsets = v5_native_readback_active_wcs_offsets(readback);
-    if (!a_center || !c_center ||
-        !isfinite(a_center[0]) || !isfinite(a_center[1]) || !isfinite(a_center[2]) ||
-        !isfinite(c_center[0]) || !isfinite(c_center[1]) || !isfinite(c_center[2]) ||
-        !active_offsets || !isfinite(active_offsets[0]) || !isfinite(active_offsets[2])) {
+    model = main_page_motion_model_kind_from_text(readback->motion_model);
+    if (model == V5_MAIN_PAGE_MOTION_MODEL_UNKNOWN) {
         return 0;
     }
-    snprintf(
-        out,
-        out_size,
-        "G53 A %.2f,%.2f,%.2f  C %.2f,%.2f,%.2f",
-        active_offsets[0],
-        a_center[1],
-        a_center[2],
-        c_center[0],
-        c_center[1],
-        active_offsets[2]);
+    first_center = v5_native_readback_g53_center(
+        readback,
+        model == V5_MAIN_PAGE_MOTION_MODEL_BC ?
+            V5_NATIVE_READBACK_G53_CENTER_B : V5_NATIVE_READBACK_G53_CENTER_A);
+    c_center = v5_native_readback_g53_center(readback, V5_NATIVE_READBACK_G53_CENTER_C);
+    active_offsets = v5_native_readback_active_wcs_offsets(readback);
+    if (!first_center || !c_center ||
+        !isfinite(first_center[0]) || !isfinite(first_center[1]) || !isfinite(first_center[2]) ||
+        !isfinite(c_center[0]) || !isfinite(c_center[1]) || !isfinite(c_center[2]) ||
+        !active_offsets ||
+        !isfinite(active_offsets[0]) ||
+        !isfinite(active_offsets[1]) ||
+        !isfinite(active_offsets[2])) {
+        return 0;
+    }
+    if (model == V5_MAIN_PAGE_MOTION_MODEL_BC) {
+        snprintf(
+            out,
+            out_size,
+            "G53 B %.2f,%.2f,%.2f  C %.2f,%.2f,%.2f",
+            first_center[0],
+            active_offsets[1],
+            first_center[2],
+            c_center[0],
+            c_center[1],
+            active_offsets[2]);
+    } else {
+        snprintf(
+            out,
+            out_size,
+            "G53 A %.2f,%.2f,%.2f  C %.2f,%.2f,%.2f",
+            active_offsets[0],
+            first_center[1],
+            first_center[2],
+            c_center[0],
+            c_center[1],
+            active_offsets[2]);
+    }
     return 1;
 }
 
 static int format_toolpath_wcs_offset_text(char *out, size_t out_size, const V5NativeReadback *readback)
 {
     const double *offsets;
+    V5MainPageMotionModelKind model;
     if (!out || out_size == 0U || !readback) {
         return 0;
     }
@@ -813,10 +1039,13 @@ static int format_toolpath_wcs_offset_text(char *out, size_t out_size, const V5N
         !isfinite(offsets[3]) || !isfinite(offsets[4])) {
         return 0;
     }
+    model = main_page_motion_model_kind_from_text(readback->motion_model);
     snprintf(
         out,
         out_size,
-        "%s偏置 X%.2f Y%.2f Z%.2f A%.2f C%.2f",
+        model == V5_MAIN_PAGE_MOTION_MODEL_BC ?
+            "%s偏置 X%.2f Y%.2f Z%.2f B%.2f C%.2f" :
+            "%s偏置 X%.2f Y%.2f Z%.2f A%.2f C%.2f",
         main_page_wcs_code(readback),
         offsets[0],
         offsets[1],
@@ -833,7 +1062,7 @@ static void update_toolpath_status_text(V5MainPage *page)
         return;
     }
     if (page->toolpath_summary_label &&
-        format_toolpath_g53_ac_text(text, sizeof(text), &page->native_readback)) {
+        format_toolpath_g53_active_model_text(text, sizeof(text), &page->native_readback)) {
         set_label_text_if_changed(page->toolpath_summary_label, text);
     }
     if (page->toolpath_detail_label &&
@@ -1181,16 +1410,17 @@ static int clip_toolpath_segment(V5ToolpathScreenPoint *start, V5ToolpathScreenP
     return 1;
 }
 
-static void set_toolpath_ac_geometry_from_basis(
+static void set_toolpath_active_model_geometry_from_basis(
     V5MainPage *page,
+    V5MainPageMotionModelKind model,
     const V5ToolpathScreenPoint *origin,
     const V5ToolpathScreenPoint *x_axis,
     const V5ToolpathScreenPoint *y_axis,
     const V5ToolpathScreenPoint *z_axis,
-    const V5ToolpathScreenPoint *a_center_override,
-    const V5ToolpathScreenPoint *c_center_override,
-    double a_deg,
-    int a_valid)
+    const V5ToolpathScreenPoint *first_center_override,
+    const V5ToolpathScreenPoint *second_center_override,
+    double first_deg,
+    int first_valid)
 {
     V5ToolpathScreenPoint ac_center[2];
     V5ToolpathScreenPoint ac_axis_start[2];
@@ -1204,14 +1434,17 @@ static void set_toolpath_ac_geometry_from_basis(
     double z_dy;
     double c_dx;
     double c_dy;
+    const char *first_label = model == V5_MAIN_PAGE_MOTION_MODEL_BC ? "B" : "A";
 
-    if (!page || !origin || !x_axis || !y_axis || !z_axis || !a_center_override || !c_center_override) {
+    if (!page || !origin || !x_axis || !y_axis || !z_axis ||
+        !first_center_override || !second_center_override ||
+        model == V5_MAIN_PAGE_MOTION_MODEL_UNKNOWN) {
         hide_toolpath_ac_geometry(page);
         return;
     }
 
-    if (a_valid && isfinite(a_deg)) {
-        angle = a_deg * M_PI / 180.0;
+    if (first_valid && isfinite(first_deg)) {
+        angle = first_deg * M_PI / 180.0;
     }
     x_dx = x_axis->x - origin->x;
     x_dy = x_axis->y - origin->y;
@@ -1219,13 +1452,23 @@ static void set_toolpath_ac_geometry_from_basis(
     y_dy = y_axis->y - origin->y;
     z_dx = z_axis->x - origin->x;
     z_dy = z_axis->y - origin->y;
-    c_dx = (-sin(angle) * y_dx) + (cos(angle) * z_dx);
-    c_dy = (-sin(angle) * y_dy) + (cos(angle) * z_dy);
+    if (model == V5_MAIN_PAGE_MOTION_MODEL_BC) {
+        c_dx = (sin(angle) * x_dx) + (cos(angle) * z_dx);
+        c_dy = (sin(angle) * x_dy) + (cos(angle) * z_dy);
+    } else {
+        c_dx = (-sin(angle) * y_dx) + (cos(angle) * z_dx);
+        c_dy = (-sin(angle) * y_dy) + (cos(angle) * z_dy);
+    }
 
-    ac_center[0] = *a_center_override;
-    ac_axis_start[0] = toolpath_scaffold_point(ac_center[0].x - x_dx, ac_center[0].y - x_dy);
-    ac_axis_end[0] = toolpath_scaffold_point(ac_center[0].x + x_dx, ac_center[0].y + x_dy);
-    ac_center[1] = *c_center_override;
+    ac_center[0] = *first_center_override;
+    if (model == V5_MAIN_PAGE_MOTION_MODEL_BC) {
+        ac_axis_start[0] = toolpath_scaffold_point(ac_center[0].x - y_dx, ac_center[0].y - y_dy);
+        ac_axis_end[0] = toolpath_scaffold_point(ac_center[0].x + y_dx, ac_center[0].y + y_dy);
+    } else {
+        ac_axis_start[0] = toolpath_scaffold_point(ac_center[0].x - x_dx, ac_center[0].y - x_dy);
+        ac_axis_end[0] = toolpath_scaffold_point(ac_center[0].x + x_dx, ac_center[0].y + x_dy);
+    }
+    ac_center[1] = *second_center_override;
     ac_axis_start[1] = toolpath_scaffold_point(ac_center[1].x - c_dx, ac_center[1].y - c_dy);
     ac_axis_end[1] = toolpath_scaffold_point(ac_center[1].x + c_dx, ac_center[1].y + c_dy);
 
@@ -1244,7 +1487,7 @@ static void set_toolpath_ac_geometry_from_basis(
     set_toolpath_v3_center_dot(page->toolpath_a_center_line, &ac_center[0], 1);
     set_toolpath_v3_center_dot(page->toolpath_c_center_line, &ac_center[1], 1);
     if (page->toolpath_a_label) {
-        set_label_text_if_changed(page->toolpath_a_label, "A");
+        set_label_text_if_changed(page->toolpath_a_label, first_label);
         set_obj_pos_if_changed(page->toolpath_a_label, V5_TOOLPATH_X + clamp_coord(ac_axis_end[0].x + 4.0, 0, V5_TOOLPATH_W - 24), V5_TOOLPATH_Y + clamp_coord(ac_axis_end[0].y - 12.0, 0, V5_TOOLPATH_H - 22));
         clear_hidden_flag_if_hidden(page->toolpath_a_label);
     }
@@ -1340,9 +1583,15 @@ static void update_toolpath_state_lines(V5MainPage *page, const V5UiStatusView *
     };
     double wcs_origin[V5_STATUS_AXIS_COUNT];
     double wcs_axis[3][V5_STATUS_AXIS_COUNT];
+    V5MainPageMotionModelKind active_model;
+    V5MainPageMotionModelKind wcs_follow_model = V5_MAIN_PAGE_MOTION_MODEL_UNKNOWN;
+    double wcs_follow_first_center[V5_STATUS_AXIS_COUNT];
+    double wcs_follow_second_center[V5_STATUS_AXIS_COUNT];
+    double wcs_follow_first_deg = 0.0;
+    double wcs_follow_second_deg = 0.0;
     int mcs_valid;
     int wcs_valid;
-    int wcs_projection_valid = 1;
+    int wcs_follow_active_model;
     int axis_ok[3] = {0, 0, 0};
     unsigned int i;
 
@@ -1366,22 +1615,24 @@ static void update_toolpath_state_lines(V5MainPage *page, const V5UiStatusView *
             set_toolpath_axis_line(page->toolpath_mcs_axis_lines[i], page->toolpath_mcs_axis_points[i], &origin_point, &axis_point[i], ok);
         }
         if (axis_ok[0] && axis_ok[1] && axis_ok[2]) {
-            V5ToolpathScreenPoint a_center_point;
-            V5ToolpathScreenPoint c_center_point;
-            double a_center_world[V5_STATUS_AXIS_COUNT];
-            double c_center_world[V5_STATUS_AXIS_COUNT];
-            if (main_page_g53_ac_center_world(page, 0U, a_center_world) &&
-                main_page_project_world_point_transformed(page, a_center_world, &a_center_point) &&
-                main_page_g53_ac_center_world(page, 1U, c_center_world) &&
-                main_page_project_world_point_transformed(page, c_center_world, &c_center_point)) {
-                set_toolpath_ac_geometry_from_basis(
+            V5ToolpathScreenPoint first_center_point;
+            V5ToolpathScreenPoint second_center_point;
+            double first_center_world[V5_STATUS_AXIS_COUNT];
+            double second_center_world[V5_STATUS_AXIS_COUNT];
+            active_model = main_page_active_motion_model(page);
+            if (main_page_g53_active_center_world(page, 0U, first_center_world) &&
+                main_page_project_world_point_transformed(page, first_center_world, &first_center_point) &&
+                main_page_g53_active_center_world(page, 1U, second_center_world) &&
+                main_page_project_world_point_transformed(page, second_center_world, &second_center_point)) {
+                set_toolpath_active_model_geometry_from_basis(
                     page,
+                    active_model,
                     &origin_point,
                     &axis_point[0],
                     &axis_point[1],
                     &axis_point[2],
-                    &a_center_point,
-                    &c_center_point,
+                    &first_center_point,
+                    &second_center_point,
                     status->mcs[3],
                     1);
             } else {
@@ -1412,22 +1663,31 @@ static void update_toolpath_state_lines(V5MainPage *page, const V5UiStatusView *
             memcpy(wcs_axis[i], wcs_origin, sizeof(wcs_axis[i]));
             wcs_axis[i][i] += 40.0;
         }
-        if (main_page_rtcp_rotates_current_wcs(page)) {
-            wcs_projection_valid = main_page_apply_ac_projection_to_world(page, status, wcs_origin);
-            for (i = 0U; i < 3U && wcs_projection_valid; ++i) {
-                wcs_projection_valid = main_page_apply_ac_projection_to_world(page, status, wcs_axis[i]);
-            }
-        }
-        if (!wcs_projection_valid) {
-            hide_toolpath_line(page->toolpath_wcs_origin_line);
+        wcs_follow_active_model = main_page_rtcp_wcs_follow_active_model_available(
+            page,
+            status,
+            &wcs_follow_model,
+            &wcs_follow_first_deg,
+            &wcs_follow_second_deg,
+            wcs_follow_first_center,
+            wcs_follow_second_center);
+        if (wcs_follow_active_model) {
+            main_page_apply_active_model_pose_to_world_point(
+                wcs_follow_model,
+                wcs_origin,
+                wcs_follow_first_center,
+                wcs_follow_second_center,
+                wcs_follow_first_deg,
+                wcs_follow_second_deg);
             for (i = 0U; i < 3U; ++i) {
-                hide_toolpath_line(page->toolpath_wcs_axis_lines[i]);
+                main_page_apply_active_model_pose_to_world_point(
+                    wcs_follow_model,
+                    wcs_axis[i],
+                    wcs_follow_first_center,
+                    wcs_follow_second_center,
+                    wcs_follow_first_deg,
+                    wcs_follow_second_deg);
             }
-            if (page->toolpath_wcs_label) {
-                set_label_text_if_changed(page->toolpath_wcs_label, "WCS");
-                clear_hidden_flag_if_hidden(page->toolpath_wcs_label);
-            }
-            return;
         }
         if (v5_toolpath_display_project_world_point(wcs_origin, &page->toolpath_fit, (double)V5_TOOLPATH_W, (double)V5_TOOLPATH_H, &wcs_origin_point)) {
             wcs_origin_point = apply_toolpath_view_transform(page, wcs_origin_point);
@@ -1521,6 +1781,7 @@ static void hide_toolpath_program_line(V5MainPage *page)
     memset(page->toolpath_program_wcs_offset, 0, sizeof(page->toolpath_program_wcs_offset));
     page->toolpath_program_point_count = 0U;
     page->toolpath_program_ac_valid = 0;
+    page->toolpath_program_model_kind = (int)V5_MAIN_PAGE_MOTION_MODEL_UNKNOWN;
     page->toolpath_program_ac_a_deg = 0.0;
     page->toolpath_program_ac_c_deg = 0.0;
     for (segment = 0U; segment < V5_MAIN_PAGE_TOOLPATH_DRAW_SEGMENTS; ++segment) {
@@ -1546,6 +1807,7 @@ static void mark_toolpath_static_dirty(V5MainPage *page)
     page->toolpath_program_visible = 0;
     page->toolpath_program_point_count = 0U;
     page->toolpath_program_ac_valid = 0;
+    page->toolpath_program_model_kind = (int)V5_MAIN_PAGE_MOTION_MODEL_UNKNOWN;
     page->toolpath_program_ac_a_deg = 0.0;
     page->toolpath_program_ac_c_deg = 0.0;
     v5_toolpath_display_fit_init(&page->toolpath_fit);
@@ -1725,12 +1987,16 @@ static int readback_execution_line_active(const V5NativeReadback *readback)
     return 1;
 }
 
+static unsigned int program_preview_highlight_epoch(const V5ProgramRuntime *runtime);
+
 static int active_preview_line_from_readback(
     const V5MainPage *page,
     const V5ProgramRuntime *runtime,
     const char **native_command_out)
 {
     const V5NativeReadback *readback;
+    unsigned int runtime_epoch;
+    int line_allowed;
     if (native_command_out) {
         *native_command_out = "";
     }
@@ -1738,9 +2004,12 @@ static int active_preview_line_from_readback(
         return 0;
     }
     readback = &page->native_readback;
-    if (!readback_execution_line_active(readback)) {
-        return 0;
-    }
+    runtime_epoch = program_preview_highlight_epoch(runtime);
+    line_allowed = readback_execution_line_active(readback) ||
+        (runtime_epoch != 0U && page->program_preview_started_loaded_epoch == runtime_epoch) ||
+        (runtime_epoch != 0U &&
+            page->program_preview_highlight_loaded_epoch == runtime_epoch &&
+            page->program_preview_highlight_line > 0);
     if (v5_program_runtime_has_mdi(runtime) &&
         v5_native_readback_mdi_run_known(readback) &&
         readback->mdi_run_active && readback->mdi_run_line > 0) {
@@ -1748,6 +2017,9 @@ static int active_preview_line_from_readback(
             *native_command_out = readback->mdi_run_command;
         }
         return readback->mdi_run_line;
+    }
+    if (!line_allowed) {
+        return 0;
     }
     if (v5_native_readback_interpreter_known(readback) && readback->interpreter_paused) {
         if (v5_native_readback_current_line_known(readback) && readback->current_line > 0) {
@@ -1758,31 +2030,104 @@ static int active_preview_line_from_readback(
         }
         return 0;
     }
-    if (v5_native_readback_current_line_known(readback) && readback->current_line > 0) {
-        return readback->current_line;
-    }
     if (v5_native_readback_motion_line_known(readback) && readback->motion_line > 0) {
         return readback->motion_line;
+    }
+    if (v5_native_readback_current_line_known(readback) && readback->current_line > 0) {
+        return readback->current_line;
     }
     return 0;
 }
 
-static unsigned int preview_start_line(unsigned int total, int active)
+static unsigned int program_preview_highlight_epoch(const V5ProgramRuntime *runtime)
 {
-    unsigned int start = 1U;
-    if (active > (int)V5_PROGRAM_PREVIEW_ROWS) {
-        start = (unsigned int)active - (V5_PROGRAM_PREVIEW_ROWS - 1U);
+    if (!runtime) {
+        return 0U;
     }
-    if (total > V5_PROGRAM_PREVIEW_ROWS) {
+    if (v5_program_runtime_has_open_program(runtime)) {
+        return v5_program_runtime_loaded_epoch(runtime);
+    }
+    return 0U;
+}
+
+static void clear_program_preview_highlight(V5MainPage *page)
+{
+    if (!page) {
+        return;
+    }
+    page->program_preview_highlight_line = 0;
+    page->program_preview_highlight_loaded_epoch = 0U;
+}
+
+static int remembered_program_preview_highlight_line(
+    const V5MainPage *page,
+    const V5ProgramRuntime *runtime,
+    unsigned int total)
+{
+    int line;
+    if (!page || !runtime || page->program_preview_highlight_line <= 0) {
+        return 0;
+    }
+    if (page->program_preview_highlight_loaded_epoch != program_preview_highlight_epoch(runtime)) {
+        return 0;
+    }
+    line = page->program_preview_highlight_line;
+    if (total > 0U && (unsigned int)line > total) {
+        return 0;
+    }
+    return line;
+}
+
+static int display_preview_line_from_readback(
+    V5MainPage *page,
+    const V5ProgramRuntime *runtime,
+    unsigned int total,
+    const char **native_command_out)
+{
+    int active;
+    const char *native_command = "";
+    if (native_command_out) {
+        *native_command_out = "";
+    }
+    active = active_preview_line_from_readback(page, runtime, &native_command);
+    if (active > 0 && (total == 0U || (unsigned int)active <= total || (native_command && native_command[0]))) {
+        if (page) {
+            page->program_preview_highlight_line = active;
+            page->program_preview_highlight_loaded_epoch = program_preview_highlight_epoch(runtime);
+            page->program_preview_started_loaded_epoch = page->program_preview_highlight_loaded_epoch;
+        }
+        if (native_command_out) {
+            *native_command_out = native_command;
+        }
+        return active;
+    }
+    return remembered_program_preview_highlight_line(page, runtime, total);
+}
+
+static unsigned int clamp_preview_start_line(unsigned int total, unsigned int start)
+{
+    if (total <= V5_PROGRAM_PREVIEW_ROWS) {
+        return 1U;
+    }
+    if (start < 1U) {
+        start = 1U;
+    }
+    {
         unsigned int max_start = total - (V5_PROGRAM_PREVIEW_ROWS - 1U);
         if (start > max_start) {
             start = max_start;
         }
     }
-    if (start < 1U) {
-        start = 1U;
-    }
     return start;
+}
+
+static unsigned int preview_start_line_for_active(unsigned int total, int active)
+{
+    unsigned int start = 1U;
+    if (active > 0) {
+        start = (unsigned int)active;
+    }
+    return clamp_preview_start_line(total, start);
 }
 
 static void refresh_program_preview_from_text(
@@ -1802,12 +2147,22 @@ static void refresh_program_preview_from_text(
     if (active < 0 || (total > 0U && (unsigned int)active > total && (!native_command || !native_command[0]))) {
         active = 0;
     }
-    start_line = preview_start_line(total, active);
     if (!text || !text[0]) {
+        page->program_preview_scroll_start_line = 1U;
         for (row = 0U; row < V5_PROGRAM_PREVIEW_ROWS; ++row) {
             set_program_preview_row(page, row, "", 0, 0);
         }
         return;
+    }
+    if (active > 0) {
+        start_line = preview_start_line_for_active(total, active);
+        page->program_preview_scroll_start_line = start_line;
+    } else {
+        start_line = clamp_preview_start_line(
+            total,
+            page->program_preview_scroll_start_line ? page->program_preview_scroll_start_line : 1U);
+        page->program_preview_scroll_start_line = start_line;
+        active = (int)start_line;
     }
     segment = text;
     cursor = text;
@@ -1868,23 +2223,26 @@ static void refresh_program_preview_rows(V5MainPage *page, const V5ProgramRuntim
         return;
     }
     if (!runtime) {
+        clear_program_preview_highlight(page);
         for (row = 0U; row < V5_PROGRAM_PREVIEW_ROWS; ++row) {
             set_program_preview_row(page, row, "", 0, 0);
         }
         return;
     }
-    active = active_preview_line_from_readback(page, runtime, &native_command);
     if (v5_program_runtime_has_mdi(runtime)) {
         const char *text = v5_program_runtime_mdi_text(runtime);
         unsigned int total = count_preview_source_lines(text);
+        active = display_preview_line_from_readback(page, runtime, total, &native_command);
         refresh_program_preview_from_text(page, text, native_command, total, active);
         return;
     }
     if (v5_program_runtime_has_open_program(runtime) && runtime->gcode_text) {
         unsigned int total = count_preview_source_lines(runtime->gcode_text);
+        active = display_preview_line_from_readback(page, runtime, total, &native_command);
         refresh_program_preview_from_text(page, runtime->gcode_text, native_command, total, active);
         return;
     }
+    clear_program_preview_highlight(page);
     for (row = 0U; row < V5_PROGRAM_PREVIEW_ROWS; ++row) {
         set_program_preview_row(page, row, "", 0, 0);
     }
@@ -2103,8 +2461,35 @@ static void make_override_reset_hit(V5MainPage *page, int x, int y, int w, int h
 static void main_program_edit_hit_event_cb(lv_event_t *event)
 {
     V5MainPage *page = (V5MainPage *)lv_event_get_user_data(event);
+    lv_event_code_t code = lv_event_get_code(event);
+    lv_point_t point;
+    lv_indev_t *indev;
+    int changed = 0;
     uint32_t now;
-    if (!page || lv_event_get_code(event) != LV_EVENT_CLICKED) {
+    if (!page) {
+        return;
+    }
+    if (code == LV_EVENT_PRESSED || code == LV_EVENT_PRESSING) {
+        indev = lv_indev_get_act();
+        if (indev) {
+            lv_indev_get_point(indev, &point);
+            (void)main_page_handle_program_preview_touch(page, &point, 1, &changed);
+            if (changed) {
+                lv_obj_invalidate(page->program_edit_hit_area);
+            }
+        }
+        return;
+    }
+    if (code == LV_EVENT_RELEASED) {
+        (void)main_page_handle_program_preview_touch(page, 0, 0, 0);
+        return;
+    }
+    if (code != LV_EVENT_CLICKED) {
+        return;
+    }
+    if (page->program_preview_dragged) {
+        page->program_preview_dragged = 0;
+        page->program_edit_last_click_tick = 0U;
         return;
     }
     now = lv_tick_get();
@@ -2134,6 +2519,9 @@ static void create_main_program_edit_hit_area(V5MainPage *page)
     lv_obj_set_style_border_width(hit, 0, 0);
     lv_obj_add_flag(hit, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_clear_flag(hit, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(hit, main_program_edit_hit_event_cb, LV_EVENT_PRESSED, page);
+    lv_obj_add_event_cb(hit, main_program_edit_hit_event_cb, LV_EVENT_PRESSING, page);
+    lv_obj_add_event_cb(hit, main_program_edit_hit_event_cb, LV_EVENT_RELEASED, page);
     lv_obj_add_event_cb(hit, main_program_edit_hit_event_cb, LV_EVENT_CLICKED, page);
     lv_obj_move_foreground(hit);
     page->program_edit_hit_area = hit;
@@ -2689,8 +3077,9 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
     if ((refresh_flags & V5_MAIN_PAGE_REFRESH_DYNAMIC) != 0U) {
         v5_coordinate_panel_from_status(status, &panel);
         for (i = 0; i < V5_MAIN_PAGE_AXIS_COUNT; ++i) {
+            const char display_axis = main_page_axis_display_char(page, i);
             if (page->axis_labels[i]) {
-                char axis[2] = {panel.lines[i].axis ? panel.lines[i].axis : '-', '\0'};
+                char axis[2] = {display_axis, '\0'};
                 set_label_text_if_changed(page->axis_labels[i], axis);
             }
             {
@@ -2711,7 +3100,7 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
             }
             if (page->error_labels[i]) {
                 char error_text[32];
-                snprintf(error_text, sizeof(error_text), "%c: %s", panel.lines[i].axis ? panel.lines[i].axis : '-', panel.lines[i].following_error_text);
+                snprintf(error_text, sizeof(error_text), "%c: %s", display_axis, panel.lines[i].following_error_text);
                 set_label_text_if_changed(page->error_labels[i], error_text);
             }
         }
@@ -2844,6 +3233,7 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
         memset(page->toolpath_program_wcs_offset, 0, sizeof(page->toolpath_program_wcs_offset));
         page->toolpath_program_point_count = 0U;
         page->toolpath_program_ac_valid = 0;
+        page->toolpath_program_model_kind = (int)V5_MAIN_PAGE_MOTION_MODEL_UNKNOWN;
         page->toolpath_program_ac_a_deg = 0.0;
         page->toolpath_program_ac_c_deg = 0.0;
     }
@@ -2888,6 +3278,111 @@ int v5_main_page_apply_status(V5MainPage *page, const V5UiStatusView *status)
     return v5_main_page_apply_status_flags(page, status, V5_MAIN_PAGE_REFRESH_ALL);
 }
 
+static unsigned int program_preview_total_lines_for_runtime(const V5ProgramRuntime *runtime)
+{
+    if (!runtime) {
+        return 0U;
+    }
+    if (v5_program_runtime_has_mdi(runtime)) {
+        return count_preview_source_lines(v5_program_runtime_mdi_text(runtime));
+    }
+    if (v5_program_runtime_has_open_program(runtime) && runtime->gcode_text) {
+        return count_preview_source_lines(runtime->gcode_text);
+    }
+    return 0U;
+}
+
+static int main_page_program_preview_has_active_line(V5MainPage *page, const V5ProgramRuntime *runtime)
+{
+    unsigned int total = program_preview_total_lines_for_runtime(runtime);
+    return active_preview_line_from_readback(page, runtime, 0) > 0 ||
+           remembered_program_preview_highlight_line(page, runtime, total) > 0;
+}
+
+static int main_page_scroll_program_preview_rows(V5MainPage *page, int rows)
+{
+    const V5ProgramRuntime *runtime;
+    unsigned int total;
+    unsigned int start;
+    if (!page || rows == 0 || !page->program_controller) {
+        return 0;
+    }
+    runtime = v5_program_controller_runtime(page->program_controller);
+    if (main_page_program_preview_has_active_line(page, runtime)) {
+        return 0;
+    }
+    total = program_preview_total_lines_for_runtime(runtime);
+    if (total <= V5_PROGRAM_PREVIEW_ROWS) {
+        page->program_preview_scroll_start_line = 1U;
+        return 0;
+    }
+    start = page->program_preview_scroll_start_line ? page->program_preview_scroll_start_line : 1U;
+    if (rows > 0) {
+        start += (unsigned int)rows;
+    } else {
+        unsigned int up = (unsigned int)(-rows);
+        start = up >= start ? 1U : start - up;
+    }
+    start = clamp_preview_start_line(total, start);
+    if (start == page->program_preview_scroll_start_line) {
+        return 0;
+    }
+    page->program_preview_scroll_start_line = start;
+    refresh_program_preview_rows(page, runtime);
+    return 1;
+}
+
+static int main_page_handle_program_preview_touch(
+    V5MainPage *page,
+    const lv_point_t *point,
+    int pressed,
+    int *changed)
+{
+    int local_changed = 0;
+    if (changed) {
+        *changed = 0;
+    }
+    if (!page) {
+        return 0;
+    }
+    if (!pressed || !point) {
+        int was_active = page->program_preview_touch_active;
+        page->program_preview_touch_active = 0;
+        page->program_preview_touch_accum_y = 0;
+        return was_active;
+    }
+    if (!page->program_preview_touch_active) {
+        if (!point_in_program_preview_zone(point)) {
+            return 0;
+        }
+        page->program_preview_touch_active = 1;
+        page->program_preview_touch_last_point = *point;
+        page->program_preview_touch_accum_y = 0;
+        page->program_preview_dragged = 0;
+        return 1;
+    }
+    page->program_preview_touch_accum_y += point->y - page->program_preview_touch_last_point.y;
+    page->program_preview_touch_last_point = *point;
+    while (page->program_preview_touch_accum_y <= -V5_PROGRAM_PREVIEW_LINE_STEP) {
+        if (main_page_scroll_program_preview_rows(page, 1)) {
+            local_changed = 1;
+        }
+        page->program_preview_touch_accum_y += V5_PROGRAM_PREVIEW_LINE_STEP;
+        page->program_preview_dragged = 1;
+    }
+    while (page->program_preview_touch_accum_y >= V5_PROGRAM_PREVIEW_LINE_STEP) {
+        if (main_page_scroll_program_preview_rows(page, -1)) {
+            local_changed = 1;
+        }
+        page->program_preview_touch_accum_y -= V5_PROGRAM_PREVIEW_LINE_STEP;
+        page->program_preview_dragged = 1;
+    }
+    if (changed) {
+        *changed = local_changed;
+    }
+    return 1;
+}
+
 int v5_main_page_handle_touch_points(V5MainPage *page, const lv_point_t *points, int count, int pressed, int *changed)
 {
     double mid_x;
@@ -2904,12 +3399,23 @@ int v5_main_page_handle_touch_points(V5MainPage *page, const lv_point_t *points,
     }
     if (!pressed || !points || count <= 0) {
         const int was_active = page->toolpath_gesture_active_count > 0;
+        const int preview_was_active = page->program_preview_touch_active;
+        (void)main_page_handle_program_preview_touch(page, 0, 0, 0);
         page->toolpath_gesture_active_count = 0;
-        return was_active;
+        return was_active || preview_was_active;
     }
     if (count > 2) {
         count = 2;
     }
+    if (count == 1 && main_page_handle_program_preview_touch(page, &points[0], pressed, &local_changed)) {
+        page->toolpath_gesture_active_count = 0;
+        if (changed) {
+            *changed = local_changed;
+        }
+        return 1;
+    }
+    page->program_preview_touch_active = 0;
+    page->program_preview_touch_accum_y = 0;
     if (!toolpath_points_in_graphics_zone(points, count)) {
         page->toolpath_gesture_active_count = 0;
         return 0;
@@ -3122,6 +3628,12 @@ int v5_main_page_set_mdi_text(V5MainPage *page, const char *line)
     if (!v5_program_runtime_set_mdi_line(&page->program_controller->runtime, line)) {
         return 0;
     }
+    page->program_preview_scroll_start_line = 1U;
+    clear_program_preview_highlight(page);
+    page->program_preview_started_loaded_epoch = 0U;
+    page->program_preview_touch_active = 0;
+    page->program_preview_touch_accum_y = 0;
+    page->program_preview_dragged = 0;
     mark_toolpath_static_dirty(page);
     v5_main_page_refresh_program_status(page);
     return 1;
@@ -3139,6 +3651,12 @@ int v5_main_page_open_program(V5MainPage *page, const char *path, V5ProgramOpenR
         return 0;
     }
     page->last_program_open = *out;
+    page->program_preview_scroll_start_line = 1U;
+    clear_program_preview_highlight(page);
+    page->program_preview_started_loaded_epoch = 0U;
+    page->program_preview_touch_active = 0;
+    page->program_preview_touch_accum_y = 0;
+    page->program_preview_dragged = 0;
     mark_toolpath_static_dirty(page);
     v5_main_page_refresh_program_status(page);
     return 1;
@@ -3319,6 +3837,15 @@ static void execute_prepared_command_if_enabled(V5MainPage *page, V5MainPageActi
     if (report->executed &&
         (report->request.kind == V5_COMMAND_WCS_SELECT || report->request.kind == V5_COMMAND_WORK_ZERO)) {
         report->executed = main_page_confirm_wcs_readback_after_send(page, report);
+    }
+    if (report->executed &&
+        (report->request.kind == V5_COMMAND_START || report->request.kind == V5_COMMAND_MDI_RUN) &&
+        page->program_controller) {
+        const V5ProgramRuntime *runtime = v5_program_controller_runtime(page->program_controller);
+        unsigned int epoch = program_preview_highlight_epoch(runtime);
+        if (epoch != 0U) {
+            page->program_preview_started_loaded_epoch = epoch;
+        }
     }
     if (report->executed && strcmp(report->command.owner ? report->command.owner : "", "native_safety") == 0) {
         V5NativeReadback readback = page->native_readback;

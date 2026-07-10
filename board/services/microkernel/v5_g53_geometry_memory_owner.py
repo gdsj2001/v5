@@ -7,7 +7,7 @@ import resource
 import struct
 import sys
 import time
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 
 def lock_process_memory(process_name: str) -> None:
@@ -25,12 +25,13 @@ def lock_process_memory(process_name: str) -> None:
 
 
 MAGIC = 0x56354753
-VERSION = 1
+VERSION = 2
 CENTER_COUNT = 3
 AXIS_COUNT = 3
 VALUE_COUNT = CENTER_COUNT * AXIS_COUNT
-BLOCK_STRUCT = struct.Struct("<IIIIIIIIQ" + ("d" * VALUE_COUNT) + "II")
-PREFIX_STRUCT = struct.Struct("<IIIIIIIIQ" + ("d" * VALUE_COUNT))
+MODEL_CAP = 32
+BLOCK_STRUCT = struct.Struct("<IIIIIIIIQ" + ("d" * VALUE_COUNT) + f"{MODEL_CAP}sII")
+PREFIX_STRUCT = struct.Struct("<IIIIIIIIQ" + ("d" * VALUE_COUNT) + f"{MODEL_CAP}s")
 DEFAULT_PATH = "/dev/shm/v5_native_g53_geometry_status.bin"
 DEFAULT_INI = "/opt/8ax/v5/linuxcnc/ini/v5_bus.ini"
 DEFAULT_INTERVAL_MS = 100
@@ -60,6 +61,14 @@ def geometry_epoch(centers: List[List[float]]) -> int:
     return epoch or 1
 
 
+def pack_motion_model(model: str) -> bytes:
+    value = model.strip()
+    if not value:
+        raise ValueError("rtcp_motion_model_empty")
+    raw = value.encode("utf-8")[: MODEL_CAP - 1]
+    return raw + (b"\0" * (MODEL_CAP - len(raw)))
+
+
 def atomic_write(path: str, payload: bytes) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = f"{path}.tmp.{os.getpid()}"
@@ -70,8 +79,9 @@ def atomic_write(path: str, payload: bytes) -> None:
     os.replace(tmp, path)
 
 
-def write_status(path: str, valid: int, centers: List[List[float]], epoch: int) -> None:
+def write_status(path: str, valid: int, centers: List[List[float]], epoch: int, motion_model: str) -> None:
     values = flatten_centers(centers)
+    model_bytes = pack_motion_model(motion_model)
     valid_value = 1 if valid and epoch else 0
     epoch_value = int(epoch) if valid_value else 0
     monotonic_ns = time.monotonic_ns()
@@ -86,6 +96,7 @@ def write_status(path: str, valid: int, centers: List[List[float]], epoch: int) 
         0,
         monotonic_ns,
         *values,
+        model_bytes,
     )
     payload = BLOCK_STRUCT.pack(
         MAGIC,
@@ -98,6 +109,7 @@ def write_status(path: str, valid: int, centers: List[List[float]], epoch: int) 
         0,
         monotonic_ns,
         *values,
+        model_bytes,
         crc32_like(prefix),
         0,
     )
@@ -111,8 +123,10 @@ def parse_value(raw: str, key: str) -> float:
     return value
 
 
-def read_rtcp_geometry_from_ini(ini_path: str) -> List[List[float]]:
+def read_rtcp_geometry_from_ini(ini_path: str) -> Tuple[List[List[float]], str]:
     values: Dict[str, float] = {}
+    model = ""
+    fallback_model = ""
     section = ""
     with open(ini_path, "r", encoding="utf-8", errors="replace") as fp:
         for raw in fp:
@@ -128,16 +142,26 @@ def read_rtcp_geometry_from_ini(ini_path: str) -> List[List[float]]:
             key = key.strip().upper()
             if key in REQUIRED_KEYS:
                 values[key] = parse_value(value, key)
+            elif key == "MODEL":
+                model = value.split("#", 1)[0].split(";", 1)[0].strip()
+            elif key == "MOTION_MODEL":
+                fallback_model = value.split("#", 1)[0].split(";", 1)[0].strip()
 
     missing = [key for key in REQUIRED_KEYS if key not in values]
     if missing:
         raise SystemExit(f"g53_geometry_ini_missing_keys: {','.join(missing)} source={ini_path}")
+    motion_model = model or fallback_model
+    if not motion_model:
+        raise SystemExit(f"g53_geometry_ini_missing_model: MODEL source={ini_path}")
 
-    return [
-        [0.0, values["G53_A_Y"], values["G53_A_Z"]],
-        [values["G53_B_X"], 0.0, values["G53_B_Z"]],
-        [values["G53_C_X"], values["G53_C_Y"], 0.0],
-    ]
+    return (
+        [
+            [0.0, values["G53_A_Y"], values["G53_A_Z"]],
+            [values["G53_B_X"], 0.0, values["G53_B_Z"]],
+            [values["G53_C_X"], values["G53_C_Y"], 0.0],
+        ],
+        motion_model,
+    )
 
 
 def parse_mock_centers(text: str) -> List[List[float]]:
@@ -160,19 +184,29 @@ def main() -> int:
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument("--mock-centers", default="")
+    parser.add_argument("--mock-model", default="XYZAC_TRT")
     args = parser.parse_args()
 
-    centers = parse_mock_centers(args.mock_centers) if args.mock_centers else read_rtcp_geometry_from_ini(args.ini)
+    if args.mock_centers:
+        centers = parse_mock_centers(args.mock_centers)
+        motion_model = args.mock_model
+    else:
+        centers, motion_model = read_rtcp_geometry_from_ini(args.ini)
     epoch = geometry_epoch(centers)
     source = "mock" if args.mock_centers else args.ini
     interval = max(args.interval_ms, 20) / 1000.0
-    print(f"v5_g53_geometry_memory_owner loaded source={source} epoch={epoch} path={args.path}", flush=True)
+    print(
+        f"v5_g53_geometry_memory_owner loaded source={source} epoch={epoch} "
+        f"model={motion_model} path={args.path}",
+        flush=True,
+    )
 
     while True:
-        write_status(args.path, 1, centers, epoch)
+        write_status(args.path, 1, centers, epoch, motion_model)
         if args.once or args.verbose:
             print(
                 "v5_g53_geometry_memory_owner valid=1 "
+                f"model={motion_model} "
                 f"A={centers[0][0]:.6g},{centers[0][1]:.6g},{centers[0][2]:.6g} "
                 f"B={centers[1][0]:.6g},{centers[1][1]:.6g},{centers[1][2]:.6g} "
                 f"C={centers[2][0]:.6g},{centers[2][1]:.6g},{centers[2][2]:.6g}",

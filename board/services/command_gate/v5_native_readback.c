@@ -1,5 +1,6 @@
 #include "v5_native_readback.h"
 
+#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -25,6 +26,8 @@ void v5_native_readback_set_unavailable(V5NativeReadback *readback, const char *
     readback->g53_geometry_available = 0;
     readback->g53_geometry_epoch = 0U;
     memset(readback->g53_centers, 0, sizeof(readback->g53_centers));
+    readback->motion_model_available = 0;
+    readback->motion_model[0] = '\0';
     readback->interpreter_state_available = 0;
     readback->interpreter_paused = 0;
     readback->interpreter_idle_available = 0;
@@ -195,6 +198,40 @@ const double *v5_native_readback_g53_center(const V5NativeReadback *readback, un
     return readback->g53_centers[center_index];
 }
 
+void v5_native_readback_set_motion_model(V5NativeReadback *readback, const char *motion_model)
+{
+    const char *start;
+    const char *end;
+    size_t len;
+
+    if (!readback) {
+        return;
+    }
+    readback->motion_model_available = 0;
+    readback->motion_model[0] = '\0';
+    if (!motion_model) {
+        return;
+    }
+    start = motion_model;
+    while (*start && isspace((unsigned char)*start)) {
+        ++start;
+    }
+    end = start + strlen(start);
+    while (end > start && isspace((unsigned char)end[-1])) {
+        --end;
+    }
+    len = (size_t)(end - start);
+    if (len == 0U) {
+        return;
+    }
+    if (len >= sizeof(readback->motion_model)) {
+        len = sizeof(readback->motion_model) - 1U;
+    }
+    memcpy(readback->motion_model, start, len);
+    readback->motion_model[len] = '\0';
+    readback->motion_model_available = 1;
+}
+
 void v5_native_readback_set_interpreter_paused(V5NativeReadback *readback, int paused)
 {
     if (!readback) {
@@ -335,6 +372,11 @@ int v5_native_readback_wcs_table_known(const V5NativeReadback *readback)
 int v5_native_readback_g53_geometry_known(const V5NativeReadback *readback)
 {
     return readback && readback->g53_geometry_available && readback->g53_geometry_epoch != 0U;
+}
+
+int v5_native_readback_motion_model_known(const V5NativeReadback *readback)
+{
+    return readback && readback->motion_model_available && readback->motion_model[0];
 }
 
 int v5_native_readback_interpreter_known(const V5NativeReadback *readback)

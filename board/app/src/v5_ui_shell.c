@@ -111,15 +111,93 @@ static int shell_load_current_program_for_mdi_edit(void);
 #define V5_UI_ESTOP_REFRESH_NS 100000000ULL
 #define V5_UI_SLOW_REFRESH_NS 200000000ULL
 #define V5_NATIVE_READBACK_MIN_NS 200000000ULL
+#define V5_MODAL_LINE_READBACK_MIN_NS 33333333ULL
 #define V5_SAFETY_READBACK_MIN_NS 100000000ULL
 #define V5_SAFETY_READBACK_TIMEOUT_MS 80U
 
 static unsigned long long g_native_readback_last_probe_ns;
+static unsigned long long g_modal_line_readback_last_probe_ns;
 static unsigned long long g_safety_readback_last_probe_ns;
 static unsigned long long g_ui_dynamic_last_refresh_ns;
 static unsigned long long g_ui_button_last_refresh_ns;
 static unsigned long long g_ui_estop_last_refresh_ns;
 static unsigned long long g_ui_slow_last_refresh_ns;
+
+static void shell_apply_modal_tool_readback(V5NativeReadback *readback, const V5NativeReadback *modal_tool_readback)
+{
+    if (!readback || !modal_tool_readback) {
+        return;
+    }
+    if (v5_native_readback_modal_known(modal_tool_readback)) {
+        v5_native_readback_set_modal_actual(readback, modal_tool_readback->modal_text);
+    }
+    if (v5_native_readback_tool_known(modal_tool_readback)) {
+        v5_native_readback_set_tool_actual(
+            readback,
+            modal_tool_readback->tool_number,
+            v5_native_readback_tool_length_known(modal_tool_readback),
+            modal_tool_readback->tool_length_mm);
+    }
+    if (v5_native_readback_interpreter_idle_known(modal_tool_readback)) {
+        v5_native_readback_set_interpreter_idle(readback, modal_tool_readback->interpreter_idle);
+    }
+    if (v5_native_readback_interpreter_known(modal_tool_readback)) {
+        v5_native_readback_set_interpreter_paused(readback, modal_tool_readback->interpreter_paused);
+    }
+    if (v5_native_readback_current_line_known(modal_tool_readback)) {
+        v5_native_readback_set_current_line(readback, modal_tool_readback->current_line);
+    } else {
+        v5_native_readback_set_current_line(readback, 0);
+    }
+    if (v5_native_readback_motion_line_known(modal_tool_readback)) {
+        v5_native_readback_set_motion_line(readback, modal_tool_readback->motion_line);
+    } else {
+        v5_native_readback_set_motion_line(readback, 0);
+    }
+    if (v5_native_readback_mdi_run_known(modal_tool_readback)) {
+        v5_native_readback_set_mdi_run_actual(
+            readback,
+            modal_tool_readback->mdi_run_active,
+            modal_tool_readback->mdi_run_line,
+            modal_tool_readback->mdi_run_command);
+    } else {
+        v5_native_readback_set_mdi_run_actual(readback, 0, 0, "");
+    }
+    if (v5_native_readback_all_homed_known(modal_tool_readback)) {
+        v5_native_readback_set_all_homed(readback, modal_tool_readback->all_homed);
+    }
+}
+
+static int shell_refresh_modal_line_readback(int force)
+{
+    V5NativeReadback before;
+    V5NativeReadback readback;
+    V5NativeReadback modal_tool_readback;
+    unsigned long long now;
+    int changed;
+
+    now = shell_monotonic_ns();
+    if (!force && g_modal_line_readback_last_probe_ns != 0ULL &&
+        now - g_modal_line_readback_last_probe_ns < V5_MODAL_LINE_READBACK_MIN_NS) {
+        return 0;
+    }
+    g_modal_line_readback_last_probe_ns = now;
+
+    v5_native_readback_init(&modal_tool_readback);
+    before = g_main_page.native_readback;
+    readback = g_main_page.native_readback;
+    if (v5_native_modal_tool_status_read(0, V5_NATIVE_MODAL_TOOL_STATUS_DEFAULT_MAX_AGE_MS, &modal_tool_readback)) {
+        shell_apply_modal_tool_readback(&readback, &modal_tool_readback);
+    } else {
+        v5_native_readback_set_current_line(&readback, 0);
+        v5_native_readback_set_motion_line(&readback, 0);
+        v5_native_readback_set_mdi_run_actual(&readback, 0, 0, "");
+    }
+    v5_main_page_set_native_readback(&g_main_page, &readback);
+    shell_update_top_status_label();
+    changed = memcmp(&before, &readback, sizeof(readback)) != 0;
+    return changed;
+}
 
 static int shell_refresh_native_readback(int force)
 {
@@ -168,46 +246,12 @@ static int shell_refresh_native_readback(int force)
             V5_NATIVE_READBACK_G53_CENTER_COUNT,
             V5_NATIVE_READBACK_G53_AXIS_COUNT,
             g53_geometry_readback.g53_geometry_epoch);
+        if (v5_native_readback_motion_model_known(&g53_geometry_readback)) {
+            v5_native_readback_set_motion_model(&readback, g53_geometry_readback.motion_model);
+        }
     }
     if (v5_native_modal_tool_status_read(0, V5_NATIVE_MODAL_TOOL_STATUS_DEFAULT_MAX_AGE_MS, &modal_tool_readback)) {
-        if (v5_native_readback_modal_known(&modal_tool_readback)) {
-            v5_native_readback_set_modal_actual(&readback, modal_tool_readback.modal_text);
-        }
-        if (v5_native_readback_tool_known(&modal_tool_readback)) {
-            v5_native_readback_set_tool_actual(
-                &readback,
-                modal_tool_readback.tool_number,
-                v5_native_readback_tool_length_known(&modal_tool_readback),
-                modal_tool_readback.tool_length_mm);
-        }
-        if (v5_native_readback_interpreter_idle_known(&modal_tool_readback)) {
-            v5_native_readback_set_interpreter_idle(&readback, modal_tool_readback.interpreter_idle);
-        }
-        if (v5_native_readback_interpreter_known(&modal_tool_readback)) {
-            v5_native_readback_set_interpreter_paused(&readback, modal_tool_readback.interpreter_paused);
-        }
-        if (v5_native_readback_current_line_known(&modal_tool_readback)) {
-            v5_native_readback_set_current_line(&readback, modal_tool_readback.current_line);
-        } else {
-            v5_native_readback_set_current_line(&readback, 0);
-        }
-        if (v5_native_readback_motion_line_known(&modal_tool_readback)) {
-            v5_native_readback_set_motion_line(&readback, modal_tool_readback.motion_line);
-        } else {
-            v5_native_readback_set_motion_line(&readback, 0);
-        }
-        if (v5_native_readback_mdi_run_known(&modal_tool_readback)) {
-            v5_native_readback_set_mdi_run_actual(
-                &readback,
-                modal_tool_readback.mdi_run_active,
-                modal_tool_readback.mdi_run_line,
-                modal_tool_readback.mdi_run_command);
-        } else {
-            v5_native_readback_set_mdi_run_actual(&readback, 0, 0, "");
-        }
-        if (v5_native_readback_all_homed_known(&modal_tool_readback)) {
-            v5_native_readback_set_all_homed(&readback, modal_tool_readback.all_homed);
-        }
+        shell_apply_modal_tool_readback(&readback, &modal_tool_readback);
     } else {
         v5_native_readback_set_current_line(&readback, 0);
         v5_native_readback_set_motion_line(&readback, 0);
@@ -1856,6 +1900,9 @@ int v5_ui_shell_refresh_once(void)
     if (shell_refresh_due(now, &g_ui_dynamic_last_refresh_ns, V5_UI_DYNAMIC_REFRESH_NS)) {
         V5UiStatusView before = g_model.status_view;
         (void)v5_ui_model_refresh_status_from_shm(&g_model, V5_STATUS_SHM_PATH);
+        if (shell_refresh_modal_line_readback(0)) {
+            flags |= V5_MAIN_PAGE_REFRESH_DYNAMIC;
+        }
         if (!shell_status_display_equal(&before, &g_model.status_view)) {
             flags |= V5_MAIN_PAGE_REFRESH_DYNAMIC;
         }

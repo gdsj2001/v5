@@ -15,6 +15,8 @@ static lv_color_t rgb(uint8_t r, uint8_t g, uint8_t b)
     return lv_color_make(r, g, b);
 }
 
+static void update_return_home_button_label(V5SettingsPage *page);
+
 static double monotonic_seconds(void)
 {
     struct timespec ts;
@@ -604,6 +606,78 @@ static void make_value_cell_colored(lv_obj_t *parent, const char *text, int x, i
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
 }
 
+static int motion_model_value_is_bc(const char *value)
+{
+    char normalized[64];
+    size_t i;
+    if (!value || !value[0]) {
+        return 0;
+    }
+    for (i = 0U; i + 1U < sizeof(normalized) && value[i]; ++i) {
+        normalized[i] = (char)toupper((unsigned char)value[i]);
+    }
+    normalized[i] = '\0';
+    return strncmp(normalized, "BC", 2U) == 0 ||
+           strstr(normalized, "XYZBC") != 0 ||
+           strstr(normalized, "_BC") != 0 ||
+           strstr(normalized, "-BC") != 0;
+}
+
+static void settings_motion_model_refresh_dropdown(V5SettingsPage *page)
+{
+    if (!page || !page->motion_model_dropdown) {
+        return;
+    }
+    lv_dropdown_set_selected(
+        page->motion_model_dropdown,
+        motion_model_value_is_bc(v5_settings_axis_table_motion_model_value()) ? 1U : 0U);
+}
+
+static void settings_motion_model_changed_cb(lv_event_t *event)
+{
+    V5SettingsPage *page = (V5SettingsPage *)lv_event_get_user_data(event);
+    char selected[32];
+    int ok;
+    if (!page || lv_event_get_code(event) != LV_EVENT_VALUE_CHANGED || !page->motion_model_dropdown) {
+        return;
+    }
+    selected[0] = '\0';
+    lv_dropdown_get_selected_str(page->motion_model_dropdown, selected, sizeof(selected));
+    ok = v5_settings_axis_table_commit_motion_model(selected);
+    settings_motion_model_refresh_dropdown(page);
+    if (ok) {
+        page->restart_pending = 1;
+        update_return_home_button_label(page);
+        set_status_text(page, 42, 221, 128, "运动模型: %s", v5_settings_axis_table_motion_model_value());
+    } else {
+        set_status_text(page, 245, 214, 82, "运动模型: owner readback 未确认");
+    }
+}
+
+static lv_obj_t *make_motion_model_dropdown(V5SettingsPage *page, lv_obj_t *parent, int x, int y, int w, int h)
+{
+    lv_obj_t *dd;
+    if (!page || !parent) {
+        return 0;
+    }
+    dd = lv_dropdown_create(parent);
+    lv_obj_set_pos(dd, x, y);
+    lv_obj_set_size(dd, w, h);
+    lv_dropdown_set_options(dd, "AC摇篮\nBC摇篮");
+    lv_obj_set_style_bg_color(dd, rgb(5, 27, 43), 0);
+    lv_obj_set_style_bg_opa(dd, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(dd, 0, 0);
+    lv_obj_set_style_radius(dd, 2, 0);
+    lv_obj_set_style_pad_all(dd, 0, 0);
+    lv_obj_set_style_text_color(dd, rgb(150, 170, 190), 0);
+    lv_obj_set_style_text_align(dd, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_clear_flag(dd, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(dd, settings_motion_model_changed_cb, LV_EVENT_VALUE_CHANGED, page);
+    page->motion_model_dropdown = dd;
+    settings_motion_model_refresh_dropdown(page);
+    return dd;
+}
+
 static void make_value_cell(lv_obj_t *parent, const char *text, int x, int y, int w, int h, int muted)
 {
     make_value_cell_colored(parent, text, x, y, w, h, muted, 226, 238, 246);
@@ -735,16 +809,7 @@ int v5_settings_page_create(V5SettingsPage *page, lv_obj_t *parent)
 
     make_panel(page->root, 16, 42, 220, 176, 7, 31, 48);
     make_label(page->root, "运动模型", 24, 55, 100, 24, 155, 177, 198);
-    make_value_cell_colored(page->root,
-                            v5_settings_axis_table_motion_model_value(),
-                            25,
-                            78,
-                            190,
-                            36,
-                            0,
-                            150,
-                            170,
-                            190);
+    make_motion_model_dropdown(page, page->root, 25, 78, 190, 36);
     make_label(page->root, "脉冲/总线", 24, 132, 100, 24, 226, 238, 246);
     make_value_cell_colored(page->root,
                             v5_settings_axis_table_bus_pulse_value(),

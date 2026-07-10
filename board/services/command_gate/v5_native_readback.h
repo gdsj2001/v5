@@ -15,6 +15,7 @@ extern "C" {
 #define V5_NATIVE_READBACK_G53_CENTER_A 0U
 #define V5_NATIVE_READBACK_G53_CENTER_B 1U
 #define V5_NATIVE_READBACK_G53_CENTER_C 2U
+#define V5_NATIVE_READBACK_MOTION_MODEL_CAP 32U
 #define V5_NATIVE_READBACK_MODAL_TEXT_CAP 128U
 #define V5_NATIVE_READBACK_MDI_COMMAND_CAP 128U
 
@@ -30,6 +31,8 @@ typedef struct V5NativeReadback {
     int g53_geometry_available;
     unsigned int g53_geometry_epoch;
     double g53_centers[V5_NATIVE_READBACK_G53_CENTER_COUNT][V5_NATIVE_READBACK_G53_AXIS_COUNT];
+    int motion_model_available;
+    char motion_model[V5_NATIVE_READBACK_MOTION_MODEL_CAP];
     int interpreter_state_available;
     int interpreter_paused;
     int interpreter_idle_available;
@@ -81,6 +84,7 @@ void v5_native_readback_set_g53_geometry(
     size_t axis_count,
     unsigned int epoch);
 const double *v5_native_readback_g53_center(const V5NativeReadback *readback, unsigned int center_index);
+void v5_native_readback_set_motion_model(V5NativeReadback *readback, const char *motion_model);
 void v5_native_readback_set_interpreter_paused(V5NativeReadback *readback, int paused);
 void v5_native_readback_set_interpreter_idle(V5NativeReadback *readback, int idle);
 void v5_native_readback_set_current_line(V5NativeReadback *readback, int line);
@@ -104,6 +108,7 @@ int v5_native_readback_wcs_known(const V5NativeReadback *readback);
 int v5_native_readback_wcs_offset_known(const V5NativeReadback *readback);
 int v5_native_readback_wcs_table_known(const V5NativeReadback *readback);
 int v5_native_readback_g53_geometry_known(const V5NativeReadback *readback);
+int v5_native_readback_motion_model_known(const V5NativeReadback *readback);
 int v5_native_readback_interpreter_known(const V5NativeReadback *readback);
 int v5_native_readback_interpreter_idle_known(const V5NativeReadback *readback);
 int v5_native_readback_current_line_known(const V5NativeReadback *readback);

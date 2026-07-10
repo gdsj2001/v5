@@ -62,9 +62,15 @@ int main(void)
     }
     if (!check_native_g53_field("G53_A_Y") ||
         !check_native_g53_field("G53_A_Z") ||
+        !check_native_g53_field("G53_B_X") ||
+        !check_native_g53_field("G53_B_Z") ||
         !check_native_g53_field("G53_C_X") ||
-        !check_native_g53_field("G53_C_Y")) {
+        !check_native_g53_field("G53_C_Y") ||
+        !check_native_g53_field("motion_model")) {
         return 15;
+    }
+    if (!check_apply("motion_model", "XYZBC_TRT")) {
+        return 16;
     }
     if (!check_apply("axis_X_max_velocity", "10000")) {
         return 3;
