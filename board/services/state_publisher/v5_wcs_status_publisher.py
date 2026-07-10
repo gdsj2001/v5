@@ -9,6 +9,14 @@ import ctypes
 import resource
 from typing import Iterable, Tuple
 
+from v5_native_operator_error_map import (
+    DEFAULT_OPERATOR_ERROR_MAP,
+    DEFAULT_OPERATOR_ERROR_PATH,
+    NativeOperatorErrorMap,
+    poll_operator_error_events,
+    write_operator_error_status,
+)
+
 
 
 def lock_process_memory(process_name: str) -> None:
@@ -677,6 +685,8 @@ def main() -> int:
     parser.add_argument('--path', default=DEFAULT_PATH)
     parser.add_argument('--position-path', default=DEFAULT_POSITION_PATH)
     parser.add_argument('--modal-tool-path', default=DEFAULT_MODAL_TOOL_PATH)
+    parser.add_argument('--operator-error-path', default=DEFAULT_OPERATOR_ERROR_PATH)
+    parser.add_argument('--operator-error-map', default=DEFAULT_OPERATOR_ERROR_MAP)
     parser.add_argument('--ini', default=os.environ.get('V5_LINUXCNC_INI', os.environ.get('INI_FILE_NAME', '')))
     parser.add_argument('--parameter-file', default=os.environ.get('V5_LINUXCNC_PARAMETER_FILE', ''))
     parser.add_argument('--interval-ms', type=int, default=DEFAULT_INTERVAL_MS)
@@ -686,7 +696,24 @@ def main() -> int:
     parser.add_argument('--mock-offsets', default='')
     parser.add_argument('--mock-mcs', default='')
     parser.add_argument('--mock-cmd-mcs', default='')
+    parser.add_argument('--mock-native-error', default='')
+    parser.add_argument('--mock-native-error-kind', type=int, default=1)
     args = parser.parse_args()
+
+    operator_error_map = NativeOperatorErrorMap.from_tsv(args.operator_error_map)
+    if args.mock_native_error:
+        message = operator_error_map.translate(args.mock_native_error)
+        write_operator_error_status(
+            args.operator_error_path,
+            1,
+            args.mock_native_error_kind,
+            1,
+            message)
+        print(
+            f'v5_native_operator_error mock source_id={message.source_id} '
+            f'fingerprint={message.fingerprint} matched={1 if message.matched else 0}',
+            flush=True)
+        return 0
 
     if args.mock_g5x_index or args.mock_mcs:
         valid, wcs_index = wcs_from_g5x(args.mock_g5x_index or 1)
@@ -723,12 +750,20 @@ def main() -> int:
     linuxcnc = load_linuxcnc()
     interpreter_idle_value = getattr(linuxcnc, 'INTERP_IDLE', 1)
     interpreter_paused_value = getattr(linuxcnc, 'INTERP_PAUSED', None)
+    operator_error_types = {
+        int(getattr(linuxcnc, 'NML_ERROR', 1)),
+        int(getattr(linuxcnc, 'OPERATOR_ERROR', 3)),
+    }
     consecutive_failures = 0
     interval = max(args.interval_ms, 20) / 1000.0
     invalid_after_failures = max(1, int(math.ceil(1.0 / interval)))
     next_status_log = 0.0
     last_status_log = None
     stat = None
+    operator_error_channel = None
+    operator_error_generation = 0
+    next_operator_error_log = 0.0
+    write_operator_error_status(args.operator_error_path, 0, 0, 0)
     while True:
         try:
             if stat is None:
@@ -742,6 +777,24 @@ def main() -> int:
                 args.t0_tool_holder_length_mm,
                 interpreter_idle_value,
                 interpreter_paused_value)
+            try:
+                if operator_error_channel is None:
+                    operator_error_channel = linuxcnc.error_channel()
+                operator_error_generation, _ = poll_operator_error_events(
+                    operator_error_channel,
+                    operator_error_types,
+                    operator_error_map,
+                    args.operator_error_path,
+                    operator_error_generation)
+            except Exception as error_exc:
+                operator_error_channel = None
+                error_now = time.monotonic()
+                if error_now >= next_operator_error_log:
+                    print(
+                        f'v5_native_operator_error reconnecting after channel error: {error_exc}',
+                        file=sys.stderr,
+                        flush=True)
+                    next_operator_error_log = error_now + 5.0
             consecutive_failures = 0
             status_log = (valid, wcs_index)
             now = time.monotonic()

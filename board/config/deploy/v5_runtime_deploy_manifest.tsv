@@ -5,6 +5,7 @@ script	services/state_publisher/v5_rtcp_status_publisher.py	/usr/libexec/8ax/v5_
 script	services/microkernel/v5_g53_geometry_memory_owner.py	/usr/libexec/8ax/v5_g53_geometry_memory_owner.py	0755
 script	services/microkernel/v5_native_safety_latch_owner.py	/usr/libexec/8ax/v5_native_safety_latch_owner.py	0755
 script	services/state_publisher/v5_wcs_status_publisher.py	/usr/libexec/8ax/v5_wcs_status_publisher.py	0755
+module	services/state_publisher/v5_native_operator_error_map.py	/usr/libexec/8ax/v5_native_operator_error_map.py	0644
 binary	build/board/app/v5_touch_diagnostics	/usr/libexec/8ax/v5_touch_diagnostics	0755
 binary	build/board/app/v5_linuxcncrsh_probe	/usr/libexec/8ax/v5_linuxcncrsh_probe	0755
 binary	build/board/app/v5_command_gate_server	/usr/libexec/8ax/v5_command_gate_server	0755
@@ -27,6 +28,7 @@ runtime_seed	linuxcnc/runtime/var/position.txt	/opt/8ax/v5/linuxcnc/var/position
 runtime_seed	linuxcnc/runtime/var/tool.tbl	/opt/8ax/v5/linuxcnc/var/tool.tbl	0644
 runtime_seed	linuxcnc/runtime/var/linuxcnc.var	/opt/8ax/v5/linuxcnc/var/linuxcnc.var	0644
 config	config/hardware/hardware_profile.json	/opt/8ax/v5/config/hardware_profile.json	0644
+config	config/ui/v5_native_operator_error_map.tsv	/opt/8ax/v5/config/ui/v5_native_operator_error_map.tsv	0644
 config	config/auth/device_auth_public.pem	/etc/6x-cnc/device_auth_public.pem	0644
 runtime_seed_merge	config/settings/self_parameter_table.tsv	/opt/8ax/v5/config/settings/self_parameter_table.tsv	0644
 runtime_seed	config/settings/drive_parameter_table.tsv	/opt/8ax/v5/config/settings/drive_parameter_table.tsv	0644

@@ -43,6 +43,8 @@ check_remote_test "v5_state_publisher installed executable" 'test -x /usr/libexe
 check_remote_test "v5_rtcp_status_publisher installed executable" 'test -x /usr/libexec/8ax/v5_rtcp_status_publisher.py'
 check_remote_test "v5_g53_geometry_memory_owner installed executable" 'test -x /usr/libexec/8ax/v5_g53_geometry_memory_owner.py'
 check_remote_test "v5_wcs_status_publisher installed executable" 'test -x /usr/libexec/8ax/v5_wcs_status_publisher.py'
+check_remote_test "native operator error mapper installed" 'test -r /usr/libexec/8ax/v5_native_operator_error_map.py'
+check_remote_test "native operator error complete map installed" 'test -r /opt/8ax/v5/config/ui/v5_native_operator_error_map.tsv && test "$(grep -vc "^#" /opt/8ax/v5/config/ui/v5_native_operator_error_map.tsv)" -eq 556'
 check_remote_test "v5_touch_diagnostics installed executable" 'test -x /usr/libexec/8ax/v5_touch_diagnostics'
 check_remote_test "v5_linuxcncrsh_probe installed executable" 'test -x /usr/libexec/8ax/v5_linuxcncrsh_probe'
 check_remote_test "v5_command_gate_server installed executable" 'test -x /usr/libexec/8ax/v5_command_gate_server'
@@ -132,7 +134,17 @@ fi
 check_remote_test "retired /run WCS v3 snapshot absent" 'test ! -e /run/8ax_v5_product_ui/v3_native_wcs_status.bin'
 check_remote_test "retired /run native position/modal snapshots absent" 'test ! -e /run/8ax_v5_product_ui/v3_native_position_status.bin && test ! -e /run/8ax_v5_product_ui/v3_native_modal_tool_status.bin'
 check_remote_test "registered native position/modal blocks in dev shm" 'test -s /dev/shm/v5_native_position_status.bin && test -s /dev/shm/v5_native_modal_tool_status.bin'
+check_remote_test "registered native operator error block in dev shm" 'test -s /dev/shm/v5_native_operator_error_status.bin'
 check_remote_test "registered native G53 geometry block in dev shm" 'test -s /dev/shm/v5_native_g53_geometry_status.bin'
+
+operator_error_block_check='import struct,sys; p="/dev/shm/v5_verify_native_operator_error.bin"; fmt=struct.Struct("<IIIIIIQQ64s24s96s384s256sII"); v=fmt.unpack(open(p,"rb").read(fmt.size)); text=b" ".join((v[10],v[11],v[12])).decode("utf-8","replace").lower(); banned=("linuxcnc","linuxcncrsh"," emc "," hal "," nml "); sys.exit(0 if v[1]==1 and v[2]==fmt.size and v[3]==1 and v[6]==1 and all(x not in text for x in banned) else 1)'
+if remote "PYTHONPATH=/usr/lib/python3/dist-packages /usr/libexec/8ax/v5_wcs_status_publisher.py --operator-error-map /opt/8ax/v5/config/ui/v5_native_operator_error_map.tsv --operator-error-path /dev/shm/v5_verify_native_operator_error.bin --mock-native-error \"Can't run a program when not homed\" >/tmp/v5_operator_error_mock.out 2>&1 && /usr/bin/python3 -c '$operator_error_block_check'" >/dev/null 2>&1; then
+  ok "native operator error mapper publishes Chinese resident event block"
+else
+  fail_msg "native operator error mapper publishes Chinese resident event block"
+  remote 'tail -n 10 /tmp/v5_operator_error_mock.out 2>/dev/null || true' | sed 's/^/INFO operator error mapper: /'
+fi
+remote 'rm -f /dev/shm/v5_verify_native_operator_error.bin /tmp/v5_operator_error_mock.out' >/dev/null 2>&1 || true
 
 if remote "/usr/libexec/8ax/v5_state_publisher --path /dev/shm/v5_verify_state_publisher --once >/tmp/v5_verify_state_publisher.out 2>&1 && test -s /dev/shm/v5_verify_state_publisher && rm -f /dev/shm/v5_verify_state_publisher" >/dev/null 2>&1; then
   ok "state publisher one-shot writes shm"

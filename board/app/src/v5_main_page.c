@@ -3,6 +3,7 @@
 #include "v5_command_gate_ipc.h"
 #include "v5_button_visuals.h"
 #include "v5_native_wcs_status.h"
+#include "v5_native_operator_error_status.h"
 #include "v5_layout_icons.h"
 #include "v5_lvgl_clock.h"
 #include "v5_lvgl_remote_display.h"
@@ -599,6 +600,22 @@ static void main_page_rotate_xyz_about_axis(
     point[2] = center[2] + (vz * c) + (cross_z * s) + (kz * dot * (1.0 - c));
 }
 
+static void main_page_rotate_about_active_model_first_axis(
+    const V5MotionModelDescriptor *model,
+    double point[V5_STATUS_AXIS_COUNT],
+    const double center[V5_STATUS_AXIS_COUNT],
+    double first_deg)
+{
+    double first_axis[3] = {0.0, 0.0, 0.0};
+
+    if (!model || !point || !center || !isfinite(first_deg) ||
+        model->first_world_axis_component >= 3U) {
+        return;
+    }
+    first_axis[model->first_world_axis_component] = 1.0;
+    main_page_rotate_xyz_about_axis(point, center, first_axis, first_deg * M_PI / 180.0);
+}
+
 static void main_page_apply_active_model_pose_to_world_point(
     const V5MotionModelDescriptor *model,
     double point[V5_STATUS_AXIS_COUNT],
@@ -607,35 +624,15 @@ static void main_page_apply_active_model_pose_to_world_point(
     double first_deg,
     double second_deg)
 {
-    double first_axis[3] = {0.0, 0.0, 0.0};
-    double second_axis[3] = {0.0, 0.0, 1.0};
-    double first_rad;
-    double second_rad;
     double base_z[3] = {0.0, 0.0, 1.0};
-    double dot;
-    double cross[3];
-    double c;
-    double s;
 
     if (!point || !first_center || !second_center ||
         !isfinite(first_deg) || !isfinite(second_deg) ||
         !model || model->first_world_axis_component >= 3U) {
         return;
     }
-    first_axis[model->first_world_axis_component] = 1.0;
-    first_rad = first_deg * M_PI / 180.0;
-    second_rad = second_deg * M_PI / 180.0;
-    c = cos(first_rad);
-    s = sin(first_rad);
-    dot = (first_axis[0] * base_z[0]) + (first_axis[1] * base_z[1]) + (first_axis[2] * base_z[2]);
-    cross[0] = (first_axis[1] * base_z[2]) - (first_axis[2] * base_z[1]);
-    cross[1] = (first_axis[2] * base_z[0]) - (first_axis[0] * base_z[2]);
-    cross[2] = (first_axis[0] * base_z[1]) - (first_axis[1] * base_z[0]);
-    second_axis[0] = (base_z[0] * c) + (cross[0] * s) + (first_axis[0] * dot * (1.0 - c));
-    second_axis[1] = (base_z[1] * c) + (cross[1] * s) + (first_axis[1] * dot * (1.0 - c));
-    second_axis[2] = (base_z[2] * c) + (cross[2] * s) + (first_axis[2] * dot * (1.0 - c));
-    main_page_rotate_xyz_about_axis(point, first_center, first_axis, first_rad);
-    main_page_rotate_xyz_about_axis(point, second_center, second_axis, second_rad);
+    main_page_rotate_xyz_about_axis(point, second_center, base_z, second_deg * M_PI / 180.0);
+    main_page_rotate_about_active_model_first_axis(model, point, first_center, first_deg);
 }
 
 static int main_page_rtcp_wcs_follow_active_model_available(
@@ -708,7 +705,10 @@ static void main_page_update_program_project_points(
     }
 }
 
-static void main_page_expand_static_geometry_fit(V5MainPage *page, const V5UiStatusView *status)
+static void main_page_expand_static_geometry_fit(
+    V5MainPage *page,
+    const V5UiStatusView *status,
+    V5ToolpathDisplayFit *fit)
 {
     double point[V5_STATUS_AXIS_COUNT];
     double wcs_origin[V5_STATUS_AXIS_COUNT];
@@ -718,13 +718,15 @@ static void main_page_expand_static_geometry_fit(V5MainPage *page, const V5UiSta
     double second_center[V5_STATUS_AXIS_COUNT];
     double first_deg = 0.0;
     double second_deg = 0.0;
+    double pose_first_deg;
     double angle;
     double c_vec_x;
     double c_vec_y;
     double c_vec_z;
+    int first_center_valid;
     int wcs_follow_model;
     unsigned int i;
-    if (!page || !page->toolpath_fit.valid) {
+    if (!page || !fit || !fit->valid) {
         return;
     }
     if (v5_native_readback_wcs_offset_known(&page->native_readback)) {
@@ -746,68 +748,87 @@ static void main_page_expand_static_geometry_fit(V5MainPage *page, const V5UiSta
             main_page_apply_active_model_pose_to_world_point(
                 model, wcs_origin, first_center, second_center, first_deg, second_deg);
         }
-        main_page_fit_expand_world_point(&page->toolpath_fit, wcs_origin);
+        main_page_fit_expand_world_point(fit, wcs_origin);
         for (i = 0U; i < 3U; ++i) {
             if (wcs_follow_model) {
                 main_page_apply_active_model_pose_to_world_point(
                     model, wcs_axis[i], first_center, second_center, first_deg, second_deg);
             }
-            main_page_fit_expand_world_point(&page->toolpath_fit, wcs_axis[i]);
+            main_page_fit_expand_world_point(fit, wcs_axis[i]);
         }
     }
     model = main_page_active_motion_model(page);
-    if (main_page_g53_active_center_world(page, 0U, first_center)) {
+    first_center_valid = main_page_g53_active_center_world(page, 0U, first_center);
+    if (first_center_valid) {
         point[0] = first_center[0];
         point[1] = first_center[1];
         point[2] = first_center[2];
         point[3] = 0.0;
         point[4] = 0.0;
         point[model->first_world_axis_component] -= 40.0;
-        main_page_fit_expand_world_point(&page->toolpath_fit, point);
+        main_page_fit_expand_world_point(fit, point);
         point[0] = first_center[0];
         point[1] = first_center[1];
         point[2] = first_center[2];
         point[model->first_world_axis_component] += 40.0;
-        main_page_fit_expand_world_point(&page->toolpath_fit, point);
+        main_page_fit_expand_world_point(fit, point);
     }
     if (main_page_g53_active_center_world(page, 1U, second_center)) {
-        angle = (status && (status->valid_mask & V5_STATUS_VALID_MCS) && isfinite(status->mcs[3])) ? status->mcs[3] * M_PI / 180.0 : 0.0;
+        pose_first_deg = (status && (status->valid_mask & V5_STATUS_VALID_MCS) && isfinite(status->mcs[3])) ? status->mcs[3] : 0.0;
+        angle = pose_first_deg * M_PI / 180.0;
+        if (first_center_valid) {
+            main_page_rotate_about_active_model_first_axis(
+                model,
+                second_center,
+                first_center,
+                pose_first_deg);
+        }
         c_vec_x = model->first_world_axis_component == 1U ? sin(angle) * 40.0 : 0.0;
         c_vec_y = model->first_world_axis_component == 0U ? -sin(angle) * 40.0 : 0.0;
         c_vec_z = cos(angle) * 40.0;
         point[0] = second_center[0] - c_vec_x; point[1] = second_center[1] - c_vec_y; point[2] = second_center[2] - c_vec_z; point[3] = 0.0; point[4] = 0.0;
-        main_page_fit_expand_world_point(&page->toolpath_fit, point);
+        main_page_fit_expand_world_point(fit, point);
         point[0] = second_center[0] + c_vec_x;
         point[1] = second_center[1] + c_vec_y;
         point[2] = second_center[2] + c_vec_z;
-        main_page_fit_expand_world_point(&page->toolpath_fit, point);
+        main_page_fit_expand_world_point(fit, point);
     }
 }
 
-static void main_page_expand_visible_toolpath_fit(V5MainPage *page, const V5UiStatusView *status)
+static void main_page_expand_visible_toolpath_fit(
+    V5MainPage *page,
+    const V5UiStatusView *status,
+    V5ToolpathDisplayFit *fit)
 {
     double origin[V5_STATUS_AXIS_COUNT] = {0.0, 0.0, 0.0, 0.0, 0.0};
     double x_axis[V5_STATUS_AXIS_COUNT] = {40.0, 0.0, 0.0, 0.0, 0.0};
     double y_axis[V5_STATUS_AXIS_COUNT] = {0.0, 40.0, 0.0, 0.0, 0.0};
     double z_axis[V5_STATUS_AXIS_COUNT] = {0.0, 0.0, 40.0, 0.0, 0.0};
     double tool_len = 0.0;
+    unsigned int i;
 
-    if (!page || !page->toolpath_fit.valid) {
+    if (!page || !fit || !fit->valid) {
         return;
     }
 
-    main_page_fit_expand_world_point(&page->toolpath_fit, origin);
-    main_page_fit_expand_world_point(&page->toolpath_fit, x_axis);
-    main_page_fit_expand_world_point(&page->toolpath_fit, y_axis);
-    main_page_fit_expand_world_point(&page->toolpath_fit, z_axis);
+    main_page_fit_expand_world_point(fit, origin);
+    main_page_fit_expand_world_point(fit, x_axis);
+    main_page_fit_expand_world_point(fit, y_axis);
+    main_page_fit_expand_world_point(fit, z_axis);
+
+    if (page->toolpath_program_visible) {
+        for (i = 0U; i < page->toolpath_program_point_count; ++i) {
+            main_page_fit_expand_world_point(fit, page->toolpath_program_project_points[i].axis);
+        }
+    }
 
     if (status && (status->valid_mask & V5_STATUS_VALID_MCS) != 0U && main_page_axis_values_finite(status->mcs)) {
         double holder_end[V5_STATUS_AXIS_COUNT];
-        main_page_fit_expand_world_point(&page->toolpath_fit, status->mcs);
+        main_page_fit_expand_world_point(fit, status->mcs);
         if (main_page_tool_length_mm(page, &tool_len) && fabs(tool_len) > 1.0e-9) {
             memcpy(holder_end, status->mcs, sizeof(holder_end));
             holder_end[2] -= tool_len;
-            main_page_fit_expand_world_point(&page->toolpath_fit, holder_end);
+            main_page_fit_expand_world_point(fit, holder_end);
         }
     }
 
@@ -817,10 +838,141 @@ static void main_page_expand_visible_toolpath_fit(V5MainPage *page, const V5UiSt
         if (main_page_tool_length_mm(page, &tool_len) && fabs(tool_len) > 1.0e-9) {
             cmd_tip[2] -= tool_len;
         }
-        main_page_fit_expand_world_point(&page->toolpath_fit, cmd_tip);
+        main_page_fit_expand_world_point(fit, cmd_tip);
     }
 
-    main_page_expand_static_geometry_fit(page, status);
+    main_page_expand_static_geometry_fit(page, status, fit);
+}
+
+static int main_page_fit_candidate_outside_window(
+    const V5ToolpathDisplayFit *current,
+    const V5ToolpathDisplayFit *candidate)
+{
+    double span_u;
+    double span_v;
+    double margin_u;
+    double margin_v;
+
+    if (!current || !candidate || !current->valid || !candidate->valid ||
+        !current->bounds.valid || !candidate->bounds.valid || current->plane != candidate->plane) {
+        return 0;
+    }
+    span_u = current->bounds.max_u - current->bounds.min_u;
+    span_v = current->bounds.max_v - current->bounds.min_v;
+    if (fabs(span_u) < 0.001) span_u = 1.0;
+    if (fabs(span_v) < 0.001) span_v = 1.0;
+    margin_u = fabs(span_u) * 0.125;
+    margin_v = fabs(span_v) * 0.125;
+    return candidate->bounds.min_u < current->bounds.min_u - margin_u ||
+           candidate->bounds.max_u > current->bounds.max_u + margin_u ||
+           candidate->bounds.min_v < current->bounds.min_v - margin_v ||
+           candidate->bounds.max_v > current->bounds.max_v + margin_v;
+}
+
+static int main_page_world_point_outside_fit_window(
+    const V5MainPage *page,
+    const double world[V5_STATUS_AXIS_COUNT])
+{
+    V5ToolpathScreenPoint point;
+
+    if (!page || !world || !page->toolpath_fit.valid ||
+        !v5_toolpath_display_project_world_point(
+            world,
+            &page->toolpath_fit,
+            (double)V5_TOOLPATH_W,
+            (double)V5_TOOLPATH_H,
+            &point)) {
+        return 0;
+    }
+    return point.x < 0.0 || point.x > (double)V5_TOOLPATH_W ||
+           point.y < 0.0 || point.y > (double)V5_TOOLPATH_H;
+}
+
+static int main_page_dynamic_toolpath_outside_fit_window(
+    const V5MainPage *page,
+    const V5UiStatusView *status)
+{
+    double point[V5_STATUS_AXIS_COUNT];
+    double tool_len = 0.0;
+    int tool_len_valid;
+
+    if (!page || !status || !page->toolpath_fit.valid) {
+        return 0;
+    }
+    tool_len_valid = main_page_tool_length_mm(page, &tool_len) && fabs(tool_len) > 1.0e-9;
+    if ((status->valid_mask & V5_STATUS_VALID_MCS) != 0U && main_page_axis_values_finite(status->mcs)) {
+        if (main_page_world_point_outside_fit_window(page, status->mcs)) {
+            return 1;
+        }
+        if (tool_len_valid) {
+            memcpy(point, status->mcs, sizeof(point));
+            point[2] -= tool_len;
+            if (main_page_world_point_outside_fit_window(page, point)) {
+                return 1;
+            }
+        }
+    }
+    if ((status->valid_mask & V5_STATUS_VALID_CMD_MCS) != 0U && main_page_axis_values_finite(status->cmd_mcs)) {
+        memcpy(point, status->cmd_mcs, sizeof(point));
+        if (tool_len_valid) {
+            point[2] -= tool_len;
+        }
+        if (main_page_world_point_outside_fit_window(page, point)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int main_page_program_outside_fit_window(const V5MainPage *page)
+{
+    unsigned int i;
+
+    if (!page || !page->toolpath_fit.valid || !page->toolpath_program_visible) {
+        return 0;
+    }
+    for (i = 0U; i < page->toolpath_program_point_count; ++i) {
+        if (main_page_world_point_outside_fit_window(
+                page,
+                page->toolpath_program_project_points[i].axis)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int main_page_static_geometry_outside_fit_window(
+    V5MainPage *page,
+    const V5UiStatusView *status)
+{
+    V5ToolpathDisplayFit candidate;
+
+    if (!page || !page->toolpath_fit.valid || !page->toolpath_fit.bounds.valid) {
+        return 0;
+    }
+    candidate = page->toolpath_fit;
+    main_page_expand_static_geometry_fit(page, status, &candidate);
+    return main_page_fit_candidate_outside_window(&page->toolpath_fit, &candidate);
+}
+
+static int main_page_expand_fit_on_overflow(V5MainPage *page, const V5UiStatusView *status)
+{
+    V5ToolpathDisplayFit candidate;
+
+    if (!page || !page->toolpath_fit.valid || !page->toolpath_fit.bounds.valid) {
+        return 0;
+    }
+    candidate = page->toolpath_fit;
+    main_page_expand_visible_toolpath_fit(page, status, &candidate);
+    if (!main_page_fit_candidate_outside_window(&page->toolpath_fit, &candidate)) {
+        return 0;
+    }
+    candidate.generation = page->toolpath_fit.generation + 1U;
+    if (candidate.generation == 0U) {
+        candidate.generation = 1U;
+    }
+    page->toolpath_fit = candidate;
+    return 1;
 }
 
 static double monotonic_seconds(void)
@@ -1602,10 +1754,20 @@ static void update_toolpath_state_lines(V5MainPage *page, const V5UiStatusView *
             V5ToolpathScreenPoint second_center_point;
             double first_center_world[V5_STATUS_AXIS_COUNT];
             double second_center_world[V5_STATUS_AXIS_COUNT];
+            int active_geometry_valid;
             active_model = main_page_active_motion_model(page);
-            if (main_page_g53_active_center_world(page, 0U, first_center_world) &&
+            active_geometry_valid = active_model &&
+                main_page_g53_active_center_world(page, 0U, first_center_world) &&
+                main_page_g53_active_center_world(page, 1U, second_center_world);
+            if (active_geometry_valid) {
+                main_page_rotate_about_active_model_first_axis(
+                    active_model,
+                    second_center_world,
+                    first_center_world,
+                    status->mcs[3]);
+            }
+            if (active_geometry_valid &&
                 main_page_project_world_point_transformed(page, first_center_world, &first_center_point) &&
-                main_page_g53_active_center_world(page, 1U, second_center_world) &&
                 main_page_project_world_point_transformed(page, second_center_world, &second_center_point)) {
                 set_toolpath_active_model_geometry_from_basis(
                     page,
@@ -1859,6 +2021,33 @@ static void set_toolpath_program_line(
     }
     page->toolpath_program_visible = 1;
     page->toolpath_line_rewrite_count += 1U;
+}
+
+static int main_page_project_program_with_current_fit(V5MainPage *page)
+{
+    unsigned int i;
+    unsigned int projected_count;
+
+    if (!page || !page->toolpath_fit.valid || page->toolpath_program_point_count == 0U) {
+        return 0;
+    }
+    projected_count = v5_toolpath_display_project_points_with_fit(
+        page->toolpath_program_project_points,
+        page->toolpath_program_point_count,
+        &page->toolpath_fit,
+        (double)V5_TOOLPATH_W,
+        (double)V5_TOOLPATH_H,
+        page->toolpath_program_screen_points,
+        V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT);
+    if (projected_count == 0U) {
+        return 0;
+    }
+    for (i = 0U; i < projected_count; ++i) {
+        page->toolpath_program_screen_points[i] =
+            apply_toolpath_view_transform(page, page->toolpath_program_screen_points[i]);
+    }
+    set_toolpath_program_line(page, page->toolpath_program_screen_points, projected_count);
+    return 1;
 }
 
 static void make_divider(lv_obj_t *parent, int x, int y, int w, int h)
@@ -2903,11 +3092,9 @@ static void create_power_on_home_popup(V5MainPage *page)
 
 static void show_power_on_home_popup(V5MainPage *page, int status_known)
 {
-    const char *code = status_known ?
+    V5NativeOperatorErrorStatus operator_message;
+    const char *alias_code = status_known ?
         "POWER_ON_HOME_REQUIRED" : "POWER_ON_HOME_STATUS_UNAVAILABLE";
-    const char *reason = status_known ?
-        "本动作需要先完成本次开机机械全轴回零" :
-        "无法从微内核读取本次开机回零状态";
     char message[384];
     if (!page || !page->power_on_home_popup || !page->power_on_home_popup_message) {
         return;
@@ -2917,12 +3104,16 @@ static void show_power_on_home_popup(V5MainPage *page, int status_known)
             &page->power_on_home_popup_frame_guard,
             V5_REMOTE_DISPLAY_CACHE_POPUP);
     }
+    if (!v5_native_operator_error_status_from_alias(alias_code, &operator_message)) {
+        return;
+    }
     snprintf(
         message,
         sizeof(message),
-        "提示: %s\n原因: %s\n下一步: 关闭提示，选择\"机械全轴\"后按\"回零\"",
-        code,
-        reason);
+        "提示: %s\n\n原因: %s\n\n下一步: %s",
+        operator_message.title_cn,
+        operator_message.reason_cn,
+        operator_message.next_cn);
     lv_label_set_text(page->power_on_home_popup_message, message);
     lv_obj_clear_flag(page->power_on_home_popup, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(page->power_on_home_popup);
@@ -3390,6 +3581,8 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
     int program_ac_changed = 0;
     int static_pose_changed = 0;
     int program_refresh_due = 0;
+    int fit_overflow_checked = 0;
+    int fit_overflow_changed = 0;
     int runtime_has_program = runtime && v5_program_runtime_has_open_program(runtime);
     unsigned int i;
 
@@ -3465,7 +3658,7 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
 
         if (!page->toolpath_fit.valid && status) {
             if (v5_toolpath_display_fit_from_status(status, page->view_plane, &page->toolpath_fit)) {
-                main_page_expand_visible_toolpath_fit(page, status);
+                main_page_expand_visible_toolpath_fit(page, status, &page->toolpath_fit);
                 page->toolpath_static_cache_misses += 1U;
             }
         }
@@ -3505,11 +3698,21 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
                 (!page->toolpath_program_visible ||
                  page->toolpath_program_generation != runtime_generation ||
                  page->toolpath_program_plane != page->view_plane ||
-                 program_wcs_changed ||
                  !page->toolpath_fit.valid);
+            if (preview_count > 0U && !program_fit_dirty &&
+                (program_ac_changed || program_wcs_changed || static_pose_changed)) {
+                fit_overflow_checked = 1;
+                if (main_page_program_outside_fit_window(page) ||
+                    main_page_dynamic_toolpath_outside_fit_window(page, status) ||
+                    main_page_static_geometry_outside_fit_window(page, status)) {
+                    fit_overflow_changed = main_page_expand_fit_on_overflow(page, status);
+                }
+            }
             program_projection_dirty =
                 program_fit_dirty ||
                 program_ac_changed ||
+                program_wcs_changed ||
+                fit_overflow_changed ||
                 page->toolpath_program_view_generation != page->toolpath_view_generation;
             if (preview_count > 0U && program_projection_dirty) {
                 if (!program_fit_dirty ||
@@ -3519,21 +3722,10 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
                         page->view_plane,
                         &page->toolpath_fit)) {
                     if (program_fit_dirty) {
-                        main_page_expand_visible_toolpath_fit(page, status);
+                        main_page_expand_visible_toolpath_fit(page, status, &page->toolpath_fit);
                     }
-                    unsigned int projected_count = v5_toolpath_display_project_points_with_fit(
-                        page->toolpath_program_project_points,
-                        preview_count,
-                        &page->toolpath_fit,
-                        (double)V5_TOOLPATH_W,
-                        (double)V5_TOOLPATH_H,
-                        page->toolpath_program_screen_points,
-                        V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT);
-                    for (i = 0U; i < projected_count; ++i) {
-                        page->toolpath_program_screen_points[i] =
-                            apply_toolpath_view_transform(page, page->toolpath_program_screen_points[i]);
-                    }
-                    set_toolpath_program_line(page, page->toolpath_program_screen_points, projected_count);
+                    page->toolpath_program_point_count = preview_count;
+                    main_page_project_program_with_current_fit(page);
                     page->toolpath_program_generation = runtime_generation;
                     page->toolpath_program_view_generation = page->toolpath_view_generation;
                     page->toolpath_program_plane = page->view_plane;
@@ -3542,7 +3734,6 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
                     page->toolpath_program_wcs_offset[0] = program_wcs_offset[0];
                     page->toolpath_program_wcs_offset[1] = program_wcs_offset[1];
                     page->toolpath_program_wcs_offset[2] = program_wcs_offset[2];
-                    page->toolpath_program_point_count = preview_count;
                     if (program_fit_dirty) {
                         page->toolpath_static_cache_misses += 1U;
                     }
@@ -3568,7 +3759,17 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
         page->toolpath_program_ac_c_deg = 0.0;
     }
 
-    if (static_toolpath_due || program_ac_changed || static_pose_changed ||
+    if (!fit_overflow_checked &&
+        (main_page_dynamic_toolpath_outside_fit_window(page, status) ||
+         ((static_toolpath_due || static_pose_changed) &&
+          main_page_static_geometry_outside_fit_window(page, status)))) {
+        fit_overflow_changed = main_page_expand_fit_on_overflow(page, status);
+        if (fit_overflow_changed && runtime_has_program && page->toolpath_program_visible) {
+            main_page_project_program_with_current_fit(page);
+        }
+    }
+
+    if (static_toolpath_due || program_ac_changed || static_pose_changed || fit_overflow_changed ||
         (refresh_flags & V5_MAIN_PAGE_REFRESH_SLOW) != 0U) {
         update_toolpath_state_lines(page, status);
         main_page_store_static_pose(page, status);

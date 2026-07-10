@@ -123,6 +123,14 @@ add_executable(v5_program_page_double_click_smoke
     src/v5_ui_status_view.c
 )
 
+add_library(v5_operator_error_status STATIC
+    ../services/state_publisher/v5_native_operator_error_status.c
+)
+
+target_include_directories(v5_operator_error_status PUBLIC
+    "${V5_ROOT_DIR}/services/state_publisher"
+)
+
 add_library(v5_status_shm_projection STATIC
     src/v5_status_shm_reader.c
     ../services/state_publisher/v5_native_sample.c
@@ -135,6 +143,8 @@ add_library(v5_status_shm_projection STATIC
     ../services/command_gate/v5_native_g53_geometry_status.c
     ../services/command_gate/v5_native_modal_tool_status.c
 )
+
+target_link_libraries(v5_status_shm_projection PUBLIC v5_operator_error_status)
 
 target_include_directories(v5_status_shm_projection PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
@@ -201,7 +211,7 @@ target_include_directories(v5_command_gate_core PUBLIC
     "${V5_ROOT_DIR}/services/state_publisher"
 )
 
-target_link_libraries(v5_command_gate_core PUBLIC v5_command_gate_client)
+target_link_libraries(v5_command_gate_core PUBLIC v5_command_gate_client v5_operator_error_status)
 if(NOT MSVC)
     target_link_libraries(v5_command_gate_core PUBLIC m)
 endif()
@@ -449,6 +459,12 @@ add_executable(v5_native_modal_tool_status_smoke
 )
 
 target_link_libraries(v5_native_modal_tool_status_smoke PRIVATE v5_command_gate_core m)
+
+add_executable(v5_native_operator_error_status_smoke
+    ../services/state_publisher/v5_native_operator_error_status_smoke.c
+)
+
+target_link_libraries(v5_native_operator_error_status_smoke PRIVATE v5_operator_error_status)
 
 target_link_libraries(v5_command_wrappers_smoke PRIVATE
     v5_program_commands

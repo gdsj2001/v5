@@ -1,0 +1,561 @@
+# schema=v5.native_operator_error_map.v1
+# source_count=555
+# interpreter_fixed_count=197
+# dynamic_format_count=358
+# inventory_sha256=10ea2746943af0d98cf709cfe1f550006440169637322e6f639cfc32be517962
+source_id	origin	native_pattern_json	reason_cn_json	handling_group
+INTERPRETER_FMT_005BB8FB0122	CHKS:rs274ngc/interp_convert.cc	"G%d requires D word to be a whole number"	"G%d 要求D字是一个整数"	PROGRAM_SYNTAX
+INTERPRETER_FMT_02A7A101691E	CHKS:rs274ngc/interp_convert.cc	"Q word with M19 requires a value > 0"	"Q字与M19需要值> 0"	PROGRAM_SYNTAX
+INTERPRETER_FMT_0453E3037BB5	ERS:rs274ngc/interp_namedparams.cc	"Named parameter #<%s> not defined"	"命名参数 #<%s> 没有定义"	PROGRAM_SYNTAX
+INTERPRETER_FMT_056AACFB0C12	ERS:rs274ngc/interp_convert.cc	"Cannot set reference point with cutter compensation in effect"	"刀具补偿生效时不能设置参考点"	TOOL
+INTERPRETER_FMT_057AA4F49161	CHKS:rs274ngc/interp_python.cc	"py_execute(%s): Python plugin not initialized"	"扩展程序%s尚未初始化"	INTERNAL
+INTERPRETER_FMT_0612A010BEC4	CHKS:rs274ngc/interp_namedparams.cc	"named param - pycall(%s):\n%s"	"扩展命名参数调用%s失败"	PROGRAM_SYNTAX
+INTERPRETER_FMT_0676E4422F66	ERS:rs274ngc/interp_queue.cc	"BUG: Unsupported plane [%d] in cutter compensation"	"错误: 不支持平面 [%d] 中的刀具补偿"	INTERNAL
+INTERPRETER_FMT_07383ADC18DF	ERS:rs274ngc/interp_cycles.cc	"%s for plane %s not implemented"	"%s尚不支持平面%s"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_08126D3EBA75	ERS:rs274ngc/interp_namedparams.cc	"can't open INI file '%s'"	"无法打开系统配置文件"	CONFIG
+INTERPRETER_FMT_08371828E5A8	CHKS:rs274ngc/interp_read.cc	"Cannot read current position with cutter radius compensation on"	"使用刀具半径补偿时无法读取当前位置"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_086307DD8D79	ERS:rs274ngc/interp_cycles.cc	"Spindle not turning in %s"	"主轴在 %s 中未转动"	SPINDLE
+INTERPRETER_FMT_089C14F9ED4C	CHKS:rs274ngc/interp_convert.cc	"BUG: restore from level %d !?"	"错误:从级别%d恢复?"	INTERNAL
+INTERPRETER_FMT_0B1E8A6600B6	CHKS:rs274ngc/interp_read.cc	"BUG: M remapping: modal group < 0"	"M指令重映射组小于允许范围"	INTERNAL
+INTERPRETER_FMT_0B2BCC5D9B11	CHKS:rs274ngc/interp_arc.cc	"Radius to end of arc differs from radius to start: start=(%c%.4f,%c%.4f) center=(%c%.4f,%c%.4f) end=(%c%.4f,%c%.4f) r1=%.4f r2=%.4f abs_err=%.4g rel_err=%.4f%%"	"半径到圆弧的半径不同于半径开始: start=(%c%.4f,%c%.4f) center=(%c%.4f,%c%.4f) end=(%c%.4f,%c%.4f) r1=%.4f r2=%.4f abs_err=%.4g rel_err=%.4f%%"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_0CDF907F4DBE	CHKS:rs274ngc/interp_convert.cc	"Q number in G10 is not an integer"	"G10中的Q号不是一个整数"	PROGRAM_SYNTAX
+INTERPRETER_FMT_0D8E22C67F68	ERS:rs274ngc/interp_read.cc	"bad number format (conversion failed) parsing '%s'"	"错误的数字格式(转换失败)解析 '%s'"	PROGRAM_SYNTAX
+INTERPRETER_FMT_10013D6BC515	CHKS:rs274ngc/interp_read.cc	"DISABLE_FANUC_STYLE_SUB set in INI file, but found m98"	"程序中的M98与当前子程序格式设置不一致"	CONFIG
+INTERPRETER_FMT_101F1712E8B6	CHKS:rs274ngc/interp_read.cc	"Calculation resulted in 'infinity'"	"计算结果 'infinity'"	PROGRAM_SYNTAX
+INTERPRETER_FMT_112C177218F8	CHKS:rs274ngc/interp_namedparams.cc	"Python namedparams.%s returns no value"	"扩展参数%s没有返回值"	PROGRAM_SYNTAX
+INTERPRETER_FMT_1467F43D71D6	CHKS:rs274ngc/interp_read.cc	"Calculation resulted in 'not a number'"	"计算结果 'not a number'"	PROGRAM_SYNTAX
+INTERPRETER_FMT_14F58B875DC2	CHKS:rs274ngc/interp_python.cc	"py_reload:\n%s"	"扩展程序重新加载失败"	PROGRAM_SYNTAX
+INTERPRETER_FMT_15D00B1568C3	CHKS:rs274ngc/interp_convert.cc	"Arc move in concave corner cannot be reached by the tool without gouging"	"没有刨削槽的刀具无法到达凹角处的弧线"	TOOL
+INTERPRETER_FMT_15E67A96F3C8	CHKS:rs274ngc/interp_remap.cc	"BUG: add_parameters: argspec = NULL"	"扩展参数定义缺失"	INTERNAL
+INTERPRETER_FMT_172519EECC6A	ERS:rs274ngc/rs274ngc_pre.cc	"BUG: execute_block: got %d - not in remappings() !! (next_remap=%d)"	"控制系统内部程序块状态异常（当前%d，下一项%d）"	INTERNAL
+INTERPRETER_FMT_17361C542CDC	CHKS:rs274ngc/interp_convert.cc	"Invalid analog index with M67"	"模拟索引与M67无效"	PROGRAM_SYNTAX
+INTERPRETER_FMT_18778807F06E	CHKS:rs274ngc/interp_o_word.cc	"'O.... sub' subroutine must be called with 'O.... call'"	"O sub子程序必须用O call调用"	PROGRAM_FLOW
+INTERPRETER_FMT_18A7E9120FF6	CHKS:rs274ngc/interp_convert.cc	"Spindle not turning in G33"	"在 G33 中主轴未转动"	SPINDLE
+INTERPRETER_FMT_18AE95F1F813	CHKS:rs274ngc/interp_check.cc	"L word with no G10, cutter compensation, canned cycle, digital/analog input, M98 or NURBS code"	"L字，无G10，刀具补偿，固定循环，数字/模拟输入或M98和NURBS代码"	TOOL
+INTERPRETER_FMT_18F32FEB0070	CHKS:rs274ngc/interp_read.cc	"DISABLE_FANUC_STYLE_SUB set in INI file, but found m99"	"程序中的M99与当前子程序格式设置不一致"	CONFIG
+INTERPRETER_FMT_1A31AC1585A0	CHKS:rs274ngc/interp_read.cc	"Left bracket missing after 'if'"	"'if'后左括号丢失"	PROGRAM_SYNTAX
+INTERPRETER_FMT_1B881013FED0	CHKS:rs274ngc/interp_execute.cc	"Invalid spindle ($) number in Spindle speed command"	"主轴速度命令中的主轴 ($) 编号无效"	SPINDLE
+INTERPRETER_FMT_1DFCB24DF6AA	CHKS:rs274ngc/interp_convert.cc	"Invalid spindle ($) number in G33.1 move"	"G33.1移动中的主轴($) 编号无效"	SPINDLE
+INTERPRETER_FMT_1E44A8A95ACB	CHKS:rs274ngc/interp_internal.cc	"Cannot use polar coordinate except in G17 plane"	"除G17平面外不能使用极坐标"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_1FC58D5542F4	CHKS:rs274ngc/interp_cycles.cc	"G17.1 canned cycle is not possible on a machine without W axis"	"没有W轴的机床不能使用G17.1固定循环"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_204F923BEB67	ERS:rs274ngc/interp_convert.cc	"BUG: Code not G28.1 or G38.1"	"控制系统内部指令状态异常"	INTERNAL
+INTERPRETER_FMT_227F14A3417E	ERS:rs274ngc/interp_namedparams.cc	"Cannot assign to read-only parameter #<%s>"	"无法分配给只读参数#<%s>"	INTERNAL
+INTERPRETER_FMT_24274F5D36E0	ERS:rs274ngc/interp_read.cc	"Unexpected character after O-word"	"O字后存在意外字符"	PROGRAM_FLOW
+INTERPRETER_FMT_24DAB3F6707E	CHKS:rs274ngc/interp_read.cc	"Multiple V words on one line"	"一行上有多个V字"	PROGRAM_SYNTAX
+INTERPRETER_FMT_2613E32B27AB	CHKS:rs274ngc/interp_cycles.cc	"Invalid spindle ($) number in G74/G84 cycle"	"G74 / G84循环中的主轴($) 编号无效"	SPINDLE
+INTERPRETER_FMT_27D2418AEA68	ERS:rs274ngc/rs274ngc_pre.cc	"BUG: remap_level < 0 : %d"	"控制系统内部重映射层级无效（%d）"	INTERNAL
+INTERPRETER_FMT_2948612645E2	CHKS:rs274ngc/interp_read.cc	"BUG: G remapping: modal group < 0"	"G指令重映射组配置无效"	INTERNAL
+INTERPRETER_FMT_2A002AE3A61B	CHKS:rs274ngc/interp_convert.cc	"gen_restore G20/G21 failed: '%s'"	"gen_restore G20/G21 失败: '%s'"	PROGRAM_SYNTAX
+INTERPRETER_FMT_2C0581A89BFC	ERS:rs274ngc/interp_remap.cc	"BUG: add_parameters: remap_frame: executing_remap == NULL "	"重映射执行上下文缺失"	INTERNAL
+INTERPRETER_FMT_2D13FF959D88	CHKS:rs274ngc/interp_read.cc	"Left bracket missing after 'repeat'"	"'repeat'后左括号丢失"	PROGRAM_SYNTAX
+INTERPRETER_FMT_2D19538684A2	CHKS:rs274ngc/interp_o_word.cc	"'O.... endsub' or 'O.... return' must follow 'O.... sub' subroutine definition"	"O endsub或O return必须跟在O sub子程序定义之后"	PROGRAM_FLOW
+INTERPRETER_FMT_2D8F74CB93C8	CHKS:rs274ngc/interp_convert.cc	"Cannot change control mode with cutter radius compensation on"	"使用刀具半径补偿时不能改变控制模式"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_2F68FB711823	CHKS:rs274ngc/interp_internal.cc	"Cannot specify both polar coordinate and X word"	"不能同时指定极坐标和X字"	PROGRAM_SYNTAX
+INTERPRETER_FMT_316C984AB0E5	CHKS:rs274ngc/interp_convert.cc	"Bug:  Reached convert_stop() from M99 as subprogram return"	"错误:从M99到达convert_stop() 作为子程序返回"	INTERNAL
+INTERPRETER_FMT_32CCE248499D	ERS:rs274ngc/interp_namedparams.cc	"Python call %s.%s returned '%s' - expected double, int or string, got %s"	"扩展调用%s.%s返回类型无效"	PROGRAM_SYNTAX
+INTERPRETER_FMT_34AA6A99F4C7	CHKS:rs274ngc/interp_cycles.cc	"G18.1 canned cycle is not possible on a machine without V axis"	"没有V轴的机床不能使用G18.1固定循环"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_34E216AEBE63	CHKS:rs274ngc/interp_internal.cc	"Cannot specify both polar coordinate and Y word"	"不能同时指定极坐标和Y字"	PROGRAM_SYNTAX
+INTERPRETER_FMT_37BBB13865F9	CHKS:rs274ngc/interp_check.cc	"D word with no G41, G41.1, G42, G42.1, G71, G71.1, G71.2 or G96 to use it"	"D指令 没有与 G41、G41.1、G42、G42.1、G96 配合使用"	PROGRAM_SYNTAX
+INTERPRETER_FMT_3862224C1B96	CHKS:rs274ngc/interp_cycles.cc	"Cannot put a W in a canned cycle in the %s plane"	"在%s平面的固定循环中不能使用W轴"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_397792455F41	CHKS:rs274ngc/interp_cycles.cc	"Cannot put an X in a canned cycle in the %s plane"	"在%s平面的固定循环中不能使用X轴"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_39B63357DEED	ERS:rs274ngc/interp_queue.cc	"BUG: Unsupported plane in cutter compensation"	"错误: 不支持的平面刀具补偿"	INTERNAL
+INTERPRETER_FMT_3D03EC74DC65	CHKS:rs274ngc/interp_namedparams.cc	"BUG: variable '%s' marked global, but assigned at level %d"	"变量%s声明为全局变量，但在层级%d被赋值"	INTERNAL
+INTERPRETER_FMT_3EACC1D171E5	ERS:rs274ngc/interp_convert.cc	"G10 L0 not allowed with loaded tool <%d>\n"	"刀具%d已装载时不允许使用G10 L0"	TOOL
+INTERPRETER_FMT_3F4B67247805	ERS:rs274ngc/interp_g7x.cc	"G7X error: I must be greater than zero."	"G7X的I参数必须大于0"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_402C64C4E5B8	ERS:rs274ngc/interp_namedparams.cc	"Internal error: Could not assign #<%s>"	"内部错误:无法分配#<%s>"	INTERNAL
+INTERPRETER_FMT_407F071C225F	CHKS:rs274ngc/interp_find.cc	"G91 motion with polar coordinates is indeterminate when at the origin"	"在极坐标下的G91运动在原点时是不确定的"	PROGRAM_SYNTAX
+INTERPRETER_FMT_40A9079D8A82	CHKS:rs274ngc/interp_namedparams.cc	"adding r/o '%s'"	"内部只读参数%s注册异常"	INTERNAL
+INTERPRETER_FMT_40FFBEF30C18	CHKS:rs274ngc/interp_convert.cc	"BUG: cannot restore from a lower call level (%d) to a higher call level (%d)"	"错误:无法从较低的对话级别(%d)恢复到较高的对话级别(%d)"	INTERNAL
+INTERPRETER_FMT_4255607C2C70	CHKS:rs274ngc/interp_convert.cc	"Must specify positive weight P for every Control Point"	"必须为每个控制点指定正的权重P"	PROGRAM_SYNTAX
+INTERPRETER_FMT_426526C4572E	CHKS:rs274ngc/interp_convert.cc	"Cannot feed with zero spindle speed in feed per rev mode"	"每转进给模式下无法以主轴转速进给"	SPINDLE
+INTERPRETER_FMT_428D262E2174	CHKS:rs274ngc/interp_convert.cc	"No valid P word with M64"	"M64没有有效的P字"	PROGRAM_SYNTAX
+INTERPRETER_FMT_43CF29A482BC	CHKS:rs274ngc/interp_check.cc	"Line with G10 does not have L0, L1, L10, L11, L2, or L20"	"G10指令的所在行没有L0、L1、L10、L11、L2、L20"	PROGRAM_SYNTAX
+INTERPRETER_FMT_44172D21FA21	CHKS:rs274ngc/interp_convert.cc	"No valid P word with M63"	"M63没有有效的P字"	PROGRAM_SYNTAX
+INTERPRETER_FMT_455E8D57152D	CHKS:rs274ngc/interp_convert.cc	"Cannot make a NURBS with 0 feedrate"	"无法以0进给率创建NURBS"	PROGRAM_SYNTAX
+INTERPRETER_FMT_4590F85E153E	ERS:rs274ngc/interp_g7x.cc	"G7x error: Cannot use U and X in the same block"	"同一G7X程序块不能同时使用U和X"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_45B6996C0F53	CHKS:rs274ngc/interp_check.cc	"I word with no G2, G3, G5, G5.1, G10, G33.1, G76, or G87 to use it"	"I指令 没有与 G2、 G3、 G5、 G5.1、 G10、 G33.1、 G76、G87 配合使用"	PROGRAM_SYNTAX
+INTERPRETER_FMT_471B0C445A13	CHKS:rs274ngc/interp_o_word.cc	"Fanuc 'O....' subroutine definition must end with 'M99'"	"Fanuc格式的O子程序定义必须以M99结束"	PROGRAM_FLOW
+INTERPRETER_FMT_473324635BB4	ERS:rs274ngc/interp_queue.cc	"Straight traverse in concave corner cannot be reached by the tool without gouging"	"直线运动刀具无法到达凹角处,会做成刨削槽"	TOOL
+INTERPRETER_FMT_49D3652B0D5A	CHKS:rs274ngc/interp_check.cc	"P value not an integer with M19 G2 or G3"	"P值 在与M19 G2或G3 使用时不为整数"	PROGRAM_SYNTAX
+INTERPRETER_FMT_4A39AF0CABAD	CHKS:rs274ngc/interp_convert.cc	"Cannot change retract mode with cutter radius compensation on"	"开启刀具半径补偿后，无法更改退刀模式"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_4A683B7BA9E4	CHKS:rs274ngc/interp_cycles.cc	"G17 canned cycle is not possible on a machine without Z axis"	"没有Z轴的机床不能使用G17固定循环"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_4A74ED57A0C6	CHKS:rs274ngc/interp_python.cc	"py_execute(%s)%s:\n%s"	"扩展程序%s执行失败"	PROGRAM_SYNTAX
+INTERPRETER_FMT_4AE33AB9A384	CHKS:rs274ngc/interp_check.cc	"H word with no G43 or G76 to use it"	"H指令 没有与 G43、G76 配合使用"	PROGRAM_SYNTAX
+INTERPRETER_FMT_4DB7C80392A1	ERS:rs274ngc/interp_g7x.cc	"G%d.%d cannot be used with cutter compensation enabled"	"启用刀具补偿时不能使用G%d.%d"	TOOL
+INTERPRETER_FMT_4F61F3194495	CHKS:rs274ngc/interp_convert.cc	"G10 L1 without offsets has no effect"	"无偏移的G10 L1无效"	PROGRAM_SYNTAX
+INTERPRETER_FMT_4F7D4BECA987	ERS:rs274ngc/interp_convert.cc	"BUG: Code not G40, G41, G41.1, G42, G42.1"	"控制系统内部指令状态异常"	INTERNAL
+INTERPRETER_FMT_508F36D9809F	CHKS:rs274ngc/interp_namedparams.cc	"fetch_hal_param: hal_init(%s): %d"	"获取底层控制参数: 底层控制_init(%s): %d"	PROGRAM_SYNTAX
+INTERPRETER_FMT_516EB0A7C1BB	CHKS:rs274ngc/interp_cycles.cc	"Invalid E-number in G74/G84 cycle"	"G74 / G84循环中的E编号无效"	PROGRAM_SYNTAX
+INTERPRETER_FMT_54AC6C8557C5	CHKS:rs274ngc/rs274ngc_pre.cc	"Failed to find sub 'O%s' before EOF"	"程序结束前未找到子程序O%s"	PROGRAM_FILE
+INTERPRETER_FMT_54F75CE6DAC4	CHKS:rs274ngc/interp_cycles.cc	"Cannot use inverse time feed with canned cycles"	"使用固定循环时不能用反时限进给"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_55117CB1D4BB	CHKS:rs274ngc/interp_python.cc	"run_string(%s):\n%s"	"程序字符串%s执行失败"	PROGRAM_SYNTAX
+INTERPRETER_FMT_563A7531D39F	CHKS:rs274ngc/interp_convert.cc	"Cannot use G5.3 without G5.2 first"	"首先不能使用G5.3而不使用G5.2"	PROGRAM_SYNTAX
+INTERPRETER_FMT_57E1D984A98B	CHKS:rs274ngc/interp_cycles.cc	"Cannot put a U in a canned cycle in the %s plane"	"在%s平面的固定循环中不能使用U轴"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_58ED596EB765	CHKS:rs274ngc/rs274ngc_pre.cc	"Unable to open parameter file: '%s'"	"无法打开参数文件: '%s'"	CONFIG
+INTERPRETER_FMT_5962BBE5DC1C	CHKS:rs274ngc/interp_convert.cc	"BUG: restore to level %d !?"	"错误:恢复到级别%d！?"	INTERNAL
+INTERPRETER_FMT_5B9627C5B972	CHKS:rs274ngc/interp_convert.cc	"Arc to arc motion makes a corner the compensated tool can't fit in without gouging"	"圆弧到圆弧运动使拐角补偿的刀具无法适应没有刨削槽"	TOOL
+INTERPRETER_FMT_5BA2F6C32E85	CHKS:rs274ngc/interp_check.cc	"P value out of range with G10 L%d"	"P值超出范围 G10 L%d"	PROGRAM_SYNTAX
+INTERPRETER_FMT_5C412ED32346	CHKS:rs274ngc/interp_convert.cc	"Indexing axis %c can only be moved alone"	"索引轴%c只能单独移动"	PROGRAM_SYNTAX
+INTERPRETER_FMT_5E8512A75C2B	CHKS:rs274ngc/interp_convert.cc	"Splines may not have motion in Z, A, B, or C"	"样条曲线在Z，A，B或C中可能没有运动"	PROGRAM_SYNTAX
+INTERPRETER_FMT_5EDE63871F5D	CHKS:rs274ngc/interp_convert.cc	"R not allowed in G10 L20"	"R不允许在G10 L20中使用"	PROGRAM_SYNTAX
+INTERPRETER_FMT_5FFB6D5CCB7B	CHKS:rs274ngc/interp_convert.cc	"Cannot set motion output with cutter radius compensation on"	"刀具半径补偿打开时，不能设置运动输出"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_60799AEC52F5	CHKS:rs274ngc/interp_convert.cc	"Cannot set motion digital output with cutter radius compensation on"	"刀具半径补偿打开时，不能设置运动数字输出"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_60B5DC7F3A95	CHKS:rs274ngc/interp_o_word.cc	"Bug:  Reached convert_control_functions() from M99 in main program"	"主程序中出现了不允许的M99控制流程"	INTERNAL
+INTERPRETER_FMT_6326C2348D79	CHKS:rs274ngc/interp_convert.cc	"Length of cutter compensation entry move is not greater than the tool radius"	"刀具补偿进刀移动的长度不大于刀具半径"	TOOL
+INTERPRETER_FMT_636EC7A1759C	CHKS:rs274ngc/interp_o_word.cc	"Fanuc 'O....' subroutine must be called with 'M98'"	"Fanuc格式的O子程序必须用M98调用"	PROGRAM_FLOW
+INTERPRETER_FMT_64395535DA80	CHKS:rs274ngc/interp_check.cc	"P value out of range (0-9) with G10 L%d"	"P值超出范围(0-9)，G10 L%d"	PROGRAM_SYNTAX
+INTERPRETER_FMT_65FD6B72ED41	CHKS:rs274ngc/interp_convert.cc	"No valid P word with M62"	"M62没有有效的P字"	PROGRAM_SYNTAX
+INTERPRETER_FMT_66131B198601	CHKS:rs274ngc/interp_remap.cc	"BUG: convert_remapped_code: no remapping"	"当前指令没有对应的重映射定义"	INTERNAL
+INTERPRETER_FMT_66E22FD51439	CHKS:rs274ngc/interp_convert.cc	"In G76, J must be greater than 0"	"在 G76，J 必须大于 0"	PROGRAM_SYNTAX
+INTERPRETER_FMT_6791D653B4BB	CHKS:rs274ngc/interp_convert.cc	"Cannot use G76 threading cycle with cutter radius compensation on"	"不能使用G76螺紋週期當刀具半徑補償在使用"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_68F4F6F30B0C	CHKS:rs274ngc/interp_read.cc	"DISABLE_FANUC_STYLE_SUB disabled in INI file, but found bare O-word"	"程序中的裸O字与当前子程序格式设置不一致"	CONFIG
+INTERPRETER_FMT_71602F68C053	CHKS:rs274ngc/interp_find.cc	"Cannot specify X or Y words with polar coordinate"	"不能用极坐标指定X或Y字"	PROGRAM_SYNTAX
+INTERPRETER_FMT_73D98A9C7785	CHKS:rs274ngc/interp_cycles.cc	"Cannot put a Y in a canned cycle in the %s plane"	"在%s平面的固定循环中不能使用Y轴"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_73EF5828DB0C	CHKS:rs274ngc/interp_check.cc	"J word with no G2, G3, G5, G5.1, G10, G76 or G87 to use it"	"J指令 沒有与 G2、G3、G5、G5.1、G10、G76、G87 配合使用"	PROGRAM_SYNTAX
+INTERPRETER_FMT_74FF94AA7381	CHKS:rs274ngc/interp_convert.cc	"Invalid absolute position %5.2f for wrapped rotary axis %c"	"绝对位置 %5.2f 无效，旋转轴%c"	MOTION_KINEMATICS
+INTERPRETER_FMT_75FB754F6C0D	CHKS:rs274ngc/interp_check.cc	"$ (spindle selection) word with no M3, M4, M5, M19, M51, G33, G33.1, G76, G95, G96 or G97 to use it"	"$主轴选择参数没有配套的主轴或同步指令"	SPINDLE
+INTERPRETER_FMT_7755F2D0E49C	ERS:rs274ngc/interp_read.cc	"EOF in file:%s seeking o-word: o<%s> from line: %d"	"EOF 在文件:%s 查找 o-word: o<%s> 来自行: %d"	PROGRAM_FLOW
+INTERPRETER_FMT_78D86DB06FE1	CHKS:rs274ngc/interp_convert.cc	"In G76, K must be greater than J"	"在 G76，K 必须大于 J"	PROGRAM_SYNTAX
+INTERPRETER_FMT_7A43FFE17500	CHKS:rs274ngc/interp_check.cc	"K word with no G2, G3, G33, G33.1, G76, or G87 to use it"	"K指令 没有与 G2、G3、G33、G33.1、G76、G87 配合使用"	PROGRAM_SYNTAX
+INTERPRETER_FMT_7AA4BEA65763	CHKS:rs274ngc/interp_find.cc	"Requested tool %d not found in the tool table"	"请求的刀具%d在刀具表中找不到"	TOOL
+INTERPRETER_FMT_7D28D1887E9F	CHKS:rs274ngc/interp_convert.cc	"Spindle ($) number out of range in M4 Command\nnum_spindles =%i. $=%d\n"	"M4命令中的主轴 ($) 编号超出范围 num_spindles =%i. $=%d"	SPINDLE
+INTERPRETER_FMT_7D7476857755	CHKS:rs274ngc/interp_convert.cc	"Indexing axis %c can only be moved with G0"	"索引轴%c只能用G0移动"	PROGRAM_SYNTAX
+INTERPRETER_FMT_7E71D4D383A5	ERS:rs274ngc/interp_namedparams.cc	"BUG: lookup_named_param(%s): unhandled index=%fn"	"错误: lookup_named_param(%s): unhandled index=%fn"	INTERNAL
+INTERPRETER_FMT_7EDD7B95A49A	CHKS:rs274ngc/interp_convert.cc	"G%d with lathe tool, but plane is not G18"	"G%d 与车刀，但平面不是 G18"	TOOL
+INTERPRETER_FMT_7FDA7D86D03C	ERS:rs274ngc/interp_convert.cc	"BUG: Invalid plane for cutter compensation"	"刀具补偿平面状态无效"	INTERNAL
+INTERPRETER_FMT_80AEC49CD92D	CHKS:rs274ngc/interp_cycles.cc	"Spindle turning clockwise in G74"	"在G74中主轴顺时针转动"	SPINDLE
+INTERPRETER_FMT_81212F4E4839	CHKS:rs274ngc/interp_convert.cc	"Invalid tool orientation"	"无效的刀具定位"	TOOL
+INTERPRETER_FMT_81A4AEB31890	CHKS:rs274ngc/interp_convert.cc	"Invalid D-number in G76 cycle"	"G76循环中的D编号无效"	PROGRAM_SYNTAX
+INTERPRETER_FMT_820AA52C8768	CHKS:rs274ngc/interp_execute.cc	"Invalid spindle ($) number in Spindle Mode command"	"主轴模式命令中的主轴($) 编号无效"	SPINDLE
+INTERPRETER_FMT_83E89D4EE5F2	CHKS:rs274ngc/interp_convert.cc	"Need non-negative Q-word to specify tool number with M61"	"需要非负的Q字来指定M61的刀具号"	TOOL
+INTERPRETER_FMT_84909C7B2175	CHKS:rs274ngc/rs274ngc_pre.cc	"Queue is not empty after tool change"	"更换刀具后队列不为空"	TOOL
+INTERPRETER_FMT_854B9CF25999	ERS:rs274ngc/interp_g7x.cc	"G7X error: both R and I or K flag used for arc"	"G7X圆弧不能同时使用R参数和I/K标志"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_8604F5F5D748	CHKS:rs274ngc/interp_o_word.cc	"pycall(%s.%s) failed"	"扩展调用%s.%s失败"	PROGRAM_SYNTAX
+INTERPRETER_FMT_869E814C3BE2	ERS:rs274ngc/interp_queue.cc	"BUG: cutter compensation has generated an invalid arc with mismatched radii r1 %f r2 %f\n"	"错误: 刀具补偿产生了一个不匹配的半径 r1 %f r2 %f"	INTERNAL
+INTERPRETER_FMT_86A9E52600FF	CHKS:rs274ngc/interp_check.cc	"R value must be within 0..360 with M19"	"R值必须在0..360以内与M19"	PROGRAM_SYNTAX
+INTERPRETER_FMT_8942150CB366	ERS:rs274ngc/interp_cycles.cc	"Spindle state unknown for %s"	"在 %s 中主轴状态未知"	SPINDLE
+INTERPRETER_FMT_8AA0F3370F7D	CHKS:rs274ngc/interp_internal.cc	"Cannot use polar coordinate on a machine lacking X or Y axes"	"不能在缺少X或Y轴的机器上使用极坐标"	PROGRAM_SYNTAX
+INTERPRETER_FMT_8B4A844A680D	CHKS:rs274ngc/interp_read.cc	"Bad character '\\%03o' usedBad character '%c' used"	"程序中使用了无效字符"	PROGRAM_SYNTAX
+INTERPRETER_FMT_8D63EF50D667	CHKS:rs274ngc/interp_convert.cc	"Cannot restore context from invalid stack frame - missing M70/M73?"	"无法从无效堆栈帧恢复上下文 - 缺少M70 / M73?"	PROGRAM_SYNTAX
+INTERPRETER_FMT_8D9768FFF837	ERS:rs274ngc/interp_convert.cc	"invalid P-word with M66"	"M66没有有效的P字"	PROGRAM_SYNTAX
+INTERPRETER_FMT_8FD779E796EE	CHKS:rs274ngc/interp_convert.cc	"Invalid spindle ($) number in M51 command"	"M51指令中的主轴($) 编号无效"	SPINDLE
+INTERPRETER_FMT_923F1A48F21F	CHKS:rs274ngc/interp_convert.cc	"M7x: restore_settings G20/G21 failed: '%s'"	"M7x: restore_settings G20/G21 失败: '%s'"	PROGRAM_SYNTAX
+INTERPRETER_FMT_93697D03F5F0	CHKS:rs274ngc/interp_check.cc	"G4 not allowed with G2 or G3 because they both use P"	"G4指令不允许与G2、G3一起使用，因为他们都使用P值"	PROGRAM_SYNTAX
+INTERPRETER_FMT_943FD71E3B02	ERS:rs274ngc/interp_g7x.cc	"G7x error: Cannot use W and Z in the same block"	"同一G7X程序块不能同时使用W和Z"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_9555A8751371	CHKS:rs274ngc/interp_check.cc	"Between G5.2 and G5.3 codes, only additional G5.2 codes are allowed."	"在G5.2和G5.3代码之间，只允许增加G5.2代码。"	PROGRAM_SYNTAX
+INTERPRETER_FMT_9802413485CC	ERS:rs274ngc/interp_read.cc	"bad number format (trailing characters) parsing '%s'"	"错误的数字格式(结尾字符)解析 '%s'"	PROGRAM_SYNTAX
+INTERPRETER_FMT_99EF8BEF03A1	CHKS:rs274ngc/interp_convert.cc	"Invalid spindle ($) number in G33 move"	"G33移动中的主轴($) 编号无效"	SPINDLE
+INTERPRETER_FMT_9AE5EE26F55D	CHKS:rs274ngc/interp_read.cc	"BUG: M remapping: modal group > 10"	"M指令重映射组超过允许范围"	INTERNAL
+INTERPRETER_FMT_9B1AEFC856DC	CHKS:rs274ngc/interp_namedparams.cc	"storing r/o '%s' %f"	"内部只读参数%s写入异常"	INTERNAL
+INTERPRETER_FMT_9B34C6610BD1	CHKS:rs274ngc/interp_convert.cc	"BUG: An axis incorrectly moved along with an indexer"	"错误: 一个轴不正确地与一个索引器一起移动"	INTERNAL
+INTERPRETER_FMT_9B98E8206283	ERS:rs274ngc/interp_convert.cc	"BUG: trying to index incorrect axis"	"错误: 试图索引不正确的轴"	INTERNAL
+INTERPRETER_FMT_9D385559250A	ERS:rs274ngc/interp_g7x.cc	"G7x error: Cannot use W in incremental mode (G91)"	"增量模式G91下不能使用G7X的W参数"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_9E2CCEBFA6E4	ERS:rs274ngc/interp_convert.cc	"BUG: Code not G93, G94, or G95"	"控制系统内部指令状态异常"	INTERNAL
+INTERPRETER_FMT_9EDC7B6CA621	ERS:rs274ngc/interp_convert.cc	"BUG: Code not G7 or G8"	"控制系统内部指令状态异常"	INTERNAL
+INTERPRETER_FMT_A37093C9B0D9	CHKS:rs274ngc/interp_execute.cc	"Invalid spindle ($) number in Spindle Feed command"	"主轴进给命令中的主轴($) 编号无效"	SPINDLE
+INTERPRETER_FMT_A3B522D32310	CHKS:rs274ngc/interp_convert.cc	"Cannot change tool offset with cutter radius compensation on"	"使用刀具半径补偿时不能改变刀具偏置"	TOOL
+INTERPRETER_FMT_A3BA81450A49	CHKS:rs274ngc/interp_cycles.cc	"G19.1 canned cycle is not possible on a machine without U axis"	"没有U轴的机床不能使用G19.1固定循环"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_A3F9D70B5E99	CHKS:rs274ngc/interp_python.cc	"pycall(%s):\n%s"	"扩展调用%s失败"	PROGRAM_SYNTAX
+INTERPRETER_FMT_A3FB8CC7DB18	CHKS:rs274ngc/interp_read.cc	"Expected ] reading bracketed parameter"	"预期 ] 读方括号内的参数"	PROGRAM_SYNTAX
+INTERPRETER_FMT_A508961F0237	CHKS:rs274ngc/interp_cycles.cc	"G18 canned cycle is not possible on a machine without Y axis"	"没有Y轴的机床不能使用G18固定循环"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_A68AAB50DC46	ERS:rs274ngc/interp_g7x.cc	"G%d.%d can only be used in XZ plane (G18)"	"G%d.%d只能在XZ平面（G18）使用"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_A6C57CC22D32	ERS:rs274ngc/interp_namedparams.cc	"%s: trailing garbage after closing bracket"	"%s：右方括号后存在多余字符"	PROGRAM_SYNTAX
+INTERPRETER_FMT_A7EF13C1C01F	CHKS:rs274ngc/interp_convert.cc	"Can specify P without X and Y only for the first control point"	"可以在没有X和Y的情况下指定P，仅用于第一个控制点"	PROGRAM_SYNTAX
+INTERPRETER_FMT_A8EA5EF00118	CHKS:rs274ngc/interp_convert.cc	"Chosen spindle (%i) not turning in G76"	"选择的主轴(%i)未在G76中转动"	SPINDLE
+INTERPRETER_FMT_A950DC182049	ERS:rs274ngc/interp_remap.cc	"add_parameters: can't add '%s' to args"	"无法把参数%s加入扩展调用"	PROGRAM_FLOW
+INTERPRETER_FMT_A9A5AF7BA284	CHKS:rs274ngc/interp_convert.cc	"Must specify both I and J, or neither"	"必须同时指定I和J，或者都不指定"	PROGRAM_SYNTAX
+INTERPRETER_FMT_AA00A4DD4A5E	CHKS:rs274ngc/interp_convert.cc	"Cannot probe with feed per rev mode"	"使用每转进给模式时无法探测"	MOTION_PROBE
+INTERPRETER_FMT_AA68553B62E6	CHKS:rs274ngc/interp_convert.cc	"Spindle ($) number out of range in M5 Command\nnum_spindles =%i. $=%d\n"	"M5命令中的主轴 ($) 编号超出范围 num_spindles =%i. $=%d"	SPINDLE
+INTERPRETER_FMT_AB07D39008DD	CHKS:rs274ngc/interp_convert.cc	"Cannot wait for analog input with cutter radius compensation on"	"刀具半径补偿开启时，不能等待模拟输入"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_ABD2FCB715DD	CHKS:rs274ngc/interp_convert.cc	"Cannot change the active coordinate system with cutter radius compensation on"	"开启刀具半径补偿功能后，不能改变活动坐标系"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_AC8845269578	CHKS:rs274ngc/interp_convert.cc	"Radius of cutter compensation entry arc is not greater than the tool radius"	"刀具补偿入口半径不大于刀具半径"	TOOL
+INTERPRETER_FMT_AF038A592B6A	CHKS:rs274ngc/interp_read.cc	"Found 'M99' instead of 'O endsub' after 'O sub'"	"O sub之后应使用O endsub，不能使用M99"	PROGRAM_FLOW
+INTERPRETER_FMT_B18CC0BD6FE0	ERS:rs274ngc/interp_g7x.cc	"G7X error: Both A and C parameters on a corner"	"G7X拐角不能同时设置A和C参数"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_B1C4F1E91691	CHKS:rs274ngc/interp_check.cc	"E word with no G70, G76, M66, M67 or M68 to use it"	"E参数没有配套的G70、G76、M66、M67或M68指令"	PROGRAM_SYNTAX
+INTERPRETER_FMT_B1E1A2BF3486	CHKS:rs274ngc/interp_convert.cc	"Arc to straight motion makes a corner the compensated tool can't fit in without gouging"	"弧到直线运动做的角,刀具补偿不合适会做成刨削槽"	TOOL
+INTERPRETER_FMT_B27A325B4580	ERS:rs274ngc/interp_convert.cc	"BUG: Invalid plane in comp_get_current"	"刀具补偿当前平面状态无效"	INTERNAL
+INTERPRETER_FMT_B3A1ABDE1DC6	CHKS:rs274ngc/interp_convert.cc	"Cannot change coordinate systems with cutter radius compensation on"	"使用刀具半径补偿时不能改变坐标系"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_B50268252E79	CHKS:rs274ngc/interp_convert.cc	"Cannot set auxiliary digital output with cutter radius compensation on"	"刀具半径补偿打开时，不能设置辅助数字输出"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_B54C72A00493	CHKS:rs274ngc/interp_convert.cc	"Arc to arc motion is invalid because the arcs have the same center"	"圆弧到圆弧运动是无效的，因为圆弧具有相同的中心"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_B56031E94248	CHKS:rs274ngc/interp_convert.cc	"Splines must be in the XY plane"	"样条曲线必须位于XY平面中"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_B65F8F059A82	CHKS:rs274ngc/interp_check.cc	"P value must be 0,1,or 2 with M19"	"P值 在与M19一起使用时必须为 0、1、2"	PROGRAM_SYNTAX
+INTERPRETER_FMT_B6CABE56BC3E	CHKS:rs274ngc/interp_python.cc	"pycall(%s): Python plugin not initialized"	"扩展调用%s尚未初始化"	INTERNAL
+INTERPRETER_FMT_B8F68D3DA801	CHKS:rs274ngc/interp_convert.cc	"Cannot disable overrides with cutter radius compensation on"	"使用刀具半径补偿时无法禁用超速"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_BAB7EEA6A934	ERS:rs274ngc/rs274ngc_pre.cc	"maximum nesting of remapped blocks exceeded"	"重映射程序块嵌套层数超过上限"	PROGRAM_FLOW
+INTERPRETER_FMT_BAF1ADFB34B8	CHKS:rs274ngc/interp_cycles.cc	"Cannot feed with zero feed rate"	"无法以零进给速度进给"	PROGRAM_SYNTAX
+INTERPRETER_FMT_BD3DBB852F23	ERS:rs274ngc/interp_o_word.cc	"BUG:  execute_call():  arrived with call_type=CT_NONE"	"控制系统内部调用状态异常"	INTERNAL
+INTERPRETER_FMT_BF41E79F3F1C	CHKS:rs274ngc/interp_convert.cc	"Cannot wait for digital input with cutter radius compensation on"	"刀具半径补偿开启时，不能等待数字输入"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_C01003A6AB6C	CHKS:rs274ngc/interp_convert.cc	"Cannot do an arc in planes G17.1, G18.1, or G19.1"	"在平面G17.1，G18.1或G19.1中不能做圆弧"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_C15AF78B6517	ERS:rs274ngc/interp_convert.cc	"BUG: Invalid plane in comp_get_programmed"	"刀具补偿编程平面状态无效"	INTERNAL
+INTERPRETER_FMT_C177A0B0FCE9	CHKS:rs274ngc/rs274ngc_pre.cc	"Parameter file name is missing"	"参数文件名缺失"	CONFIG
+INTERPRETER_FMT_C23713915619	CHKS:rs274ngc/interp_arc.cc	"Zero-radius arc: start=(%c%.4f,%c%.4f) center=(%c%.4f,%c%.4f) end=(%c%.4f,%c%.4f) r1=%.4f r2=%.4f"	"零半径弧: start=(%c%.4f,%c%.4f) center=(%c%.4f,%c%.4f) end=(%c%.4f,%c%.4f) r1=%.4f r2=%.4f"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_C3864ED9E089	ERS:rs274ngc/interp_convert.cc	"%c word missing in absolute center arc"	"绝对中心圆弧缺少%c字"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_C41C5122EAFE	CHKS:rs274ngc/interp_find.cc	"Cannot use polar coordinates with G53"	"G53不能使用极坐标"	PROGRAM_SYNTAX
+INTERPRETER_FMT_C43FFD7C4AE3	CHKS:rs274ngc/rs274ngc_pre.cc	"exception adding Python predefined named parameter: %s"	"预定义扩展参数加载异常"	INTERNAL
+INTERPRETER_FMT_C44AED2D6A23	CHKS:rs274ngc/interp_check.cc	"P value not an integer with G10"	"P值在与G10一起使用时不为整数"	PROGRAM_SYNTAX
+INTERPRETER_FMT_C57D14AAE39E	CHKS:rs274ngc/interp_read.cc	"Left bracket missing after 'elseif'"	"'elseif'后左括号丢失"	PROGRAM_SYNTAX
+INTERPRETER_FMT_C5E24F39048B	CHKS:rs274ngc/interp_read.cc	"Found 'm98' code with no P-word"	"M98指令缺少P参数"	PROGRAM_FLOW
+INTERPRETER_FMT_C7F227CCCE32	CHKS:rs274ngc/interp_cycles.cc	"G19 canned cycle is not possible on a machine without X axis"	"没有X轴的机床不能使用G19固定循环"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_C9C0921B004F	CHKS:rs274ngc/interp_find.cc	"Incremental motion with polar coordinates is indeterminate when at the origin"	"在极坐标下的增量运动在原点时是不确定的"	PROGRAM_SYNTAX
+INTERPRETER_FMT_CA45D244E84C	CHKS:rs274ngc/interp_convert.cc	"I J words not allowed with G10 L2"	"G10 L2不允许使用I J字"	PROGRAM_SYNTAX
+INTERPRETER_FMT_CAB024A8A847	ERS:rs274ngc/rs274ngc_pre.cc	"BUG - remappings not empty"	"控制系统内部重映射队列未清空"	INTERNAL
+INTERPRETER_FMT_CACD4DCB6B75	CHKS:rs274ngc/interp_read.cc	"Multiple W words on one line"	"一行上有多个W字"	PROGRAM_SYNTAX
+INTERPRETER_FMT_CAFAE2D0BC99	ERS:rs274ngc/interp_o_word.cc	"File:%s line:%d sub: o|%s| found in illegal location"	"文件:%s 行:%d sub: o|%s| 发现在非法的位置"	PROGRAM_SYNTAX
+INTERPRETER_FMT_CB66400044C1	CHKS:rs274ngc/interp_find.cc	"Must specify angle in polar coordinate if at the origin"	"如果在原点，必须在极坐标中指定角度"	PROGRAM_SYNTAX
+INTERPRETER_FMT_CD75E4741308	CHKS:rs274ngc/interp_convert.cc	"G43.2: No axes specified and H word missing"	"G43.2:未指定轴且缺失 H 编号"	PROGRAM_SYNTAX
+INTERPRETER_FMT_CDE183A1BBEC	CHKS:rs274ngc/interp_convert.cc	"Failed to restore interp state on abort '%s': %s"	"中止时无法恢复插补状态 '%s': %s"	PROGRAM_SYNTAX
+INTERPRETER_FMT_CE75898B5289	CHKS:rs274ngc/interp_cycles.cc	"Cannot put a Z in a canned cycle in the %s plane"	"在%s平面的固定循环中不能使用Z轴"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_CE7D87A1F77F	ERS:rs274ngc/rs274ngc_pre.cc	"BUG: remap_finished(): phase=%d nesting=%d"	"控制系统内部重映射结束状态异常（阶段%d，层级%d）"	INTERNAL
+INTERPRETER_FMT_D2DD7A9AC10A	CHKS:rs274ngc/interp_check.cc	"P value should be 1 or greater with G2 or G3"	"G2或G3，P值应为1或更大"	PROGRAM_SYNTAX
+INTERPRETER_FMT_D30C81470B13	CHKS:rs274ngc/interp_convert.cc	"G43.2: Can not have both H and axis words"	"G43.2: 不能同时有 H 编号和轴编号"	PROGRAM_SYNTAX
+INTERPRETER_FMT_D32A6BE0EC55	ERS:rs274ngc/interp_convert.cc	"BUG: Code not G43, G43.1, G43.2, or G49"	"控制系统内部指令状态异常"	INTERNAL
+INTERPRETER_FMT_D36B3CB731B2	CHKS:rs274ngc/interp_convert.cc	"No valid P word with M65"	"M65没有有效的P字"	PROGRAM_SYNTAX
+INTERPRETER_FMT_D3A4A795F25C	ERS:rs274ngc/interp_queue.cc	"Straight feed in concave corner cannot be reached by the tool without gouging"	"在凹角直线进给不能到达,会做成刨削槽"	TOOL
+INTERPRETER_FMT_D43E7B7EA9C4	CHKS:rs274ngc/interp_read.cc	"Expected # reading parameter"	"预期 # 阅读参数"	PROGRAM_SYNTAX
+INTERPRETER_FMT_D6221D69D586	ERS:rs274ngc/interp_namedparams.cc	"Named INI parameter #<%s> not found in INI file '%s': error=0x%x"	"系统配置中未找到参数#<%s>"	CONFIG
+INTERPRETER_FMT_D85DFF677313	ERS:rs274ngc/rs274ngc_pre.cc	"recursive remapping for %s detected"	"检测到%s递归重映射"	PROGRAM_FLOW
+INTERPRETER_FMT_D9834669FC26	CHKS:rs274ngc/interp_convert.cc	"You must specify a number of control points at least equal to the order L = %d"	"您必须指定至少等于L = %d的控制点数"	PROGRAM_SYNTAX
+INTERPRETER_FMT_DB277FFA3E34	CHKS:rs274ngc/interp_convert.cc	"Cannot convert spline with cutter radius compensation"	"不能用刀具半径补偿来转换样条曲线"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_DB2853F63500	CHKS:rs274ngc/interp_remap.cc	"convert_remapped_code: initial read returned %s"	"重映射指令首次读取失败（状态%s）"	PROGRAM_FLOW
+INTERPRETER_FMT_DC05B5CB3F9D	CHKS:rs274ngc/interp_convert.cc	"Must specify both P and Q with G5"	"必须用G5指定P和Q"	PROGRAM_SYNTAX
+INTERPRETER_FMT_DDB98F599115	CHKS:rs274ngc/interp_convert.cc	"M7x: restore_settings failed executing: '%s': %s"	"M7x: restore_settings 执行失败: '%s': %s"	PROGRAM_SYNTAX
+INTERPRETER_FMT_DE13F47EF5EF	ERS:rs274ngc/rs274ngc_pre.cc	"remap_finished: got %d - not in cblock.remappings!"	"控制系统内部重映射结束状态异常（%d）"	PROGRAM_FLOW
+INTERPRETER_FMT_DE8F939676E8	ERS:rs274ngc/interp_python.cc	"exception during generator call: %s"	"扩展程序执行异常"	INTERNAL
+INTERPRETER_FMT_DE9F9BB7CDF6	CHKS:rs274ngc/interp_convert.cc	"G%d.1 with no D word"	"G%d.1，无D字"	PROGRAM_SYNTAX
+INTERPRETER_FMT_DEB45814763A	CHKS:rs274ngc/interp_convert.cc	"Must specify both I and J with G5.1"	"必须用G5.1指定I和J"	PROGRAM_SYNTAX
+INTERPRETER_FMT_DFCAD9E9A30D	CHKS:rs274ngc/interp_convert.cc	"Spindle ($) number out of range in M19 Command"	"M19命令中的主轴 ($) 编号超出范围"	SPINDLE
+INTERPRETER_FMT_E1B87A7FE100	CHKS:rs274ngc/interp_convert.cc	"Spindle ($) number out of range in M3 Command\nnum_spindles =%i. $=%d\n"	"M3命令中的主轴 ($) 编号超出范围 num_spindles =%i. $=%d"	SPINDLE
+INTERPRETER_FMT_E3CA2CB278C6	CHKS:rs274ngc/interp_convert.cc	"Cannot enable overrides with cutter radius compensation on"	"使用刀具半径补偿时无法启用超速"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_E3E423AB6D6E	ERS:rs274ngc/interp_g7x.cc	"G7X error: either I or K must be present for arc"	"G7X圆弧必须提供I或K参数"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_E47B37A3766E	ERS:rs274ngc/interp_convert.cc	"BUG: Invalid plane in comp_set_programmed"	"刀具补偿编程平面写入状态无效"	INTERNAL
+INTERPRETER_FMT_E4EEE371FE7E	ERS:rs274ngc/interp_g7x.cc	"G7X error: %s"	"G7X循环参数无效"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_E5216D682F4C	CHKS:rs274ngc/interp_check.cc	"Q word with no G5, G10, G64, G73, G76, G83, M19, M66, M67, M68 or user M code that uses it"	"没有G5，G10，G64，G73，G76，G83，M19，M66，M67，M68或使用它的用户M代码的Q字"	PROGRAM_SYNTAX
+INTERPRETER_FMT_E58D8E4C4581	CHKS:rs274ngc/interp_read.cc	"Bad character '\\%03o' used"	"使用错误的字符'\\%03o'"	PROGRAM_SYNTAX
+INTERPRETER_FMT_E67A227CFBA4	CHKS:rs274ngc/interp_internal.cc	"Polar coordinates can only be used for motion"	"极坐标只能用于运动"	PROGRAM_SYNTAX
+INTERPRETER_FMT_E8286D301DD5	ERS:rs274ngc/interp_o_word.cc	"File:%s line:%d redefining sub: o|%s| already defined in file:%s"	"文件:%s 行:%d 重新定义 sub: o|%s| 已经在文件:%s中定义"	PROGRAM_SYNTAX
+INTERPRETER_FMT_E8F1E1F16CB3	CHKS:rs274ngc/interp_convert.cc	"G%d.1 with L word, but plane is not G18"	"G%d.1和L字，但平面不是 G18"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_EB85674FD4F7	CHKS:rs274ngc/interp_cycles.cc	"Cannot put a V in a canned cycle in the %s plane"	"在%s平面的固定循环中不能使用V轴"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_EC0CDEFC2880	CHKS:rs274ngc/interp_convert.cc	"The move just after exiting cutter compensation mode must be straight, not an arc"	"退出刀具补偿模式之后的移动必须是直线的，而不是弧线"	TOOL
+INTERPRETER_FMT_ED1FC01E73F1	CHKS:rs274ngc/interp_cycles.cc	"Spindle turning counterclockwise in G84"	"在G84中主轴逆时针转动"	SPINDLE
+INTERPRETER_FMT_ED6A0348A45C	CHKS:rs274ngc/interp_read.cc	"Left bracket missing after 'while'"	"'while'后左括号丢失"	PROGRAM_SYNTAX
+INTERPRETER_FMT_EDBD025D5848	CHKS:rs274ngc/interp_namedparams.cc	"fetch_hal_param: hal_ready(): %d"	"获取底层控制参数: 底层控制_ready(): %d"	PROGRAM_SYNTAX
+INTERPRETER_FMT_EEA0C26C3F83	ERS:rs274ngc/interp_o_word.cc	"handler_returned: %s returned double: %f - invalid"	"扩展处理%s返回了无效数值%f"	PROGRAM_SYNTAX
+INTERPRETER_FMT_EFCE2F7FFF65	CHKS:rs274ngc/interp_read.cc	"Multiple U words on one line"	"一行上有多个U字"	PROGRAM_SYNTAX
+INTERPRETER_FMT_F04AB9B2FE01	ERS:rs274ngc/interp_namedparams.cc	"Named hal parameter #<%s> not found"	"底层控制中未找到参数#<%s>"	PROGRAM_SYNTAX
+INTERPRETER_FMT_F09F343574CC	CHKS:rs274ngc/interp_convert.cc	"Zero degree inside corner is invalid for cutter compensation"	"零度内角对刀具补偿无效"	TOOL
+INTERPRETER_FMT_F0AEBD62CE27	CHKS:rs274ngc/interp_convert.cc	"Spindle not turning in G33.1"	"在 G33.1 中主轴未转动"	SPINDLE
+INTERPRETER_FMT_F0DAECBC1B91	CHKS:rs274ngc/interp_convert.cc	"Invalid analog index with M68"	"无效的模拟索引与M68"	PROGRAM_SYNTAX
+INTERPRETER_FMT_F3BD1C7E8781	ERS:rs274ngc/rs274ngc_pre.cc	"BUG - check find_remappings()!! status=%d nesting=%d"	"控制系统内部重映射状态异常（状态%d，层级%d）"	INTERNAL
+INTERPRETER_FMT_F3C6702BD539	ERS:rs274ngc/interp_remap.cc	"user-defined %s:%s"	"用户程序错误：%s：%s"	USER_PROGRAM
+INTERPRETER_FMT_F3DE1A5ADF64	ERS:rs274ngc/interp_convert.cc	"BUG: Invalid plane in comp_set_current"	"刀具补偿当前平面写入状态无效"	INTERNAL
+INTERPRETER_FMT_F4BE066D6BD8	ERS:rs274ngc/interp_g7x.cc	"G7x.x  requires a Q word"	"G7X循环缺少Q参数"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_F4DF30BB41D8	CHKS:rs274ngc/interp_convert.cc	"In G76, I must not be 0"	"在 G76，I 不能为 0"	PROGRAM_SYNTAX
+INTERPRETER_FMT_F4EF8B9E157F	CHKS:rs274ngc/interp_check.cc	"P word with no G2 G3 G4 G10 G64 G5 G5.2 G76 G82 G86 G88 G89 or M50 M51 M52 M53 M62 M63 M64 M65 M66 M98 or user M code to use it"	"P 参数没有与 G2 G3 G4 G10 G64 G5 G5.2 G76 G82 G86 G88 G89 或 M50 M51 M52 M53 M62 M63 M64 M65 M66 M98 或者用户自定义M命令一起使用"	PROGRAM_FLOW
+INTERPRETER_FMT_F51A11096EEA	CHKS:rs274ngc/interp_o_word.cc	"%s (remapped) uses Python functions, but the Python plugin is not available"	"重映射指令%s需要扩展功能，但该功能当前不可用"	PROGRAM_FLOW
+INTERPRETER_FMT_F6CC723689FE	CHKS:rs274ngc/interp_convert.cc	"Cannot set motion analog output with cutter radius compensation on"	"刀具半径补偿开启时，不能设置运动模拟输出"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_F83C8F09F00F	CHKS:rs274ngc/interp_convert.cc	"Cannot set auxiliary analog output with cutter radius compensation on"	"刀具半径补偿开启时，不能设置辅助模拟输出"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_F9516FFA2151	CHKS:rs274ngc/interp_cycles.cc	"Cannot use canned cycles with cutter compensation on"	"使用刀具补偿时不能使用固定循环"	TOOL
+INTERPRETER_FMT_FDB0113F15C3	CHKS:rs274ngc/interp_convert.cc	"You must specify both X and Y coordinates for Control Points"	"您必须为控制点指定X和Y坐标"	PROGRAM_SYNTAX
+INTERPRETER_FMT_FDE35B2127FF	ERS:rs274ngc/interp_g7x.cc	"G7x error: Cannot use U in incremental mode (G91)"	"增量模式G91下不能使用G7X的U参数"	PROGRAM_GEOMETRY
+INTERPRETER_FMT_FEBDF07C81A4	CHKS:rs274ngc/interp_convert.cc	"Cannot change tools with cutter radius compensation on"	"使用刀具半径补偿时无法更换刀具"	TOOL
+MOTION_FMT_026D154AEB4A	reportError:motion/command.c	"Probe is already clear when starting G38.4 or G38.5 move"	"在启动G38.4或G38.5时，探头已经清除"	MOTION_PROBE
+MOTION_FMT_058CC65B238C	reportError:motion/command.c	"can't add probe move"	"不能添加探头移动"	MOTION_PROBE
+MOTION_FMT_08AAE3303E8F	reportError:motion/command.c	"Attempt to release brake of non-existent spindle <%d>"	"尝试释放不存在的主轴制动器 <%d>"	SPINDLE
+MOTION_FMT_09B1E5798E39	reportError:motion/command.c	"%s move on line %d would exceed %c's %s limit"	"%s在行%d将超过%c的%s极限"	MOTION_LIMIT
+MOTION_FMT_0A6C2BE6C04F	reportError:motion/command.c	"need to be enabled, in coord mode for linear move"	"需要启用才能在坐标模式下进行线性移动"	MACHINE_MODE
+MOTION_FMT_0DE92679D65C	reportError:motion/command.c	"Probe is already tripped when starting G38.2 or G38.3 move"	"探头在启动G38.2或G38.3时已经跳闸"	MOTION_PROBE
+MOTION_FMT_109FE6BF4DB1	reportError:motion/command.c	"joint %d: compensation values must increase"	"关节 %d: 补偿值必须增加"	CONFIG
+MOTION_FMT_11003372640D	reportError:motion/command.c	"must be in joint mode or disabled to unhome"	"必须处于关节模式或禁用才可以消零"	MOTION_HOME
+MOTION_FMT_13F001E392C8	reportError:motion/command.c	"Can't jog joint %d further past max soft limit."	"不能点动关节 %d 超出正向软极限。"	MOTION_LIMIT
+MOTION_FMT_14212A028810	reportError:motion/control.c	"G38.2 move finished without making contact."	"G38.2 移动完成后不接触."	MOTION_PROBE
+MOTION_FMT_150764DD057F	reportError:motion/command.c	"can't enable motion, enable input is false"	"无法启用运动，使能输入为false"	SAFETY_ENABLE
+MOTION_FMT_1C54800F7CDF	reportError:motion/control.c	"Can't wheel jog locking joint_num=%d"	"关节%d当前被锁定，无法手轮点动"	MOTION_JOG
+MOTION_FMT_1FB249B5DD33	reportError:motion/command.c	"%s move on line %d gave non-finite joint location on joint %d"	"%s在行%d关节%d上给出非有限关节位置"	MOTION_KINEMATICS
+MOTION_FMT_1FCD246E8375	reportError:motion/command.c	"Can't jog joint %d further past max hard limit."	"不能点动关节 %d 超出正向硬极限。"	MOTION_LIMIT
+MOTION_FMT_2F909C267ED5	reportError:motion/command.c	"Can't jog invalid joint number %d."	"不能点动，无效的关节号码 %d."	MOTION_JOG
+MOTION_FMT_34B5429DF845	reportError:motion/command.c	"%s move on line %d would exceed joint %d's negative limit"	"%s移动在行%d将超过关节%d's的负极限"	MOTION_LIMIT
+MOTION_FMT_36A8570D7E47	reportError:motion/control.c	"joint %d amplifier fault"	"关节 %d 放大器故障"	DRIVE_FEEDBACK
+MOTION_FMT_3AAE6F44FBCA	reportError:motion/command.c	"Attempt to stop non-existent spindle <%d>"	"尝试停止不存在的主轴 <%d>"	SPINDLE
+MOTION_FMT_3B7BD36FDD7A	reportError:motion/control.c	"kinematicsInverse gave non-finite joint location on joint %d"	"运动学逆向在关节%d上给出非有限关节位置"	MOTION_KINEMATICS
+MOTION_FMT_3F298AB997D6	reportError:motion/command.c	"can't do circular move with limits exceeded"	"超出限位，不能做环形移动"	MOTION_LIMIT
+MOTION_FMT_41AA1E260B99	reportError:motion/command.c	"Can't jog any joints while homing."	"在回零时不能点动任何关节。"	MOTION_JOG
+MOTION_FMT_46B58D27CD79	reportError:motion/command.c	"Can't jog joint when not enabled."	"未启用时不能进行点动关节。"	MOTION_JOG
+MOTION_FMT_4871EE81B3F6	reportError:motion/command.c	"can't add circular move at line %d, error code %d"	"不能在行%d处添加环形移动，错误代码%d"	MOTION_PLANNER
+MOTION_FMT_4BA7F4C91837	reportError:motion/control.c	"kinematicsInverse failed"	"运动学逆向失败"	MOTION_KINEMATICS
+MOTION_FMT_501262782FB0	reportError:motion/command.c	"unrecognized command %d"	"无法识别的指令 %d"	INTERNAL
+MOTION_FMT_5149D2A0E504	reportError:motion/control.c	"Exceeded POSITIVE soft limit (%.5f) on joint %d\n"	"正向软限位 (%.5f) 在关节 %d 上已超程"	MOTION_LIMIT
+MOTION_FMT_5508D4E5F7D8	reportError:motion/command.c	"emcmotGetRotaryUnlocked(): No unlock pin configured for joint %d\n   Use motmod parameter: unlock_joints_mask=%X'"	"关节%d未配置旋转解锁信号"	CONFIG
+MOTION_FMT_5C5699EBD985	reportError:motion/command.c	"can't do rigid tap move with limits exceeded"	"超出限制不能做刚性攻丝移动"	MOTION_LIMIT
+MOTION_FMT_60FB8A6E1E7C	reportError:motion/command.c	"can't do probe move with limits exceeded"	"超出限制不能做探头移动"	MOTION_LIMIT
+MOTION_FMT_62EB884338AB	reportError:motion/control.c	"Motion Stopped by misc error %d"	"由于杂项错误 %d 运动停止"	INTERNAL
+MOTION_FMT_63ACC1EF0077	reportError:motion/command.c	"need to be enabled, in coord mode for circular move"	"需要启用才能在坐标模式下进行环形移动"	MACHINE_MODE
+MOTION_FMT_65D9C168AB40	reportError:motion/command.c	"invalid V5 wrapped rotary target state"	"旋转轴等效角目标状态无效"	MOTION_KINEMATICS
+MOTION_FMT_6AFF3B0592DB	reportError:motion/control.c	"G38.4 move finished without breaking contact."	"G38.4 移动完成后不断开接触."	MOTION_PROBE
+MOTION_FMT_6B1899B56B65	reportError:motion/control.c	"joint %d following error"	"关节 %d 跟随错误"	DRIVE_FEEDBACK
+MOTION_FMT_73BD5ADAF3CF	reportError:motion/control.c	"Jog aborted by jog-stop-immediate"	"点动已由立即停止指令中止"	MOTION_JOG
+MOTION_FMT_77E7B4BBC81C	reportError:motion/motion.c	"all joints must be homed before going into teleop mode"	"在进入teleop模式之前，所有关节都必须回零"	MOTION_HOME
+MOTION_FMT_81DD291C04A1	reportError:motion/command.c	"can't do linear move with limits exceeded"	"超出限位，不能做线性移动"	MOTION_LIMIT
+MOTION_FMT_83F2A67FCB28	reportError:motion/control.c	"Probe tripped during a coordinate jog."	"探头在坐标点动期间触发。"	MOTION_PROBE
+MOTION_FMT_84EC7460A210	reportError:motion/control.c	"Probe tripped during non-probe move."	"探头在非探测运动中触发。"	MOTION_PROBE
+MOTION_FMT_84F4122450EE	reportError:motion/control.c	"Probe tripped during homing motion."	"在回零运动期间探头跳闸."	MOTION_PROBE
+MOTION_FMT_86FF963F6394	reportError:motion/control.c	"Exceeded NEGATIVE soft limit (%.5f) on joint %d\n"	"负向软限位 (%.5f) 在关节 %d 上已超程"	MOTION_LIMIT
+MOTION_FMT_870D9D1E2CD5	reportError:motion/command.c	"all joints must be homed before going into coordinated mode"	"所有关节必须在进入坐标模式之前回零"	MOTION_HOME
+MOTION_FMT_871313624A0B	reportError:motion/command.c	"Can't jog joint %d further past min hard limit."	"不能点动关节 %d 超出负向硬极限。"	MOTION_LIMIT
+MOTION_FMT_885BA0D619A6	reportError:motion/control.c	"fault %d during orient in progress"	"正在前进的过程中的故障%d"	SPINDLE
+MOTION_FMT_8CCD102973C3	reportError:motion/command.c	"emcmotSetRotaryUnlock(): No unlock pin configured for joint %d\n   Use motmod parameter: unlock_joints_mask=%X"	"关节%d未配置旋转解锁信号"	CONFIG
+MOTION_FMT_9EE82CCF3E7B	reportError:motion/command.c	"Attempt to configure non-existent spindle"	"尝试设置不存在的主轴"	SPINDLE
+MOTION_FMT_9FB59679FD68	reportError:motion/command.c	"Attempt to engage brake of non-existent spindle <%d>"	"尝试吸合不存在的主轴制动器 <%d>"	SPINDLE
+MOTION_FMT_9FC4EE4D5C80	reportError:motion/command.c	"Attempt to increase non-existent spindle <%d>"	"尝试增加不存在的主轴 <%d>"	SPINDLE
+MOTION_FMT_A03F4030C481	reportError:motion/command.c	"joint %d: too many compensation entries"	"关节 %d: 补偿项目太多"	CONFIG
+MOTION_FMT_A0AC1F80A9F7	reportError:motion/control.c	"Hint: switch to joint mode to jog off soft limit"	"提示:切换到关节模式，点动软限位"	MOTION_LIMIT
+MOTION_FMT_A26DDDC6F1CD	reportError:motion/command.c	"Attempt to start non-existent spindle"	"尝试启动不存在的主轴"	SPINDLE
+MOTION_FMT_A55A9D64E580	reportError:motion/command.c	"Attempt to orient non-existent spindle <%d>"	"尝试定位不存在的主轴 <%d>"	SPINDLE
+MOTION_FMT_A8085B2477ED	reportError:motion/command.c	"can't add linear move at line %d, error code %d"	"不能在行%d处添加线性移动，错误代码%d"	MOTION_PLANNER
+MOTION_FMT_A81154751688	reportError:motion/command.c	"%s move on line %d would exceed joint %d's positive limit"	"%s移动在行%d将超过关节%d's的正极限"	MOTION_LIMIT
+MOTION_FMT_AA66C1D38A91	reportError:motion/command.c	"Can't jog joint %d further past min soft limit."	"不能点动关节 %d 超出负向软极限。"	MOTION_LIMIT
+MOTION_FMT_B1C1DF723CAD	reportError:motion/control.c	"Jog aborted by jog-stop"	"点动已由停止指令中止"	MOTION_JOG
+MOTION_FMT_B2F00999E329	reportError:motion/control.c	"spindle %d amplifier fault"	"主轴%d放大器故障"	DRIVE_FEEDBACK
+MOTION_FMT_B5B9E3D281A6	reportError:motion/command.c	"invalid params in linear command"	"线性命令中的无效参数"	MOTION_PLANNER
+MOTION_FMT_B6188D878DE4	reportError:motion/command.c	"need to be enabled, in coord mode for probe move"	"需要启用，在坐标模式下进行探头移动"	MACHINE_MODE
+MOTION_FMT_B69A80DC9CE9	reportError:motion/control.c	"Probe tripped during a joint jog."	"在关节点动期间探头跳闸。"	MOTION_PROBE
+MOTION_FMT_C08ABEA36427	reportError:motion/control.c	"Note: Motion enabled after reaching a coordinate soft limit with active external offsets"	"存在外部偏移时到达坐标软限位，运动已重新使能"	MOTION_LIMIT
+MOTION_FMT_CBFDD440B4C2	reportError:motion/command.c	"Homing denied by motion.homing-inhibit joint=%d\n"	"回零被motion.homing-inhibit joint=%d拒绝"	MOTION_HOME
+MOTION_FMT_CEC8A013CBA7	reportError:motion/control.c	"motion stopped by enable input"	"运动停止因为启用了输入"	SAFETY_ENABLE
+MOTION_FMT_D66736E7A86A	reportError:motion/command.c	"Attempt to decrease non-existent spindle <%d>."	"尝试减少不存在的主轴 <%d>。"	SPINDLE
+MOTION_FMT_D778C773F9D9	reportError:motion/command.c	"%s move on line %d fails kinematicsInverse"	"%s在行%d运动学逆向失败"	MOTION_KINEMATICS
+MOTION_FMT_D93BE6AFCA20	reportError:motion/command.c	"need to be enabled, in coord mode for rigid tap move"	"需要启用，在坐标模式下进行刚性攻丝移动"	MACHINE_MODE
+MOTION_FMT_D9B4FADC5EEE	reportError:motion/command.c	"must be in joint mode to home"	"必须以关节模式回零"	MOTION_HOME
+MOTION_FMT_E3CF637D93B3	reportError:motion/control.c	"joint %d on limit switch error"	"关节%d 限位开关错误"	MOTION_LIMIT
+MOTION_FMT_E7AA879C7547	reportError:motion/command.c	"Can't jog locking joint_num=%d"	"关节%d当前被锁定，无法点动"	MOTION_JOG
+MOTION_FMT_EC55CEA3DECC	reportError:motion/command.c	"can't add rigid tap move at line %d, error code %d"	"不能在%d行添加刚性攻丝移动，错误代码 %d"	SPINDLE
+MOTION_FMT_EC7EBB822279	reportError:motion/command.c	"Cannot jog while jog-inhibit is active."	"点动抑制触发时无法进行点动。"	MOTION_JOG
+MOTION_FMT_F00A8FDCDCD3	reportError:motion/command.c	"Problem:\n  motmod configured for %d spindles\n  but command requests %d spindles\n  Using: %d spindles"	"主轴数量配置不一致：配置%d个，请求%d个，当前使用%d个"	SPINDLE
+MOTION_FMT_F684C73CBA75	CANON_ERROR:rs274ngc/canonmodule.cc	"%s"	"控制系统返回未分类错误"	PASSTHROUGH
+MOTION_FMT_F8F480A6D409	reportError:motion/control.c	"Joint must be unhomed, jogged into limits, rehomed"	"关节必须设为未回零，然后点动至限位，重新回零"	MOTION_HOME
+MOTION_FMT_F9FF8E875622	reportError:motion/command.c	"MOTION: can't STEP while already executing"	"动作: 在执行时不能STEP"	MACHINE_MODE
+MOTION_FMT_FBA43065A46F	reportError:motion/command.c	"Can't jog any joint while homing."	"在回零时不能点动任何关节。"	MOTION_JOG
+NCE_ALL_AXES_MISSING_WITH_G52_OR_G92	INTERPRETER_FIXED	"All axes missing with g52 or g92"	"所有的轴都缺少g52或g92"	PROGRAM_SYNTAX
+NCE_ALL_AXES_MISSING_WITH_MOTION_CODE	INTERPRETER_FIXED	"All axes missing with motion code"	"所有的轴都没有运动代码"	PROGRAM_SYNTAX
+NCE_ANALOG_INPUT_INVALID_ON_M66	INTERPRETER_FIXED	"Analog input selected out of bounds"	"模拟输入选择超出范围"	PROGRAM_SYNTAX
+NCE_ANALOG_INPUT_WITH_WAIT_NOT_IMMEDIATE	INTERPRETER_FIXED	"Can't select analog input with wait type != immediate return"	"无法选择等待类型的模拟输入!=立即返回"	PROGRAM_SYNTAX
+NCE_ARC_RADIUS_TOO_SMALL_TO_REACH_END_POINT	INTERPRETER_FIXED	"Arc radius too small to reach end point"	"圆弧半径太小，无法到达终点"	PROGRAM_GEOMETRY
+NCE_ARGUMENT_TO_ACOS_OUT_OF_RANGE	INTERPRETER_FIXED	"Argument to acos out of range"	"acos 参数超出范围"	PROGRAM_SYNTAX
+NCE_ARGUMENT_TO_ASIN_OUT_OF_RANGE	INTERPRETER_FIXED	"Argument to asin out of range"	"asin 参数超出范围"	PROGRAM_SYNTAX
+NCE_ATTEMPT_TO_DIVIDE_BY_ZERO	INTERPRETER_FIXED	"Attempt to divide by zero"	"试图除以零"	PROGRAM_SYNTAX
+NCE_ATTEMPT_TO_RAISE_NEGATIVE_TO_NON_INTEGER_POWER	INTERPRETER_FIXED	"Attempt to raise negative to non integer power"	"试图将负数提高到非整数幂"	PROGRAM_SYNTAX
+NCE_A_FILE_IS_ALREADY_OPEN	INTERPRETER_FIXED	"A file is already open"	"一个文件已经打开"	PROGRAM_FILE
+NCE_BAD_FORMAT_UNSIGNED_INTEGER	INTERPRETER_FIXED	"Bad format unsigned integer"	"格式为无符号整数"	PROGRAM_SYNTAX
+NCE_BAD_NUMBER_FORMAT	INTERPRETER_FIXED	"Bad number format"	"数字格式不正确"	PROGRAM_SYNTAX
+NCE_BOTH_DIGITAL_AND_ANALOG_INPUT_SELECTED	INTERPRETER_FIXED	"Invalid to select both a digital and an analog input with M66"	"用M66选择数字和模拟输入无效"	PROGRAM_SYNTAX
+NCE_BUG_BAD_G_CODE_MODAL_GROUP_0	INTERPRETER_FIXED	"Bug bad g code modal group 0"	"错误:错误g代码模式组0"	PROGRAM_SYNTAX
+NCE_BUG_CODE_NOT_G0_OR_G1	INTERPRETER_FIXED	"Bug code not g0 or g1"	"错误:代码不是g0或g1"	PROGRAM_SYNTAX
+NCE_BUG_CODE_NOT_G17_G18_OR_G19	INTERPRETER_FIXED	"Bug code not g17 g18 or g19"	"错误:代码不是 g17 g18或 g19"	PROGRAM_SYNTAX
+NCE_BUG_CODE_NOT_G20_OR_G21	INTERPRETER_FIXED	"Bug code not g20 or g21"	"错误:代码不是 g20 或 g21"	PROGRAM_SYNTAX
+NCE_BUG_CODE_NOT_G28_OR_G30	INTERPRETER_FIXED	"Bug code not g28 or g30"	"错误:代码不是 g28 或g30"	PROGRAM_SYNTAX
+NCE_BUG_CODE_NOT_G2_OR_G3	INTERPRETER_FIXED	"Bug code not g2 or g3"	"错误:代码不是 g2 或 g3"	PROGRAM_SYNTAX
+NCE_BUG_CODE_NOT_G4_G10_G28_G30_G52_G53_OR_G92_SERIES	INTERPRETER_FIXED	"Bug code not g4 g10 g28 g30 g52 g53 or g92 series"	"错误:代码不是g4 g10 g28 g30 g52 g53或g92系列"	PROGRAM_SYNTAX
+NCE_BUG_CODE_NOT_G61_G61_1_OR_G64	INTERPRETER_FIXED	"Bug code not g61 g61.1 or g64"	"错误:代码不是 g61或 g64 g61.1"	PROGRAM_SYNTAX
+NCE_BUG_CODE_NOT_G90_OR_G91	INTERPRETER_FIXED	"Bug code not g90 or g91"	"错误:代码不是 g0 或 g1"	PROGRAM_SYNTAX
+NCE_BUG_CODE_NOT_G98_OR_G99	INTERPRETER_FIXED	"Bug code not g98 or g99"	"错误:代码不是 g0 或 g1"	PROGRAM_SYNTAX
+NCE_BUG_CODE_NOT_IN_G52_G92_SERIES	INTERPRETER_FIXED	"Bug code not in g52 or g92 series"	"错误:代码不是g52或g92系列"	PROGRAM_SYNTAX
+NCE_BUG_CODE_NOT_IN_RANGE_G54_TO_G593	INTERPRETER_FIXED	"Bug code not in range g54 to g593"	"错误:代码不在范围g54到g593"	PROGRAM_SYNTAX
+NCE_BUG_CODE_NOT_M0_M1_M2_M30_M60_M99	INTERPRETER_FIXED	"Bug code not m0 m1 m2 m30 m60 m99"	"错误:代码不是m0 m1 m2 m30 m60 m99"	PROGRAM_FLOW
+NCE_BUG_DISTANCE_MODE_NOT_G90_OR_G91	INTERPRETER_FIXED	"Bug distance mode not g90 or g91"	"错误:距离模式不G90 G91或"	PROGRAM_SYNTAX
+NCE_BUG_FUNCTION_SHOULD_NOT_HAVE_BEEN_CALLED	INTERPRETER_FIXED	"Bug function should not have been called"	"错误:函数不应该被调用"	PROGRAM_SYNTAX
+NCE_BUG_IN_TOOL_RADIUS_COMP	INTERPRETER_FIXED	"Bug in tool radius comp"	"刀具半径错误"	TOOL
+NCE_BUG_PLANE_NOT_XY_YZ_OR_XZ	INTERPRETER_FIXED	"Bug plane not xy yz or xz"	"错误:平面不是xy yz 或 xz"	PROGRAM_GEOMETRY
+NCE_BUG_SIDE_NOT_RIGHT_OR_LEFT	INTERPRETER_FIXED	"Bug side not right or left"	"错误:侧面或左面不对"	PROGRAM_SYNTAX
+NCE_BUG_UNKNOWN_MOTION_CODE	INTERPRETER_FIXED	"Bug unknown motion code"	"错误未知运动代码"	PROGRAM_SYNTAX
+NCE_BUG_UNKNOWN_OPERATION	INTERPRETER_FIXED	"Bug unknown operation"	"错误未知操作"	PROGRAM_SYNTAX
+NCE_CALL_STACK_UNDERRUN	INTERPRETER_FIXED	"Bug: call stack underrun"	"错误:调用堆栈欠载"	INTERNAL
+NCE_CANNOT_CHANGE_AXIS_OFFSETS_WITH_CUTTER_RADIUS_COMP	INTERPRETER_FIXED	"Cannot change axis offsets with cutter radius comp"	"切刀半径不能改变轴偏移"	PROGRAM_GEOMETRY
+NCE_CANNOT_CHANGE_PLANES_WITH_CUTTER_RADIUS_COMP_ON	INTERPRETER_FIXED	"Cannot change planes with cutter radius compensation on"	"使用刀具半径补偿不能改变平面"	PROGRAM_GEOMETRY
+NCE_CANNOT_CREATE_BACKUP_FILE	INTERPRETER_FIXED	"Cannot create backup file"	"无法创建备份文件"	PROGRAM_FILE
+NCE_CANNOT_DO_G1_WITH_ZERO_FEED_RATE	INTERPRETER_FIXED	"Cannot do g1 with zero feed rate"	"不能以零进给速率执行g1"	PROGRAM_SYNTAX
+NCE_CANNOT_DO_ZERO_REPEATS_OF_CYCLE	INTERPRETER_FIXED	"Cannot do zero repeats of cycle"	"不能做零循环的重复"	PROGRAM_SYNTAX
+NCE_CANNOT_MAKE_ARC_WITH_ZERO_FEED_RATE	INTERPRETER_FIXED	"Cannot make arc with zero feed rate"	"不能以零进给速率进行电弧"	PROGRAM_GEOMETRY
+NCE_CANNOT_MOVE_ROTARY_AXES_WITH_G76	INTERPRETER_FIXED	"Cannot move rotary axes with G76"	"使用G76不能移动旋转轴"	PROGRAM_SYNTAX
+NCE_CANNOT_OPEN_BACKUP_FILE	INTERPRETER_FIXED	"Cannot open backup file"	"无法打开备份文件"	PROGRAM_FILE
+NCE_CANNOT_OPEN_VARIABLE_FILE	INTERPRETER_FIXED	"Cannot open variable file"	"无法创建备份文件"	PROGRAM_FILE
+NCE_CANNOT_PROBE_WITH_CUTTER_RADIUS_COMP_ON	INTERPRETER_FIXED	"Cannot probe with cutter radius comp on"	"無法啟用超速 當刀具半徑補償在使用"	MOTION_PROBE
+NCE_CANNOT_PROBE_WITH_ZERO_FEED_RATE	INTERPRETER_FIXED	"Cannot probe with zero feed rate"	"无法以零进给速率进行探测"	MOTION_PROBE
+NCE_CANNOT_PUT_AN_A_IN_CANNED_CYCLE	INTERPRETER_FIXED	"Cannot put an a in canned cycle"	"不能在固定循环中放置A"	PROGRAM_GEOMETRY
+NCE_CANNOT_PUT_A_B_IN_CANNED_CYCLE	INTERPRETER_FIXED	"Cannot put a b in canned cycle"	"不能在固定循环中放置B"	PROGRAM_GEOMETRY
+NCE_CANNOT_PUT_A_C_IN_CANNED_CYCLE	INTERPRETER_FIXED	"Cannot put a c in canned cycle"	"不能在固定循环中放置C"	PROGRAM_GEOMETRY
+NCE_CANNOT_REOPEN_FILE	INTERPRETER_FIXED	"cannot reopen file %s - removed or renamed? (%s)"	"无法重新打开文件%s - 删除或重命名?(%s)"	PROGRAM_FILE
+NCE_CANNOT_TURN_CUTTER_RADIUS_COMP_ON_WHEN_ON	INTERPRETER_FIXED	"Cannot turn cutter radius comp on when on"	"打开时不能转动刀具半径"	PROGRAM_GEOMETRY
+NCE_CANNOT_USE_AXIS_VALUES_WITHOUT_A_G_CODE_THAT_USES_THEM	INTERPRETER_FIXED	"Cannot use axis values without a g code that uses them"	"不能使用轴值，而不使用使用它们的g代码"	PROGRAM_SYNTAX
+NCE_CANNOT_USE_AXIS_VALUES_WITH_G80	INTERPRETER_FIXED	"Cannot use axis values with g80"	"g80不能使用轴值"	PROGRAM_SYNTAX
+NCE_CANNOT_USE_G28_OR_G30_WITH_CUTTER_RADIUS_COMP	INTERPRETER_FIXED	"Cannot use g28 or g30 with cutter radius comp"	"不能使用带有刀具半径的g28或g30"	PROGRAM_GEOMETRY
+NCE_CANNOT_USE_G53_INCREMENTAL	INTERPRETER_FIXED	"Cannot use g53 incremental"	"不能使用g53增量"	PROGRAM_SYNTAX
+NCE_CANNOT_USE_G53_WITH_CUTTER_RADIUS_COMP	INTERPRETER_FIXED	"Cannot use g53 with cutter radius comp"	"不能使用带铣刀半径的g53"	PROGRAM_GEOMETRY
+NCE_CANNOT_USE_TWO_G_CODES_THAT_BOTH_USE_AXIS_VALUES	INTERPRETER_FIXED	"Cannot use two g codes that both use axis values"	"不能使用两个使用轴值的g代码"	PROGRAM_SYNTAX
+NCE_COMMAND_TOO_LONG	INTERPRETER_FIXED	"Command too long"	"指令太长"	PROGRAM_SYNTAX
+NCE_CURRENT_POINT_SAME_AS_END_POINT_OF_ARC	INTERPRETER_FIXED	"Current point same as end point of arc"	"当前点与圆弧终点相同"	PROGRAM_GEOMETRY
+NCE_DIGITAL_INPUT_INVALID_ON_M66	INTERPRETER_FIXED	"Digital input selected out of bounds"	"数字输入选择超出范围"	PROGRAM_SYNTAX
+NCE_DWELL_TIME_MISSING_WITH_G4	INTERPRETER_FIXED	"Dwell time missing with g4"	"停留时间缺少g4"	PROGRAM_SYNTAX
+NCE_DWELL_TIME_P_WORD_MISSING_WITH_G82	INTERPRETER_FIXED	"Dwell time p word missing with g82"	"停留时间p字缺少g82"	PROGRAM_SYNTAX
+NCE_DWELL_TIME_P_WORD_MISSING_WITH_G86	INTERPRETER_FIXED	"Dwell time p word missing with g86"	"停留时间p字缺少g86"	PROGRAM_SYNTAX
+NCE_DWELL_TIME_P_WORD_MISSING_WITH_G88	INTERPRETER_FIXED	"Dwell time p word missing with g88"	"停留时间p字缺少g88"	PROGRAM_SYNTAX
+NCE_DWELL_TIME_P_WORD_MISSING_WITH_G89	INTERPRETER_FIXED	"Dwell time p word missing with g89"	"停留时间p字缺少g89"	PROGRAM_SYNTAX
+NCE_EQUAL_SIGN_MISSING_IN_PARAMETER_SETTING	INTERPRETER_FIXED	"Equal sign missing in parameter setting"	"参数设置中缺少等号"	PROGRAM_SYNTAX
+NCE_FILE_ENDED_WITH_NO_PERCENT_SIGN	INTERPRETER_FIXED	"File ended with no percent sign (%%)"	"程序结束前缺少百分号（%%）"	PROGRAM_FILE
+NCE_FILE_ENDED_WITH_NO_PERCENT_SIGN_OR_PROGRAM_END	INTERPRETER_FIXED	"File ended with no percent sign (%%) or program end (M2)"	"程序结束前缺少百分号（%%）或M2结束指令"	PROGRAM_FILE
+NCE_FILE_NAME_TOO_LONG	INTERPRETER_FIXED	"File name too long"	"文件名太长"	PROGRAM_FILE
+NCE_FILE_NOT_OPEN	INTERPRETER_FIXED	"File not open"	"文件未打开"	PROGRAM_FILE
+NCE_F_WORD_MISSING_WITH_INVERSE_TIME_ARC_MOVE	INTERPRETER_FIXED	"F word missing with inverse time arc move"	"反时针圆弧移动缺少F字"	PROGRAM_GEOMETRY
+NCE_F_WORD_MISSING_WITH_INVERSE_TIME_G1_MOVE	INTERPRETER_FIXED	"F word missing with inverse time g1 move"	"反时针g1移动缺少F字"	PROGRAM_SYNTAX
+NCE_F_WORD_USED_WITH_G33	INTERPRETER_FIXED	"F word used with a g33/g33.1"	"F字用了g33/g33.1"	PROGRAM_SYNTAX
+NCE_G_CODE_OUT_OF_RANGE	INTERPRETER_FIXED	"G-code out of range"	"G代码超出范围"	PROGRAM_SYNTAX
+NCE_INVALID_OR_MISSING_P_AND_E_WORDS_FOR_WAIT_INPUT	INTERPRETER_FIXED	"Need to have either a valid P or a valid E word with M66"	"需要M66有效的P或有效的E字"	PROGRAM_SYNTAX
+NCE_I_J_OR_K_WORDS_MISSING_WITH_G76	INTERPRETER_FIXED	"I J or K words missing with G76"	"I J或K字缺失的 G76"	PROGRAM_SYNTAX
+NCE_I_WORD_GIVEN_FOR_ARC_IN_YZ_PLANE	INTERPRETER_FIXED	"I word given for arc in yz plane"	"圆弧在xz平面给予I字"	PROGRAM_GEOMETRY
+NCE_I_WORD_MISSING_WITH_G87	INTERPRETER_FIXED	"I word missing with g87"	"I字字缺少g87"	PROGRAM_SYNTAX
+NCE_J_WORD_GIVEN_FOR_ARC_IN_XZ_PLANE	INTERPRETER_FIXED	"J word given for arc in xz plane"	"圆弧在xz平面给予J字"	PROGRAM_GEOMETRY
+NCE_J_WORD_MISSING_WITH_G87	INTERPRETER_FIXED	"J word missing with g87"	"J字缺少g87"	PROGRAM_SYNTAX
+NCE_K_WORD_GIVEN_FOR_ARC_IN_XY_PLANE	INTERPRETER_FIXED	"K word given for arc in xy plane"	"圆弧在xz平面给予K字"	PROGRAM_GEOMETRY
+NCE_K_WORD_MISSING_WITH_G33	INTERPRETER_FIXED	"K word missing with g33/g33.1"	"K字缺少用 g33/g33.1"	PROGRAM_SYNTAX
+NCE_K_WORD_MISSING_WITH_G87	INTERPRETER_FIXED	"K word missing with g87"	"K字缺少g87"	PROGRAM_SYNTAX
+NCE_LEFT_BRACKET_MISSING_AFTER_SLASH_WITH_ATAN	INTERPRETER_FIXED	"Left bracket missing after slash with atan"	"左括号后丢失斜杠"	PROGRAM_SYNTAX
+NCE_LEFT_BRACKET_MISSING_AFTER_UNARY_OPERATION_NAME	INTERPRETER_FIXED	"Left bracket missing after unary operation name"	"一次操作后左括号丢失"	PROGRAM_SYNTAX
+NCE_MIXED_RADIUS_IJK_FORMAT_FOR_ARC	INTERPRETER_FIXED	"Mixed radius ijk format for arc"	"混合半径ijk格式为圆弧"	PROGRAM_GEOMETRY
+NCE_MULTIPLE_A_WORDS_ON_ONE_LINE	INTERPRETER_FIXED	"Multiple a words on one line"	"多个 a字在一行"	PROGRAM_SYNTAX
+NCE_MULTIPLE_B_WORDS_ON_ONE_LINE	INTERPRETER_FIXED	"Multiple b words on one line"	"多个 b字在一行"	PROGRAM_SYNTAX
+NCE_MULTIPLE_C_WORDS_ON_ONE_LINE	INTERPRETER_FIXED	"Multiple c words on one line"	"多个 c字在一行"	PROGRAM_SYNTAX
+NCE_MULTIPLE_D_WORDS_ON_ONE_LINE	INTERPRETER_FIXED	"Multiple d words on one line"	"多个 d字在一行"	PROGRAM_SYNTAX
+NCE_MULTIPLE_E_WORDS_ON_ONE_LINE	INTERPRETER_FIXED	"Multiple e words on one line"	"多个 e字在一行"	PROGRAM_SYNTAX
+NCE_MULTIPLE_F_WORDS_ON_ONE_LINE	INTERPRETER_FIXED	"Multiple f words on one line"	"多个 f字在一行"	PROGRAM_SYNTAX
+NCE_MULTIPLE_H_WORDS_ON_ONE_LINE	INTERPRETER_FIXED	"Multiple h words on one line"	"多个 h字在一行"	PROGRAM_SYNTAX
+NCE_MULTIPLE_I_WORDS_ON_ONE_LINE	INTERPRETER_FIXED	"Multiple i words on one line"	"多个 i字在一行"	PROGRAM_SYNTAX
+NCE_MULTIPLE_J_WORDS_ON_ONE_LINE	INTERPRETER_FIXED	"Multiple j words on one line"	"多个 j字在一行"	PROGRAM_SYNTAX
+NCE_MULTIPLE_K_WORDS_ON_ONE_LINE	INTERPRETER_FIXED	"Multiple k words on one line"	"多个 k 字在一行"	PROGRAM_SYNTAX
+NCE_MULTIPLE_L_WORDS_ON_ONE_LINE	INTERPRETER_FIXED	"Multiple l words on one line"	"多个 l字在一行"	PROGRAM_SYNTAX
+NCE_MULTIPLE_P_WORDS_ON_ONE_LINE	INTERPRETER_FIXED	"Multiple p words on one line"	"多个 p字在一行"	PROGRAM_SYNTAX
+NCE_MULTIPLE_Q_WORDS_ON_ONE_LINE	INTERPRETER_FIXED	"Multiple q words on one line"	"多个 q字在一行"	PROGRAM_SYNTAX
+NCE_MULTIPLE_R_WORDS_ON_ONE_LINE	INTERPRETER_FIXED	"Multiple r words on one line"	"多個 r字在一行"	PROGRAM_SYNTAX
+NCE_MULTIPLE_S_WORDS_ON_ONE_LINE	INTERPRETER_FIXED	"Multiple s words on one line"	"多个 s字在一行"	PROGRAM_SYNTAX
+NCE_MULTIPLE_T_WORDS_ON_ONE_LINE	INTERPRETER_FIXED	"Multiple t words on one line"	"多个 t字在一行"	PROGRAM_SYNTAX
+NCE_MULTIPLE_X_WORDS_ON_ONE_LINE	INTERPRETER_FIXED	"Multiple x words on one line"	"多个 x字在一行"	PROGRAM_SYNTAX
+NCE_MULTIPLE_Y_WORDS_ON_ONE_LINE	INTERPRETER_FIXED	"Multiple y words on one line"	"多个 y字在一行"	PROGRAM_SYNTAX
+NCE_MULTIPLE_Z_WORDS_ON_ONE_LINE	INTERPRETER_FIXED	"Multiple z words on one line"	"多个 z字在一行"	PROGRAM_SYNTAX
+NCE_MUST_USE_G0_OR_G1_WITH_G53	INTERPRETER_FIXED	"Must use g0 or g1 with g53"	"必须使用g0或g1与g53"	PROGRAM_SYNTAX
+NCE_M_CODE_GREATER_THAN_199	INTERPRETER_FIXED	"M-code greater than 199: M%d"	"M代码大于 199:M%d"	PROGRAM_SYNTAX
+NCE_NAMED_PARAMETER_NOT_TERMINATED	INTERPRETER_FIXED	"Named parameter not terminated"	"命名参数未终止"	PROGRAM_SYNTAX
+NCE_NEGATIVE_ARGUMENT_TO_SQRT	INTERPRETER_FIXED	"Negative argument to sqrt"	"负参数 sqrt"	PROGRAM_SYNTAX
+NCE_NEGATIVE_D_WORD_TOOL_RADIUS_INDEX_USED	INTERPRETER_FIXED	"Negative d word tool radius index used"	"使用负d字刀具半径指标"	TOOL
+NCE_NEGATIVE_F_WORD_USED	INTERPRETER_FIXED	"Negative f word used"	"使用负f字"	PROGRAM_SYNTAX
+NCE_NEGATIVE_G_CODE_USED	INTERPRETER_FIXED	"Negative g code used"	"使用负g代码"	PROGRAM_SYNTAX
+NCE_NEGATIVE_H_WORD_USED	INTERPRETER_FIXED	"Negative h word used"	"使用负h字"	PROGRAM_SYNTAX
+NCE_NEGATIVE_L_WORD_USED	INTERPRETER_FIXED	"Negative l word used"	"使用负l字"	PROGRAM_SYNTAX
+NCE_NEGATIVE_M_CODE_USED	INTERPRETER_FIXED	"Negative m code used"	"使用负m代码"	PROGRAM_SYNTAX
+NCE_NEGATIVE_OR_ZERO_Q_VALUE_USED	INTERPRETER_FIXED	"Negative or zero q value used"	"使用负数或零q值"	PROGRAM_SYNTAX
+NCE_NEGATIVE_P_WORD_USED	INTERPRETER_FIXED	"Negative p word used"	"使用负p字"	PROGRAM_SYNTAX
+NCE_NEGATIVE_SPINDLE_SPEED_USED	INTERPRETER_FIXED	"Negative spindle speed used"	"使用负主轴转速"	SPINDLE
+NCE_NEGATIVE_TOOL_ID_USED	INTERPRETER_FIXED	"Negative tool id (tool not found)"	"刀具id为负数（找不到刀具）"	TOOL
+NCE_NESTED_COMMENT_FOUND	INTERPRETER_FIXED	"Nested comment found"	"发现嵌套评论"	PROGRAM_SYNTAX
+NCE_NESTED_SUBROUTINE_DEFN	INTERPRETER_FIXED	"Nested subroutine definition"	"嵌套子程序定义"	PROGRAM_FLOW
+NCE_NON_INTEGER_VALUE_FOR_INTEGER	INTERPRETER_FIXED	"Non integer value for integer"	"整数的非整数值"	PROGRAM_SYNTAX
+NCE_NOT_IN_SUBROUTINE_DEFN	INTERPRETER_FIXED	"Not in subroutine definition"	"未在子程序定义中"	PROGRAM_FLOW
+NCE_NO_CHARACTERS_FOUND_IN_READING_REAL_VALUE	INTERPRETER_FIXED	"No characters found in reading real value"	"在读取实际值时找不到字符"	PROGRAM_SYNTAX
+NCE_NULL_MISSING_AFTER_NEWLINE	INTERPRETER_FIXED	"Null missing after newline"	"换行后空缺"	PROGRAM_SYNTAX
+NCE_OUT_OF_MEMORY	INTERPRETER_FIXED	"Out of memory"	"內存不足"	PROGRAM_SYNTAX
+NCE_PARAMETER_FILE_OUT_OF_ORDER	INTERPRETER_FIXED	"Parameter file out of order"	"参数文件乱序"	CONFIG
+NCE_PARAMETER_NUMBER_OUT_OF_RANGE	INTERPRETER_FIXED	"Parameter number out of range"	"参数号超出范围"	PROGRAM_SYNTAX
+NCE_PARAMETER_NUMBER_READONLY	INTERPRETER_FIXED	"Parameter is readonly"	"参数是只读的"	PROGRAM_SYNTAX
+NCE_POCKET_MAX_TOO_LARGE	INTERPRETER_FIXED	"Pocket max too large"	"刀袋最大值过大"	PROGRAM_SYNTAX
+NCE_P_WORD_MISSING_WITH_G76	INTERPRETER_FIXED	"P word missing with G76"	"P字缺少的 G76"	PROGRAM_SYNTAX
+NCE_QUEUE_IS_NOT_EMPTY_AFTER_INPUT	INTERPRETER_FIXED	"Queue is not empty after external input"	"外部输入后队列不为空"	PROGRAM_SYNTAX
+NCE_QUEUE_IS_NOT_EMPTY_AFTER_PROBING	INTERPRETER_FIXED	"Queue is not empty after probing"	"探测后队列不为空"	MOTION_PROBE
+NCE_Q_WORD_MISSING_WITH_G73	INTERPRETER_FIXED	"Q word missing with g73"	"g73缺少Q字"	PROGRAM_SYNTAX
+NCE_Q_WORD_MISSING_WITH_G83	INTERPRETER_FIXED	"Q word missing with g83"	"g83缺少Q字"	PROGRAM_SYNTAX
+NCE_RADIUS_COMP_ONLY_IN_XY_OR_XZ	INTERPRETER_FIXED	"Cutter radius compensation allowed only in XY, XZ planes"	"只允许在XY，XZ平面使用刀具半径补偿"	PROGRAM_GEOMETRY
+NCE_R_CLEARANCE_PLANE_UNSPECIFIED_IN_CYCLE	INTERPRETER_FIXED	"R clearance plane unspecified in cycle"	"在VW平面固定循环中未指定U值"	PROGRAM_GEOMETRY
+NCE_R_I_J_K_WORDS_ALL_MISSING_FOR_ARC	INTERPRETER_FIXED	"R i j k words all missing for arc"	"R i j k所有缺少的弧的字"	PROGRAM_GEOMETRY
+NCE_R_LESS_THAN_U_IN_CYCLE_IN_VW_PLANE	INTERPRETER_FIXED	"R less than U in cycle in VW plane"	"R在VW平面上的循环小于U"	PROGRAM_GEOMETRY
+NCE_R_LESS_THAN_V_IN_CYCLE_IN_UW_PLANE	INTERPRETER_FIXED	"R less than V in cycle in UW plane"	"R在UW 平面上的循环小于V"	PROGRAM_GEOMETRY
+NCE_R_LESS_THAN_W_IN_CYCLE_IN_UV_PLANE	INTERPRETER_FIXED	"R less than W in cycle in UV plane"	"R在UV平面上的循环小于W"	PROGRAM_GEOMETRY
+NCE_R_LESS_THAN_X_IN_CYCLE_IN_YZ_PLANE	INTERPRETER_FIXED	"R less than x in cycle in yz plane"	"R在VW平面上的循环小于U"	PROGRAM_GEOMETRY
+NCE_R_LESS_THAN_Y_IN_CYCLE_IN_XZ_PLANE	INTERPRETER_FIXED	"R less than y in cycle in xz plane"	"R在VW平面上的循环小于U"	PROGRAM_GEOMETRY
+NCE_R_LESS_THAN_Z_IN_CYCLE_IN_XY_PLANE	INTERPRETER_FIXED	"R less than z in cycle in xy plane"	"R在VW平面上的循环小于U"	PROGRAM_GEOMETRY
+NCE_R_WORD_WITH_NO_G_CODE_THAT_USES_IT	INTERPRETER_FIXED	"R word with no g code that uses it"	"R字，没有使用它的g代码"	PROGRAM_SYNTAX
+NCE_SLASH_MISSING_AFTER_FIRST_ATAN_ARGUMENT	INTERPRETER_FIXED	"Slash missing after first atan argument"	"在第一次atan论据之后，反斜杠不见了"	PROGRAM_SYNTAX
+NCE_SPINDLE_NOT_TURNING_CLOCKWISE_IN_G84	INTERPRETER_FIXED	"Spindle not turning clockwise in g84"	"在g84中主轴不顺转"	SPINDLE
+NCE_SPINDLE_NOT_TURNING_IN_G86	INTERPRETER_FIXED	"Spindle not turning in g86"	"在G86中主轴不转"	SPINDLE
+NCE_SPINDLE_NOT_TURNING_IN_G87	INTERPRETER_FIXED	"Spindle not turning in g87"	"在G87中主轴不转"	SPINDLE
+NCE_SPINDLE_NOT_TURNING_IN_G88	INTERPRETER_FIXED	"Spindle not turning in g88"	"在G88中主轴不转"	SPINDLE
+NCE_SSCANF_FAILED	INTERPRETER_FIXED	"Sscanf failed"	"Sscanf函数失败"	PROGRAM_SYNTAX
+NCE_START_POINT_TOO_CLOSE_TO_PROBE_POINT	INTERPRETER_FIXED	"Start point too close to probe point"	"起点太靠近探测点"	MOTION_PROBE
+NCE_S_WORD_MISSING_WITH_G96	INTERPRETER_FIXED	"S word missing with G96"	"S字缺少的 G96"	PROGRAM_SYNTAX
+NCE_TOOL_RADIUS_NOT_LESS_THAN_ARC_RADIUS_WITH_COMP	INTERPRETER_FIXED	"Tool radius not less than arc radius with comp"	"刀具半径不小于圆弧半径"	TOOL
+NCE_TOO_MANY_M_CODES_ON_LINE	INTERPRETER_FIXED	"Too many m codes on line"	"线上的m代码太多了"	PROGRAM_SYNTAX
+NCE_TOO_MANY_OWORD_LABELS	INTERPRETER_FIXED	"Too many oword labels"	"太多oword标签"	PROGRAM_SYNTAX
+NCE_TOO_MANY_SUBROUTINE_LEVELS	INTERPRETER_FIXED	"Too many subroutine levels"	"子程序级别太多"	PROGRAM_FLOW
+NCE_TOO_MANY_SUBROUTINE_PARAMETERS	INTERPRETER_FIXED	"Too many subroutine parameters"	"子程序参数太多"	PROGRAM_FLOW
+NCE_TWO_G_CODES_USED_FROM_SAME_MODAL_GROUP	INTERPRETER_FIXED	"Two g codes used from same modal group"	"在同一个模式組使用两个G代码"	PROGRAM_SYNTAX
+NCE_TWO_M_CODES_USED_FROM_SAME_MODAL_GROUP	INTERPRETER_FIXED	"Two m codes used from same modal group"	"在同一个模式組使用两个M代码"	PROGRAM_SYNTAX
+NCE_TXX_MISSING_FOR_M6	INTERPRETER_FIXED	"Need tool prepared -Txx- for toolchange"	"需要准备刀具 -TXX- 进行刀"	TOOL
+NCE_UNABLE_TO_OPEN_FILE	INTERPRETER_FIXED	"Unable to open file <%s>"	"无法打开文件<%s>"	PROGRAM_FILE
+NCE_UNCLOSED_COMMENT_FOUND	INTERPRETER_FIXED	"Unclosed comment found"	"发现未闭合的批注"	PROGRAM_SYNTAX
+NCE_UNCLOSED_EXPRESSION	INTERPRETER_FIXED	"Unclosed expression"	"未闭合的表达式"	PROGRAM_SYNTAX
+NCE_UNKNOWN_COMMAND_IN_O_LINE	INTERPRETER_FIXED	"Unknown control command in o word"	"未知控制指令在O字"	PROGRAM_SYNTAX
+NCE_UNKNOWN_G_CODE_USED	INTERPRETER_FIXED	"Unknown g code used"	"使用未知的g代码"	PROGRAM_SYNTAX
+NCE_UNKNOWN_M_CODE_USED	INTERPRETER_FIXED	"Unknown m code used: M%d"	"使用的未知m代码: M%d"	PROGRAM_SYNTAX
+NCE_UNKNOWN_OPERATION	INTERPRETER_FIXED	"Unknown operation"	"未知操作"	PROGRAM_SYNTAX
+NCE_UNKNOWN_OPERATION_NAME_STARTING_WITH_A	INTERPRETER_FIXED	"Unknown operation name starting with a"	"未知操作名称以a开头"	PROGRAM_SYNTAX
+NCE_UNKNOWN_OPERATION_NAME_STARTING_WITH_E	INTERPRETER_FIXED	"Unknown operation name starting with e"	"未知操作名称以e开始"	PROGRAM_SYNTAX
+NCE_UNKNOWN_OPERATION_NAME_STARTING_WITH_G	INTERPRETER_FIXED	"Unknown operation name starting with g"	"未知操作名称以g开始"	PROGRAM_SYNTAX
+NCE_UNKNOWN_OPERATION_NAME_STARTING_WITH_L	INTERPRETER_FIXED	"Unknown operation name starting with l"	"未知操作名称以l开始"	PROGRAM_SYNTAX
+NCE_UNKNOWN_OPERATION_NAME_STARTING_WITH_M	INTERPRETER_FIXED	"Unknown operation name starting with m"	"未知操作名称以m开头"	PROGRAM_SYNTAX
+NCE_UNKNOWN_OPERATION_NAME_STARTING_WITH_N	INTERPRETER_FIXED	"Unknown operation name starting with n"	"未知操作名称以n开始"	PROGRAM_SYNTAX
+NCE_UNKNOWN_OPERATION_NAME_STARTING_WITH_O	INTERPRETER_FIXED	"Unknown operation name starting with o"	"未知操作名称以o开头"	PROGRAM_SYNTAX
+NCE_UNKNOWN_OPERATION_NAME_STARTING_WITH_X	INTERPRETER_FIXED	"Unknown operation name starting with x"	"未知操作名称以x开头"	PROGRAM_SYNTAX
+NCE_UNKNOWN_OWORD_NUMBER	INTERPRETER_FIXED	"Unknown oword number"	"未知oword号"	PROGRAM_SYNTAX
+NCE_UNKNOWN_WORD_STARTING_WITH_A	INTERPRETER_FIXED	"Unknown word starting with a"	"未知字以a开头"	PROGRAM_SYNTAX
+NCE_UNKNOWN_WORD_STARTING_WITH_C	INTERPRETER_FIXED	"Unknown word starting with c"	"未知字以c开头"	PROGRAM_SYNTAX
+NCE_UNKNOWN_WORD_STARTING_WITH_E	INTERPRETER_FIXED	"Unknown word starting with e"	"未知字以e开头"	PROGRAM_SYNTAX
+NCE_UNKNOWN_WORD_STARTING_WITH_F	INTERPRETER_FIXED	"Unknown word starting with f"	"未知字以f开头"	PROGRAM_SYNTAX
+NCE_UNKNOWN_WORD_STARTING_WITH_L	INTERPRETER_FIXED	"Unknown word starting with l"	"未知字以l开头"	PROGRAM_SYNTAX
+NCE_UNKNOWN_WORD_STARTING_WITH_R	INTERPRETER_FIXED	"Unknown word starting with r"	"未知字以r开头"	PROGRAM_SYNTAX
+NCE_UNKNOWN_WORD_STARTING_WITH_S	INTERPRETER_FIXED	"Unknown word starting with s"	"未知字以s开头"	PROGRAM_SYNTAX
+NCE_UNKNOWN_WORD_STARTING_WITH_T	INTERPRETER_FIXED	"Unknown word starting with t"	"未知字以t开头"	PROGRAM_SYNTAX
+NCE_UNKNOWN_WORD_WHERE_UNARY_OPERATION_COULD_BE	INTERPRETER_FIXED	"Unknown word where unary operation could be"	"一元操作可能是未知的字"	PROGRAM_SYNTAX
+NCE_U_VALUE_UNSPECIFIED_IN_VW_PLANE_CANNED_CYCLE	INTERPRETER_FIXED	"U value unspecified in VW plane canned cycle"	"在VW平面固定循环中未指定U值"	PROGRAM_GEOMETRY
+NCE_V_VALUE_UNSPECIFIED_IN_UW_PLANE_CANNED_CYCLE	INTERPRETER_FIXED	"V value unspecified in UW plane canned cycle"	"在UW平面固定循环中未指定V值"	PROGRAM_GEOMETRY
+NCE_W_VALUE_UNSPECIFIED_IN_UV_PLANE_CANNED_CYCLE	INTERPRETER_FIXED	"W value unspecified in UV plane canned cycle"	"在UV平面固定循环中未指定W值"	PROGRAM_GEOMETRY
+NCE_X_AND_Y_WORDS_MISSING_FOR_ARC_IN_XY_PLANE	INTERPRETER_FIXED	"X and y words missing for arc in xy plane"	"在xy平面上，X和Y字缺少弧"	PROGRAM_GEOMETRY
+NCE_X_AND_Z_WORDS_MISSING_FOR_ARC_IN_XZ_PLANE	INTERPRETER_FIXED	"X and z words missing for arc in xz plane"	"在xz平面中，X和Z字缺少弧"	PROGRAM_GEOMETRY
+NCE_X_VALUE_UNSPECIFIED_IN_YZ_PLANE_CANNED_CYCLE	INTERPRETER_FIXED	"X value unspecified in yz plane canned cycle"	"X值在yz平面固定循环中未指定"	PROGRAM_GEOMETRY
+NCE_Y_AND_Z_WORDS_MISSING_FOR_ARC_IN_YZ_PLANE	INTERPRETER_FIXED	"Y and z words missing for arc in yz plane"	"在yz平面上，Y和z字缺少弧"	PROGRAM_GEOMETRY
+NCE_Y_VALUE_UNSPECIFIED_IN_XZ_PLANE_CANNED_CYCLE	INTERPRETER_FIXED	"Y value unspecified in xz plane canned cycle"	"Y值在xz平面固定循环中未指定"	PROGRAM_GEOMETRY
+NCE_ZERO_OR_NEGATIVE_ARGUMENT_TO_LN	INTERPRETER_FIXED	"Zero or negative argument to ln"	"零或负参数 ln"	PROGRAM_SYNTAX
+NCE_ZERO_RADIUS_ARC	INTERPRETER_FIXED	"Zero radius arc"	"零半径弧"	PROGRAM_GEOMETRY
+NCE_ZERO_TIMEOUT_WITH_WAIT_NOT_IMMEDIATE	INTERPRETER_FIXED	"Zero timeout with wait type != immediate return"	"零超时的等待类型 !=立即返回"	PROGRAM_SYNTAX
+NCE_Z_VALUE_UNSPECIFIED_IN_XY_PLANE_CANNED_CYCLE	INTERPRETER_FIXED	"Z value unspecified in xy plane canned cycle"	"Z值在xy平面固定循环中未指定"	PROGRAM_GEOMETRY
+TASK_FMT_048A78A7BE63	emcOperatorError:task/emctaskmain.cc	"Must be in MDI mode to issue MDI command"	"必须在MDI模式下才能发出MDI指令"	MACHINE_MODE
+TASK_FMT_0BF86437E1AE	emcOperatorError:task/emctaskmain.cc	"can't open %s"	"无法打开%s"	PROGRAM_FILE
+TASK_FMT_13BF0FD6A7E7	emcOperatorError:task/emctaskmain.cc	"Can't switch mode while mode is AUTO and interpreter is not IDLE"	"自动模式下解释器不空闲时无法切换至其他模式"	MACHINE_MODE
+TASK_FMT_155A43B83C1B	emcOperatorError:task/emctaskmain.cc	"can't do that (%s) in auto mode with the interpreter reading"	"自动模式下解释器读取时，无法在执行此操作(%s)"	MACHINE_MODE
+TASK_FMT_187F4C3F2088	emcOperatorError:task/emctaskmain.cc	"can't do that (%s:%d) in MDI mode"	"MDI模式下，无法执行此操作(%s:%d)"	MACHINE_MODE
+TASK_FMT_1DB0B2742B81	CANON_ERROR:task/emccanon.cc	"external length units are zero"	"长度单位比例不能为0"	CONFIG
+TASK_FMT_1E9D61148BCE	emcOperatorError:task/emctaskmain.cc	"wait for orient complete: FAULTED code=%d"	"主轴定向失败（故障码%d）"	SPINDLE
+TASK_FMT_2F4B861C51BC	emcOperatorError:task/emctaskmain.cc	"command (%s) cannot be executed until the machine is out of E-stop and turned on"	"在解除急停开关及开启设备电源之前，无法执行此操作(%s)"	SAFETY_ENABLE
+TASK_FMT_3B2EF1E85D3B	CANON_ERROR:task/emccanon.cc	"external angle units are zero"	"角度单位比例不能为0"	CONFIG
+TASK_FMT_5F6522CFBC3F	emcOperatorError:task/emctaskmain.cc	"Can't issue MDI command when not homed"	"未返回原点时无法发出MDI指令"	MOTION_HOME
+TASK_FMT_62E1F0932379	emcOperatorError:task/emctaskmain.cc	"wait for orient complete: TIMED OUT"	"主轴定向等待超时"	SPINDLE
+TASK_FMT_6605BE5830FC	emcOperatorError:task/emctaskmain.cc	"Can't run a program when not homed"	"未返回原点时无法运行程序"	MOTION_HOME
+TASK_FMT_66A86639096C	emcOperatorError:task/emctaskmain.cc	"can't do that (%s) in auto mode with the interpreter paused"	"自动模式下解释器暂停时，无法在执行此操作 (%s)"	MACHINE_MODE
+TASK_FMT_70DEF93740CF	CANON_ERROR:task/emccanon.cc	"Can't set plane in UVW axes, assuming XY"	"UVW轴不支持当前平面选择，系统已改用XY平面"	PROGRAM_GEOMETRY
+TASK_FMT_71643D285DD0	emcOperatorError:task/emctaskmain.cc	"can't do that (%s) in auto mode with the interpreter waiting"	"自动模式下解释器等待时，无法在执行此操作 (%s)"	MACHINE_MODE
+TASK_FMT_8256667903B3	emcOperatorError:task/emctask.cc	"Ignoring task mode change while jogging"	"点动期间不能切换运行模式，本次切换已忽略"	MOTION_JOG
+TASK_FMT_895458ABADB5	emcOperatorError:task/emctaskmain.cc	"can't do that (%s:%d) in manual mode"	"手动模式下无法执行此操作(%s:%d)"	MACHINE_MODE
+TASK_FMT_97E7CFBC2F84	emcOperatorError:task/emctaskmain.cc	"Unknown Wait Mode"	"等待模式无效"	INTERNAL
+TASK_FMT_A942D18CA87E	emcOperatorError:task/emctaskmain.cc	"failed to close file"	"关闭文件时发生错误"	PROGRAM_FILE
+TASK_FMT_AB05E945D33E	CANON_ERROR:task/emccanon.cc	"non-standard length units, setting interpreter to mm"	"长度单位不受支持，系统已按毫米处理"	CONFIG
+TASK_FMT_D8EA0D58D356	emcOperatorError:task/emctaskmain.cc	"On Soft Limit"	"已触发软限位"	MOTION_LIMIT
+TASK_FMT_DA864B5C07E7	emcOperatorError:task/emctaskmain.cc	"Identity kinematics are MISCONFIGURED"	"运动学配置不正确"	MOTION_KINEMATICS
+TASK_FMT_E688B1CF05E2	emcOperatorError:task/backtrace.cc	"backtrace for %s (pid %s signal %d): gdb failed to start"	"控制任务%s异常退出，且诊断信息生成失败"	INTERNAL
+TASK_FMT_EF08C75BC86F	emcOperatorError:task/taskclass.cc	"return_int(%s): %s"	"扩展调用%s返回失败"	INTERNAL
+TASK_FMT_F3575460BE30	emcOperatorError:task/emctaskmain.cc	"can't do that (%s) in auto mode with the interpreter idle"	"自动模式下解释器空闲时，无法在执行此操作(%s)"	MACHINE_MODE
+TASK_FMT_F726C8893629	emcOperatorError:task/taskclass.cc	"return_int(%s): expected int return value, got '%s' (%s)"	"扩展调用%s应返回整数，但返回值类型无效"	PROGRAM_FLOW
+TASK_FMT_FAAF0C0B1DE5	emcOperatorError:task/taskclass.cc	"emcPluginCall: Python plugin not initialized"	"扩展指令功能尚未初始化"	INTERNAL
+TASK_FMT_FDE4F4799AC6	emcOperatorError:task/backtrace.cc	"%s (pid %d) died on signal %d, backtrace stored in %s"	"控制任务%s（进程%d）因信号%d异常退出，诊断记录位于%s"	INTERNAL

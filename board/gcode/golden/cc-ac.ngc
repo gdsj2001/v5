@@ -1,6 +1,6 @@
-(RE_V5_CC_AC_LINUXCNC_NATIVE)
-(RS274/NGC LinuxCNC only: G0/G1/G4/G17/G21/G40/G43/G49/G53/G54/G64/G80/G90/G91.1/G94/F/H/M64/M65/M30)
-(Program is fed to LinuxCNC/microkernel exactly as opened; no UI G-code rewrite)
+(RE_V5_CC_AC_NATIVE)
+(RS274/NGC controller syntax: G0/G1/G4/G17/G21/G40/G43/G49/G53/G54/G64/G80/G90/G91.1/G94/F/H/M64/M65/M30)
+(Program is fed to the microkernel exactly as opened; no UI G-code rewrite)
 (Program model: XYZAC five-turn cylindrical spring, radius 10mm, Z 0 to -50mm)
 (A axis swings 45 +/- 10 deg during cutting; C axis rotates with the spring)
 

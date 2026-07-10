@@ -12,6 +12,7 @@
 #include "v5_native_wcs_status.h"
 #include "v5_native_g53_geometry_status.h"
 #include "v5_native_modal_tool_status.h"
+#include "v5_native_operator_error_status.h"
 #include "v5_command_gate_ipc.h"
 #include "v5_settings_page.h"
 #include "v5_settings_axis_table.h"
@@ -94,6 +95,9 @@ static int g_main_cache_dirty;
 static V5ShellPageKind g_current_page = V5_SHELL_PAGE_MAIN;
 static lv_obj_t *g_top_status_layer;
 static lv_obj_t *g_top_status_label;
+static V5NativeOperatorErrorStatus g_operator_error_status;
+static uint64_t g_operator_error_generation_seen;
+static unsigned long long g_operator_error_show_until_ns;
 
 static void shell_navigate(void *user_data, V5MainPageActionKind action);
 static void shell_clear_style(lv_obj_t *obj);
@@ -115,14 +119,48 @@ static int shell_load_current_program_for_mdi_edit(void);
 #define V5_MODAL_LINE_READBACK_MIN_NS 33333333ULL
 #define V5_SAFETY_READBACK_MIN_NS 100000000ULL
 #define V5_SAFETY_READBACK_TIMEOUT_MS 80U
+#define V5_OPERATOR_ERROR_READ_MIN_NS 100000000ULL
+#define V5_OPERATOR_ERROR_SHOW_NS 6000000000ULL
 
 static unsigned long long g_native_readback_last_probe_ns;
 static unsigned long long g_modal_line_readback_last_probe_ns;
 static unsigned long long g_safety_readback_last_probe_ns;
+static unsigned long long g_operator_error_last_probe_ns;
 static unsigned long long g_ui_dynamic_last_refresh_ns;
 static unsigned long long g_ui_button_last_refresh_ns;
 static unsigned long long g_ui_estop_last_refresh_ns;
 static unsigned long long g_ui_slow_last_refresh_ns;
+
+static int shell_refresh_operator_error(int force)
+{
+    V5NativeOperatorErrorStatus status;
+    unsigned long long now = shell_monotonic_ns();
+    int changed = 0;
+    if (!force && g_operator_error_last_probe_ns != 0ULL &&
+        now - g_operator_error_last_probe_ns < V5_OPERATOR_ERROR_READ_MIN_NS) {
+        return 0;
+    }
+    g_operator_error_last_probe_ns = now;
+    v5_native_operator_error_status_init(&status);
+    if (v5_native_operator_error_status_read(
+            0,
+            V5_NATIVE_OPERATOR_ERROR_STATUS_DEFAULT_MAX_AGE_MS,
+            &status) &&
+        status.generation != g_operator_error_generation_seen) {
+        g_operator_error_status = status;
+        g_operator_error_generation_seen = status.generation;
+        g_operator_error_show_until_ns = now + V5_OPERATOR_ERROR_SHOW_NS;
+        changed = 1;
+    } else if (g_operator_error_show_until_ns != 0ULL && now >= g_operator_error_show_until_ns) {
+        v5_native_operator_error_status_init(&g_operator_error_status);
+        g_operator_error_show_until_ns = 0ULL;
+        changed = 1;
+    }
+    if (changed) {
+        shell_update_top_status_label();
+    }
+    return changed;
+}
 
 static void shell_apply_modal_tool_readback(V5NativeReadback *readback, const V5NativeReadback *modal_tool_readback)
 {
@@ -414,10 +452,17 @@ static void shell_set_text_color_if_changed(lv_obj_t *obj, lv_color_t color, uin
 
 static void shell_update_top_status_label(void)
 {
+    unsigned long long now;
     if (!g_top_status_label) {
         return;
     }
     shell_set_text_color_if_changed(g_top_status_label, lv_color_make(255, 86, 86), 0);
+    now = shell_monotonic_ns();
+    if (g_operator_error_show_until_ns != 0ULL && now < g_operator_error_show_until_ns &&
+        g_operator_error_status.reason_cn[0]) {
+        shell_set_label_text_if_changed(g_top_status_label, g_operator_error_status.reason_cn);
+        return;
+    }
     if (!v5_native_readback_all_homed_known(&g_main_page.native_readback)) {
         shell_set_label_text_if_changed(g_top_status_label, "回零状态未知");
         return;
@@ -1894,6 +1939,9 @@ int v5_ui_shell_refresh_once(void)
         if (shell_refresh_modal_line_readback(0)) {
             flags |= V5_MAIN_PAGE_REFRESH_DYNAMIC;
         }
+        if (shell_refresh_operator_error(0)) {
+            flags |= V5_MAIN_PAGE_REFRESH_DYNAMIC;
+        }
         if (!shell_status_display_equal(&before, &g_model.status_view)) {
             flags |= V5_MAIN_PAGE_REFRESH_DYNAMIC;
         }
@@ -1985,5 +2033,10 @@ int v5_ui_shell_test_current_page_is_mdi(void)
 const char *v5_ui_shell_test_mdi_text(void)
 {
     return g_mdi_line;
+}
+
+const char *v5_ui_shell_test_top_status_text(void)
+{
+    return g_top_status_label ? lv_label_get_text(g_top_status_label) : "";
 }
 #endif

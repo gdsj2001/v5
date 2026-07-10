@@ -11,7 +11,9 @@ LOGFILE=/run/8ax/v5_wcs_status_publisher.log
 STATUS_PATH=${V5_WCS_STATUS_PATH:-/dev/shm/v5_native_wcs_status.bin}
 LINUXCNC_INI=${V5_LINUXCNC_INI:-/opt/8ax/v5/linuxcnc/ini/v5_bus.ini}
 MODAL_TOOL_PATH=${V5_MODAL_TOOL_STATUS_PATH:-/dev/shm/v5_native_modal_tool_status.bin}
-RETIRED_STATUS_PATHS="/run/8ax_v5_product_ui/v3_native_wcs_status.bin /run/8ax_v5_product_ui/v3_native_position_status.bin /run/8ax_v5_product_ui/v3_native_modal_tool_status.bin"
+OPERATOR_ERROR_PATH=${V5_OPERATOR_ERROR_STATUS_PATH:-/dev/shm/v5_native_operator_error_status.bin}
+OPERATOR_ERROR_MAP=${V5_OPERATOR_ERROR_MAP:-/opt/8ax/v5/config/ui/v5_native_operator_error_map.tsv}
+RETIRED_STATUS_PATHS="/run/8ax_v5_product_ui/v3_native_wcs_status.bin /run/8ax_v5_product_ui/v3_native_position_status.bin /run/8ax_v5_product_ui/v3_native_modal_tool_status.bin /run/8ax_v5_product_ui/v3_native_operator_error_status.bin"
 INTERVAL_MS=${V5_WCS_STATUS_INTERVAL_MS:-33}
 PYTHONPATH=/usr/lib/python3/dist-packages${PYTHONPATH:+:$PYTHONPATH}
 LINUXCNC_PY_HOME=${V5_LINUXCNC_PY_HOME:-}
@@ -72,16 +74,17 @@ start_service() {
     return 0
   fi
   test -x "$DAEMON"
+  test -r "$OPERATOR_ERROR_MAP"
   mkdir -p /run/8ax /run/8ax_v5_product_ui
-  rm -f "$PIDFILE" $RETIRED_STATUS_PATHS
+  rm -f "$PIDFILE" "$OPERATOR_ERROR_PATH" $RETIRED_STATUS_PATHS
   cd "$LINUXCNC_PY_HOME"
   wait_linuxcnc_stat_ready
-  setsid "$DAEMON" --path "$STATUS_PATH" --modal-tool-path "$MODAL_TOOL_PATH" --ini "$LINUXCNC_INI" --interval-ms "$INTERVAL_MS" >>"$LOGFILE" 2>&1 &
+  setsid "$DAEMON" --path "$STATUS_PATH" --modal-tool-path "$MODAL_TOOL_PATH" --operator-error-path "$OPERATOR_ERROR_PATH" --operator-error-map "$OPERATOR_ERROR_MAP" --ini "$LINUXCNC_INI" --interval-ms "$INTERVAL_MS" >>"$LOGFILE" 2>&1 &
   echo "$!" >"$PIDFILE"
   sleep 1
   if is_running; then
     set_non_microkernel_affinity "$(cat "$PIDFILE")"
-    echo "v5_wcs_status_publisher started pid=$(cat "$PIDFILE") path=$STATUS_PATH modal_tool_path=$MODAL_TOOL_PATH interval_ms=$INTERVAL_MS home=$LINUXCNC_PY_HOME"
+    echo "v5_wcs_status_publisher started pid=$(cat "$PIDFILE") path=$STATUS_PATH modal_tool_path=$MODAL_TOOL_PATH operator_error_path=$OPERATOR_ERROR_PATH interval_ms=$INTERVAL_MS home=$LINUXCNC_PY_HOME"
     return 0
   fi
   echo "v5_wcs_status_publisher failed to start" >&2
@@ -91,7 +94,7 @@ start_service() {
 
 stop_service() {
   if ! is_running; then
-    rm -f "$PIDFILE" $RETIRED_STATUS_PATHS
+    rm -f "$PIDFILE" "$OPERATOR_ERROR_PATH" $RETIRED_STATUS_PATHS
     echo "v5_wcs_status_publisher not running"
     return 0
   fi
@@ -106,7 +109,7 @@ stop_service() {
     echo "v5_wcs_status_publisher did not stop pid=$pid" >&2
     return 1
   fi
-  rm -f "$PIDFILE" $RETIRED_STATUS_PATHS
+  rm -f "$PIDFILE" "$OPERATOR_ERROR_PATH" $RETIRED_STATUS_PATHS
   echo "v5_wcs_status_publisher stopped pid=$pid"
 }
 

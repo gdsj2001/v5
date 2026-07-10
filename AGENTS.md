@@ -39,6 +39,8 @@ CONFLICT_PRIORITY:
 
 SOURCE_AND_DELIVERY_SHORTCUTS:
 - Source truth: docs/Windows-owned files under `D:\v5`; runtime/Linux/native/LVGL/tools under `D:\v5\board`; VM and board copies are generated/deployed copies only.
+- Source-first board delivery is mandatory: fix source under `D:\v5` / `D:\v5\board`, then sync/build/package/deploy to the board. Do not SSH/SCP/edit files directly on the board as the way to implement a change.
+- SD-card rebuild invariant: the board SD card is disposable and may fail at any time. The system must be rebuildable from Windows source truth plus the controlled VM build workspace; never make the SD card or any board-side file the only place a source change exists.
 - Deletion beats fallback: remove retired/shadow/duplicate/bypass paths instead of adding wrappers or compatibility branches.
 - SHM is display projection only unless an indexed owner explicitly says otherwise; native/microkernel actuals must come from native owner/readback.
 - Board-facing behavior is not fixed until the real board/operator path is proven. Local tests are pre-board gates, not closure.
@@ -90,6 +92,10 @@ SOURCE_TRUTH:
 - Do not use `D:\v3` as live source; it is frozen read-only reference only.
 - New v5 maintainable entries must use v5 names, not new `z20_*` names. Existing hardware hostnames/SSH aliases may appear only as external facts.
 - Windows local `D:\v5` is the source truth. Runtime source edits belong in `D:\v5\board`; docs and Windows/Vivado owners stay under `D:\v5`. The VM v5 directory is a generated copy only, must not be edited directly, and must be refreshed immediately after local Windows source changes before VM build/deploy work.
+- The board SD card is not durable and is never a source repository. Treat every board filesystem path, including `/opt/8ax`, LinuxCNC runtime directories, service units, deployed scripts, binaries, HAL/INI files, and runtime state, as rebuildable output. A clean SD card must be reconstructable from the Windows source tree, documented external prerequisites, and the canonical VM build/deploy workflow.
+- Source-bearing workspaces are limited to the Windows canonical source tree and the controlled VM sync/build workspace generated from it. Do not create source copies in board directories, desktop temp folders, backup folders, `bak/`, `repo_ignored/`, NAS mirrors, deploy staging folders, or SD-card paths. Archives/backups may exist only as non-source recovery/evidence artifacts and must not be edited, built from, or treated as owner truth.
+- Direct board editing is forbidden as an implementation path. Do not use SSH, SCP, `sed`, `tee`, `vi`, `nano`, inline shell redirection, or ad hoc copy commands to modify `/opt/8ax`, LinuxCNC configs, services, scripts, UI binaries, HAL/INI files, or other product/runtime files on the board. Board-side access is for inspection, logs, runtime probes, safe recovery, and deployment of artifacts built from the Windows source truth only.
+- If a temporary board-side diagnostic patch is ever required to understand a fault, it is not a source fix and cannot close the task. Reproduce the change in the owning Windows source under `D:\v5` / `D:\v5\board`, remove the temporary board mutation by redeploying from source, then verify the original operator path before claiming fixed.
 - Use `D:\v5\board\tools\sync_win_source_to_vm.py` as the canonical one-way sync tool from Windows truth to the VM v5 copy. The tool performs manifest-based incremental overwrite: normal runs transfer only changed/deleted local truth, and the default remote drift check re-hashes VM copy files so any manual VM edit is overwritten by the Windows truth without a full resend. Do not create or edit VM source mirrors by hand.
 - Do not install, enable, or use WSL on Windows for this project. When Linux userspace/tooling is required, sync `D:\v5\board` to the existing VM staging/build workspace and run the VM toolchain there.
 

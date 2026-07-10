@@ -30,7 +30,7 @@ int main(void)
     }
     if (!v5_ui_shell_test_current_page_is_mdi() ||
         !v5_ui_shell_test_mdi_text() ||
-        !strstr(v5_ui_shell_test_mdi_text(), "RE_V5_CC_AC_LINUXCNC_NATIVE")) {
+        !strstr(v5_ui_shell_test_mdi_text(), "RE_V5_CC_AC_NATIVE")) {
         return 10;
     }
     if (!v5_ui_shell_test_click_program_name(0U)) {
@@ -54,7 +54,7 @@ int main(void)
     }
     if (!v5_ui_shell_test_current_page_is_mdi() ||
         !v5_ui_shell_test_mdi_text() ||
-        !strstr(v5_ui_shell_test_mdi_text(), "RE_V5_CC_AC_LINUXCNC_NATIVE")) {
+        !strstr(v5_ui_shell_test_mdi_text(), "RE_V5_CC_AC_NATIVE")) {
         return 12;
     }
     printf("v5 program page double click: first_touch=select second_touch=open path=%s\n", loaded_path);

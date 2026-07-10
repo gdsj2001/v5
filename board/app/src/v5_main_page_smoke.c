@@ -22,6 +22,67 @@ static int project_expected(const V5MainPage *page, const double world[V5_STATUS
     return v5_toolpath_display_project_world_point(world, &page->toolpath_fit, 388.0, 378.0, point);
 }
 
+static void nested_pose_expected(
+    const double source[V5_STATUS_AXIS_COUNT],
+    const double first_center[3],
+    const double second_center[3],
+    unsigned int first_axis_component,
+    double first_deg,
+    double second_deg,
+    double expected[V5_STATUS_AXIS_COUNT])
+{
+    const double first_rad = first_deg * 3.14159265358979323846 / 180.0;
+    const double second_rad = second_deg * 3.14159265358979323846 / 180.0;
+    const double first_c = cos(first_rad);
+    const double first_s = sin(first_rad);
+    const double second_c = cos(second_rad);
+    const double second_s = sin(second_rad);
+    double dx;
+    double dy;
+    double dz;
+
+    memcpy(expected, source, sizeof(double) * V5_STATUS_AXIS_COUNT);
+    dx = expected[0] - second_center[0];
+    dy = expected[1] - second_center[1];
+    expected[0] = second_center[0] + (second_c * dx) - (second_s * dy);
+    expected[1] = second_center[1] + (second_s * dx) + (second_c * dy);
+
+    dx = expected[0] - first_center[0];
+    dy = expected[1] - first_center[1];
+    dz = expected[2] - first_center[2];
+    if (first_axis_component == 0U) {
+        expected[1] = first_center[1] + (first_c * dy) - (first_s * dz);
+        expected[2] = first_center[2] + (first_s * dy) + (first_c * dz);
+    } else {
+        expected[0] = first_center[0] + (first_c * dx) + (first_s * dz);
+        expected[2] = first_center[2] - (first_s * dx) + (first_c * dz);
+    }
+}
+
+static int wcs_axes_match_world(
+    const V5MainPage *page,
+    const double world[4][V5_STATUS_AXIS_COUNT])
+{
+    V5ToolpathScreenPoint expected[4];
+    unsigned int i;
+
+    if (!page || !world) {
+        return 0;
+    }
+    for (i = 0U; i < 4U; ++i) {
+        if (!project_expected(page, world[i], &expected[i])) {
+            return 0;
+        }
+    }
+    for (i = 0U; i < 3U; ++i) {
+        if (point_delta_abs(&page->toolpath_wcs_axis_points[i][0], &expected[0]) > 4L ||
+            point_delta_abs(&page->toolpath_wcs_axis_points[i][1], &expected[i + 1U]) > 4L) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 static long line_cross_abs(const lv_point_t a[2], const lv_point_t b[2])
 {
     const long ax = (long)a[1].x - (long)a[0].x;
@@ -232,6 +293,8 @@ int main(void)
     }
     {
         const double a_rad = status.mcs[3] * 3.14159265358979323846 / 180.0;
+        const double posed_c_y = 20.0 - (sin(a_rad) * 58.0);
+        const double posed_c_z = -50.0 + (cos(a_rad) * 58.0);
         const double y_dx = (double)page.toolpath_mcs_axis_points[1][1].x - (double)page.toolpath_mcs_axis_points[1][0].x;
         const double y_dy = (double)page.toolpath_mcs_axis_points[1][1].y - (double)page.toolpath_mcs_axis_points[1][0].y;
         const double z_dx = (double)page.toolpath_mcs_axis_points[2][1].x - (double)page.toolpath_mcs_axis_points[2][0].x;
@@ -242,8 +305,8 @@ int main(void)
         memcpy(fixed_wcs_origin, page.toolpath_wcs_origin_points, sizeof(fixed_wcs_origin));
         double a_start_world[V5_STATUS_AXIS_COUNT] = {-30.0, 20.0, -50.0, 0.0, 0.0};
         double a_end_world[V5_STATUS_AXIS_COUNT] = {50.0, 20.0, -50.0, 0.0, 0.0};
-        double c_start_world[V5_STATUS_AXIS_COUNT] = {50.0, 20.0 + (sin(a_rad) * 40.0), 8.0 - (cos(a_rad) * 40.0), 0.0, 0.0};
-        double c_end_world[V5_STATUS_AXIS_COUNT] = {50.0, 20.0 - (sin(a_rad) * 40.0), 8.0 + (cos(a_rad) * 40.0), 0.0, 0.0};
+        double c_start_world[V5_STATUS_AXIS_COUNT] = {50.0, posed_c_y + (sin(a_rad) * 40.0), posed_c_z - (cos(a_rad) * 40.0), 0.0, 0.0};
+        double c_end_world[V5_STATUS_AXIS_COUNT] = {50.0, posed_c_y - (sin(a_rad) * 40.0), posed_c_z + (cos(a_rad) * 40.0), 0.0, 0.0};
         V5ToolpathScreenPoint a_start_expected;
         V5ToolpathScreenPoint a_end_expected;
         V5ToolpathScreenPoint c_start_expected;
@@ -381,6 +444,9 @@ int main(void)
     }
     {
         V5ToolpathScreenPoint program_first_expected;
+        const double ac_first_center[3] = {10.0, 20.0, -50.0};
+        const double c_center[3] = {50.0, 20.0, 8.0};
+        double nested_expected[V5_STATUS_AXIS_COUNT];
         lv_coord_t min_x = page.trajectory_points[0].x;
         lv_coord_t max_x = page.trajectory_points[0].x;
         lv_coord_t min_y = page.trajectory_points[0].y;
@@ -391,6 +457,20 @@ int main(void)
             if (page.trajectory_points[pi].x > max_x) max_x = page.trajectory_points[pi].x;
             if (page.trajectory_points[pi].y < min_y) min_y = page.trajectory_points[pi].y;
             if (page.trajectory_points[pi].y > max_y) max_y = page.trajectory_points[pi].y;
+        }
+        nested_pose_expected(
+            page.toolpath_program_points[0].axis,
+            ac_first_center,
+            c_center,
+            0U,
+            status.mcs[3],
+            status.mcs[4],
+            nested_expected);
+        if (fabs(page.toolpath_program_project_points[0].axis[0] - nested_expected[0]) > 0.000001 ||
+            fabs(page.toolpath_program_project_points[0].axis[1] - nested_expected[1]) > 0.000001 ||
+            fabs(page.toolpath_program_project_points[0].axis[2] - nested_expected[2]) > 0.000001) {
+            v5_program_controller_destroy(&controller);
+            return 64;
         }
         if (!page.toolpath_program_wcs_valid || page.toolpath_program_wcs_index != 0 ||
             fabs(page.toolpath_program_wcs_offset[0] - 10.0) > 0.0005 ||
@@ -414,11 +494,19 @@ int main(void)
         return 12;
     }
     {
+        const double base_wcs_world[4][V5_STATUS_AXIS_COUNT] = {
+            {10.0, 12.0, 8.0, 0.0, 0.0},
+            {50.0, 12.0, 8.0, 0.0, 0.0},
+            {10.0, 52.0, 8.0, 0.0, 0.0},
+            {10.0, 12.0, 48.0, 0.0, 0.0},
+        };
+        double posed_wcs_world[4][V5_STATUS_AXIS_COUNT];
         lv_point_t wcs_origin_before[5];
         lv_point_t wcs_axes_before[3][2];
         double projected_before[3];
         unsigned int rewrite_before = page.toolpath_line_rewrite_count;
         unsigned int fit_before = page.toolpath_fit.generation;
+        unsigned int wi;
         memcpy(wcs_origin_before, page.toolpath_wcs_origin_points, sizeof(wcs_origin_before));
         memcpy(wcs_axes_before, page.toolpath_wcs_axis_points, sizeof(wcs_axes_before));
         projected_before[0] = page.toolpath_program_project_points[0].axis[0];
@@ -428,14 +516,23 @@ int main(void)
         status.mcs[4] += 35.0;
         if (!v5_main_page_apply_status(&page, &status) ||
             page.toolpath_line_rewrite_count <= rewrite_before ||
-            page.toolpath_fit.generation != fit_before ||
-            memcmp(wcs_origin_before, page.toolpath_wcs_origin_points, sizeof(wcs_origin_before)) != 0 ||
-            memcmp(wcs_axes_before, page.toolpath_wcs_axis_points, sizeof(wcs_axes_before)) != 0 ||
+            page.toolpath_fit.generation > fit_before + 1U ||
+            !wcs_axes_match_world(&page, base_wcs_world) ||
             (fabs(page.toolpath_program_project_points[0].axis[0] - projected_before[0]) < 0.0005 &&
              fabs(page.toolpath_program_project_points[0].axis[1] - projected_before[1]) < 0.0005 &&
              fabs(page.toolpath_program_project_points[0].axis[2] - projected_before[2]) < 0.0005)) {
             v5_program_controller_destroy(&controller);
             return 37;
+        }
+        {
+            unsigned int stable_fit_generation = page.toolpath_fit.generation;
+            unsigned int stable_rewrite_count = page.toolpath_line_rewrite_count;
+            if (!v5_main_page_apply_status(&page, &status) ||
+                page.toolpath_fit.generation != stable_fit_generation ||
+                page.toolpath_line_rewrite_count != stable_rewrite_count) {
+                v5_program_controller_destroy(&controller);
+                return 66;
+            }
         }
 
         rewrite_before = page.toolpath_line_rewrite_count;
@@ -449,16 +546,37 @@ int main(void)
         v5_main_page_set_native_readback(&page, &readback);
         status.mcs[3] += 15.0;
         status.mcs[4] -= 20.0;
+        for (wi = 0U; wi < 4U; ++wi) {
+            const double first_center[3] = {10.0, 20.0, -50.0};
+            const double second_center[3] = {50.0, 20.0, 8.0};
+            nested_pose_expected(
+                base_wcs_world[wi],
+                first_center,
+                second_center,
+                0U,
+                status.mcs[3],
+                status.mcs[4],
+                posed_wcs_world[wi]);
+        }
         if (!v5_main_page_apply_status(&page, &status) ||
             page.toolpath_line_rewrite_count <= rewrite_before ||
-            page.toolpath_fit.generation != fit_before ||
-            (memcmp(wcs_origin_before, page.toolpath_wcs_origin_points, sizeof(wcs_origin_before)) == 0 &&
-             memcmp(wcs_axes_before, page.toolpath_wcs_axis_points, sizeof(wcs_axes_before)) == 0) ||
+            page.toolpath_fit.generation > fit_before + 1U ||
+            !wcs_axes_match_world(&page, posed_wcs_world) ||
             (fabs(page.toolpath_program_project_points[0].axis[0] - projected_before[0]) < 0.0005 &&
              fabs(page.toolpath_program_project_points[0].axis[1] - projected_before[1]) < 0.0005 &&
              fabs(page.toolpath_program_project_points[0].axis[2] - projected_before[2]) < 0.0005)) {
             v5_program_controller_destroy(&controller);
             return 38;
+        }
+        {
+            unsigned int stable_fit_generation = page.toolpath_fit.generation;
+            unsigned int stable_rewrite_count = page.toolpath_line_rewrite_count;
+            if (!v5_main_page_apply_status(&page, &status) ||
+                page.toolpath_fit.generation != stable_fit_generation ||
+                page.toolpath_line_rewrite_count != stable_rewrite_count) {
+                v5_program_controller_destroy(&controller);
+                return 67;
+            }
         }
 
         v5_native_readback_set_motion_model(&readback, "XYZBC_TRT");
@@ -467,6 +585,25 @@ int main(void)
             strcmp(lv_label_get_text(page.axis_labels[3]), "B") != 0) {
             v5_program_controller_destroy(&controller);
             return 39;
+        }
+        {
+            const double bc_first_center[3] = {0.0, 12.0, -25.0};
+            const double c_center[3] = {50.0, 20.0, 8.0};
+            double nested_expected[V5_STATUS_AXIS_COUNT];
+            nested_pose_expected(
+                page.toolpath_program_points[0].axis,
+                bc_first_center,
+                c_center,
+                1U,
+                status.mcs[3],
+                status.mcs[4],
+                nested_expected);
+            if (fabs(page.toolpath_program_project_points[0].axis[0] - nested_expected[0]) > 0.000001 ||
+                fabs(page.toolpath_program_project_points[0].axis[1] - nested_expected[1]) > 0.000001 ||
+                fabs(page.toolpath_program_project_points[0].axis[2] - nested_expected[2]) > 0.000001) {
+                v5_program_controller_destroy(&controller);
+                return 65;
+            }
         }
         memcpy(wcs_origin_before, page.toolpath_wcs_origin_points, sizeof(wcs_origin_before));
         memcpy(wcs_axes_before, page.toolpath_wcs_axis_points, sizeof(wcs_axes_before));
@@ -492,6 +629,7 @@ int main(void)
             v5_program_controller_destroy(&controller);
             return 41;
         }
+        fit_generation_after_program = page.toolpath_fit.generation;
     }
     gesture_start[0].x = 160;
     gesture_start[0].y = 180;
@@ -541,6 +679,26 @@ int main(void)
         lv_obj_has_flag(page.toolpath_holder_marker_line, LV_OBJ_FLAG_HIDDEN)) {
         v5_program_controller_destroy(&controller);
         return 11;
+    }
+    {
+        V5ToolpathDisplayFit fit_before = page.toolpath_fit;
+        unsigned int expanded_generation;
+        status.mcs[0] += 10000.0;
+        if (!v5_main_page_apply_status(&page, &status) ||
+            page.toolpath_fit.generation != fit_before.generation + 1U ||
+            page.toolpath_fit.bounds.min_u > fit_before.bounds.min_u ||
+            page.toolpath_fit.bounds.min_v > fit_before.bounds.min_v ||
+            page.toolpath_fit.bounds.max_v < fit_before.bounds.max_v ||
+            page.toolpath_fit.bounds.max_u <= fit_before.bounds.max_u) {
+            v5_program_controller_destroy(&controller);
+            return 68;
+        }
+        expanded_generation = page.toolpath_fit.generation;
+        if (!v5_main_page_apply_status(&page, &status) ||
+            page.toolpath_fit.generation != expanded_generation) {
+            v5_program_controller_destroy(&controller);
+            return 69;
+        }
     }
 
     printf(
