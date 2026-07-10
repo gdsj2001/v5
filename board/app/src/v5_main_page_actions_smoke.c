@@ -83,22 +83,22 @@ static int expect_home_native_gate(V5MainPage *page)
            report.send_status == 0;
 }
 
-static int expect_rotary_equiv_zero(V5MainPage *page, char axis)
+static int expect_axis_zero_position(V5MainPage *page, char axis, const char *space)
 {
     V5MainPageActionReport report;
-    unsigned int expected_mask = axis == 'A' ? V5_COMMAND_AXIS_A_MASK : V5_COMMAND_AXIS_C_MASK;
     if (!v5_main_page_trigger_action(page, V5_MAIN_PAGE_ACTION_HOME, &report)) {
         return 0;
     }
     if (report.action != V5_MAIN_PAGE_ACTION_HOME || !report.prepared || report.local_only || report.executed) {
         return 0;
     }
-    return same_text(report.command.name, "rotary_equiv_zero") &&
-           same_text(report.command.owner, "native_rotary_gate") &&
+    return same_text(report.command.name, "axis_zero_position") &&
+           same_text(report.command.owner, "native_axis_zero_position") &&
            report.command.accepted &&
-           report.request.kind == V5_COMMAND_ROTARY_EQUIV_ZERO &&
-           report.request.axis_mask == expected_mask &&
-           report.request.enabled_value == 1 &&
+           report.request.kind == V5_COMMAND_AXIS_ZERO_POSITION &&
+           report.request.text_value && report.request.text_value[0] == axis &&
+           report.request.text_value[1] == '\0' &&
+           same_text(report.request.mode_value, space) &&
            !report.command_line[0] &&
            report.send_status == 0;
 }
@@ -209,6 +209,68 @@ static int button_pressed_state_clears_on_click(V5MainPage *page, V5MainPageActi
     return !lv_obj_has_state(button, LV_STATE_PRESSED) && button_bg_matches(page, action, r, g, b);
 }
 
+static int button_pressed_state_clears_on_release(V5MainPage *page, V5MainPageActionKind action)
+{
+    lv_obj_t *button = button_for_action(page, action);
+    if (!button) {
+        return 0;
+    }
+    lv_obj_add_state(button, LV_STATE_PRESSED);
+    lv_event_send(button, LV_EVENT_RELEASED, 0);
+    return !lv_obj_has_state(button, LV_STATE_PRESSED);
+}
+
+static int exercise_jog_press_timing(V5MainPage *page)
+{
+    lv_obj_t *button;
+    if (!page || !v5_main_page_select_axis(page, V5_MAIN_PAGE_SELECT_MCS, 'X')) {
+        return 0;
+    }
+    button = button_for_action(page, V5_MAIN_PAGE_ACTION_JOG_PLUS);
+    if (!button) {
+        return 0;
+    }
+    lv_event_send(button, LV_EVENT_PRESSED, 0);
+    lv_tick_inc(499U);
+    (void)lv_timer_handler();
+    lv_event_send(button, LV_EVENT_RELEASED, 0);
+    if (page->last_action.request.kind != V5_COMMAND_JOG_INCREMENT ||
+        page->last_action.request.increment_value != page->jog_step ||
+        page->last_action.request.axis_value <= 0.0 || page->jog_pressed_button) {
+        return 0;
+    }
+    lv_event_send(button, LV_EVENT_PRESSED, 0);
+    lv_tick_inc(500U);
+    (void)lv_timer_handler();
+    if (page->last_action.request.kind != V5_COMMAND_JOG_CONTINUOUS ||
+        !page->jog_long_press_elapsed) {
+        return 0;
+    }
+    lv_event_send(button, LV_EVENT_PRESS_LOST, 0);
+    return !page->jog_pressed_button && !page->jog_long_press_elapsed &&
+           page->last_action.request.kind == V5_COMMAND_JOG_CONTINUOUS;
+}
+
+static int exercise_axis_selection_timeout(V5MainPage *page)
+{
+    if (!page || !v5_main_page_select_axis(page, V5_MAIN_PAGE_SELECT_MCS, 'Y')) {
+        return 0;
+    }
+    lv_tick_inc(2500U);
+    (void)lv_timer_handler();
+    if (page->selection.all_axes || !expect_local(page, V5_MAIN_PAGE_ACTION_JOG_STEP_10, "jog_step")) {
+        return 0;
+    }
+    lv_tick_inc(1000U);
+    (void)lv_timer_handler();
+    if (page->selection.all_axes) {
+        return 0;
+    }
+    lv_tick_inc(2100U);
+    (void)lv_timer_handler();
+    return page->selection.all_axes && page->selection.space == V5_MAIN_PAGE_SELECT_MCS;
+}
+
 static void refresh_estop_active(void *user_data, V5MainPageActionKind action)
 {
     V5MainPage *page = (V5MainPage *)user_data;
@@ -293,6 +355,9 @@ int main(void)
     if (!button_pressed_state_clears_on_click(&page, V5_MAIN_PAGE_ACTION_HOME, 42, 63, 85)) {
         return 50;
     }
+    if (!button_pressed_state_clears_on_release(&page, V5_MAIN_PAGE_ACTION_HOME)) {
+        return 65;
+    }
     v5_program_controller_init(&controller);
     v5_main_page_bind_program_controller(&page, &controller);
 
@@ -322,8 +387,11 @@ int main(void)
         }
         v5_main_page_set_navigation_callback(&page, 0, 0);
     }
-    if (!expect_local(&page, V5_MAIN_PAGE_ACTION_JOG_STEP_10, "jog_step") || page.jog_step != 10.0) {
+    if (!expect_local(&page, V5_MAIN_PAGE_ACTION_JOG_STEP_10, "jog_step") || page.jog_step != 0.01) {
         return 5;
+    }
+    if (!exercise_jog_press_timing(&page) || !exercise_axis_selection_timeout(&page)) {
+        return 66;
     }
     if (!button_bg_matches(&page, V5_MAIN_PAGE_ACTION_JOG_STEP_1, 32, 52, 73) ||
         !button_bg_matches(&page, V5_MAIN_PAGE_ACTION_JOG_STEP_10, 29, 151, 104)) {
@@ -414,17 +482,36 @@ int main(void)
         return 16;
     }
     if (!v5_main_page_select_axis(&page, V5_MAIN_PAGE_SELECT_MCS, 'Y') ||
-        !expect_command_line(&page, V5_MAIN_PAGE_ACTION_JOG_PLUS, "jog_increment", "native_linuxcncrsh", "Set Jog_Incr Y 100.000 10.000") ||
-        !expect_command_line(&page, V5_MAIN_PAGE_ACTION_JOG_MINUS, "jog_increment", "native_linuxcncrsh", "Set Jog_Incr Y -100.000 10.000")) {
+        !expect_command_line(&page, V5_MAIN_PAGE_ACTION_JOG_PLUS, "jog_increment", "native_linuxcncrsh", "Set Jog_Incr Y 1.000 0.010") ||
+        !expect_command_line(&page, V5_MAIN_PAGE_ACTION_JOG_MINUS, "jog_increment", "native_linuxcncrsh", "Set Jog_Incr Y -1.000 0.010") ||
+        !expect_axis_zero_position(&page, 'Y', "mcs")) {
         return 17;
     }
+    {
+        V5NativeReadback model_readback;
+        v5_native_readback_init(&model_readback);
+        v5_native_readback_set_motion_model(&model_readback, "XYZAC_TRT");
+        v5_main_page_set_native_readback(&page, &model_readback);
+    }
     if (!v5_main_page_select_axis(&page, V5_MAIN_PAGE_SELECT_MCS, 'A') ||
-        !expect_rotary_equiv_zero(&page, 'A')) {
+        !expect_axis_zero_position(&page, 'A', "mcs")) {
         return 18;
     }
     if (!v5_main_page_select_axis(&page, V5_MAIN_PAGE_SELECT_MCS, 'C') ||
-        !expect_rotary_equiv_zero(&page, 'C')) {
+        !expect_axis_zero_position(&page, 'C', "mcs")) {
         return 36;
+    }
+    {
+        V5NativeReadback model_readback;
+        v5_native_readback_init(&model_readback);
+        v5_native_readback_set_motion_model(&model_readback, "XYZBC_TRT");
+        v5_main_page_set_native_readback(&page, &model_readback);
+        if (page.mcs_targets[3].axis != 'B' || page.wcs_targets[3].axis != 'B' ||
+            page.mcs_targets[4].axis != 'C' ||
+            !v5_main_page_select_axis(&page, V5_MAIN_PAGE_SELECT_MCS, 'B') ||
+            !expect_axis_zero_position(&page, 'B', "mcs")) {
+            return 67;
+        }
     }
     {
         V5NativeReadback readback;
@@ -453,7 +540,8 @@ int main(void)
             return 46;
         }
         if (!v5_main_page_select_axis(&page, V5_MAIN_PAGE_SELECT_WCS, 'Z') ||
-            !expect_command_line(&page, V5_MAIN_PAGE_ACTION_WORK_ZERO_X, "work_zero", "native_linuxcncrsh", "Set MDI G10 L20 P3 Z0")) {
+            !expect_command_line(&page, V5_MAIN_PAGE_ACTION_WORK_ZERO_X, "work_zero", "native_work_zero", "Set MDI G10 L20 P3 Z0") ||
+            !expect_axis_zero_position(&page, 'Z', "wcs")) {
             return 19;
         }
         if (!button_bg_matches(&page, V5_MAIN_PAGE_ACTION_AXIS_ALL, 42, 63, 85)) {
@@ -678,7 +766,7 @@ int main(void)
         unlink(preview_scroll_path);
     }
 
-    printf("v5 main page actions: buttons=%u local=view_3d mdi=start jog=native rtcp=toggle axis_select=prepared rotary_equiv_zero=prepared first_point=prepared native_lines=prepared missing_gates=0\n",
+    printf("v5 main page actions: buttons=%u local=view_3d mdi=start jog=native rtcp=toggle axis_select=prepared axis_zero_position=prepared first_point=prepared native_lines=prepared missing_gates=0\n",
            page.button_count);
     v5_program_controller_destroy(&controller);
     return 0;

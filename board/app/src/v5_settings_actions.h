@@ -27,6 +27,8 @@ typedef struct V5SettingsActionStatus {
     char message[768];
     char result_path[192];
     char axis[16];
+    char state[24];
+    int cancel_allowed;
     int restart_required;
     int restart_deferred;
     int backend_restart_required;
@@ -41,6 +43,7 @@ int v5_settings_axis_zero_start(const char *axis,
                                 const char *home_offset,
                                 V5SettingsActionResult *result);
 int v5_settings_action_poll_status(V5SettingsActionStatus *status);
+int v5_settings_action_cancel(const char *run_id);
 
 #ifdef __cplusplus
 }

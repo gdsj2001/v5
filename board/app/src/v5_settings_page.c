@@ -2,6 +2,7 @@
 #include "v5_settings_actions.h"
 #include "v5_settings_axis_table.h"
 #include "v5_lvgl_remote_display.h"
+#include "v5_motion_model_registry.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -14,8 +15,6 @@ static lv_color_t rgb(uint8_t r, uint8_t g, uint8_t b)
 {
     return lv_color_make(r, g, b);
 }
-
-static void update_return_home_button_label(V5SettingsPage *page);
 
 static double monotonic_seconds(void)
 {
@@ -244,13 +243,6 @@ static int settings_action_eta_seconds(const char *action)
     return 0;
 }
 
-static int settings_action_sets_restart_pending(const char *action)
-{
-    return action &&
-           (strcmp(action, "drive_set_parameters") == 0 ||
-            strcmp(action, "settings_axis_zero") == 0);
-}
-
 static int settings_action_refreshes_axis_table(const char *action)
 {
     return action &&
@@ -296,6 +288,8 @@ static void settings_popup_show(V5SettingsPage *page, const char *action, const 
     was_active = page->popup_active;
     if (!was_active) {
         v5_ui_first_frame_guard_begin(&page->popup_frame_guard, V5_REMOTE_DISPLAY_CACHE_POPUP);
+        page->popup_run_id[0] = '\0';
+        page->popup_cancel_pending = 0;
     }
     snprintf(page->popup_action, sizeof(page->popup_action), "%s", action ? action : "");
     page->popup_active = 1;
@@ -308,6 +302,32 @@ static void settings_popup_show(V5SettingsPage *page, const char *action, const 
     settings_popup_set_eta(page, page->popup_eta_seconds);
     lv_obj_clear_flag(page->popup_overlay, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(page->popup_overlay);
+}
+
+static void settings_popup_hide(V5SettingsPage *page)
+{
+    if (!page) {
+        return;
+    }
+    if (page->popup_overlay) {
+        lv_obj_add_flag(page->popup_overlay, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (page->popup_close) {
+        lv_obj_clear_state(page->popup_close, LV_STATE_DISABLED);
+    }
+    page->popup_active = 0;
+    page->popup_final = 0;
+    page->popup_action[0] = '\0';
+    page->popup_run_id[0] = '\0';
+    page->popup_cancel_pending = 0;
+    page->popup_eta_seconds = 0;
+    v5_ui_first_frame_guard_restore(&page->popup_frame_guard);
+    if (page->status_label) {
+        lv_obj_invalidate(page->status_label);
+    }
+    if (page->machine_code_label) {
+        lv_obj_invalidate(page->machine_code_label);
+    }
 }
 
 static void settings_popup_update_running(V5SettingsPage *page, const char *title, const char *message)
@@ -350,21 +370,27 @@ static void button_release_visual_cb(lv_event_t *event)
 static void settings_popup_close_cb(lv_event_t *event)
 {
     V5SettingsPage *page = (V5SettingsPage *)lv_event_get_user_data(event);
-    if (!page || lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    V5SettingsActionStatus status;
+    if (!page || lv_event_get_code(event) != LV_EVENT_RELEASED) return;
     clear_button_pressed_visual_now(lv_event_get_target(event));
-    if (page->popup_overlay) {
-        lv_obj_add_flag(page->popup_overlay, LV_OBJ_FLAG_HIDDEN);
+    if (page->popup_final) {
+        settings_popup_hide(page);
+        return;
     }
-    page->popup_active = 0;
-    page->popup_final = 0;
-    page->popup_action[0] = '\0';
-    page->popup_eta_seconds = 0;
-    v5_ui_first_frame_guard_restore(&page->popup_frame_guard);
-    if (page->status_label) {
-        lv_obj_invalidate(page->status_label);
+    if (!page->popup_run_id[0] && v5_settings_action_poll_status(&status) &&
+        status.available && status.busy &&
+        (!page->popup_action[0] || strcmp(page->popup_action, status.action) == 0)) {
+        snprintf(page->popup_run_id, sizeof(page->popup_run_id), "%s", status.run_id);
     }
-    if (page->machine_code_label) {
-        lv_obj_invalidate(page->machine_code_label);
+    if (!page->popup_cancel_pending && page->popup_run_id[0] &&
+        v5_settings_action_cancel(page->popup_run_id)) {
+        page->popup_cancel_pending = 1;
+        if (page->popup_close) {
+            lv_obj_add_state(page->popup_close, LV_STATE_DISABLED);
+        }
+        settings_popup_update_running(page, 0, "提示: CANCELLING\n原因: 正在终止本次后台进程及进程组\n下一步: 等待 cancelled 终态");
+    } else if (!page->popup_cancel_pending) {
+        settings_popup_update_running(page, 0, "提示: CANCEL_NOT_ACCEPTED\n原因: 未取得本次 run_id 或后台未接受取消\n下一步: 保持窗口并重新确认后台状态");
     }
 }
 
@@ -393,7 +419,7 @@ static void settings_popup_create(V5SettingsPage *page)
     lv_obj_set_style_border_width(page->popup_close, 1, 0);
     lv_obj_set_style_border_color(page->popup_close, rgb(76, 119, 146), 0);
     lv_obj_add_event_cb(page->popup_close, button_release_visual_cb, LV_EVENT_RELEASED, 0);
-    lv_obj_add_event_cb(page->popup_close, settings_popup_close_cb, LV_EVENT_CLICKED, page);
+    lv_obj_add_event_cb(page->popup_close, settings_popup_close_cb, LV_EVENT_RELEASED, page);
     close_label = lv_label_create(page->popup_close);
     lv_label_set_text(close_label, "关闭");
     lv_obj_set_pos(close_label, 0, 10);
@@ -402,8 +428,6 @@ static void settings_popup_create(V5SettingsPage *page)
     lv_obj_set_style_text_color(close_label, rgb(238, 245, 248), 0);
     lv_obj_add_flag(page->popup_overlay, LV_OBJ_FLAG_HIDDEN);
 }
-
-static void update_return_home_button_label(V5SettingsPage *page);
 
 static void settings_status_timer_cb(lv_timer_t *timer)
 {
@@ -427,25 +451,40 @@ static void settings_status_timer_cb(lv_timer_t *timer)
     settings_status_popup_title(&status, label, sizeof(label));
     detail = status.message[0] ? status.message : status.code;
     if (status.busy) {
-        snprintf(running, sizeof(running), "提示: RUNNING\n原因: %s\n下一步: 等待后台完成", detail[0] ? detail : "执行中");
-        settings_popup_update_running(page, label, running);
+        if (page->popup_active && !page->popup_final &&
+            (!page->popup_action[0] || strcmp(page->popup_action, status.action) == 0)) {
+            if (!page->popup_run_id[0]) {
+                snprintf(page->popup_run_id, sizeof(page->popup_run_id), "%s", status.run_id);
+            }
+            if (strcmp(page->popup_run_id, status.run_id) == 0) {
+                snprintf(running, sizeof(running), "提示: %s\n原因: %s\n下一步: %s",
+                         page->popup_cancel_pending ? "CANCELLING" : "RUNNING",
+                         detail[0] ? detail : "执行中",
+                         page->popup_cancel_pending ? "等待 cancelled 终态" : "等待后台完成");
+                settings_popup_update_running(page, label, running);
+            }
+        }
         set_status_text(page, 88, 204, 255, "%s: 执行中", label);
     } else if (status.ok) {
-        if (page->popup_active && !page->popup_final && (!page->popup_action[0] || strcmp(page->popup_action, status.action) == 0)) {
+        if (page->popup_active && !page->popup_final &&
+            (!page->popup_action[0] || strcmp(page->popup_action, status.action) == 0) &&
+            (!page->popup_run_id[0] || strcmp(page->popup_run_id, status.run_id) == 0)) {
             settings_popup_update_final(page, label, 1, status.code, detail);
         }
         settings_refresh_axis_table_once(page, &status);
         if (strcmp(status.action, "device_dna_register") == 0) {
             refresh_machine_code_label(page);
         }
-        if (status.restart_required && settings_action_sets_restart_pending(status.action)) {
-            page->restart_pending = 1;
-            update_return_home_button_label(page);
-        }
         set_status_text(page, 42, 221, 128, "%s: 完成 %s", label, status.code[0] ? status.code : detail);
     } else {
-        if (page->popup_active && !page->popup_final && (!page->popup_action[0] || strcmp(page->popup_action, status.action) == 0)) {
-            settings_popup_update_final(page, label, 0, status.code, detail);
+        if (page->popup_active && !page->popup_final &&
+            (!page->popup_action[0] || strcmp(page->popup_action, status.action) == 0) &&
+            (!page->popup_run_id[0] || strcmp(page->popup_run_id, status.run_id) == 0)) {
+            if (page->popup_cancel_pending && strcmp(status.code, "SETTINGS_ACTION_CANCELLED") == 0) {
+                settings_popup_hide(page);
+            } else {
+                settings_popup_update_final(page, label, 0, status.code, detail);
+            }
         }
         set_status_text(page, 245, 214, 82, "%s: %s", label, detail[0] ? detail : "未完成");
     }
@@ -466,31 +505,13 @@ static void write_json_text(FILE *fp, const char *text)
     fputc('"', fp);
 }
 
-static void update_return_home_button_label(V5SettingsPage *page)
-{
-    if (!page || !page->return_home_button_label) {
-        return;
-    }
-    lv_label_set_text(page->return_home_button_label, page->restart_pending ? "保存并重启" : "返回主页面");
-}
-
-void v5_settings_page_reset_return_state(V5SettingsPage *page)
-{
-    if (!page) {
-        return;
-    }
-    page->restart_pending = 0;
-    update_return_home_button_label(page);
-}
-
 static void settings_parameter_changed_cb(void *user_data)
 {
     V5SettingsPage *page = (V5SettingsPage *)user_data;
     if (!page) {
         return;
     }
-    page->restart_pending = 1;
-    update_return_home_button_label(page);
+    set_status_text(page, 42, 221, 128, "参数已保存，等待保存并重启");
 }
 
 static void settings_axis_zero_requested_cb(const char *axis,
@@ -606,48 +627,41 @@ static void make_value_cell_colored(lv_obj_t *parent, const char *text, int x, i
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
 }
 
-static int motion_model_value_is_bc(const char *value)
-{
-    char normalized[64];
-    size_t i;
-    if (!value || !value[0]) {
-        return 0;
-    }
-    for (i = 0U; i + 1U < sizeof(normalized) && value[i]; ++i) {
-        normalized[i] = (char)toupper((unsigned char)value[i]);
-    }
-    normalized[i] = '\0';
-    return strncmp(normalized, "BC", 2U) == 0 ||
-           strstr(normalized, "XYZBC") != 0 ||
-           strstr(normalized, "_BC") != 0 ||
-           strstr(normalized, "-BC") != 0;
-}
-
 static void settings_motion_model_refresh_dropdown(V5SettingsPage *page)
 {
+    const V5MotionModelDescriptor *model;
+    unsigned int model_index = 0U;
     if (!page || !page->motion_model_dropdown) {
         return;
     }
-    lv_dropdown_set_selected(
-        page->motion_model_dropdown,
-        motion_model_value_is_bc(v5_settings_axis_table_motion_model_value()) ? 1U : 0U);
+    model = v5_motion_model_find(v5_settings_axis_table_motion_model_value());
+    if (!v5_motion_model_registry_index(model, &model_index)) {
+        lv_dropdown_set_selected(page->motion_model_dropdown, 0U);
+        return;
+    }
+    lv_dropdown_set_selected(page->motion_model_dropdown, model_index + 1U);
 }
 
 static void settings_motion_model_changed_cb(lv_event_t *event)
 {
     V5SettingsPage *page = (V5SettingsPage *)lv_event_get_user_data(event);
-    char selected[32];
+    char selected[64];
+    const V5MotionModelDescriptor *model;
     int ok;
     if (!page || lv_event_get_code(event) != LV_EVENT_VALUE_CHANGED || !page->motion_model_dropdown) {
         return;
     }
     selected[0] = '\0';
     lv_dropdown_get_selected_str(page->motion_model_dropdown, selected, sizeof(selected));
-    ok = v5_settings_axis_table_commit_motion_model(selected);
+    model = v5_motion_model_find(selected);
+    if (!model) {
+        settings_motion_model_refresh_dropdown(page);
+        set_status_text(page, 245, 214, 82, "运动模型: 未登记模型");
+        return;
+    }
+    ok = v5_settings_axis_table_commit_motion_model(model->canonical);
     settings_motion_model_refresh_dropdown(page);
     if (ok) {
-        page->restart_pending = 1;
-        update_return_home_button_label(page);
         set_status_text(page, 42, 221, 128, "运动模型: %s", v5_settings_axis_table_motion_model_value());
     } else {
         set_status_text(page, 245, 214, 82, "运动模型: owner readback 未确认");
@@ -657,13 +671,19 @@ static void settings_motion_model_changed_cb(lv_event_t *event)
 static lv_obj_t *make_motion_model_dropdown(V5SettingsPage *page, lv_obj_t *parent, int x, int y, int w, int h)
 {
     lv_obj_t *dd;
+    char registry_options[128];
+    char options[136];
     if (!page || !parent) {
         return 0;
     }
+    if (!v5_motion_model_dropdown_options(registry_options, sizeof(registry_options))) {
+        return 0;
+    }
+    snprintf(options, sizeof(options), "--\n%s", registry_options);
     dd = lv_dropdown_create(parent);
     lv_obj_set_pos(dd, x, y);
     lv_obj_set_size(dd, w, h);
-    lv_dropdown_set_options(dd, "AC摇篮\nBC摇篮");
+    lv_dropdown_set_options(dd, options);
     lv_obj_set_style_bg_color(dd, rgb(5, 27, 43), 0);
     lv_obj_set_style_bg_opa(dd, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(dd, 0, 0);
@@ -876,8 +896,7 @@ int v5_settings_page_create(V5SettingsPage *page, lv_obj_t *parent)
     make_button(page, "清除故障", 830, 236, 82, 34, 20, 62, 91, V5_MAIN_PAGE_ACTION_SETTINGS_FAULT_RESET);
     make_button(page, "设置驱动", 914, 236, 82, 34, 39, 113, 164, V5_MAIN_PAGE_ACTION_SETTINGS_SET_DRIVE);
     make_button(page, "登记本机码", 806, 8, 94, 34, 20, 62, 91, V5_MAIN_PAGE_ACTION_SETTINGS_DNA_REGISTER);
-    page->return_home_button_label = make_button(page, "返回主页面", 902, 8, 92, 34, 74, 91, 111, V5_MAIN_PAGE_ACTION_SETTINGS_RETURN_HOME);
-    v5_settings_page_reset_return_state(page);
+    make_button(page, "保存并重启", 902, 8, 92, 34, 74, 91, 111, V5_MAIN_PAGE_ACTION_SETTINGS_SAVE_RETURN);
     settings_popup_create(page);
     return page->button_count == V5_SETTINGS_PAGE_BUTTON_COUNT;
 }
@@ -926,23 +945,6 @@ int v5_settings_page_trigger_action(V5SettingsPage *page, V5MainPageActionKind a
     }
     memset(out, 0, sizeof(*out));
     out->action = action;
-    if (page->navigation_cb && action == V5_MAIN_PAGE_ACTION_SETTINGS_RETURN_HOME && page->restart_pending) {
-        action = V5_MAIN_PAGE_ACTION_SETTINGS_SAVE_RETURN;
-        out->action = action;
-    }
-    if (page->navigation_cb && action == V5_MAIN_PAGE_ACTION_SETTINGS_RETURN_HOME) {
-        out->prepared = 1;
-        out->local_only = 1;
-        out->request.kind = V5_COMMAND_UI_LOCAL;
-        out->command.kind = V5_COMMAND_UI_LOCAL;
-        out->command.accepted = 1;
-        out->command.name = "settings_return_home";
-        out->command.owner = "ui_navigation";
-        page->last_action = *out;
-        set_status_text(page, 88, 204, 255, "返回主页面");
-        page->navigation_cb(page->navigation_user_data, V5_MAIN_PAGE_ACTION_NAV_MAIN);
-        return 1;
-    }
     if (v5_settings_action_start(action, &action_result)) {
         out->prepared = 1;
         out->local_only = 0;

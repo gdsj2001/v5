@@ -98,7 +98,7 @@ static int axis_name_ok(const char *text)
         return 0;
     }
     c = (char)toupper((unsigned char)text[0]);
-    return c == 'X' || c == 'Y' || c == 'Z' || c == 'A' || c == 'C';
+    return c == 'X' || c == 'Y' || c == 'Z' || c == 'A' || c == 'B' || c == 'C';
 }
 
 static int finite_bounded(double value, double limit)
@@ -186,15 +186,15 @@ int v5_command_gate_validate_execute_frame(
     if (!no_stray_axis_mask(frame, reason, reason_cap)) {
         return 0;
     }
-    if (!text_is_empty(frame->mode_value)) {
-        set_reason(reason, reason_cap, "MODE_TEXT_UNSUPPORTED");
-        return 0;
-    }
-    if (frame->kind <= (int32_t)V5_COMMAND_UI_LOCAL || frame->kind > (int32_t)V5_COMMAND_ROTARY_EQUIV_ZERO) {
+    if (frame->kind <= (int32_t)V5_COMMAND_UI_LOCAL || frame->kind > (int32_t)V5_COMMAND_AXIS_ZERO_POSITION) {
         set_reason(reason, reason_cap, "UNKNOWN_COMMAND_KIND");
         return 0;
     }
     kind = (V5CommandKind)frame->kind;
+    if (kind != V5_COMMAND_AXIS_ZERO_POSITION && !text_is_empty(frame->mode_value)) {
+        set_reason(reason, reason_cap, "MODE_TEXT_UNSUPPORTED");
+        return 0;
+    }
     switch (kind) {
     case V5_COMMAND_PROGRAM_OPEN:
         if (!axis_mask_must_be_zero(frame, reason, reason_cap) ||
@@ -224,10 +224,10 @@ int v5_command_gate_validate_execute_frame(
         break;
     case V5_COMMAND_JOG_CONTINUOUS:
         if (!axis_mask_must_be_zero(frame, reason, reason_cap) ||
-            frame->index_value < 0 || frame->index_value >= (int32_t)V5_COMMAND_AXIS_COUNT ||
             frame->axis_value == 0.0 ||
             !finite_bounded(frame->axis_value, V5_COMMAND_GATE_MAX_ABS_AXIS_VALUE) ||
-            !command_text_ok(frame->text_value, 0, 0, reason, reason_cap) ||
+            !command_text_ok(frame->text_value, 1, 1, reason, reason_cap) ||
+            !axis_name_ok(frame->text_value) ||
             !command_text_ok(frame->secondary_text_value, 0, 0, reason, reason_cap)) {
             set_reason(reason, reason_cap, "JOG_CONTINUOUS_INVALID");
             return 0;
@@ -235,8 +235,8 @@ int v5_command_gate_validate_execute_frame(
         break;
     case V5_COMMAND_JOG_STOP:
         if (!axis_mask_must_be_zero(frame, reason, reason_cap) ||
-            frame->index_value < 0 || frame->index_value >= (int32_t)V5_COMMAND_AXIS_COUNT ||
-            !command_text_ok(frame->text_value, 0, 0, reason, reason_cap) ||
+            !command_text_ok(frame->text_value, 1, 1, reason, reason_cap) ||
+            !axis_name_ok(frame->text_value) ||
             !command_text_ok(frame->secondary_text_value, 0, 0, reason, reason_cap)) {
             set_reason(reason, reason_cap, "JOG_STOP_INVALID");
             return 0;
@@ -296,13 +296,16 @@ int v5_command_gate_validate_execute_frame(
             }
         }
         break;
-    case V5_COMMAND_ROTARY_EQUIV_ZERO:
-        if (frame->axis_mask == 0U ||
-            (frame->axis_mask & ~(V5_COMMAND_AXIS_A_MASK | V5_COMMAND_AXIS_C_MASK)) != 0U ||
-            frame->enabled_value != 1 ||
-            !command_text_ok(frame->text_value, 0, 0, reason, reason_cap) ||
+    case V5_COMMAND_AXIS_ZERO_POSITION:
+        if (!axis_mask_must_be_zero(frame, reason, reason_cap) ||
+            !command_text_ok(frame->text_value, 1, 1, reason, reason_cap) ||
+            !axis_name_ok(frame->text_value) ||
             !command_text_ok(frame->secondary_text_value, 0, 0, reason, reason_cap)) {
-            set_reason(reason, reason_cap, "ROTARY_EQUIV_ZERO_INVALID");
+            set_reason(reason, reason_cap, "AXIS_ZERO_POSITION_INVALID");
+            return 0;
+        }
+        if (strcmp(frame->mode_value, "mcs") != 0 && strcmp(frame->mode_value, "wcs") != 0) {
+            set_reason(reason, reason_cap, "AXIS_ZERO_POSITION_MODE_INVALID");
             return 0;
         }
         break;

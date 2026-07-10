@@ -251,6 +251,55 @@ static int send_status_request(char *response, size_t response_size)
     return 1;
 }
 
+int v5_settings_action_cancel(const char *run_id)
+{
+    int fd;
+    struct sockaddr_un addr;
+    struct timeval tv;
+    char request[160];
+    char response[512];
+    size_t i;
+    ssize_t n;
+    if (!run_id || !run_id[0] || strlen(run_id) >= 64U) {
+        return 0;
+    }
+    for (i = 0U; run_id[i]; ++i) {
+        char ch = run_id[i];
+        if (!((ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'Z') ||
+              (ch >= 'a' && ch <= 'z') || ch == '-' || ch == '_')) {
+            return 0;
+        }
+    }
+    fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0) {
+        return 0;
+    }
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", V5_SETTINGS_ACTIOND_SOCKET);
+    tv.tv_sec = 1;
+    tv.tv_usec = 0;
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    if (connect(fd, (const struct sockaddr *)&addr, sizeof(addr)) != 0) {
+        close(fd);
+        return 0;
+    }
+    snprintf(request, sizeof(request), "{\"action\":\"job_cancel\",\"run_id\":\"%s\"}\n", run_id);
+    if (write(fd, request, strlen(request)) < 0) {
+        close(fd);
+        return 0;
+    }
+    n = read(fd, response, sizeof(response) - 1U);
+    close(fd);
+    if (n <= 0) {
+        return 0;
+    }
+    response[n] = '\0';
+    return strstr(response, "\"accepted\": true") != 0 ||
+           strstr(response, "\"accepted\":true") != 0;
+}
+
 static int json_bool_value(const char *json, const char *key)
 {
     const char *p;
@@ -434,6 +483,8 @@ int v5_settings_action_poll_status(V5SettingsActionStatus *status)
     json_string_value(response, "message_cn", status->message, sizeof(status->message));
     json_string_value(response, "result_path", status->result_path, sizeof(status->result_path));
     json_string_value(response, "axis", status->axis, sizeof(status->axis));
+    json_string_value(response, "state", status->state, sizeof(status->state));
+    status->cancel_allowed = json_bool_value(response, "cancel_allowed");
     status->restart_required = json_bool_value(response, "restart_required");
     status->restart_deferred = json_bool_value(response, "restart_deferred");
     status->backend_restart_required = json_bool_value(response, "backend_restart_required");

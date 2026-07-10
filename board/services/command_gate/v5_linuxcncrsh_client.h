@@ -48,6 +48,15 @@ int v5_linuxcncrsh_probe_estop(
     size_t out_size);
 int v5_linuxcncrsh_probe_active_driver_mode(char *out, size_t out_size);
 int v5_linuxcncrsh_gate_preconnect(const V5LinuxcncrshConfig *config);
+int v5_linuxcncrsh_get_axis_position(
+    const V5LinuxcncrshConfig *config,
+    char axis,
+    int relative,
+    double *position_out);
+int v5_linuxcncrsh_get_all_homed(
+    const V5LinuxcncrshConfig *config,
+    unsigned int expected_joint_count,
+    int *all_homed_out);
 
 V5LinuxcncrshSendStatus v5_linuxcncrsh_send_line(
     const V5LinuxcncrshConfig *config,
@@ -55,13 +64,6 @@ V5LinuxcncrshSendStatus v5_linuxcncrsh_send_line(
 
 V5LinuxcncrshSendStatus v5_linuxcncrsh_send_machine_on_sequence(
     const V5LinuxcncrshConfig *config);
-
-V5LinuxcncrshSendStatus v5_linuxcncrsh_send_home_sequence(
-    const V5LinuxcncrshConfig *config,
-    char *mode_out,
-    size_t mode_out_size,
-    char *code_out,
-    size_t code_out_size);
 
 V5LinuxcncrshSendStatus v5_linuxcncrsh_send_prepared(
     const V5LinuxcncrshConfig *config,

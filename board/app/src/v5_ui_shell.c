@@ -1632,7 +1632,6 @@ static void shell_navigate(void *user_data, V5MainPageActionKind action)
     } else if (page == V5_SHELL_PAGE_PROGRAM) {
         shell_update_program_row();
     } else if (page == V5_SHELL_PAGE_SETTINGS) {
-        v5_settings_page_reset_return_state(&g_settings_page);
     }
     shell_hide_all_pages();
     if (g_shell_pages[page]) {

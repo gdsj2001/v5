@@ -4,6 +4,46 @@ AI_LOAD_ONLY=true
 PROJECT_ROOT=.
 RULE_SOURCE=AGENTS.md
 
+## P0_AI_FAST_PATH
+
+THIS_SECTION_IS_INDEX_ONLY:
+- 本节是给 AI 的快读入口，不替代后文详细规则。
+- 若本节和后文 P0 细则冲突，以更具体的后文 P0 细则为准；若项目规则和系统/开发者/工具安全规则冲突，以系统/开发者/工具安全规则为准。
+
+FIRST_90_SECONDS:
+1. 先读最新用户消息，判断任务类型：规则/文档、功能需求、代码修复、板端验证、VM/部署、纯提问。
+2. 读本节，然后只跳到匹配的详细章节，不要全文漫游后才行动。
+3. 先看 `git status` 和相关 diff；不要覆盖用户已有改动。
+4. 如果是产品功能/行为变化，先走 `功能/需求真源索引.md` 找单一 `REQ-*` owner，再改 owner 文档，然后改代码。
+5. 如果只是 `AGENTS.md`、规则、说明文档整理，备份被改文件后直接改目标文档，跑 `git diff --check`。
+6. 如果改 `D:\v5\board` 下板端可见代码，必须从 Windows source truth 同步到 VM、完整构建、部署并走原始 UI/operator 路径验证；没有板端证据只能报 `source_only` 或 `local_verified_only`。
+7. 最终回复只讲改了什么、验证了什么、缺什么；不要写命令试错过程。
+
+TASK_ROUTER:
+| User request kind | Read first | Edit first | Required closure |
+| --- | --- | --- | --- |
+| Product behavior / feature requirement | `功能/需求真源索引.md` then one indexed owner | indexed `功能/` owner | code/config + targeted tests; board-visible changes need board closure |
+| Specific `待做工作/*.md` request | named workdoc, then indexed `功能/` owner | indexed `功能/` owner if behavior changes | implementation against owner, not stale workdoc text |
+| Rule/workflow cleanup | `AGENTS.md` matching section | `AGENTS.md` only unless user names another file | `git diff --check` |
+| Board runtime source change | `AGENTS.md`, indexed owner if behavior changes, relevant `D:\v5\board` source | Windows `D:\v5\board` source truth | sync to VM, full build, deploy, original operator-path proof |
+| Local non-board code/tool change | relevant source + focused owner docs | canonical local source/tool | nearest compile/unit/contract/static gate |
+| Pure question / review | relevant docs/source only | no edit unless requested | answer with evidence and status limits |
+
+CONFLICT_PRIORITY:
+1. System/developer/tool safety instructions.
+2. Latest explicit user message as requirement-change input.
+3. `功能/需求真源索引.md` plus the single indexed owner for product truth.
+4. `AGENTS.md` for workflow, placement, cleanup, verification, and delivery.
+5. `待做工作/` as active input/progress only, not settled product truth.
+6. Old notes, comments, tests, generated files, VM/board copies, and chat summaries are stale when they conflict with the above.
+
+SOURCE_AND_DELIVERY_SHORTCUTS:
+- Source truth: docs/Windows-owned files under `D:\v5`; runtime/Linux/native/LVGL/tools under `D:\v5\board`; VM and board copies are generated/deployed copies only.
+- Deletion beats fallback: remove retired/shadow/duplicate/bypass paths instead of adding wrappers or compatibility branches.
+- SHM is display projection only unless an indexed owner explicitly says otherwise; native/microkernel actuals must come from native owner/readback.
+- Board-facing behavior is not fixed until the real board/operator path is proven. Local tests are pre-board gates, not closure.
+- Status words are strict: `source_only`, `local_verified_only`, `board_verified`, `blocked`.
+
 ## P0_AI_READ_FIRST
 
 READ_ORDER:
@@ -135,12 +175,13 @@ LOCKS_PAUSED_SCOPE=All `repo_ignored/locks/` source, VM, board, deploy, operator
 
 REQUIREMENT_ID_RULE:
 - `功能/需求真源索引.md` is the index for cross-feature and fast-changing product requirements.
-- Current high-volatility entries include `REQ-DOC-SINGLE-SOURCE`, `REQ-PARAM-MEMORY-LIGHTWEIGHT-SAVE`, `REQ-NATIVE-OWNER-FIRST`, `REQ-SETTINGS-RUNTIME-DRIVE-ONLY`, `REQ-SCALE-CHAIN-HISTORY-POLLUTION`, `REQ-LINUXCNC-COMMAND-GATE`, `REQ-G92-NATIVE-RUNTIME`, `REQ-WCS-NATIVE-OWNER`, `REQ-ROTARY-UNWRAP-ABSOLUTE-PROOF`, `REQ-ROTARY-REBASE-NATIVE-GATE`, and `REQ-RTCP-G53-NATIVE-ACTUAL`.
+- Do not maintain a complete or authoritative `REQ-*` list in `AGENTS.md`; it drifts as `功能/` evolves. Always read `功能/需求真源索引.md` for the current owner list, route map, and conflict decision.
+- Common high-volatility domains include doc single-source, file placement, boot-to-memory parameters, SHM display projection, UI refresh/cache, native/LinuxCNC command ownership, settings runtime drive-only, BUS/Pulse mode, G-code hot path, Start/Home/E-stop operator paths, RTCP native status, RTCP/G53/active model geometry, WCS/G92, rotary unwrap/rebase, remote display relay, board full-build closure, and automatic closed-loop proof. These names are reminders only; the index decides the exact `REQ-*` and owner document.
 - Every volatile requirement must have one `REQ-*` entry and one owner document. Change that owner document when the requirement changes; do not chase every non-owner feature doc just to restate the same policy.
 - User-proposed feature requirements must not be implemented from chat alone. First search the relevant `功能/` owner path through this index; when the requirement is missing, create or assign the `REQ-*` record and owner document before source/config/tests/backlog changes.
 - Non-owner docs should cite the relevant `REQ-*` IDs and keep only local implementation detail, owner cards, field mappings, and verification requirements.
 - If copied text in a non-owner doc conflicts with the indexed owner, the copied text is stale. Update the owner requirement first, then implementation; update references only when missing or actively misleading.
-- New or edited feature docs that mention native owner, `settings_runtime.json`, G92, WCS, RTCP/G53, rotary unwrap/checkpoint, or LinuxCNC command gate must cite the corresponding `REQ-*` entry.
+- New or edited feature docs that mention native owner, `settings_runtime.json`, SHM, UI refresh/cache, G-code Start/Open, Home, E-stop, board closure, G92, WCS, RTCP/G53, active model, rotary unwrap/checkpoint, remote display relay, or LinuxCNC command gate must cite the corresponding `REQ-*` entry from the index.
 
 ## P0_FINISH_LINE_READ_FIRST
 
@@ -488,9 +529,19 @@ VM_ACCESS:
 
 ## P1_FEATURE_DOCS
 
+FEATURE_DOCS_NOTE:
+- This is a convenience route map only. `功能/需求真源索引.md` remains the authoritative `REQ-*` owner index when this map is incomplete or stale.
+- Prefer searching the index for the exact `REQ-*` before editing requirements; use the aliases below only to open likely owner docs quickly.
+
 requirements_index=功能/需求真源索引.md
 boot_params_memory=功能/0-1开机参数入内存.md
+param_classification=功能/0-2参数归类.md
+shared_memory=功能/0-4共享内存.md
+shm_display_projection=功能/0-4共享内存.md
+remote_display_relay=功能/0-4共享内存.md
 microkernel=功能/微内核.md
+rtcp_native_status=功能/微内核.md
+no_periodic_disk_writes=功能/微内核.md
 settings_bus_pulse=功能/2-2设置页总线模式设置项作用说明.md
 bus_pulse_difference=功能/2-1总线脉冲区别.md
 settings_buttons=功能/2-3设置页每个按钮作用和目的.md
@@ -502,19 +553,30 @@ drive_command_map=功能/1驱动命令映射表命令需求.md
 drive_profile_adapter=功能/1驱动命令映射表命令需求.md
 vps_auth=功能/VPS登录与项目对接说明.md
 toolpath=功能/3-4UI刀路绘图顺序与状态稳定方案.md
+rtcp_g53_active_model=功能/3-4UI刀路绘图顺序与状态稳定方案.md
+ui_refresh_rate=功能/需求真源索引.md
+ui_first_frame_cache=功能/需求真源索引.md
 main_buttons=功能/3-1主页面按钮功能.md
 estop=功能/3-1主页面按钮功能.md
 start=功能/3-1主页面按钮功能.md
+gcode_hot_path=功能/0-1开机参数入内存.md
+start_hot_path=功能/3-1主页面按钮功能.md
 rotary_equivalent=功能/3-3旋转轴等效角目标与解决方案.md
 native_helper_whitelist=功能/0-3native_helper白名单与验收说明.md
 popup=功能/跳窗提示方案.md
 touch_input=功能/-触摸校准与输入链路说明.md
 auto_closed_loop=功能/自动闭环测试方式.md
+board_full_build_closure=功能/自动闭环测试方式.md
 red_point=功能/3-4UI刀路绘图顺序与状态稳定方案.md
 
 ## P1_COMMAND_STYLE
 
 SEARCH=rg first
+WINDOWS_SEARCH_QUOTING:
+- For repository searches on Windows, call `rg` directly whenever possible; do not wrap `rg` searches in `cmd /d /c` unless a real cmd builtin is required.
+- Do not pass multi-keyword searches as one quoted regex with `|` through PowerShell or cmd. Use separate ripgrep patterns: `rg -n -e pattern1 -e pattern2 -- path`.
+- Treat `|`, `&`, `<`, `>`, `(`, `)`, `%`, `!`, and nested double quotes as shell metacharacters, not safe search text. Put each search term behind its own `-e`, and use `--` before paths when practical.
+- If a required search term contains shell-sensitive characters or mixed quotes, put the search in a small scratch script under `repo_ignored/<short_task>/scratch/` and run the script; do not keep retrying fragile one-line shell quoting.
 POWERSHELL:
 - keep commands simple
 - avoid fragile heredoc/pipeline/nested quote commands

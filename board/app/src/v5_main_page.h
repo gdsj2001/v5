@@ -100,6 +100,14 @@ typedef struct V5MainPage {
     V5NativeReadback native_readback;
     int command_execution_enabled;
     int home_transaction_active;
+    lv_timer_t *selection_idle_timer;
+    lv_timer_t *jog_hold_timer;
+    lv_obj_t *jog_pressed_button;
+    V5MainPageSelectionSpace jog_pressed_space;
+    char jog_pressed_axis;
+    int jog_pressed_positive;
+    int jog_long_press_elapsed;
+    int jog_continuous_active;
     uint32_t program_edit_last_click_tick;
     unsigned int program_preview_scroll_start_line;
     int program_preview_highlight_line;

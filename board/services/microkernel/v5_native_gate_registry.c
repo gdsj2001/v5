@@ -9,9 +9,9 @@ static const V5NativeGateEntry k_gates[] = {
     {"home", V5_NATIVE_GATE_RUN_CONTROL, "native_home_mode_gate", "active_driver_mode -> BUS/Pulse real Home cycle; homed sync only after motion proof"},
     {"jog_increment", V5_NATIVE_GATE_RUN_CONTROL, "native_linuxcncrsh", "Set Jog_Incr"},
     {"jog_continuous", V5_NATIVE_GATE_RUN_CONTROL, "native_linuxcncrsh", "Set Jog"},
-    {"jog_stop", V5_NATIVE_GATE_RUN_CONTROL, "native_linuxcncrsh", "Set Jog 0"},
+    {"jog_stop", V5_NATIVE_GATE_RUN_CONTROL, "native_linuxcncrsh", "Set Jog_Stop axis"},
     {"wcs_select", V5_NATIVE_GATE_COORDINATE_SYSTEM, "native_linuxcncrsh", "Set MDI G5x"},
-    {"work_zero", V5_NATIVE_GATE_COORDINATE_SYSTEM, "native_linuxcncrsh", "Set MDI G10 L20"},
+    {"work_zero", V5_NATIVE_GATE_COORDINATE_SYSTEM, "native_work_zero", "G10 L20 + persistent/native readback"},
     {"g92_clear", V5_NATIVE_GATE_COORDINATE_SYSTEM, "native_linuxcncrsh", "Set MDI G92.1"},
     {"rtcp_set", V5_NATIVE_GATE_GEOMETRY, "native_rtcp_control", "native_rtcp_control_latch -> HAL/switchkins actual"},
     {"estop_force", V5_NATIVE_GATE_SAFETY, "native_safety", "native_safety_latch.estop_force"},
@@ -19,7 +19,7 @@ static const V5NativeGateEntry k_gates[] = {
     {"feed_override_set", V5_NATIVE_GATE_OVERRIDE, "native_linuxcncrsh", "Set Feed_Override"},
     {"spindle_override_set", V5_NATIVE_GATE_OVERRIDE, "native_linuxcncrsh", "Set Spindle_Override"},
     {"first_point", V5_NATIVE_GATE_RUN_CONTROL, "native_first_point", "first point AC_XY_Z"},
-    {"rotary_equiv_zero", V5_NATIVE_GATE_RUN_CONTROL, "native_rotary_gate", "A/C G53 G0 wrapped rotary safe zero return"},
+    {"axis_zero_position", V5_NATIVE_GATE_RUN_CONTROL, "native_axis_zero_position", "MCS/WCS single-axis real zero move + native readback"},
     {"settings_apply", V5_NATIVE_GATE_PARAMETER_APPLY, "native_settings_owner", "native memory apply"},
 };
 

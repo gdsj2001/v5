@@ -13,13 +13,13 @@ static const V5CommandEntry kV5Commands[] = {
     {"estop_force", "native_safety"},
     {"estop_reset", "native_safety"},
     {"wcs_select", "native_linuxcncrsh"},
-    {"work_zero", "native_linuxcncrsh"},
+    {"work_zero", "native_work_zero"},
     {"g92_clear", "native_linuxcncrsh"},
     {"rtcp_set", "native_rtcp_control"},
     {"feed_override_set", "native_linuxcncrsh"},
     {"spindle_override_set", "native_linuxcncrsh"},
     {"first_point", "native_first_point"},
-    {"rotary_equiv_zero", "native_rotary_gate"},
+    {"axis_zero_position", "native_axis_zero_position"},
 };
 
 const V5CommandEntry *v5_command_table_entries(size_t *count)

@@ -35,9 +35,9 @@ typedef struct V5SettingsPage {
     double popup_started_s;
     int popup_eta_seconds;
     char popup_action[64];
+    char popup_run_id[64];
+    int popup_cancel_pending;
     V5MainPageActionReport last_action;
-    lv_obj_t *return_home_button_label;
-    int restart_pending;
     char last_axis_table_refresh_run_id[64];
     V5UiNavigationCallback navigation_cb;
     void *navigation_user_data;
@@ -48,7 +48,6 @@ void v5_settings_page_set_boot_closure(const V5BootClosure *closure);
 int v5_settings_page_create(V5SettingsPage *page, lv_obj_t *parent);
 int v5_settings_page_apply_status(V5SettingsPage *page, const V5UiStatusView *status);
 void v5_settings_page_set_navigation_callback(V5SettingsPage *page, V5UiNavigationCallback cb, void *user_data);
-void v5_settings_page_reset_return_state(V5SettingsPage *page);
 int v5_settings_page_trigger_action(V5SettingsPage *page, V5MainPageActionKind action, V5MainPageActionReport *report);
 
 #ifdef __cplusplus

@@ -89,7 +89,8 @@ int main(void)
         char home_line[128];
         if (!v5_command_home_prepare(&prepared, &request) ||
             !v5_linuxcncrsh_format_home_sequence(home_line, sizeof(home_line)) ||
-            strcmp(home_line, "native_home_mode_gate BUS joint-jog proof + joint-jog zero + native MCS readback") != 0) {
+            strcmp(prepared.name, "home") != 0 ||
+            strcmp(prepared.owner, "native_home_mode_gate") != 0) {
             return 12;
         }
         printf("home=%s\n", home_line);
@@ -120,20 +121,20 @@ int main(void)
         !expect_no_linuxcncrsh_line("rtcp_on", prepare_rtcp_on)) {
         return 8;
     }
-    if (!v5_command_jog_increment_prepare('X', 10.0, 1, &prepared, &request) ||
-        !expect_line("jog_plus", "Set Jog_Incr X 100.000 10.000", &prepared, &request)) {
+    if (!v5_command_jog_increment_prepare('X', 0.01, 1, &prepared, &request) ||
+        !expect_line("jog_plus", "Set Jog_Incr X 1.000 0.010", &prepared, &request)) {
         return 14;
     }
-    if (!v5_command_jog_increment_prepare('X', 10.0, 0, &prepared, &request) ||
-        !expect_line("jog_minus", "Set Jog_Incr X -100.000 10.000", &prepared, &request)) {
+    if (!v5_command_jog_increment_prepare('X', 0.01, 0, &prepared, &request) ||
+        !expect_line("jog_minus", "Set Jog_Incr X -1.000 0.010", &prepared, &request)) {
         return 15;
     }
-    if (!v5_command_rotary_equiv_zero_prepare('A', &prepared, &request) ||
-        request.kind != V5_COMMAND_ROTARY_EQUIV_ZERO ||
-        request.axis_mask != V5_COMMAND_AXIS_A_MASK ||
-        request.enabled_value != 1 ||
-        strcmp(prepared.name, "rotary_equiv_zero") != 0 ||
-        strcmp(prepared.owner, "native_rotary_gate") != 0) {
+    if (!v5_command_axis_zero_position_prepare('B', "wcs", &prepared, &request) ||
+        request.kind != V5_COMMAND_AXIS_ZERO_POSITION ||
+        strcmp(request.text_value, "B") != 0 ||
+        strcmp(request.mode_value, "wcs") != 0 ||
+        strcmp(prepared.name, "axis_zero_position") != 0 ||
+        strcmp(prepared.owner, "native_axis_zero_position") != 0) {
         return 19;
     }
     if (!v5_command_feed_override_prepare(120, &prepared, &request) ||

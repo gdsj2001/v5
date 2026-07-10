@@ -48,8 +48,8 @@ setp iocontrol.0.lube_level TRUE
 setp motion.digital-in-00 TRUE
 setp mux2.0.in0 0
 setp mux2.0.in1 1
-setp mux2.0.sel 0
 net v5-rtcp-ui-request or2.0.in0
+sets v5-rtcp-ui-request [RTCP]DEFAULT_ACTIVE
 net v5-rtcp-gcode-request motion.digital-out-00 => or2.0.in1
 net v5-rtcp-selected or2.0.out => mux2.0.sel
 net re-switchkins-select mux2.0.out => motion.switchkins-type

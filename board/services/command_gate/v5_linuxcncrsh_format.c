@@ -51,16 +51,16 @@ int v5_linuxcncrsh_format_line(
         rc = snprintf(out, out_size, "Set Jog_Incr %s %.3f %.3f", request->text_value, request->axis_value, request->increment_value);
         return v5_linuxcncrsh_format_ok(rc, out_size);
     case V5_COMMAND_JOG_CONTINUOUS:
-        if (request->index_value < 0 || request->index_value >= (int)V5_COMMAND_AXIS_COUNT || request->axis_value == 0.0) {
+        if (!request->text_value || !request->text_value[0] || request->axis_value == 0.0) {
             return 0;
         }
-        rc = snprintf(out, out_size, "Set Jog %d %.6f", request->index_value, request->axis_value);
+        rc = snprintf(out, out_size, "Set Jog %s %.6f", request->text_value, request->axis_value);
         return v5_linuxcncrsh_format_ok(rc, out_size);
     case V5_COMMAND_JOG_STOP:
-        if (request->index_value < 0 || request->index_value >= (int)V5_COMMAND_AXIS_COUNT) {
+        if (!request->text_value || !request->text_value[0]) {
             return 0;
         }
-        rc = snprintf(out, out_size, "Set Jog %d 0", request->index_value);
+        rc = snprintf(out, out_size, "Set Jog_Stop %s", request->text_value);
         return v5_linuxcncrsh_format_ok(rc, out_size);
     case V5_COMMAND_PAUSE:
         rc = snprintf(out, out_size, "Set Pause");
@@ -87,6 +87,7 @@ int v5_linuxcncrsh_format_line(
         rc = snprintf(out, out_size, "Set MDI G92.1");
         return v5_linuxcncrsh_format_ok(rc, out_size);
     case V5_COMMAND_RTCP_SET:
+    case V5_COMMAND_AXIS_ZERO_POSITION:
         return 0;
     case V5_COMMAND_FEED_OVERRIDE_SET:
         if (request->index_value < 0 || request->index_value > 200) {

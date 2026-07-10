@@ -36,30 +36,43 @@ int v5_command_resume_prepare(V5CommandPrepared *prepared, V5CommandRequest *req
     return v5_command_motion_prepare(V5_COMMAND_RESUME, prepared, request);
 }
 
-int v5_command_rotary_equiv_zero_prepare(char axis, V5CommandPrepared *prepared, V5CommandRequest *request)
+static char v5_command_motion_axis_upper(char axis)
+{
+    return axis >= 'a' && axis <= 'z' ? (char)(axis - ('a' - 'A')) : axis;
+}
+
+static int v5_command_motion_axis_ok(char axis)
+{
+    axis = v5_command_motion_axis_upper(axis);
+    return axis == 'X' || axis == 'Y' || axis == 'Z' || axis == 'A' || axis == 'B' || axis == 'C';
+}
+
+static const char *v5_command_motion_axis_text(char axis)
+{
+    axis = v5_command_motion_axis_upper(axis);
+    return axis == 'X' ? "X" : axis == 'Y' ? "Y" : axis == 'Z' ? "Z" :
+           axis == 'A' ? "A" : axis == 'B' ? "B" : axis == 'C' ? "C" : 0;
+}
+
+int v5_command_axis_zero_position_prepare(
+    char axis,
+    const char *coordinate_space,
+    V5CommandPrepared *prepared,
+    V5CommandRequest *request)
 {
     V5CommandRequest local_request;
-    unsigned int mask;
+    const char *axis_text;
 
-    if (!prepared) {
-        return 0;
-    }
-    if (axis == 'a') {
-        axis = 'A';
-    } else if (axis == 'c') {
-        axis = 'C';
-    }
-    if (axis == 'A') {
-        mask = V5_COMMAND_AXIS_A_MASK;
-    } else if (axis == 'C') {
-        mask = V5_COMMAND_AXIS_C_MASK;
-    } else {
+    axis = v5_command_motion_axis_upper(axis);
+    axis_text = v5_command_motion_axis_text(axis);
+    if (!prepared || !axis_text || !coordinate_space ||
+        (strcmp(coordinate_space, "mcs") != 0 && strcmp(coordinate_space, "wcs") != 0)) {
         return 0;
     }
     memset(&local_request, 0, sizeof(local_request));
-    local_request.kind = V5_COMMAND_ROTARY_EQUIV_ZERO;
-    local_request.axis_mask = mask;
-    local_request.enabled_value = 1;
+    local_request.kind = V5_COMMAND_AXIS_ZERO_POSITION;
+    local_request.text_value = axis_text;
+    local_request.mode_value = coordinate_space;
     if (!v5_command_gate_prepare(&local_request, prepared)) {
         return 0;
     }
@@ -69,39 +82,12 @@ int v5_command_rotary_equiv_zero_prepare(char axis, V5CommandPrepared *prepared,
     return 1;
 }
 
-static int v5_command_motion_axis_ok(char axis)
-{
-    return axis == 'X' || axis == 'Y' || axis == 'Z' || axis == 'A' || axis == 'C';
-}
-
-static int v5_command_motion_axis_joint(char axis)
-{
-    switch (axis) {
-    case 'X':
-        return 0;
-    case 'Y':
-        return 1;
-    case 'Z':
-        return 2;
-    case 'A':
-        return 3;
-    case 'C':
-        return 4;
-    default:
-        return -1;
-    }
-}
-
-static const char *v5_command_motion_axis_text(char axis)
-{
-    return axis == 'X' ? "X" : axis == 'Y' ? "Y" : axis == 'Z' ? "Z" : axis == 'A' ? "A" : axis == 'C' ? "C" : 0;
-}
-
 int v5_command_jog_increment_prepare(char axis, double step, int positive, V5CommandPrepared *prepared, V5CommandRequest *request)
 {
     V5CommandRequest local_request;
     char axis_text[2];
 
+    axis = v5_command_motion_axis_upper(axis);
     if (!prepared || !v5_command_motion_axis_ok(axis) || !isfinite(step) || step <= 0.0) {
         return 0;
     }
@@ -109,7 +95,7 @@ int v5_command_jog_increment_prepare(char axis, double step, int positive, V5Com
     axis_text[1] = '\0';
     memset(&local_request, 0, sizeof(local_request));
     local_request.kind = V5_COMMAND_JOG_INCREMENT;
-    local_request.axis_value = positive ? 100.0 : -100.0;
+    local_request.axis_value = positive ? 1.0 : -1.0;
     local_request.increment_value = step;
     local_request.text_value = axis_text;
     if (!v5_command_gate_prepare(&local_request, prepared)) {
@@ -122,19 +108,20 @@ int v5_command_jog_increment_prepare(char axis, double step, int positive, V5Com
     return 1;
 }
 
-int v5_command_jog_continuous_prepare(char axis, double velocity, int positive, V5CommandPrepared *prepared, V5CommandRequest *request)
+int v5_command_jog_continuous_prepare(char axis, int positive, V5CommandPrepared *prepared, V5CommandRequest *request)
 {
     V5CommandRequest local_request;
-    int joint = v5_command_motion_axis_joint(axis);
+    const char *axis_text;
 
-    if (!prepared || joint < 0 || !isfinite(velocity) || velocity <= 0.0) {
+    axis = v5_command_motion_axis_upper(axis);
+    axis_text = v5_command_motion_axis_text(axis);
+    if (!prepared || !axis_text) {
         return 0;
     }
     memset(&local_request, 0, sizeof(local_request));
     local_request.kind = V5_COMMAND_JOG_CONTINUOUS;
-    local_request.index_value = joint;
-    local_request.axis_value = positive ? velocity : -velocity;
-    local_request.text_value = v5_command_motion_axis_text(axis);
+    local_request.axis_value = positive ? 1.0 : -1.0;
+    local_request.text_value = axis_text;
     if (!v5_command_gate_prepare(&local_request, prepared)) {
         return 0;
     }
@@ -147,15 +134,16 @@ int v5_command_jog_continuous_prepare(char axis, double velocity, int positive, 
 int v5_command_jog_stop_prepare(char axis, V5CommandPrepared *prepared, V5CommandRequest *request)
 {
     V5CommandRequest local_request;
-    int joint = v5_command_motion_axis_joint(axis);
+    const char *axis_text;
 
-    if (!prepared || joint < 0) {
+    axis = v5_command_motion_axis_upper(axis);
+    axis_text = v5_command_motion_axis_text(axis);
+    if (!prepared || !axis_text) {
         return 0;
     }
     memset(&local_request, 0, sizeof(local_request));
     local_request.kind = V5_COMMAND_JOG_STOP;
-    local_request.index_value = joint;
-    local_request.text_value = v5_command_motion_axis_text(axis);
+    local_request.text_value = axis_text;
     if (!v5_command_gate_prepare(&local_request, prepared)) {
         return 0;
     }

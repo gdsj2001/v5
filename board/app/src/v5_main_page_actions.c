@@ -48,8 +48,6 @@ const char *v5_main_page_action_label(V5MainPageActionKind action)
         return "Fault Reset";
     case V5_MAIN_PAGE_ACTION_SETTINGS_SET_DRIVE:
         return "Set Drive";
-    case V5_MAIN_PAGE_ACTION_SETTINGS_RETURN_HOME:
-        return "Return Home";
     case V5_MAIN_PAGE_ACTION_SETTINGS_SAVE_RETURN:
         return "Save Restart";
     case V5_MAIN_PAGE_ACTION_START:
@@ -154,27 +152,7 @@ static int selection_single_axis(const V5MainPageSelection *selection, char *axi
         return 0;
     }
     axis = (char)toupper((unsigned char)selection->axis);
-    if (axis != 'X' && axis != 'Y' && axis != 'Z' && axis != 'A' && axis != 'C') {
-        return 0;
-    }
-    if (axis_out) {
-        *axis_out = axis;
-    }
-    return 1;
-}
-
-static int selection_wcs_single_axis(const V5MainPageSelection *selection, char *axis_out)
-{
-    return selection && selection->space == V5_MAIN_PAGE_SELECT_WCS && selection_single_axis(selection, axis_out);
-}
-
-static int selection_mcs_rotary_axis(const V5MainPageSelection *selection, char *axis_out)
-{
-    char axis;
-    if (!selection || selection->space != V5_MAIN_PAGE_SELECT_MCS || !selection_single_axis(selection, &axis)) {
-        return 0;
-    }
-    if (axis != 'A' && axis != 'C') {
+    if (axis != 'X' && axis != 'Y' && axis != 'Z' && axis != 'A' && axis != 'B' && axis != 'C') {
         return 0;
     }
     if (axis_out) {
@@ -192,33 +170,6 @@ static int native_readback_requests_estop_reset(const V5NativeReadback *readback
         return 1;
     }
     return 0;
-}
-
-static int native_readback_allows_work_zero(const V5NativeReadback *readback)
-{
-    if (!readback || !v5_native_readback_wcs_offset_known(readback) ||
-        !v5_native_readback_wcs_table_known(readback)) {
-        return 0;
-    }
-    if (!v5_native_readback_rtcp_known(readback) || readback->rtcp_enabled) {
-        return 0;
-    }
-    if (!v5_native_readback_interpreter_idle_known(readback) || !readback->interpreter_idle) {
-        return 0;
-    }
-    if (!v5_native_readback_safety_estop_known(readback) || readback->safety_estop_active) {
-        return 0;
-    }
-    if (!v5_native_readback_machine_enable_known(readback) || !readback->machine_enabled) {
-        return 0;
-    }
-    if (!v5_native_readback_modal_known(readback)) {
-        return 0;
-    }
-    if (!v5_native_readback_tool_known(readback) || !v5_native_readback_tool_length_known(readback)) {
-        return 0;
-    }
-    return 1;
 }
 
 static int v5_main_page_wcs_index_for_action(V5MainPageActionKind action)
@@ -320,10 +271,16 @@ int v5_main_page_action_prepare(
             ok = v5_command_resume_prepare(&prepared, &request);
             break;
         case V5_MAIN_PAGE_ACTION_HOME:
-            if (selection_mcs_rotary_axis(selection, &selected_axis)) {
-                ok = v5_command_rotary_equiv_zero_prepare(selected_axis, &prepared, &request);
-            } else {
+            if (selection && selection->space == V5_MAIN_PAGE_SELECT_MCS && selection->all_axes) {
                 ok = v5_command_home_prepare(&prepared, &request);
+            } else if (selection_single_axis(selection, &selected_axis)) {
+                ok = v5_command_axis_zero_position_prepare(
+                    selected_axis,
+                    selection->space == V5_MAIN_PAGE_SELECT_WCS ? "wcs" : "mcs",
+                    &prepared,
+                    &request);
+            } else {
+                ok = 0;
             }
             break;
         case V5_MAIN_PAGE_ACTION_ESTOP_FORCE:
@@ -337,8 +294,8 @@ int v5_main_page_action_prepare(
             ok = v5_command_estop_reset_prepare(&prepared, &request);
             break;
         case V5_MAIN_PAGE_ACTION_WORK_ZERO_X:
-            if (selection_wcs_single_axis(selection, &selected_axis) &&
-                native_readback_allows_work_zero(native_readback)) {
+            if (selection_single_axis(selection, &selected_axis) &&
+                native_readback && v5_native_readback_wcs_table_known(native_readback)) {
                 ok = v5_command_work_zero_prepare(native_readback->wcs_index, selected_axis, &prepared, &request);
             } else {
                 ok = 0;
@@ -357,11 +314,11 @@ int v5_main_page_action_prepare(
             ok = v5_command_spindle_override_prepare(100, &prepared, &request);
             break;
         case V5_MAIN_PAGE_ACTION_JOG_STEP_1:
-            return v5_main_page_local_action_prepare(action, "jog_step", 1.0, report);
+            return v5_main_page_local_action_prepare(action, "jog_step", 0.001, report);
         case V5_MAIN_PAGE_ACTION_JOG_STEP_10:
-            return v5_main_page_local_action_prepare(action, "jog_step", 10.0, report);
+            return v5_main_page_local_action_prepare(action, "jog_step", 0.01, report);
         case V5_MAIN_PAGE_ACTION_JOG_STEP_100:
-            return v5_main_page_local_action_prepare(action, "jog_step", 100.0, report);
+            return v5_main_page_local_action_prepare(action, "jog_step", 0.1, report);
         case V5_MAIN_PAGE_ACTION_JOG_PLUS:
             if (selection_single_axis(selection, &selected_axis)) {
                 ok = v5_command_jog_increment_prepare(selected_axis, jog_step, 1, &prepared, &request);
@@ -378,14 +335,14 @@ int v5_main_page_action_prepare(
             break;
         case V5_MAIN_PAGE_ACTION_JOG_CONTINUOUS_PLUS:
             if (selection_single_axis(selection, &selected_axis)) {
-                ok = v5_command_jog_continuous_prepare(selected_axis, jog_step, 1, &prepared, &request);
+                ok = v5_command_jog_continuous_prepare(selected_axis, 1, &prepared, &request);
             } else {
                 ok = 0;
             }
             break;
         case V5_MAIN_PAGE_ACTION_JOG_CONTINUOUS_MINUS:
             if (selection_single_axis(selection, &selected_axis)) {
-                ok = v5_command_jog_continuous_prepare(selected_axis, jog_step, 0, &prepared, &request);
+                ok = v5_command_jog_continuous_prepare(selected_axis, 0, &prepared, &request);
             } else {
                 ok = 0;
             }

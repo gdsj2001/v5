@@ -1,6 +1,7 @@
 #include "v5_settings_apply.h"
 
 #include "v5_parameter_owner_map.h"
+#include "v5_motion_model_registry.h"
 #include "v5_settings_parameter_store.h"
 
 #include <ctype.h>
@@ -1375,22 +1376,6 @@ static const char *settings_apply_g53_rtcp_key(const char *field_name)
     return 0;
 }
 
-static void settings_apply_upper_ascii(const char *text, char *out, size_t out_cap)
-{
-    size_t i;
-    if (!out || out_cap == 0U) {
-        return;
-    }
-    out[0] = '\0';
-    if (!text) {
-        return;
-    }
-    for (i = 0U; i + 1U < out_cap && text[i]; ++i) {
-        out[i] = (char)toupper((unsigned char)text[i]);
-    }
-    out[i] = '\0';
-}
-
 static int settings_apply_motion_model_values(
     const char *value_text,
     char *canonical,
@@ -1405,7 +1390,7 @@ static int settings_apply_motion_model_values(
     size_t traj_coordinates_cap,
     unsigned int *wrapped_rotary_mask)
 {
-    char normalized[64];
+    const V5MotionModelDescriptor *model;
     if (!value_text || !value_text[0] || !canonical || canonical_cap == 0U ||
         !display || display_cap == 0U ||
         !kins_module || kins_module_cap == 0U ||
@@ -1414,32 +1399,17 @@ static int settings_apply_motion_model_values(
         !wrapped_rotary_mask) {
         return 0;
     }
-    settings_apply_upper_ascii(value_text, normalized, sizeof(normalized));
-    if (strncmp(normalized, "BC", 2U) == 0 ||
-        strstr(normalized, "XYZBC") != 0 ||
-        strstr(normalized, "_BC") != 0 ||
-        strstr(normalized, "-BC") != 0) {
-        snprintf(canonical, canonical_cap, "XYZBC_TRT");
-        snprintf(display, display_cap, "BC摇篮");
-        snprintf(kins_module, kins_module_cap, "xyzbc-trt-kins");
-        snprintf(kins_coordinates, kins_coordinates_cap, "XYZBC");
-        snprintf(traj_coordinates, traj_coordinates_cap, "X Y Z B C");
-        *wrapped_rotary_mask = 24U;
-        return 1;
+    model = v5_motion_model_find(value_text);
+    if (!model) {
+        return 0;
     }
-    if (strncmp(normalized, "AC", 2U) == 0 ||
-        strstr(normalized, "XYZAC") != 0 ||
-        strstr(normalized, "_AC") != 0 ||
-        strstr(normalized, "-AC") != 0) {
-        snprintf(canonical, canonical_cap, "XYZAC_TRT");
-        snprintf(display, display_cap, "AC摇篮");
-        snprintf(kins_module, kins_module_cap, "xyzac-trt-kins");
-        snprintf(kins_coordinates, kins_coordinates_cap, "XYZAC");
-        snprintf(traj_coordinates, traj_coordinates_cap, "X Y Z A C");
-        *wrapped_rotary_mask = 24U;
-        return 1;
-    }
-    return 0;
+    snprintf(canonical, canonical_cap, "%s", model->canonical);
+    snprintf(display, display_cap, "%s", model->display);
+    snprintf(kins_module, kins_module_cap, "%s", model->kins_module);
+    snprintf(kins_coordinates, kins_coordinates_cap, "%s", model->kins_coordinates);
+    snprintf(traj_coordinates, traj_coordinates_cap, "%s", model->traj_coordinates);
+    *wrapped_rotary_mask = model->wrapped_rotary_mask;
+    return 1;
 }
 
 static int settings_apply_commit_motion_model(

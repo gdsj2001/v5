@@ -131,7 +131,9 @@ add_library(v5_command_gate_core STATIC
     ../services/command_gate/v5_linuxcncrsh_format.c
     ../services/state_publisher/v5_native_sample.c
     ../services/command_gate/v5_native_first_point.c
-    ../services/command_gate/v5_native_rotary_equiv_zero.c
+    ../services/command_gate/v5_native_home.c
+    ../services/command_gate/v5_native_axis_zero_position.c
+    ../services/command_gate/v5_native_motion_parameters.c
     ../services/command_gate/v5_native_readback.c
     ../services/command_gate/v5_native_rtcp_control.c
     ../services/command_gate/v5_native_rtcp_status.c
@@ -139,6 +141,7 @@ add_library(v5_command_gate_core STATIC
     ../services/command_gate/v5_native_g53_geometry_status.c
     ../services/command_gate/v5_native_modal_tool_status.c
     ../services/command_gate/v5_native_safety.c
+    ../services/command_gate/v5_native_work_zero.c
     ../services/command_gate/v5_parameter_owner_map.c
     ../services/command_gate/v5_settings_apply.c
 )
@@ -324,6 +327,12 @@ add_executable(v5_command_gate_validator_smoke
 )
 
 target_link_libraries(v5_command_gate_validator_smoke PRIVATE v5_command_gate_core m)
+
+add_executable(v5_native_motion_parameters_smoke
+    ../services/command_gate/v5_native_motion_parameters_smoke.c
+)
+
+target_link_libraries(v5_native_motion_parameters_smoke PRIVATE v5_command_gate_core m)
 
 add_executable(v5_linuxcncrsh_probe
     ../services/command_gate/v5_linuxcncrsh_probe.c

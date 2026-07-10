@@ -1,12 +1,8 @@
 #include "v5_linuxcncrsh_client.h"
-#include "v5_native_modal_tool_status.h"
-#include "v5_native_rtcp_control.h"
-#include "v5_native_rtcp_status.h"
-#include "v5_native_sample.h"
-
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #ifndef _WIN32
 #include <strings.h>
@@ -63,7 +59,7 @@ int v5_linuxcncrsh_format_home_sequence(char *out, size_t out_size)
     if (!out || out_size == 0U) {
         return 0;
     }
-    rc = snprintf(out, out_size, "native_home_mode_gate abort + program RTCP latch clear + native RTCP OFF + BUS real home");
+    rc = snprintf(out, out_size, "native_home_mode_gate active mode + active model + real motion + native readback");
     return v5_linuxcncrsh_format_ok(rc, out_size);
 }
 
@@ -505,6 +501,154 @@ static int v5_linuxcncrsh_send_request_text(int fd, const char *request, char *o
            !v5_linuxcncrsh_response_has_word(discard, "ERROR");
 }
 
+static int v5_linuxcncrsh_axis_letter_ok(char axis)
+{
+    axis = (char)toupper((unsigned char)axis);
+    return axis == 'X' || axis == 'Y' || axis == 'Z' || axis == 'A' || axis == 'B' || axis == 'C';
+}
+
+static int v5_linuxcncrsh_parse_axis_position(
+    const char *response,
+    const char *key,
+    char axis,
+    double *position_out)
+{
+    const char *match = 0;
+    const char *scan;
+    char *end = 0;
+    double value;
+    if (!response || !key || !position_out) {
+        return 0;
+    }
+    scan = response;
+    while ((scan = strstr(scan, key)) != 0) {
+        match = scan;
+        scan += strlen(key);
+    }
+    if (!match) {
+        return 0;
+    }
+    scan = match + strlen(key);
+    while (*scan && isspace((unsigned char)*scan)) {
+        ++scan;
+    }
+    if (toupper((unsigned char)*scan) == toupper((unsigned char)axis) &&
+        isspace((unsigned char)scan[1])) {
+        ++scan;
+        while (*scan && isspace((unsigned char)*scan)) {
+            ++scan;
+        }
+    }
+    value = strtod(scan, &end);
+    if (end == scan || !isfinite(value)) {
+        return 0;
+    }
+    while (*end && isspace((unsigned char)*end)) {
+        ++end;
+    }
+    if (*end) {
+        char *second_end = 0;
+        double second = strtod(end, &second_end);
+        if (second_end != end && isfinite(second)) {
+            value = second;
+        }
+    }
+    *position_out = value;
+    return 1;
+}
+
+int v5_linuxcncrsh_get_axis_position(
+    const V5LinuxcncrshConfig *config,
+    char axis,
+    int relative,
+    double *position_out)
+{
+#ifdef _WIN32
+    (void)config;
+    (void)axis;
+    (void)relative;
+    (void)position_out;
+    return 0;
+#else
+    int fd;
+    int rc;
+    char command[64];
+    char response[512];
+    const char *key = relative ? "REL_ACT_POS" : "ABS_ACT_POS";
+    axis = (char)toupper((unsigned char)axis);
+    if (!position_out || !v5_linuxcncrsh_axis_letter_ok(axis)) {
+        return 0;
+    }
+    fd = v5_linuxcncrsh_gate_connect(config);
+    if (fd < 0) {
+        return 0;
+    }
+    rc = snprintf(command, sizeof(command), "Get %s %c", key, axis);
+    if (!v5_linuxcncrsh_format_ok(rc, sizeof(command)) ||
+        !v5_linuxcncrsh_send_request_text(fd, command, response, sizeof(response))) {
+        v5_linuxcncrsh_gate_close();
+        return 0;
+    }
+    return v5_linuxcncrsh_parse_axis_position(response, key, axis, position_out);
+#endif
+}
+
+int v5_linuxcncrsh_get_all_homed(
+    const V5LinuxcncrshConfig *config,
+    unsigned int expected_joint_count,
+    int *all_homed_out)
+{
+#ifdef _WIN32
+    (void)config;
+    (void)expected_joint_count;
+    if (all_homed_out) {
+        *all_homed_out = 0;
+    }
+    return 0;
+#else
+    int fd;
+    char response[512];
+    char *token;
+    char *save = 0;
+    unsigned int count = 0U;
+    int all_homed = 1;
+    if (all_homed_out) {
+        *all_homed_out = 0;
+    }
+    if (expected_joint_count == 0U) {
+        return 0;
+    }
+    fd = v5_linuxcncrsh_gate_connect(config);
+    if (fd < 0 ||
+        !v5_linuxcncrsh_send_request_text(fd, "Get Joint_Homed -1", response, sizeof(response))) {
+        if (fd >= 0) {
+            v5_linuxcncrsh_gate_close();
+        }
+        return 0;
+    }
+    token = strtok_r(response, " \t\r\n", &save);
+    if (!token || strcasecmp(token, "JOINT_HOMED") != 0) {
+        return 0;
+    }
+    while ((token = strtok_r(0, " \t\r\n", &save)) != 0) {
+        if (strcasecmp(token, "YES") != 0 && strcasecmp(token, "NO") != 0) {
+            continue;
+        }
+        if (strcasecmp(token, "YES") != 0) {
+            all_homed = 0;
+        }
+        ++count;
+    }
+    if (count != expected_joint_count) {
+        return 0;
+    }
+    if (all_homed_out) {
+        *all_homed_out = all_homed;
+    }
+    return 1;
+#endif
+}
+
 static int v5_linuxcncrsh_send_fifo_commands(int fd, const char *line)
 {
     const char *p = line;
@@ -635,282 +779,6 @@ static int v5_linuxcncrsh_wait_machine_enabled_actual(
     return 0;
 }
 
-static int v5_linuxcncrsh_read_all_homed_actual(int *all_homed_out)
-{
-    V5NativeReadback readback;
-    if (all_homed_out) {
-        *all_homed_out = 0;
-    }
-    v5_native_readback_init(&readback);
-    if (!v5_native_modal_tool_status_read(0, V5_NATIVE_MODAL_TOOL_STATUS_DEFAULT_MAX_AGE_MS, &readback) ||
-        !v5_native_readback_all_homed_known(&readback)) {
-        return 0;
-    }
-    if (all_homed_out) {
-        *all_homed_out = readback.all_homed ? 1 : 0;
-    }
-    return 1;
-}
-
-static int v5_linuxcncrsh_wait_home_completion_actual(unsigned int attempts, unsigned int delay_us)
-{
-    unsigned int attempt;
-    unsigned int stable = 0U;
-    for (attempt = 0U; attempt < attempts; ++attempt) {
-        int all_homed = 0;
-        if (v5_linuxcncrsh_read_all_homed_actual(&all_homed) && all_homed) {
-            ++stable;
-        } else {
-            stable = 0U;
-        }
-        if (stable >= 2U) {
-            return 1;
-        }
-        if (delay_us > 0U) {
-            usleep(delay_us);
-        }
-    }
-    return 0;
-}
-
-#define V5_BUS_HOME_TARGET_TOLERANCE 0.050
-#define V5_BUS_HOME_MOTION_TOLERANCE 0.010
-#define V5_BUS_HOME_PROOF_OFFSET 1.000
-#define V5_BUS_HOME_LINEAR_SPEED_MM_PER_MIN 10000.000
-#define V5_BUS_HOME_ROTARY_SPEED_DEG_PER_MIN 50000.000
-
-static int v5_linuxcncrsh_read_native_mcs(V5NativeDisplaySample *sample)
-{
-    return sample &&
-           v5_native_display_sample_read(sample) &&
-           sample->available &&
-           (sample->valid_mask & V5_STATUS_VALID_MCS) != 0U;
-}
-
-static int v5_linuxcncrsh_read_rtcp_active_actual(int *active_out)
-{
-    V5NativeReadback readback;
-    if (active_out) {
-        *active_out = 0;
-    }
-    v5_native_readback_init(&readback);
-    if (!v5_native_rtcp_status_read(0, V5_NATIVE_RTCP_STATUS_DEFAULT_MAX_AGE_MS, &readback) ||
-        !v5_native_readback_rtcp_known(&readback)) {
-        return 0;
-    }
-    if (active_out) {
-        *active_out = readback.rtcp_enabled ? 1 : 0;
-    }
-    return 1;
-}
-
-static int v5_linuxcncrsh_clear_interrupted_program_rtcp_latch(int fd)
-{
-    int active = 0;
-    if (!v5_linuxcncrsh_read_rtcp_active_actual(&active) || !active) {
-        return 1;
-    }
-    return v5_linuxcncrsh_send_request_text(fd, "Set Mode MDI", 0, 0U) &&
-           v5_linuxcncrsh_send_request_text(fd, "Set MDI M65 P0", 0, 0U);
-}
-
-static int v5_linuxcncrsh_confirm_home_rtcp_off(char *code_out, size_t code_out_size)
-{
-    V5NativeRtcpControlResult result;
-    int status;
-    int active = 0;
-    for (unsigned int attempt = 0U; attempt < 10U; ++attempt) {
-        if (!v5_linuxcncrsh_read_rtcp_active_actual(&active)) {
-            v5_linuxcncrsh_copy_code(code_out, code_out_size, "BUS_HOME_RTCP_ACTUAL_UNAVAILABLE");
-            return 0;
-        }
-        if (!active) {
-            return 1;
-        }
-        usleep(50000U);
-    }
-
-    status = v5_native_rtcp_control_set(0, &result);
-    if (status == V5_NATIVE_RTCP_CONTROL_SEND_SENT) {
-        return 1;
-    }
-    v5_linuxcncrsh_copy_code(
-        code_out,
-        code_out_size,
-        result.code[0] ? result.code : "BUS_HOME_RTCP_OFF_NOT_CONFIRMED");
-    return 0;
-}
-
-static double v5_linuxcncrsh_axis_target_error(unsigned int axis_i, double current, double target);
-
-static int v5_linuxcncrsh_home_mcs_at_target(
-    const double mcs[V5_STATUS_AXIS_COUNT],
-    const double target[V5_STATUS_AXIS_COUNT],
-    double tolerance)
-{
-    unsigned int i;
-    if (!mcs || !target) {
-        return 0;
-    }
-    for (i = 0U; i < V5_STATUS_AXIS_COUNT; ++i) {
-        if (v5_linuxcncrsh_axis_target_error(i, mcs[i], target[i]) > tolerance) {
-            return 0;
-        }
-    }
-    return 1;
-}
-
-static double v5_linuxcncrsh_axis_target_error(unsigned int axis_i, double current, double target)
-{
-    double error;
-    if (!isfinite(current) || !isfinite(target)) {
-        return HUGE_VAL;
-    }
-    error = fabs(current - target);
-    if (axis_i >= 3U) {
-        while (error >= 360.0) {
-            error -= 360.0;
-        }
-        if (error > 180.0) {
-            error = 360.0 - error;
-        }
-    }
-    return error;
-}
-
-static void v5_linuxcncrsh_home_note_axis_motion(
-    const double before[V5_STATUS_AXIS_COUNT],
-    const double after[V5_STATUS_AXIS_COUNT],
-    double tolerance,
-    int moved[V5_STATUS_AXIS_COUNT])
-{
-    unsigned int i;
-    if (!before || !after || !moved) {
-        return;
-    }
-    for (i = 0U; i < V5_STATUS_AXIS_COUNT; ++i) {
-        if (!isfinite(before[i]) || !isfinite(after[i])) {
-            continue;
-        }
-        if (fabs(after[i] - before[i]) > tolerance) {
-            moved[i] = 1;
-        }
-    }
-}
-
-static int v5_linuxcncrsh_home_all_axes_moved(const int moved[V5_STATUS_AXIS_COUNT])
-{
-    unsigned int i;
-    if (!moved) {
-        return 0;
-    }
-    for (i = 0U; i < V5_STATUS_AXIS_COUNT; ++i) {
-        if (!moved[i]) {
-            return 0;
-        }
-    }
-    return 1;
-}
-
-static int v5_linuxcncrsh_wait_bus_home_axis_arrival(
-    const double start_mcs[V5_STATUS_AXIS_COUNT],
-    int moved_axes[V5_STATUS_AXIS_COUNT],
-    unsigned int axis_i,
-    double target,
-    unsigned int attempts,
-    unsigned int delay_us)
-{
-    unsigned int attempt;
-    unsigned int stable = 0U;
-    if (axis_i >= V5_STATUS_AXIS_COUNT) {
-        return 0;
-    }
-    for (attempt = 0U; attempt < attempts; ++attempt) {
-        V5NativeDisplaySample sample;
-        if (v5_linuxcncrsh_read_native_mcs(&sample)) {
-            v5_linuxcncrsh_home_note_axis_motion(
-                start_mcs,
-                sample.mcs,
-                V5_BUS_HOME_MOTION_TOLERANCE,
-                moved_axes);
-            if (v5_linuxcncrsh_axis_target_error(axis_i, sample.mcs[axis_i], target) <= V5_BUS_HOME_TARGET_TOLERANCE) {
-                ++stable;
-            } else {
-                stable = 0U;
-            }
-            if (stable >= 3U) {
-                return 1;
-            }
-        } else {
-            stable = 0U;
-        }
-        if (delay_us > 0U) {
-            usleep(delay_us);
-        }
-    }
-    return 0;
-}
-
-static double v5_linuxcncrsh_bus_home_proof_delta(double current)
-{
-    if (!isfinite(current)) {
-        return V5_BUS_HOME_PROOF_OFFSET;
-    }
-    if (fabs(current) > V5_BUS_HOME_PROOF_OFFSET) {
-        return current > 0.0 ? -V5_BUS_HOME_PROOF_OFFSET : V5_BUS_HOME_PROOF_OFFSET;
-    }
-    return V5_BUS_HOME_PROOF_OFFSET;
-}
-
-static char v5_linuxcncrsh_bus_axis_letter(unsigned int axis_i)
-{
-    static const char axes[V5_STATUS_AXIS_COUNT] = {'X', 'Y', 'Z', 'A', 'C'};
-    return axis_i < V5_STATUS_AXIS_COUNT ? axes[axis_i] : '\0';
-}
-
-static int v5_linuxcncrsh_send_bus_home_joint_jog(
-    int fd,
-    unsigned int axis_i,
-    double delta,
-    int coordinated_axis_jog)
-{
-    char line[128];
-    double distance;
-    double speed;
-    int rc;
-    if (axis_i >= V5_STATUS_AXIS_COUNT || !isfinite(delta) || fabs(delta) <= V5_BUS_HOME_MOTION_TOLERANCE) {
-        return 0;
-    }
-    distance = fabs(delta);
-    speed = axis_i < 3U ? V5_BUS_HOME_LINEAR_SPEED_MM_PER_MIN : V5_BUS_HOME_ROTARY_SPEED_DEG_PER_MIN;
-    if (delta < 0.0) {
-        speed = -speed;
-    }
-    if (coordinated_axis_jog) {
-        char axis = v5_linuxcncrsh_bus_axis_letter(axis_i);
-        if (!axis) {
-            return 0;
-        }
-        rc = snprintf(
-            line,
-            sizeof(line),
-            "Set Jog_Incr %c %.6f %.6f",
-            axis,
-            speed,
-            distance);
-    } else {
-        rc = snprintf(
-            line,
-            sizeof(line),
-            "Set Jog_Incr %u %.6f %.6f",
-            axis_i,
-            speed,
-            distance);
-    }
-    return v5_linuxcncrsh_format_ok(rc, sizeof(line)) &&
-           v5_linuxcncrsh_send_request_text(fd, "Set Mode Manual", 0, 0U) &&
-           v5_linuxcncrsh_send_request_text(fd, line, 0, 0U);
-}
 #endif
 
 int v5_native_probe_machine_enabled_actual(int *enabled_out)
@@ -1037,133 +905,6 @@ V5LinuxcncrshSendStatus v5_linuxcncrsh_send_machine_on_sequence(
 #endif
 }
 
-V5LinuxcncrshSendStatus v5_linuxcncrsh_send_home_sequence(
-    const V5LinuxcncrshConfig *config,
-    char *mode_out,
-    size_t mode_out_size,
-    char *code_out,
-    size_t code_out_size)
-{
-#ifdef _WIN32
-    (void)config;
-    (void)mode_out;
-    (void)mode_out_size;
-    v5_linuxcncrsh_copy_code(code_out, code_out_size, "BUS_HOME_UNAVAILABLE_ON_WIN32");
-    return V5_LINUXCNCRSH_SEND_UNAVAILABLE;
-#else
-    V5NativeDisplaySample start_sample;
-    V5NativeDisplaySample current_sample;
-    double zero_target[V5_STATUS_AXIS_COUNT] = {0.0, 0.0, 0.0, 0.0, 0.0};
-    int moved_axes[V5_STATUS_AXIS_COUNT] = {0, 0, 0, 0, 0};
-    int fd;
-    int ok;
-    int all_homed = 0;
-    int coordinated_axis_jog = 0;
-    unsigned int axis_i;
-    if (mode_out && mode_out_size > 0U) {
-        snprintf(mode_out, mode_out_size, "bus_real_home_joint_jog_zero");
-    }
-    v5_linuxcncrsh_copy_code(code_out, code_out_size, "BUS_HOME_NOT_ATTEMPTED");
-    if (!v5_linuxcncrsh_wait_machine_enabled_actual(config, 1, 3U, 100000U)) {
-        v5_linuxcncrsh_copy_code(code_out, code_out_size, "BUS_HOME_MACHINE_ENABLE_NOT_CONFIRMED");
-        return V5_LINUXCNCRSH_SEND_IO_ERROR;
-    }
-    fd = v5_linuxcncrsh_gate_connect(config);
-    if (fd < 0) {
-        v5_linuxcncrsh_copy_code(code_out, code_out_size, "BUS_HOME_LINUXCNCRSH_UNAVAILABLE");
-        return V5_LINUXCNCRSH_SEND_UNAVAILABLE;
-    }
-    if (!v5_linuxcncrsh_send_request_text(fd, "Set Enable EMCTOO", 0, 0U)) {
-        v5_linuxcncrsh_gate_close();
-        v5_linuxcncrsh_copy_code(code_out, code_out_size, "BUS_HOME_ENABLE_REJECTED");
-        return V5_LINUXCNCRSH_SEND_IO_ERROR;
-    }
-    if (!v5_linuxcncrsh_send_request_text(fd, "Set Abort", 0, 0U)) {
-        v5_linuxcncrsh_copy_code(code_out, code_out_size, "BUS_HOME_ABORT_NOT_CONFIRMED");
-        return V5_LINUXCNCRSH_SEND_IO_ERROR;
-    }
-    if (!v5_linuxcncrsh_clear_interrupted_program_rtcp_latch(fd)) {
-        v5_linuxcncrsh_copy_code(code_out, code_out_size, "BUS_HOME_PROGRAM_RTCP_LATCH_CLEAR_FAILED");
-        return V5_LINUXCNCRSH_SEND_IO_ERROR;
-    }
-    if (!v5_linuxcncrsh_confirm_home_rtcp_off(code_out, code_out_size)) {
-        return V5_LINUXCNCRSH_SEND_IO_ERROR;
-    }
-    if (!v5_linuxcncrsh_send_request_text(fd, "Set Mode Manual", 0, 0U)) {
-        v5_linuxcncrsh_copy_code(code_out, code_out_size, "BUS_HOME_MANUAL_MODE_NOT_CONFIRMED");
-        return V5_LINUXCNCRSH_SEND_IO_ERROR;
-    }
-    if (!v5_linuxcncrsh_read_native_mcs(&start_sample)) {
-        v5_linuxcncrsh_copy_code(code_out, code_out_size, "BUS_HOME_NATIVE_MCS_UNAVAILABLE");
-        return V5_LINUXCNCRSH_SEND_IO_ERROR;
-    }
-    coordinated_axis_jog = v5_linuxcncrsh_read_all_homed_actual(&all_homed) && all_homed;
-    for (axis_i = 0U; axis_i < V5_STATUS_AXIS_COUNT; ++axis_i) {
-        double target = start_sample.mcs[axis_i] + v5_linuxcncrsh_bus_home_proof_delta(start_sample.mcs[axis_i]);
-        if (!v5_linuxcncrsh_send_bus_home_joint_jog(
-                fd,
-                axis_i,
-                target - start_sample.mcs[axis_i],
-                coordinated_axis_jog)) {
-            v5_linuxcncrsh_copy_code(code_out, code_out_size, "BUS_HOME_PROOF_JOG_COMMAND_REJECTED");
-            return V5_LINUXCNCRSH_SEND_IO_ERROR;
-        }
-        if (!v5_linuxcncrsh_wait_bus_home_axis_arrival(
-                start_sample.mcs,
-                moved_axes,
-                axis_i,
-                target,
-                300U,
-                50000U)) {
-            v5_linuxcncrsh_copy_code(code_out, code_out_size, "BUS_HOME_PROOF_JOG_NOT_CONFIRMED");
-            return V5_LINUXCNCRSH_SEND_IO_ERROR;
-        }
-    }
-    if (!v5_linuxcncrsh_read_native_mcs(&current_sample)) {
-        v5_linuxcncrsh_copy_code(code_out, code_out_size, "BUS_HOME_NATIVE_MCS_UNAVAILABLE_AFTER_PROOF");
-        return V5_LINUXCNCRSH_SEND_IO_ERROR;
-    }
-    for (axis_i = 0U; axis_i < V5_STATUS_AXIS_COUNT; ++axis_i) {
-        double delta = -current_sample.mcs[axis_i];
-        if (!v5_linuxcncrsh_send_bus_home_joint_jog(
-                fd,
-                axis_i,
-                delta,
-                coordinated_axis_jog)) {
-            v5_linuxcncrsh_copy_code(code_out, code_out_size, "BUS_HOME_ZERO_JOG_COMMAND_REJECTED");
-            return V5_LINUXCNCRSH_SEND_IO_ERROR;
-        }
-        if (!v5_linuxcncrsh_wait_bus_home_axis_arrival(
-                start_sample.mcs,
-                moved_axes,
-                axis_i,
-                0.0,
-                600U,
-                50000U)) {
-            v5_linuxcncrsh_copy_code(code_out, code_out_size, "BUS_HOME_ZERO_JOG_NOT_CONFIRMED");
-            return V5_LINUXCNCRSH_SEND_IO_ERROR;
-        }
-        if (!v5_linuxcncrsh_read_native_mcs(&current_sample)) {
-            v5_linuxcncrsh_copy_code(code_out, code_out_size, "BUS_HOME_NATIVE_MCS_UNAVAILABLE_DURING_ZERO");
-            return V5_LINUXCNCRSH_SEND_IO_ERROR;
-        }
-    }
-    if (!v5_linuxcncrsh_home_mcs_at_target(current_sample.mcs, zero_target, V5_BUS_HOME_TARGET_TOLERANCE) ||
-        !v5_linuxcncrsh_home_all_axes_moved(moved_axes)) {
-        v5_linuxcncrsh_copy_code(code_out, code_out_size, "BUS_HOME_REAL_MOVE_NOT_CONFIRMED");
-        return V5_LINUXCNCRSH_SEND_IO_ERROR;
-    }
-    ok = v5_linuxcncrsh_send_request_text(fd, "Set Mode Manual", 0, 0U) &&
-         v5_linuxcncrsh_send_request_text(fd, "Set Home -1", 0, 0U);
-    if (!ok || !v5_linuxcncrsh_wait_home_completion_actual(50U, 100000U)) {
-        v5_linuxcncrsh_copy_code(code_out, code_out_size, "BUS_HOME_HOMED_SYNC_FAILED_AFTER_REAL_MOVE");
-        return V5_LINUXCNCRSH_SEND_IO_ERROR;
-    }
-    v5_linuxcncrsh_copy_code(code_out, code_out_size, "BUS_HOME_REAL_MOVE_CONFIRMED");
-    return V5_LINUXCNCRSH_SEND_SENT;
-#endif
-}
-
 V5LinuxcncrshSendStatus v5_linuxcncrsh_send_prepared(
     const V5LinuxcncrshConfig *config,
     const V5CommandPrepared *prepared,
@@ -1171,9 +912,8 @@ V5LinuxcncrshSendStatus v5_linuxcncrsh_send_prepared(
 {
     char line[384];
 
-    if (prepared && request && request->kind == V5_COMMAND_HOME &&
-        strcmp(prepared->owner ? prepared->owner : "", "native_home_mode_gate") == 0) {
-        return v5_linuxcncrsh_send_home_sequence(config, 0, 0, 0, 0);
+    if (prepared && request && request->kind == V5_COMMAND_HOME) {
+        return V5_LINUXCNCRSH_SEND_INVALID;
     }
     if (prepared && request &&
         (request->kind == V5_COMMAND_ESTOP_RESET || request->kind == V5_COMMAND_ESTOP_FORCE) &&

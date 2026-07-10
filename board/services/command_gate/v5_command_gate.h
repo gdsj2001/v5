@@ -32,7 +32,7 @@ typedef enum V5CommandKind {
     V5_COMMAND_FEED_OVERRIDE_SET,
     V5_COMMAND_SPINDLE_OVERRIDE_SET,
     V5_COMMAND_FIRST_POINT,
-    V5_COMMAND_ROTARY_EQUIV_ZERO,
+    V5_COMMAND_AXIS_ZERO_POSITION,
 } V5CommandKind;
 
 typedef struct V5CommandRequest {

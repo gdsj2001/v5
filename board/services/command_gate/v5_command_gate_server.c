@@ -1,10 +1,12 @@
 #include "v5_command_gate_ipc.h"
 #include "v5_command_gate_validator.h"
 #include "v5_linuxcncrsh_client.h"
+#include "v5_native_axis_zero_position.h"
 #include "v5_native_first_point.h"
-#include "v5_native_rotary_equiv_zero.h"
+#include "v5_native_motion_parameters.h"
 #include "v5_native_rtcp_control.h"
 #include "v5_native_safety.h"
+#include "v5_native_work_zero.h"
 #include "v5_process_residency.h"
 #include "v5_settings_apply.h"
 
@@ -34,7 +36,9 @@ static pthread_mutex_t g_linuxcncrsh_lock = PTHREAD_MUTEX_INITIALIZER;
 static V5LinuxcncrshConfig g_linuxcncrsh_config = {"127.0.0.1", 5007U, "EMC", "v5_command_gate", 1000U};
 static char g_host[64] = "127.0.0.1";
 static char g_password[64] = "EMC";
+static char g_ini_path[256];
 static char g_socket_path[sizeof(((struct sockaddr_un *)0)->sun_path)] = V5_COMMAND_GATE_SOCKET_PATH;
+static V5NativeMotionParameters g_motion_parameters;
 
 static void on_signal(int signo)
 {
@@ -183,7 +187,8 @@ static int owner_is_allowed(const char *owner)
          strcmp(owner, "native_home_mode_gate") == 0 ||
          strcmp(owner, "native_safety") == 0 ||
          strcmp(owner, "native_first_point") == 0 ||
-         strcmp(owner, "native_rotary_gate") == 0 ||
+         strcmp(owner, "native_axis_zero_position") == 0 ||
+         strcmp(owner, "native_work_zero") == 0 ||
          strcmp(owner, "native_rtcp_control") == 0);
 }
 
@@ -276,38 +281,81 @@ static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5Command
             return;
         }
         status = v5_native_first_point_send(&g_linuxcncrsh_config, &prepared, &request);
-    } else if (request.kind == V5_COMMAND_ROTARY_EQUIV_ZERO && strcmp(prepared.owner, "native_rotary_gate") == 0) {
-        if (!v5_native_rotary_equiv_zero_format_report(&prepared, &request, response->command_line, sizeof(response->command_line))) {
+    } else if (request.kind == V5_COMMAND_AXIS_ZERO_POSITION &&
+               strcmp(prepared.owner, "native_axis_zero_position") == 0) {
+        V5NativeAxisZeroPositionResult native_result;
+        if (!v5_native_axis_zero_position_format_report(
+                &prepared, &request, response->command_line, sizeof(response->command_line))) {
             response->send_status = V5_COMMAND_GATE_SEND_INVALID;
             linuxcncrsh_unlock();
             return;
         }
-        status = v5_native_rotary_equiv_zero_send(&g_linuxcncrsh_config, &prepared, &request);
-        copy_cstr(
-            response->readback_code,
-            sizeof(response->readback_code),
-            status == V5_LINUXCNCRSH_SEND_SENT ? "ROTARY_EQUIV_ZERO_NATIVE_SENT" : "ROTARY_EQUIV_ZERO_NATIVE_FAILED");
+        status = v5_native_axis_zero_position_send(
+            &g_linuxcncrsh_config,
+            &g_motion_parameters,
+            &prepared,
+            &request,
+            &native_result);
+        copy_cstr(response->readback_code, sizeof(response->readback_code), native_result.code);
+    } else if (request.kind == V5_COMMAND_WORK_ZERO && strcmp(prepared.owner, "native_work_zero") == 0) {
+        V5NativeWorkZeroResult native_result;
+        if (!v5_linuxcncrsh_format_line(
+                &prepared, &request, response->command_line, sizeof(response->command_line))) {
+            response->send_status = V5_COMMAND_GATE_SEND_INVALID;
+            linuxcncrsh_unlock();
+            return;
+        }
+        status = v5_native_work_zero_send(
+            &g_linuxcncrsh_config,
+            &g_motion_parameters,
+            &prepared,
+            &request,
+            &native_result);
+        copy_cstr(response->readback_code, sizeof(response->readback_code), native_result.code);
     } else if (request.kind == V5_COMMAND_HOME && strcmp(prepared.owner, "native_home_mode_gate") == 0) {
         char home_code[64];
-        (void)v5_linuxcncrsh_format_home_sequence(response->command_line, sizeof(response->command_line));
+        snprintf(
+            response->command_line,
+            sizeof(response->command_line),
+            "native_home_mode_gate %s real Home",
+            v5_native_driver_mode_text(g_motion_parameters.driver_mode));
         home_code[0] = '\0';
-        status = v5_linuxcncrsh_send_home_sequence(
-            &g_linuxcncrsh_config,
-            0,
-            0,
-            home_code,
-            sizeof(home_code));
+        if (g_motion_parameters.driver_mode == V5_NATIVE_DRIVER_MODE_BUS) {
+            status = v5_linuxcncrsh_send_home_sequence(
+                &g_linuxcncrsh_config, 0, 0, home_code, sizeof(home_code));
+        } else {
+            status = V5_LINUXCNCRSH_SEND_UNAVAILABLE;
+            copy_cstr(home_code, sizeof(home_code), "PULSE_HOME_COLD_STAGED_NOT_RUNTIME_SELECTABLE");
+        }
         copy_cstr(
             response->readback_code,
             sizeof(response->readback_code),
             home_code[0] ? home_code : "BUS_HOME_RESULT_MISSING");
     } else {
+        char jog_code[64];
+        if ((request.kind == V5_COMMAND_JOG_INCREMENT ||
+             request.kind == V5_COMMAND_JOG_CONTINUOUS ||
+             request.kind == V5_COMMAND_JOG_STOP) &&
+            (!v5_native_motion_parameters_resolve_jog(
+                 &g_motion_parameters, &request, jog_code, sizeof(jog_code)) ||
+             v5_linuxcncrsh_send_line(&g_linuxcncrsh_config, "Set Mode Manual") != V5_LINUXCNCRSH_SEND_SENT)) {
+            response->send_status = V5_COMMAND_GATE_SEND_INVALID;
+            copy_cstr(response->readback_code, sizeof(response->readback_code),
+                      jog_code[0] ? jog_code : "JOG_NATIVE_PARAMETERS_REJECTED");
+            linuxcncrsh_unlock();
+            return;
+        }
         if (!v5_linuxcncrsh_format_line(&prepared, &request, response->command_line, sizeof(response->command_line))) {
             response->send_status = V5_COMMAND_GATE_SEND_INVALID;
             linuxcncrsh_unlock();
             return;
         }
         status = v5_linuxcncrsh_send_line(&g_linuxcncrsh_config, response->command_line);
+        if (request.kind == V5_COMMAND_JOG_INCREMENT ||
+            request.kind == V5_COMMAND_JOG_CONTINUOUS ||
+            request.kind == V5_COMMAND_JOG_STOP) {
+            copy_cstr(response->readback_code, sizeof(response->readback_code), jog_code);
+        }
     }
     response->send_status = (int32_t)status;
     response->executed = status == V5_LINUXCNCRSH_SEND_SENT ? 1 : 0;
@@ -457,6 +505,8 @@ static void parse_args(int argc, char **argv)
             copy_cstr(g_password, sizeof(g_password), argv[++i]);
         } else if (strcmp(argv[i], "--timeout-ms") == 0 && i + 1 < argc) {
             g_linuxcncrsh_config.timeout_ms = (unsigned int)atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--ini") == 0 && i + 1 < argc) {
+            copy_cstr(g_ini_path, sizeof(g_ini_path), argv[++i]);
         }
     }
     g_linuxcncrsh_config.host = g_host;
@@ -470,9 +520,16 @@ static void parse_args(int argc, char **argv)
 int main(int argc, char **argv)
 {
     int listen_fd;
+    char motion_code[64];
     parse_args(argc, argv);
     if (!v5_process_residency_lock("v5_command_gate_server")) {
         return 3;
+    }
+    if (!v5_native_motion_parameters_load(
+            g_ini_path, &g_motion_parameters, motion_code, sizeof(motion_code))) {
+        fprintf(stderr, "v5_command_gate_server motion parameter preload failed: %s ini=%s\n",
+                motion_code, g_ini_path);
+        return 5;
     }
     if (!v5_linuxcncrsh_gate_preconnect(&g_linuxcncrsh_config)) {
         fprintf(stderr, "v5_command_gate_server linuxcncrsh preconnect failed: %s:%u\n",

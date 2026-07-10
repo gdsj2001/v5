@@ -54,14 +54,19 @@ int main(void)
     if (!expect_reject(&frame, "raw_set")) return 3;
 
     init_frame(&frame, V5_COMMAND_JOG_CONTINUOUS);
-    frame.index_value = 0;
+    snprintf(frame.text_value, sizeof(frame.text_value), "X");
     frame.axis_value = NAN;
     if (!expect_reject(&frame, "nan_axis_value")) return 4;
 
     init_frame(&frame, V5_COMMAND_WORK_ZERO);
     frame.index_value = 1;
     snprintf(frame.text_value, sizeof(frame.text_value), "B");
-    if (!expect_reject(&frame, "bad_axis")) return 5;
+    if (!expect_accept(&frame)) return 5;
+
+    init_frame(&frame, V5_COMMAND_WORK_ZERO);
+    frame.index_value = 1;
+    snprintf(frame.text_value, sizeof(frame.text_value), "Q");
+    if (!expect_reject(&frame, "bad_axis")) return 15;
 
     init_frame(&frame, V5_COMMAND_RTCP_SET);
     frame.enabled_value = 2;
@@ -80,19 +85,19 @@ int main(void)
              "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
     if (!expect_accept(&frame)) return 8;
 
-    init_frame(&frame, V5_COMMAND_ROTARY_EQUIV_ZERO);
-    frame.axis_mask = V5_COMMAND_AXIS_A_MASK;
-    frame.enabled_value = 1;
+    init_frame(&frame, V5_COMMAND_AXIS_ZERO_POSITION);
+    snprintf(frame.text_value, sizeof(frame.text_value), "B");
+    snprintf(frame.mode_value, sizeof(frame.mode_value), "wcs");
     if (!expect_accept(&frame)) return 12;
 
-    init_frame(&frame, V5_COMMAND_ROTARY_EQUIV_ZERO);
-    frame.axis_mask = V5_COMMAND_AXIS_X_MASK;
-    frame.enabled_value = 1;
-    if (!expect_reject(&frame, "bad_rotary_axis")) return 13;
+    init_frame(&frame, V5_COMMAND_AXIS_ZERO_POSITION);
+    snprintf(frame.text_value, sizeof(frame.text_value), "Q");
+    snprintf(frame.mode_value, sizeof(frame.mode_value), "mcs");
+    if (!expect_reject(&frame, "bad_axis_zero_axis")) return 13;
 
-    init_frame(&frame, V5_COMMAND_ROTARY_EQUIV_ZERO);
-    frame.axis_mask = V5_COMMAND_AXIS_C_MASK;
-    if (!expect_reject(&frame, "missing_rotary_confirm")) return 14;
+    init_frame(&frame, V5_COMMAND_AXIS_ZERO_POSITION);
+    snprintf(frame.text_value, sizeof(frame.text_value), "C");
+    if (!expect_reject(&frame, "missing_axis_zero_mode")) return 14;
 
     init_frame(&frame, V5_COMMAND_START);
     frame.axis_mask = V5_COMMAND_AXIS_X_MASK;
