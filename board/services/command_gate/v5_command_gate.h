@@ -56,6 +56,7 @@ typedef struct V5CommandPrepared {
 } V5CommandPrepared;
 
 int v5_command_gate_prepare(const V5CommandRequest *request, V5CommandPrepared *prepared);
+int v5_command_gate_requires_power_on_home(V5CommandKind kind);
 
 #ifdef __cplusplus
 }

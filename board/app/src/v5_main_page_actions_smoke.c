@@ -339,6 +339,38 @@ static int expect_missing_gate(V5MainPage *page, V5MainPageActionKind action)
     return page->last_action.action == action && !page->last_action.prepared;
 }
 
+static int expect_power_on_home_block(
+    V5MainPage *page,
+    V5MainPageActionKind action,
+    const char *code)
+{
+    V5MainPageActionReport report;
+    const char *message;
+    if (!page || !code || !v5_main_page_trigger_action(page, action, &report)) {
+        return 0;
+    }
+    if (report.action != action || report.prepared || !report.local_only || report.executed ||
+        report.send_status != V5_COMMAND_GATE_SEND_INVALID ||
+        report.request.kind != V5_COMMAND_UI_LOCAL ||
+        !same_text(report.command.name, "power_on_home_precondition") ||
+        !same_text(report.command.owner, "native_home_precondition") ||
+        report.command.accepted || !same_text(report.readback_code, code)) {
+        return 0;
+    }
+    if (!page->power_on_home_popup || !page->power_on_home_popup_message ||
+        !page->power_on_home_popup_close ||
+        lv_obj_has_flag(page->power_on_home_popup, LV_OBJ_FLAG_HIDDEN)) {
+        return 0;
+    }
+    message = lv_label_get_text(page->power_on_home_popup_message);
+    if (!message || !strstr(message, code) || !strstr(message, "原因:") ||
+        !strstr(message, "下一步:")) {
+        return 0;
+    }
+    lv_event_send(page->power_on_home_popup_close, LV_EVENT_RELEASED, 0);
+    return lv_obj_has_flag(page->power_on_home_popup, LV_OBJ_FLAG_HIDDEN);
+}
+
 int main(void)
 {
     V5MainPage page;
@@ -386,6 +418,65 @@ int main(void)
     }
     if (!button_visual_state_cycle(&page, V5_MAIN_PAGE_ACTION_HOME)) {
         return 67;
+    }
+    {
+        V5NativeReadback readback;
+        v5_native_readback_init(&readback);
+        v5_native_readback_set_all_homed(&readback, 0);
+        v5_main_page_set_native_readback(&page, &readback);
+        if (!v5_main_page_select_axis(&page, V5_MAIN_PAGE_SELECT_MCS, 'X') ||
+            !expect_power_on_home_block(
+                &page,
+                V5_MAIN_PAGE_ACTION_HOME,
+                "POWER_ON_HOME_REQUIRED") ||
+            !expect_power_on_home_block(
+                &page,
+                V5_MAIN_PAGE_ACTION_START,
+                "POWER_ON_HOME_REQUIRED")) {
+            return 68;
+        }
+        if (!v5_main_page_select_axis(&page, V5_MAIN_PAGE_SELECT_MCS, 'X')) {
+            return 71;
+        }
+        {
+            V5MainPageActionReport modal_report;
+            if (!v5_main_page_trigger_action(
+                    &page,
+                    V5_MAIN_PAGE_ACTION_HOME,
+                    &modal_report) ||
+                !same_text(modal_report.readback_code, "POWER_ON_HOME_REQUIRED")) {
+                return 71;
+            }
+        }
+        lv_tick_inc(3100U);
+        (void)lv_timer_handler();
+        if (lv_obj_has_flag(page.power_on_home_popup, LV_OBJ_FLAG_HIDDEN) ||
+            page.selection.all_axes || page.selection.axis != 'X') {
+            return 71;
+        }
+        lv_event_send(page.power_on_home_popup_close, LV_EVENT_RELEASED, 0);
+        lv_tick_inc(3100U);
+        (void)lv_timer_handler();
+        if (!page.selection.all_axes || page.selection.space != V5_MAIN_PAGE_SELECT_MCS) {
+            return 72;
+        }
+        v5_main_page_select_all_axes(&page);
+        if (!expect_home_native_gate(&page)) {
+            return 69;
+        }
+        v5_native_readback_set_unavailable(&readback, "home_status_unknown");
+        v5_main_page_set_native_readback(&page, &readback);
+        if (!v5_main_page_select_axis(&page, V5_MAIN_PAGE_SELECT_MCS, 'X') ||
+            !expect_power_on_home_block(
+                &page,
+                V5_MAIN_PAGE_ACTION_HOME,
+                "POWER_ON_HOME_STATUS_UNAVAILABLE")) {
+            return 70;
+        }
+        v5_native_readback_init(&readback);
+        v5_native_readback_set_all_homed(&readback, 1);
+        v5_main_page_set_native_readback(&page, &readback);
+        v5_main_page_select_all_axes(&page);
     }
     v5_program_controller_init(&controller);
     v5_main_page_bind_program_controller(&page, &controller);
@@ -448,6 +539,7 @@ int main(void)
             return 22;
         }
         v5_native_readback_set_interpreter_paused(&readback, 1);
+        v5_native_readback_set_all_homed(&readback, 1);
         v5_main_page_set_native_readback(&page, &readback);
         if (!expect_command_line(&page, V5_MAIN_PAGE_ACTION_PAUSE, "resume", "native_linuxcncrsh", "Set Resume")) {
             return 23;
@@ -505,6 +597,12 @@ int main(void)
         !expect_command_line(&page, V5_MAIN_PAGE_ACTION_SPINDLE_OVERRIDE_100, "spindle_override_set", "native_linuxcncrsh", "Set Spindle_Override 100")) {
         return 21;
     }
+    {
+        V5NativeReadback readback;
+        v5_native_readback_init(&readback);
+        v5_native_readback_set_all_homed(&readback, 1);
+        v5_main_page_set_native_readback(&page, &readback);
+    }
     if (!expect_missing_gate(&page, V5_MAIN_PAGE_ACTION_JOG_PLUS) ||
         !expect_missing_gate(&page, V5_MAIN_PAGE_ACTION_JOG_MINUS) ||
         !expect_missing_gate(&page, V5_MAIN_PAGE_ACTION_WORK_ZERO_X)) {
@@ -520,6 +618,7 @@ int main(void)
         V5NativeReadback model_readback;
         v5_native_readback_init(&model_readback);
         v5_native_readback_set_motion_model(&model_readback, "XYZAC_TRT");
+        v5_native_readback_set_all_homed(&model_readback, 1);
         v5_main_page_set_native_readback(&page, &model_readback);
     }
     if (!v5_main_page_select_axis(&page, V5_MAIN_PAGE_SELECT_MCS, 'A') ||
@@ -534,6 +633,7 @@ int main(void)
         V5NativeReadback model_readback;
         v5_native_readback_init(&model_readback);
         v5_native_readback_set_motion_model(&model_readback, "XYZBC_TRT");
+        v5_native_readback_set_all_homed(&model_readback, 1);
         v5_main_page_set_native_readback(&page, &model_readback);
         if (page.mcs_targets[3].axis != 'B' || page.wcs_targets[3].axis != 'B' ||
             page.mcs_targets[4].axis != 'C' ||
@@ -559,6 +659,7 @@ int main(void)
             9U);
         v5_native_readback_set_rtcp_actual(&readback, 0);
         v5_native_readback_set_interpreter_idle(&readback, 1);
+        v5_native_readback_set_all_homed(&readback, 1);
         v5_native_readback_set_safety_estop(&readback, 0);
         v5_native_readback_set_machine_enabled(&readback, 1);
         v5_native_readback_set_modal_actual(&readback, "G0 G17 G21 G40 G49 G56 G64 G80 G90 G94 G97");
@@ -589,6 +690,7 @@ int main(void)
         return 49;
     }
 
+    v5_native_readback_set_all_homed(&page.native_readback, 1);
     if (!expect_missing_gate(&page, V5_MAIN_PAGE_ACTION_START)) {
         v5_program_controller_destroy(&controller);
         return 9;
@@ -607,6 +709,7 @@ int main(void)
         v5_native_readback_set_safety_estop(&line_readback, 0);
         v5_native_readback_set_machine_enabled(&line_readback, 1);
         v5_native_readback_set_interpreter_idle(&line_readback, 0);
+        v5_native_readback_set_all_homed(&line_readback, 1);
         v5_native_readback_set_current_line(&line_readback, 1);
         v5_main_page_set_native_readback(&page, &line_readback);
         if (!program_row_bg_matches(&page, 0U, 43, 133, 83)) {
@@ -680,6 +783,7 @@ int main(void)
         }
     }
 
+    v5_native_readback_set_all_homed(&page.native_readback, 1);
     {
         const char *first_point_path = "v5_first_point_smoke.ngc";
         V5ProgramOpenResult open_result;

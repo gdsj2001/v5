@@ -5,6 +5,7 @@
 #include "v5_native_wcs_status.h"
 #include "v5_layout_icons.h"
 #include "v5_lvgl_clock.h"
+#include "v5_lvgl_remote_display.h"
 #include "v5_motion_model_registry.h"
 #include "v5_remote_metrics.h"
 
@@ -2532,6 +2533,11 @@ static void selection_idle_timer_cb(lv_timer_t *timer)
     if (!page) {
         return;
     }
+    if (page->power_on_home_popup &&
+        !lv_obj_has_flag(page->power_on_home_popup, LV_OBJ_FLAG_HIDDEN)) {
+        reset_selection_idle_timer(page);
+        return;
+    }
     if (page->jog_pressed_button || page->jog_continuous_active) {
         reset_selection_idle_timer(page);
         return;
@@ -2670,7 +2676,10 @@ static void main_page_root_delete_event_cb(lv_event_t *event)
     }
     page->jog_pressed_button = 0;
     page->jog_continuous_active = 0;
+    v5_ui_first_frame_guard_clear(&page->power_on_home_popup_frame_guard);
 }
+
+static void show_power_on_home_popup(V5MainPage *page, int status_known);
 
 static int action_needs_native_readback_refresh(V5MainPageActionKind action)
 {
@@ -2678,14 +2687,76 @@ static int action_needs_native_readback_refresh(V5MainPageActionKind action)
     case V5_MAIN_PAGE_ACTION_START:
     case V5_MAIN_PAGE_ACTION_PAUSE:
     case V5_MAIN_PAGE_ACTION_RESUME:
+    case V5_MAIN_PAGE_ACTION_HOME:
     case V5_MAIN_PAGE_ACTION_ESTOP_FORCE:
     case V5_MAIN_PAGE_ACTION_ESTOP_RESET:
     case V5_MAIN_PAGE_ACTION_WORK_ZERO_X:
     case V5_MAIN_PAGE_ACTION_RTCP_TOGGLE:
+    case V5_MAIN_PAGE_ACTION_JOG_PLUS:
+    case V5_MAIN_PAGE_ACTION_JOG_MINUS:
+    case V5_MAIN_PAGE_ACTION_JOG_CONTINUOUS_PLUS:
+    case V5_MAIN_PAGE_ACTION_JOG_CONTINUOUS_MINUS:
+    case V5_MAIN_PAGE_ACTION_FIRST_POINT:
         return 1;
     default:
         return 0;
     }
+}
+
+static int action_requires_power_on_home(
+    const V5MainPage *page,
+    V5MainPageActionKind action)
+{
+    if (!page) {
+        return 0;
+    }
+    switch (action) {
+    case V5_MAIN_PAGE_ACTION_START:
+    case V5_MAIN_PAGE_ACTION_RESUME:
+    case V5_MAIN_PAGE_ACTION_WORK_ZERO_X:
+    case V5_MAIN_PAGE_ACTION_JOG_PLUS:
+    case V5_MAIN_PAGE_ACTION_JOG_MINUS:
+    case V5_MAIN_PAGE_ACTION_JOG_CONTINUOUS_PLUS:
+    case V5_MAIN_PAGE_ACTION_JOG_CONTINUOUS_MINUS:
+    case V5_MAIN_PAGE_ACTION_FIRST_POINT:
+        return 1;
+    case V5_MAIN_PAGE_ACTION_PAUSE:
+        return v5_native_readback_interpreter_known(&page->native_readback) &&
+            page->native_readback.interpreter_paused;
+    case V5_MAIN_PAGE_ACTION_HOME:
+        return page->selection.space != V5_MAIN_PAGE_SELECT_MCS ||
+            !page->selection.all_axes;
+    default:
+        return 0;
+    }
+}
+
+static void block_action_for_power_on_home(
+    V5MainPage *page,
+    V5MainPageActionKind action,
+    V5MainPageActionReport *report)
+{
+    int status_known;
+    if (!page || !report) {
+        return;
+    }
+    status_known = v5_native_readback_all_homed_known(&page->native_readback);
+    memset(report, 0, sizeof(*report));
+    report->action = action;
+    report->local_only = 1;
+    report->send_status = V5_COMMAND_GATE_SEND_INVALID;
+    report->request.kind = V5_COMMAND_UI_LOCAL;
+    report->command.kind = V5_COMMAND_UI_LOCAL;
+    report->command.name = "power_on_home_precondition";
+    report->command.owner = "native_home_precondition";
+    report->command.accepted = 0;
+    snprintf(
+        report->readback_code,
+        sizeof(report->readback_code),
+        "%s",
+        status_known ? "POWER_ON_HOME_REQUIRED" : "POWER_ON_HOME_STATUS_UNAVAILABLE");
+    show_power_on_home_popup(page, status_known);
+    page->last_action = *report;
 }
 
 static void button_event_cb(lv_event_t *event)
@@ -2758,6 +2829,105 @@ static void make_button_rgb(V5MainPage *page, int x, int y, int w, int h, V5Main
     page->button_labels[page->button_count] = label;
     page->button_actions[page->button_count] = action;
     page->button_count += 1u;
+}
+
+static void power_on_home_popup_hide(V5MainPage *page)
+{
+    if (!page || !page->power_on_home_popup) {
+        return;
+    }
+    lv_obj_add_flag(page->power_on_home_popup, LV_OBJ_FLAG_HIDDEN);
+    v5_ui_first_frame_guard_restore_dirty(
+        &page->power_on_home_popup_frame_guard,
+        page->root);
+    if (!page->selection.all_axes) {
+        reset_selection_idle_timer(page);
+    }
+    lv_refr_now(NULL);
+}
+
+static void power_on_home_popup_close_cb(lv_event_t *event)
+{
+    V5MainPage *page = (V5MainPage *)lv_event_get_user_data(event);
+    lv_indev_t *indev;
+    if (!page || lv_event_get_code(event) != LV_EVENT_RELEASED) {
+        return;
+    }
+    v5_button_visual_release_now(lv_event_get_target(event));
+    indev = lv_indev_get_act();
+    if (indev) {
+        lv_indev_wait_release(indev);
+    }
+    power_on_home_popup_hide(page);
+}
+
+static void create_power_on_home_popup(V5MainPage *page)
+{
+    lv_obj_t *box;
+    lv_obj_t *close_label;
+    if (!page || !page->root) {
+        return;
+    }
+    page->power_on_home_popup = make_panel(page->root, 0, 0, 1024, 600, 3, 16, 26);
+    lv_obj_set_style_bg_opa(page->power_on_home_popup, LV_OPA_80, 0);
+    lv_obj_add_flag(page->power_on_home_popup, LV_OBJ_FLAG_CLICKABLE);
+    box = make_panel(page->power_on_home_popup, 170, 88, 684, 424, 7, 31, 48);
+    lv_obj_set_style_border_width(box, 1, 0);
+    lv_obj_set_style_border_color(box, rgb(76, 119, 146), 0);
+    make_label_ex(box, 24, 22, 636, 36, "开机回零前置条件", 88, 204, 255, LV_TEXT_ALIGN_CENTER);
+    page->power_on_home_popup_message = make_label_ex(
+        box, 46, 86, 592, 222, "", 255, 96, 104, LV_TEXT_ALIGN_LEFT);
+    lv_label_set_long_mode(page->power_on_home_popup_message, LV_LABEL_LONG_WRAP);
+    page->power_on_home_popup_close = lv_btn_create(box);
+    clear_obj_style(page->power_on_home_popup_close);
+    lv_obj_set_pos(page->power_on_home_popup_close, 500, 346);
+    lv_obj_set_size(page->power_on_home_popup_close, 132, 48);
+    lv_obj_set_style_bg_color(page->power_on_home_popup_close, rgb(42, 86, 116), 0);
+    lv_obj_set_style_bg_opa(page->power_on_home_popup_close, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(page->power_on_home_popup_close, 1, 0);
+    lv_obj_set_style_border_color(page->power_on_home_popup_close, rgb(76, 119, 146), 0);
+    v5_button_visual_bind(page->power_on_home_popup_close);
+    lv_obj_add_event_cb(
+        page->power_on_home_popup_close,
+        power_on_home_popup_close_cb,
+        LV_EVENT_RELEASED,
+        page);
+    close_label = lv_label_create(page->power_on_home_popup_close);
+    lv_label_set_text(close_label, "关闭");
+    lv_obj_set_pos(close_label, 0, 11);
+    lv_obj_set_size(close_label, 132, 26);
+    lv_obj_set_style_text_align(close_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_color(close_label, rgb(238, 245, 248), 0);
+    lv_obj_add_flag(page->power_on_home_popup, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void show_power_on_home_popup(V5MainPage *page, int status_known)
+{
+    const char *code = status_known ?
+        "POWER_ON_HOME_REQUIRED" : "POWER_ON_HOME_STATUS_UNAVAILABLE";
+    const char *reason = status_known ?
+        "本动作需要先完成本次开机机械全轴回零" :
+        "无法从微内核读取本次开机回零状态";
+    char message[384];
+    if (!page || !page->power_on_home_popup || !page->power_on_home_popup_message) {
+        return;
+    }
+    if (lv_obj_has_flag(page->power_on_home_popup, LV_OBJ_FLAG_HIDDEN)) {
+        v5_ui_first_frame_guard_begin(
+            &page->power_on_home_popup_frame_guard,
+            V5_REMOTE_DISPLAY_CACHE_POPUP);
+    }
+    snprintf(
+        message,
+        sizeof(message),
+        "提示: %s\n原因: %s\n下一步: 关闭提示，选择\"机械全轴\"后按\"回零\"",
+        code,
+        reason);
+    lv_label_set_text(page->power_on_home_popup_message, message);
+    lv_obj_clear_flag(page->power_on_home_popup, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(page->power_on_home_popup);
+    lv_obj_invalidate(page->power_on_home_popup);
+    lv_refr_now(NULL);
 }
 
 static int view_action_matches_plane(V5MainPageActionKind action, V5ToolpathDisplayPlane plane)
@@ -3180,6 +3350,7 @@ int v5_main_page_create(V5MainPage *page, lv_obj_t *parent)
     create_main_program_edit_hit_area(page);
 
     make_v3_main_buttons(page);
+    create_power_on_home_popup(page);
     page->selection_idle_timer = lv_timer_create(
         selection_idle_timer_cb,
         V5_MAIN_PAGE_SELECTION_IDLE_MS,
@@ -4009,6 +4180,11 @@ static void execute_prepared_command_if_enabled(V5MainPage *page, V5MainPageActi
              (int)sizeof(report->command_line) - 1, gate_result.command_line);
     snprintf(report->readback_code, sizeof(report->readback_code), "%.*s",
              (int)sizeof(report->readback_code) - 1, gate_result.readback_code);
+    if (strcmp(report->readback_code, "POWER_ON_HOME_REQUIRED") == 0) {
+        show_power_on_home_popup(page, 1);
+    } else if (strcmp(report->readback_code, "POWER_ON_HOME_STATUS_UNAVAILABLE") == 0) {
+        show_power_on_home_popup(page, 0);
+    }
     v5_lvgl_clock_advance();
     if (home_button_transaction) {
         set_home_transaction_active(page, 0, 1);
@@ -4144,6 +4320,12 @@ int v5_main_page_trigger_action(V5MainPage *page, V5MainPageActionKind action, V
     }
     if (action_needs_native_readback_refresh(action) && page->native_readback_refresh_cb) {
         page->native_readback_refresh_cb(page->native_readback_refresh_user_data, action);
+    }
+    if (action_requires_power_on_home(page, action) &&
+        (!v5_native_readback_all_homed_known(&page->native_readback) ||
+         !page->native_readback.all_homed)) {
+        block_action_for_power_on_home(page, action, out);
+        return 1;
     }
     if (page->program_controller) {
         runtime = v5_program_controller_runtime(page->program_controller);

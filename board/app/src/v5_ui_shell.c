@@ -187,6 +187,7 @@ static int shell_refresh_modal_line_readback(int force)
     v5_native_readback_init(&modal_tool_readback);
     before = g_main_page.native_readback;
     readback = g_main_page.native_readback;
+    v5_native_readback_clear_all_homed(&readback);
     if (v5_native_modal_tool_status_read(0, V5_NATIVE_MODAL_TOOL_STATUS_DEFAULT_MAX_AGE_MS, &modal_tool_readback)) {
         shell_apply_modal_tool_readback(&readback, &modal_tool_readback);
     } else {
@@ -221,6 +222,7 @@ static int shell_refresh_native_readback(int force)
     v5_native_readback_init(&wcs_readback);
     v5_native_readback_init(&g53_geometry_readback);
     v5_native_readback_init(&modal_tool_readback);
+    v5_native_readback_clear_all_homed(&readback);
     if (v5_native_rtcp_status_read(0, V5_NATIVE_RTCP_STATUS_DEFAULT_MAX_AGE_MS, &rtcp_readback) &&
         v5_native_readback_rtcp_known(&rtcp_readback)) {
         v5_native_readback_set_rtcp_actual(&readback, rtcp_readback.rtcp_enabled);

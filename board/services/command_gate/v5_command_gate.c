@@ -50,6 +50,23 @@ static const char *v5_command_gate_name_for_kind(V5CommandKind kind)
     }
 }
 
+int v5_command_gate_requires_power_on_home(V5CommandKind kind)
+{
+    switch (kind) {
+    case V5_COMMAND_START:
+    case V5_COMMAND_MDI_RUN:
+    case V5_COMMAND_RESUME:
+    case V5_COMMAND_JOG_INCREMENT:
+    case V5_COMMAND_JOG_CONTINUOUS:
+    case V5_COMMAND_WORK_ZERO:
+    case V5_COMMAND_FIRST_POINT:
+    case V5_COMMAND_AXIS_ZERO_POSITION:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 int v5_command_gate_prepare(const V5CommandRequest *request, V5CommandPrepared *prepared)
 {
     const char *name;

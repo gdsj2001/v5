@@ -65,6 +65,11 @@ int main(void)
         unlink(path);
         return 4;
     }
+    v5_native_readback_clear_all_homed(&readback);
+    if (v5_native_readback_all_homed_known(&readback) || readback.all_homed) {
+        unlink(path);
+        return 7;
+    }
     if (!v5_native_modal_tool_status_write(path, 0, "", 0, -1, 0, 0.0)) {
         unlink(path);
         return 5;

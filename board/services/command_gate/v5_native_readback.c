@@ -293,6 +293,15 @@ void v5_native_readback_set_all_homed(V5NativeReadback *readback, int all_homed)
     readback->all_homed = all_homed ? 1 : 0;
 }
 
+void v5_native_readback_clear_all_homed(V5NativeReadback *readback)
+{
+    if (!readback) {
+        return;
+    }
+    readback->homed_available = 0;
+    readback->all_homed = 0;
+}
+
 void v5_native_readback_set_safety_estop(V5NativeReadback *readback, int active)
 {
     if (!readback) {

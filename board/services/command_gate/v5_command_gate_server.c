@@ -224,6 +224,36 @@ static int restore_machine_on_after_estop_reset(V5NativeSafetyResult *native_res
     return v5_native_safety_wait_reset_confirmed(native_result, 100U, 50000U);
 }
 
+static int power_on_home_gate_accepts(
+    const V5CommandRequest *request,
+    V5CommandGateIpcResponseFrame *response)
+{
+    int all_homed = 0;
+    if (!request || !response || !v5_command_gate_requires_power_on_home(request->kind)) {
+        return 1;
+    }
+    if (!v5_linuxcncrsh_get_all_homed(
+            &g_linuxcncrsh_config,
+            g_motion_parameters.active_axis_count,
+            &all_homed)) {
+        response->send_status = V5_COMMAND_GATE_SEND_INVALID;
+        copy_cstr(
+            response->readback_code,
+            sizeof(response->readback_code),
+            "POWER_ON_HOME_STATUS_UNAVAILABLE");
+        return 0;
+    }
+    if (!all_homed) {
+        response->send_status = V5_COMMAND_GATE_SEND_INVALID;
+        copy_cstr(
+            response->readback_code,
+            sizeof(response->readback_code),
+            "POWER_ON_HOME_REQUIRED");
+        return 0;
+    }
+    return 1;
+}
+
 static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5CommandGateIpcResponseFrame *response)
 {
     V5CommandRequest request;
@@ -275,6 +305,10 @@ static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5Command
     }
 
     linuxcncrsh_lock();
+    if (!power_on_home_gate_accepts(&request, response)) {
+        linuxcncrsh_unlock();
+        return;
+    }
     if (request.kind == V5_COMMAND_FIRST_POINT && strcmp(prepared.owner, "native_first_point") == 0) {
         if (!v5_native_first_point_format_report(&prepared, &request, response->command_line, sizeof(response->command_line))) {
             response->send_status = V5_COMMAND_GATE_SEND_INVALID;

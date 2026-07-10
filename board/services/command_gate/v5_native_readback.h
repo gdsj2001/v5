@@ -95,6 +95,7 @@ void v5_native_readback_set_mdi_run_actual(
     int line,
     const char *command);
 void v5_native_readback_set_all_homed(V5NativeReadback *readback, int all_homed);
+void v5_native_readback_clear_all_homed(V5NativeReadback *readback);
 void v5_native_readback_set_safety_estop(V5NativeReadback *readback, int active);
 void v5_native_readback_set_machine_enabled(V5NativeReadback *readback, int enabled);
 void v5_native_readback_set_modal_actual(V5NativeReadback *readback, const char *modal_text);

@@ -11,6 +11,7 @@
 #endif
 
 #define V5_AXIS_ZERO_TARGET_TOLERANCE 0.001
+#define V5_AXIS_ZERO_COMPARE_EPSILON 1.0e-9
 #define V5_AXIS_ZERO_MOTION_TOLERANCE 0.0001
 #define V5_AXIS_ZERO_LINEAR_PROOF 0.1
 #define V5_AXIS_ZERO_ROTARY_PROOF 1.0
@@ -95,7 +96,8 @@ static int wait_position(
             if (fabs(current - before) > V5_AXIS_ZERO_MOTION_TOLERANCE && moved) {
                 *moved = 1;
             }
-            if (target_error(axis, current, target) <= V5_AXIS_ZERO_TARGET_TOLERANCE) {
+            if (target_error(axis, current, target) <=
+                V5_AXIS_ZERO_TARGET_TOLERANCE + V5_AXIS_ZERO_COMPARE_EPSILON) {
                 ++stable;
                 if (stable >= 3U) {
                     if (position_out) {
@@ -219,7 +221,8 @@ V5LinuxcncrshSendStatus v5_native_axis_zero_position_send(
         result_code(result, "AXIS_ZERO_MDI_MODE_REJECTED");
         return V5_LINUXCNCRSH_SEND_IO_ERROR;
     }
-    if (target_error(axis, before_position, 0.0) <= V5_AXIS_ZERO_TARGET_TOLERANCE) {
+    if (target_error(axis, before_position, 0.0) <=
+        V5_AXIS_ZERO_TARGET_TOLERANCE + V5_AXIS_ZERO_COMPARE_EPSILON) {
         double delta = rotary_axis(axis) ? V5_AXIS_ZERO_ROTARY_PROOF : V5_AXIS_ZERO_LINEAR_PROOF;
         double proof_target = delta;
         if (before_abs + delta >= axis_parameters->max_limit) {

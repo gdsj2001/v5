@@ -8,6 +8,7 @@
 #include "v5_main_page_actions.h"
 #include "v5_native_readback.h"
 #include "v5_toolpath_display.h"
+#include "v5_ui_first_frame_guard.h"
 #include "v5_ui_status_view.h"
 
 #include <stdint.h>
@@ -91,6 +92,10 @@ typedef struct V5MainPage {
     lv_obj_t *program_line_bg[4];
     lv_obj_t *program_line_labels[4];
     lv_obj_t *program_edit_hit_area;
+    lv_obj_t *power_on_home_popup;
+    lv_obj_t *power_on_home_popup_message;
+    lv_obj_t *power_on_home_popup_close;
+    V5UiFirstFrameGuard power_on_home_popup_frame_guard;
     lv_obj_t *buttons[V5_MAIN_PAGE_BUTTON_COUNT];
     lv_obj_t *button_labels[V5_MAIN_PAGE_BUTTON_COUNT];
     V5MainPageActionKind button_actions[V5_MAIN_PAGE_BUTTON_COUNT];
