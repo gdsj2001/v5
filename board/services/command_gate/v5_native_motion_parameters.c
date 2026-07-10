@@ -1,6 +1,7 @@
 #include "v5_native_motion_parameters.h"
 
 #include <ctype.h>
+#include <limits.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,7 +11,8 @@
 #define V5_MOTION_VALUE_ACCELERATION 0x02U
 #define V5_MOTION_VALUE_MIN_LIMIT 0x04U
 #define V5_MOTION_VALUE_MAX_LIMIT 0x08U
-#define V5_MOTION_VALUE_ALL 0x0fU
+#define V5_MOTION_VALUE_HOME_SEQUENCE 0x10U
+#define V5_MOTION_VALUE_ALL 0x1fU
 
 static const char k_axes[V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT] = {'X', 'Y', 'Z', 'A', 'B', 'C'};
 
@@ -67,6 +69,7 @@ void v5_native_motion_parameters_init(V5NativeMotionParameters *parameters)
     memset(parameters, 0, sizeof(*parameters));
     for (i = 0U; i < V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT; ++i) {
         parameters->axes[i].axis = k_axes[i];
+        parameters->axes[i].home_sequence = -1;
     }
 }
 
@@ -88,6 +91,27 @@ static int parse_double(const char *text, double *value)
         return 0;
     }
     *value = parsed;
+    return 1;
+}
+
+static int parse_int(const char *text, int *value)
+{
+    char *end = 0;
+    long parsed;
+    if (!text || !value) {
+        return 0;
+    }
+    parsed = strtol(text, &end, 10);
+    if (end == text || parsed < INT_MIN || parsed > INT_MAX) {
+        return 0;
+    }
+    while (*end && isspace((unsigned char)*end)) {
+        ++end;
+    }
+    if (*end && *end != '#' && *end != ';') {
+        return 0;
+    }
+    *value = (int)parsed;
     return 1;
 }
 
@@ -132,10 +156,13 @@ static void parse_axis_value(
     V5NativeMotionAxisParameters *axis;
     double parsed;
     int index = axis_index(section_axis);
-    if (!parameters || index < 0 || !parse_double(value, &parsed)) {
+    if (!parameters || index < 0) {
         return;
     }
     axis = &parameters->axes[index];
+    if (!parse_double(value, &parsed)) {
+        return;
+    }
     if (strcmp(key, "MAX_VELOCITY") == 0) {
         axis->max_velocity = parsed;
         axis->valid_mask |= V5_MOTION_VALUE_VELOCITY;
@@ -148,6 +175,34 @@ static void parse_axis_value(
     } else if (strcmp(key, "MAX_LIMIT") == 0) {
         axis->max_limit = parsed;
         axis->valid_mask |= V5_MOTION_VALUE_MAX_LIMIT;
+    }
+}
+
+static void parse_joint_value(
+    V5NativeMotionParameters *parameters,
+    const char *section,
+    const char *key,
+    const char *value)
+{
+    char *end = 0;
+    unsigned long joint;
+    unsigned int i;
+    int home_sequence;
+    if (!parameters || !section || strncmp(section, "JOINT_", 6U) != 0 ||
+        strcmp(key, "HOME_SEQUENCE") != 0 || !parse_int(value, &home_sequence)) {
+        return;
+    }
+    joint = strtoul(section + 6, &end, 10);
+    if (end == section + 6 || *end || joint >= V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT) {
+        return;
+    }
+    for (i = 0U; i < V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT; ++i) {
+        V5NativeMotionAxisParameters *axis = &parameters->axes[i];
+        if (axis->active && axis->status_slot == (unsigned int)joint) {
+            axis->home_sequence = home_sequence;
+            axis->valid_mask |= V5_MOTION_VALUE_HOME_SEQUENCE;
+            return;
+        }
     }
 }
 
@@ -164,7 +219,8 @@ static int parameters_complete(const V5NativeMotionParameters *parameters)
             continue;
         }
         if (axis->valid_mask != V5_MOTION_VALUE_ALL || axis->max_velocity <= 0.0 ||
-            axis->max_acceleration <= 0.0 || axis->min_limit >= axis->max_limit) {
+            axis->max_acceleration <= 0.0 || axis->min_limit >= axis->max_limit ||
+            axis->home_sequence < 0) {
             return 0;
         }
     }
@@ -222,6 +278,8 @@ int v5_native_motion_parameters_load(
             parse_machine_mode(&loaded, value);
         } else if (strncmp(section, "AXIS_", 5U) == 0 && section[5] && !section[6]) {
             parse_axis_value(&loaded, section[5], key, value);
+        } else if (strncmp(section, "JOINT_", 6U) == 0) {
+            parse_joint_value(&loaded, section, key, value);
         }
     }
     fclose(fp);

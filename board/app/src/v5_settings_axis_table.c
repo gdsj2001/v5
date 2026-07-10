@@ -4,6 +4,7 @@
 #include "v5_settings_parameter_store.h"
 #include "v5_ui_first_frame_guard.h"
 #include "v5_lvgl_remote_display.h"
+#include "v5_motion_model_registry.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -497,6 +498,61 @@ static int resident_parameter_table_read_axis(V5SettingsParameterDiskTable table
         }
     }
     return found && out[0];
+}
+
+static int resident_parameter_table_set_axis(
+    V5SettingsParameterDiskTable table,
+    const char *axis,
+    const char *field_key,
+    const char *value)
+{
+    char *text_blob = resident_parameter_table_text(table);
+    char *line_start;
+    size_t axis_len;
+    size_t field_len;
+    size_t value_len;
+    if (!text_blob || !axis || !axis[0] || !field_key || !field_key[0] || !value || !value[0]) {
+        return 0;
+    }
+    axis_len = strlen(axis);
+    field_len = strlen(field_key);
+    value_len = strlen(value);
+    line_start = text_blob;
+    while (*line_start) {
+        char *line_end = strchr(line_start, '\n');
+        char *first_tab;
+        char *second_tab;
+        char *value_end;
+        size_t old_len;
+        size_t total_len;
+        if (!line_end) {
+            line_end = line_start + strlen(line_start);
+        }
+        first_tab = (char *)memchr(line_start, '\t', (size_t)(line_end - line_start));
+        second_tab = first_tab ? (char *)memchr(first_tab + 1, '\t', (size_t)(line_end - first_tab - 1)) : 0;
+        if (first_tab && second_tab && (size_t)(first_tab - line_start) == axis_len &&
+            (size_t)(second_tab - first_tab - 1) == field_len &&
+            memcmp(line_start, axis, axis_len) == 0 &&
+            memcmp(first_tab + 1, field_key, field_len) == 0) {
+            value_end = line_end;
+            while (value_end > second_tab + 1 && value_end[-1] == '\r') {
+                --value_end;
+            }
+            old_len = (size_t)(value_end - (second_tab + 1));
+            total_len = strlen(text_blob);
+            if (total_len - old_len + value_len >= V5_BOOT_CLOSURE_TEXT_CAP) {
+                return 0;
+            }
+            memmove(second_tab + 1 + value_len, value_end, strlen(value_end) + 1U);
+            memcpy(second_tab + 1, value, value_len);
+            return 1;
+        }
+        if (!*line_end) {
+            break;
+        }
+        line_start = line_end + 1;
+    }
+    return 0;
 }
 
 static int row_index_for_axis_name(const char *axis)
@@ -1622,6 +1678,76 @@ int v5_settings_axis_table_commit_g53_value(unsigned int row, unsigned int col, 
     return ok;
 }
 
+static void apply_motion_model_binding_readback(const char *value)
+{
+    const V5MotionModelDescriptor *target = v5_motion_model_find(value);
+    const V5MotionModelDescriptor *alternate = 0;
+    char target_axis[2];
+    char alternate_axis[2];
+    char target_slave[V5_AXIS_VALUE_CAP];
+    char alternate_slave[V5_AXIS_VALUE_CAP];
+    const char *new_target = 0;
+    const char *new_alternate = 0;
+    int target_row;
+    int alternate_row;
+    unsigned int slave_col;
+    size_t i;
+    if (!target) {
+        return;
+    }
+    for (i = 0U; i < v5_motion_model_registry_count(); ++i) {
+        const V5MotionModelDescriptor *candidate = v5_motion_model_registry_at(i);
+        if (candidate && candidate->first_status_slot == target->first_status_slot &&
+            candidate->first_rotary_axis != target->first_rotary_axis) {
+            alternate = candidate;
+            break;
+        }
+    }
+    if (!alternate) {
+        return;
+    }
+    target_axis[0] = target->first_rotary_axis;
+    target_axis[1] = '\0';
+    alternate_axis[0] = alternate->first_rotary_axis;
+    alternate_axis[1] = '\0';
+    target_row = row_index_for_axis_name(target_axis);
+    alternate_row = row_index_for_axis_name(alternate_axis);
+    if (target_row < 0 || alternate_row < 0) {
+        return;
+    }
+    for (slave_col = 0U; slave_col < v5_settings_axis_table_column_count(); ++slave_col) {
+        if (strcmp(kAxisColumns[slave_col].field_key, "slave") == 0) {
+            break;
+        }
+    }
+    if (slave_col >= v5_settings_axis_table_column_count()) {
+        return;
+    }
+    snprintf(target_slave, sizeof(target_slave), "%s", v5_settings_axis_table_value((unsigned int)target_row, slave_col));
+    snprintf(alternate_slave, sizeof(alternate_slave), "%s", v5_settings_axis_table_value((unsigned int)alternate_row, slave_col));
+    if (strcmp(target_slave, "NAT") == 0 && strcmp(alternate_slave, "NAT") != 0) {
+        new_target = alternate_slave;
+        new_alternate = "NAT";
+    } else if (strcmp(target_slave, "NAT") != 0 && strcmp(alternate_slave, target_slave) == 0) {
+        new_target = target_slave;
+        new_alternate = "NAT";
+    } else {
+        return;
+    }
+    if (!resident_parameter_table_set_axis(
+            V5_SETTINGS_PARAMETER_DISK_SELF, target_axis, "slave", new_target) ||
+        !resident_parameter_table_set_axis(
+            V5_SETTINGS_PARAMETER_DISK_SELF, alternate_axis, "slave", new_alternate)) {
+        return;
+    }
+    set_value((unsigned int)target_row, "slave", new_target, 1);
+    set_value((unsigned int)alternate_row, "slave", new_alternate, 1);
+    apply_drive_display_for_row((unsigned int)target_row);
+    apply_drive_display_for_row((unsigned int)alternate_row);
+    refresh_axis_row_refs((unsigned int)target_row);
+    refresh_axis_row_refs((unsigned int)alternate_row);
+}
+
 int v5_settings_axis_table_commit_motion_model(const char *value)
 {
     V5SettingsApplyAxisCommitRequest request;
@@ -1643,6 +1769,7 @@ int v5_settings_axis_table_commit_motion_model(const char *value)
     ok = v5_command_gate_settings_axis_commit(&request, &commit_result, 3000U);
     log_axis_param_event("motion_model", value, ok);
     if (ok) {
+        apply_motion_model_binding_readback(commit_result.readback_value);
         set_motion_model_value(commit_result.readback_value, 1);
         notify_settings_axis_commit_success();
     }

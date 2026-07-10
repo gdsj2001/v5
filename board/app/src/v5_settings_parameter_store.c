@@ -100,6 +100,35 @@ static int load_rows(const char *path, V5StoreRow *rows, size_t *count)
     return 1;
 }
 
+static int save_rows(const char *path, const V5StoreRow *rows, size_t count)
+{
+    char tmp[V5_STORE_PATH_CAP];
+    FILE *fp;
+    size_t i;
+    if (!path || !rows || snprintf(tmp, sizeof(tmp), "%s.tmp", path) >= (int)sizeof(tmp)) {
+        return 0;
+    }
+    fp = fopen(tmp, "wb");
+    if (!fp) {
+        return 0;
+    }
+    fprintf(fp, "# schema=v5.settings.parameter_table.tsv.v1\n");
+    for (i = 0U; i < count; ++i) {
+        if (rows[i].axis[0] && rows[i].field[0] && rows[i].value[0]) {
+            fprintf(fp, "%s\t%s\t%s\n", rows[i].axis, rows[i].field, rows[i].value);
+        }
+    }
+    if (fclose(fp) != 0) {
+        (void)unlink(tmp);
+        return 0;
+    }
+    if (rename(tmp, path) != 0) {
+        (void)unlink(tmp);
+        return 0;
+    }
+    return 1;
+}
+
 int v5_settings_parameter_store_read_axis(
     const char *project_root,
     V5SettingsParameterDiskTable table,
@@ -139,12 +168,10 @@ int v5_settings_parameter_store_write_axis(
     char dir[V5_STORE_PATH_CAP];
     char parent[V5_STORE_PATH_CAP];
     char path[V5_STORE_PATH_CAP];
-    char tmp[V5_STORE_PATH_CAP];
     V5StoreRow rows[V5_STORE_MAX_ROWS];
     size_t count = 0U;
     size_t i;
     int updated = 0;
-    FILE *fp;
     if (!axis || !axis[0] || !field_key || !field_key[0] || !value || !value[0]) return 0;
     if (!build_paths(project_root, table, dir, sizeof(dir), path, sizeof(path))) return 0;
     snprintf(parent, sizeof(parent), "%s/config", (project_root && project_root[0]) ? project_root : ".");
@@ -158,19 +185,49 @@ int v5_settings_parameter_store_write_axis(
         }
     }
     if (!updated) return 0;
-    if (snprintf(tmp, sizeof(tmp), "%s.tmp", path) >= (int)sizeof(tmp)) return 0;
-    fp = fopen(tmp, "wb");
-    if (!fp) return 0;
-    fprintf(fp, "# schema=v5.settings.parameter_table.tsv.v1\n");
-    for (i = 0U; i < count; ++i) {
-        if (rows[i].axis[0] && rows[i].field[0] && rows[i].value[0]) {
-            fprintf(fp, "%s\t%s\t%s\n", rows[i].axis, rows[i].field, rows[i].value);
-        }
-    }
-    if (fclose(fp) != 0) return 0;
-    if (rename(tmp, path) != 0) {
-        (void)unlink(tmp);
+    return save_rows(path, rows, count);
+}
+
+int v5_settings_parameter_store_write_axis_pair(
+    const char *project_root,
+    V5SettingsParameterDiskTable table,
+    const char *first_axis,
+    const char *second_axis,
+    const char *field_key,
+    const char *first_value,
+    const char *second_value)
+{
+    char dir[V5_STORE_PATH_CAP];
+    char parent[V5_STORE_PATH_CAP];
+    char path[V5_STORE_PATH_CAP];
+    V5StoreRow rows[V5_STORE_MAX_ROWS];
+    size_t count = 0U;
+    size_t i;
+    int first_updated = 0;
+    int second_updated = 0;
+    if (!first_axis || !first_axis[0] || !second_axis || !second_axis[0] ||
+        strcmp(first_axis, second_axis) == 0 || !field_key || !field_key[0] ||
+        !first_value || !first_value[0] || !second_value || !second_value[0]) {
         return 0;
     }
-    return 1;
+    if (!build_paths(project_root, table, dir, sizeof(dir), path, sizeof(path))) {
+        return 0;
+    }
+    snprintf(parent, sizeof(parent), "%s/config", (project_root && project_root[0]) ? project_root : ".");
+    if (!ensure_dir(parent) || !ensure_dir(dir) || !load_rows(path, rows, &count)) {
+        return 0;
+    }
+    for (i = 0U; i < count; ++i) {
+        if (strcmp(rows[i].field, field_key) != 0) {
+            continue;
+        }
+        if (strcmp(rows[i].axis, first_axis) == 0) {
+            snprintf(rows[i].value, sizeof(rows[i].value), "%s", first_value);
+            first_updated = 1;
+        } else if (strcmp(rows[i].axis, second_axis) == 0) {
+            snprintf(rows[i].value, sizeof(rows[i].value), "%s", second_value);
+            second_updated = 1;
+        }
+    }
+    return first_updated && second_updated && save_rows(path, rows, count);
 }

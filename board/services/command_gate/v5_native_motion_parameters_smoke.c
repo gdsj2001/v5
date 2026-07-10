@@ -25,15 +25,17 @@ int main(void)
     }
     axis = v5_native_motion_parameters_axis(&parameters, 'X');
     if (!axis || !close_enough(axis->max_velocity, 166.666666667) ||
-        !close_enough(axis->max_acceleration, 500.0) || axis->status_slot != 0U) {
+        !close_enough(axis->max_acceleration, 500.0) || axis->status_slot != 0U ||
+        axis->home_sequence != 1) {
         return 2;
     }
-    axis = v5_native_motion_parameters_axis(&parameters, 'A');
+    axis = v5_native_motion_parameters_axis(&parameters, 'B');
     if (!axis || !close_enough(axis->max_velocity, 833.333333333) ||
-        !close_enough(axis->max_acceleration, 2000.0) || axis->status_slot != 3U) {
+        !close_enough(axis->max_acceleration, 2000.0) || axis->status_slot != 3U ||
+        axis->home_sequence != 3) {
         return 3;
     }
-    if (v5_native_motion_parameters_axis(&parameters, 'B')) {
+    if (v5_native_motion_parameters_axis(&parameters, 'A')) {
         return 4;
     }
     memset(&request, 0, sizeof(request));

@@ -20,7 +20,10 @@ typedef struct V5SettingsPage {
     lv_obj_t *status_label;
     lv_obj_t *machine_code_label;
     lv_obj_t *motion_model_dropdown;
+    lv_obj_t *mcs_axis_labels[V5_MAIN_PAGE_AXIS_COUNT];
     lv_obj_t *mcs_labels[V5_MAIN_PAGE_AXIS_COUNT];
+    unsigned int mcs_status_slots[V5_MAIN_PAGE_AXIS_COUNT];
+    unsigned int mcs_model_registry_id;
     V5CoordinateDigits mcs_digits;
     lv_color_t mcs_digits_buffer[V5_COORD_DIGITS_SETTINGS_W * V5_COORD_DIGITS_SETTINGS_H];
     lv_timer_t *status_timer;
@@ -46,6 +49,7 @@ typedef struct V5SettingsPage {
 void v5_settings_page_init(V5SettingsPage *page);
 void v5_settings_page_set_boot_closure(const V5BootClosure *closure);
 int v5_settings_page_create(V5SettingsPage *page, lv_obj_t *parent);
+int v5_settings_page_set_native_readback(V5SettingsPage *page, const V5NativeReadback *readback);
 int v5_settings_page_apply_status(V5SettingsPage *page, const V5UiStatusView *status);
 void v5_settings_page_set_navigation_callback(V5SettingsPage *page, V5UiNavigationCallback cb, void *user_data);
 int v5_settings_page_trigger_action(V5SettingsPage *page, V5MainPageActionKind action, V5MainPageActionReport *report);

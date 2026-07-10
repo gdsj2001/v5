@@ -709,7 +709,7 @@ static void settings_axis_color(const char *axis, uint8_t *r, uint8_t *g, uint8_
     *r = 218;
     *g = 232;
     *b = 242;
-    if (strcmp(axis, "X") == 0 || strcmp(axis, "A") == 0) {
+    if (strcmp(axis, "X") == 0 || strcmp(axis, "A") == 0 || strcmp(axis, "B") == 0) {
         *r = 255;
         *g = 100;
         *b = 106;
@@ -775,7 +775,7 @@ static lv_obj_t *make_settings_mcs_value(lv_obj_t *panel, int row_y)
 
 static void make_settings_machine_coordinate_widget(V5SettingsPage *page, lv_obj_t *root)
 {
-    static const char *axes[] = {"X", "Y", "Z", "A", "C"};
+    static const char *axes[] = {"X", "Y", "Z", "-", "-"};
     lv_obj_t *outer = make_panel(root, 696, 42, 312, 176, 7, 31, 48);
     lv_obj_t *panel = make_panel(root, 696, 42, 216, 176, 6, 26, 39);
     lv_obj_t *unit;
@@ -794,7 +794,12 @@ static void make_settings_machine_coordinate_widget(V5SettingsPage *page, lv_obj
         uint8_t b;
         int row_y = 40 + (int)i * 25;
         settings_axis_color(axes[i], &r, &g, &b);
-        make_label(panel, axes[i], 12, row_y, 32, 26, r, g, b);
+        if (page && i < V5_MAIN_PAGE_AXIS_COUNT) {
+            page->mcs_axis_labels[i] = make_label(panel, axes[i], 12, row_y, 32, 26, r, g, b);
+            page->mcs_status_slots[i] = i < 3U ? i : V5_STATUS_AXIS_COUNT;
+        } else {
+            make_label(panel, axes[i], 12, row_y, 32, 26, r, g, b);
+        }
         if (page && i < V5_MAIN_PAGE_AXIS_COUNT) {
             page->mcs_labels[i] = make_settings_mcs_value(panel, 39 + (int)i * 25);
         }
@@ -901,6 +906,46 @@ int v5_settings_page_create(V5SettingsPage *page, lv_obj_t *parent)
     return page->button_count == V5_SETTINGS_PAGE_BUTTON_COUNT;
 }
 
+int v5_settings_page_set_native_readback(V5SettingsPage *page, const V5NativeReadback *readback)
+{
+    const V5MotionModelDescriptor *model = 0;
+    unsigned int registry_id;
+    char axis_text[2] = {'-', '\0'};
+    unsigned int i;
+    if (!page) {
+        return 0;
+    }
+    if (readback && v5_native_readback_motion_model_known(readback)) {
+        model = v5_motion_model_find(readback->motion_model);
+    }
+    registry_id = model ? model->registry_id : 0U;
+    if (page->mcs_model_registry_id == registry_id) {
+        return model != 0;
+    }
+    page->mcs_model_registry_id = registry_id;
+    for (i = 0U; i < V5_MAIN_PAGE_AXIS_COUNT; ++i) {
+        char axis = i < 3U ? "XYZ"[i] : '-';
+        uint8_t r;
+        uint8_t g;
+        uint8_t b;
+        page->mcs_status_slots[i] = i < 3U ? i : V5_STATUS_AXIS_COUNT;
+        if (model && i == 3U) {
+            axis = model->first_rotary_axis;
+            page->mcs_status_slots[i] = model->first_status_slot;
+        } else if (model && i == 4U) {
+            axis = model->second_rotary_axis;
+            page->mcs_status_slots[i] = model->second_status_slot;
+        }
+        axis_text[0] = axis;
+        settings_axis_color(axis_text, &r, &g, &b);
+        if (page->mcs_axis_labels[i]) {
+            lv_label_set_text(page->mcs_axis_labels[i], axis_text);
+            lv_obj_set_style_text_color(page->mcs_axis_labels[i], rgb(r, g, b), 0);
+        }
+    }
+    return model != 0;
+}
+
 int v5_settings_page_apply_status(V5SettingsPage *page, const V5UiStatusView *status)
 {
     char text[24];
@@ -910,18 +955,20 @@ int v5_settings_page_apply_status(V5SettingsPage *page, const V5UiStatusView *st
     }
     valid = status && ((status->valid_mask & V5_STATUS_VALID_MCS) != 0U);
     for (unsigned int i = 0U; i < V5_MAIN_PAGE_AXIS_COUNT; ++i) {
+        unsigned int slot = page->mcs_status_slots[i];
+        int row_valid = valid && slot < V5_STATUS_AXIS_COUNT;
         if (!page->mcs_labels[i]) {
             continue;
         }
-        format_settings_mcs_value(valid ? status->mcs[i] : 0.0, valid, text, sizeof(text));
+        format_settings_mcs_value(row_valid ? status->mcs[slot] : 0.0, row_valid, text, sizeof(text));
         lv_label_set_text(page->mcs_labels[i], text);
-        lv_obj_set_style_text_color(page->mcs_labels[i], valid ? rgb(88, 204, 255) : rgb(155, 177, 198), 0);
+        lv_obj_set_style_text_color(page->mcs_labels[i], row_valid ? rgb(88, 204, 255) : rgb(155, 177, 198), 0);
         v5_coordinate_digits_set_value(
             &page->mcs_digits,
             0U,
             i,
             text,
-            valid ? rgb(88, 204, 255) : rgb(155, 177, 198));
+            row_valid ? rgb(88, 204, 255) : rgb(155, 177, 198));
     }
     return 1;
 }

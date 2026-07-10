@@ -728,6 +728,79 @@ static int v5_linuxcncrsh_parse_joint_homed(
     return 0;
 }
 
+int v5_linuxcncrsh_get_joint_homed(
+    const V5LinuxcncrshConfig *config,
+    unsigned int joint,
+    int *homed_out)
+{
+#ifdef _WIN32
+    (void)config;
+    (void)joint;
+    if (homed_out) {
+        *homed_out = 0;
+    }
+    return 0;
+#else
+    int fd;
+    int rc;
+    char command[64];
+    char response[512];
+    if (homed_out) {
+        *homed_out = 0;
+    }
+    fd = v5_linuxcncrsh_gate_connect(config);
+    if (fd < 0) {
+        return 0;
+    }
+    rc = snprintf(command, sizeof(command), "Get Joint_Homed %u", joint);
+    if (!v5_linuxcncrsh_format_ok(rc, sizeof(command)) ||
+        !v5_linuxcncrsh_send_request_text(fd, command, response, sizeof(response))) {
+        v5_linuxcncrsh_gate_close();
+        return 0;
+    }
+    return v5_linuxcncrsh_parse_joint_homed(response, joint, homed_out);
+#endif
+}
+
+int v5_linuxcncrsh_get_teleop_enabled(
+    const V5LinuxcncrshConfig *config,
+    int *enabled_out)
+{
+#ifdef _WIN32
+    (void)config;
+    if (enabled_out) {
+        *enabled_out = 0;
+    }
+    return 0;
+#else
+    int fd;
+    char response[512];
+    const char *scan;
+    char state[16];
+    if (enabled_out) {
+        *enabled_out = 0;
+    }
+    fd = v5_linuxcncrsh_gate_connect(config);
+    if (fd < 0 ||
+        !v5_linuxcncrsh_send_request_text(fd, "Get Teleop_Enable", response, sizeof(response))) {
+        v5_linuxcncrsh_gate_close();
+        return 0;
+    }
+    scan = response;
+    while ((scan = strstr(scan, "TELEOP_ENABLE")) != 0) {
+        if (sscanf(scan, "TELEOP_ENABLE %15s", state) == 1 &&
+            (strcasecmp(state, "YES") == 0 || strcasecmp(state, "NO") == 0)) {
+            if (enabled_out) {
+                *enabled_out = strcasecmp(state, "YES") == 0;
+            }
+            return 1;
+        }
+        scan += strlen("TELEOP_ENABLE");
+    }
+    return 0;
+#endif
+}
+
 int v5_linuxcncrsh_get_all_homed(
     const V5LinuxcncrshConfig *config,
     unsigned int expected_joint_count,

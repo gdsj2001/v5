@@ -1,5 +1,6 @@
 #include "v5_native_home.h"
 
+#include <limits.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -70,7 +71,6 @@ static const V5NativeMotionAxisParameters *axis_for_slot(
 static int read_all_positions(
     const V5LinuxcncrshConfig *config,
     const V5NativeMotionParameters *parameters,
-    int coordinated,
     double positions[V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT])
 {
     unsigned int slot;
@@ -79,10 +79,7 @@ static int read_all_positions(
     }
     for (slot = 0U; slot < parameters->active_axis_count; ++slot) {
         const V5NativeMotionAxisParameters *axis = axis_for_slot(parameters, slot);
-        if (!axis ||
-            !(coordinated
-                ? v5_linuxcncrsh_get_axis_position(config, axis->axis, 0, &positions[slot])
-                : v5_linuxcncrsh_get_joint_position(config, axis->status_slot, &positions[slot]))) {
+        if (!axis || !v5_linuxcncrsh_get_joint_position(config, axis->status_slot, &positions[slot])) {
             return 0;
         }
     }
@@ -107,10 +104,37 @@ static int wait_machine_enabled(const V5LinuxcncrshConfig *config)
 #endif
 }
 
+static int wait_teleop_enabled(
+    const V5LinuxcncrshConfig *config,
+    int expected_enabled)
+{
+#ifdef _WIN32
+    (void)config;
+    (void)expected_enabled;
+    return 0;
+#else
+    unsigned int attempt;
+    unsigned int stable = 0U;
+    for (attempt = 0U; attempt < 100U; ++attempt) {
+        int enabled = 0;
+        if (v5_linuxcncrsh_get_teleop_enabled(config, &enabled) &&
+            enabled == (expected_enabled ? 1 : 0)) {
+            ++stable;
+            if (stable >= 2U) {
+                return 1;
+            }
+        } else {
+            stable = 0U;
+        }
+        usleep(V5_HOME_WAIT_US);
+    }
+    return 0;
+#endif
+}
+
 static int wait_axis_target(
     const V5LinuxcncrshConfig *config,
     const V5NativeMotionAxisParameters *axis,
-    int coordinated,
     double start,
     double target,
     int *moved)
@@ -118,7 +142,6 @@ static int wait_axis_target(
 #ifdef _WIN32
     (void)config;
     (void)axis;
-    (void)coordinated;
     (void)start;
     (void)target;
     (void)moved;
@@ -131,10 +154,7 @@ static int wait_axis_target(
     }
     for (attempt = 0U; attempt < V5_HOME_AXIS_WAIT_ATTEMPTS; ++attempt) {
         double current;
-        int position_ok = coordinated
-            ? v5_linuxcncrsh_get_axis_position(config, axis->axis, 0, &current)
-            : v5_linuxcncrsh_get_joint_position(config, axis->status_slot, &current);
-        if (position_ok) {
+        if (v5_linuxcncrsh_get_joint_position(config, axis->status_slot, &current)) {
             if (fabs(current - start) > V5_HOME_MOTION_TOLERANCE && moved) {
                 *moved = 1;
             }
@@ -156,7 +176,6 @@ static int wait_axis_target(
 static int send_increment(
     const V5LinuxcncrshConfig *config,
     const V5NativeMotionAxisParameters *axis,
-    int coordinated,
     double delta)
 {
     char line[128];
@@ -166,11 +185,8 @@ static int send_increment(
         return 0;
     }
     speed = delta < 0.0 ? -axis->max_velocity : axis->max_velocity;
-    rc = coordinated
-        ? snprintf(line, sizeof(line), "Set Jog_Incr %c %.6f %.6f", axis->axis, speed, fabs(delta))
-        : snprintf(line, sizeof(line), "Set Jog_Incr %u %.6f %.6f", axis->status_slot, speed, fabs(delta));
+    rc = snprintf(line, sizeof(line), "Set Jog_Incr %u %.6f %.6f", axis->status_slot, speed, fabs(delta));
     return rc > 0 && (size_t)rc < sizeof(line) &&
-           v5_linuxcncrsh_send_line(config, "Set Mode Manual") == V5_LINUXCNCRSH_SEND_SENT &&
            v5_linuxcncrsh_send_line(config, line) == V5_LINUXCNCRSH_SEND_SENT;
 }
 
@@ -217,6 +233,86 @@ static int wait_all_homed(
 #endif
 }
 
+static int wait_joint_homed(
+    const V5LinuxcncrshConfig *config,
+    unsigned int joint,
+    unsigned int attempts)
+{
+#ifdef _WIN32
+    (void)config;
+    (void)joint;
+    (void)attempts;
+    return 0;
+#else
+    unsigned int attempt;
+    unsigned int stable = 0U;
+    for (attempt = 0U; attempt < attempts; ++attempt) {
+        int homed = 0;
+        if (v5_linuxcncrsh_get_joint_homed(config, joint, &homed) && homed) {
+            ++stable;
+            if (stable >= 2U) {
+                return 1;
+            }
+        } else {
+            stable = 0U;
+        }
+        usleep(V5_HOME_WAIT_US);
+    }
+    return 0;
+#endif
+}
+
+static int sync_homed_in_configured_order(
+    const V5LinuxcncrshConfig *config,
+    const V5NativeMotionParameters *parameters)
+{
+    int previous_sequence = -1;
+    unsigned int completed = 0U;
+    if (!parameters || !parameters->loaded) {
+        return 0;
+    }
+    while (completed < parameters->active_axis_count) {
+        int next_sequence = INT_MAX;
+        unsigned int slot;
+        for (slot = 0U; slot < parameters->active_axis_count; ++slot) {
+            const V5NativeMotionAxisParameters *axis = axis_for_slot(parameters, slot);
+            if (!axis || axis->home_sequence < 0) {
+                return 0;
+            }
+            if (axis->home_sequence > previous_sequence && axis->home_sequence < next_sequence) {
+                next_sequence = axis->home_sequence;
+            }
+        }
+        if (next_sequence == INT_MAX) {
+            return 0;
+        }
+        for (slot = 0U; slot < parameters->active_axis_count; ++slot) {
+            const V5NativeMotionAxisParameters *axis = axis_for_slot(parameters, slot);
+            char line[64];
+            int rc;
+            if (!axis || axis->home_sequence != next_sequence) {
+                continue;
+            }
+            rc = snprintf(line, sizeof(line), "Set Home %u", axis->status_slot);
+            if (rc <= 0 || (size_t)rc >= sizeof(line) ||
+                v5_linuxcncrsh_send_line(config, line) != V5_LINUXCNCRSH_SEND_SENT) {
+                return 0;
+            }
+        }
+        for (slot = 0U; slot < parameters->active_axis_count; ++slot) {
+            const V5NativeMotionAxisParameters *axis = axis_for_slot(parameters, slot);
+            if (axis && axis->home_sequence == next_sequence) {
+                if (!wait_joint_homed(config, axis->status_slot, 100U)) {
+                    return 0;
+                }
+                ++completed;
+            }
+        }
+        previous_sequence = next_sequence;
+    }
+    return wait_all_homed(config, parameters->active_axis_count, 100U);
+}
+
 static V5LinuxcncrshSendStatus send_bus_home(
     const V5LinuxcncrshConfig *config,
     const V5NativeMotionParameters *parameters,
@@ -225,12 +321,14 @@ static V5LinuxcncrshSendStatus send_bus_home(
     double start[V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT];
     double current[V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT];
     int moved[V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT] = {0, 0, 0, 0, 0, 0};
-    int all_homed = 0;
-    int coordinated = 0;
     unsigned int slot;
-    coordinated = v5_linuxcncrsh_get_all_homed(
-        config, parameters->active_axis_count, &all_homed) && all_homed;
-    if (!read_all_positions(config, parameters, coordinated, start)) {
+    if (v5_linuxcncrsh_send_line(config, "Set Mode Manual") != V5_LINUXCNCRSH_SEND_SENT ||
+        v5_linuxcncrsh_send_line(config, "Set Teleop_Enable Off") != V5_LINUXCNCRSH_SEND_SENT ||
+        !wait_teleop_enabled(config, 0)) {
+        result_code(result, "BUS_HOME_JOINT_MODE_REJECTED");
+        return V5_LINUXCNCRSH_SEND_IO_ERROR;
+    }
+    if (!read_all_positions(config, parameters, start)) {
         result_code(result, "BUS_HOME_NATIVE_POSITION_UNAVAILABLE");
         return V5_LINUXCNCRSH_SEND_IO_ERROR;
     }
@@ -238,13 +336,13 @@ static V5LinuxcncrshSendStatus send_bus_home(
         const V5NativeMotionAxisParameters *axis = axis_for_slot(parameters, slot);
         double delta = axis ? proof_delta(axis, start[slot]) : 0.0;
         if (!axis || delta == 0.0 ||
-            !send_increment(config, axis, coordinated, delta) ||
-            !wait_axis_target(config, axis, coordinated, start[slot], start[slot] + delta, &moved[slot])) {
+            !send_increment(config, axis, delta) ||
+            !wait_axis_target(config, axis, start[slot], start[slot] + delta, &moved[slot])) {
             result_code(result, "BUS_HOME_PROOF_MOVE_NOT_CONFIRMED");
             return V5_LINUXCNCRSH_SEND_IO_ERROR;
         }
     }
-    if (!read_all_positions(config, parameters, coordinated, current)) {
+    if (!read_all_positions(config, parameters, current)) {
         result_code(result, "BUS_HOME_POSITION_UNAVAILABLE_AFTER_PROOF");
         return V5_LINUXCNCRSH_SEND_IO_ERROR;
     }
@@ -252,8 +350,8 @@ static V5LinuxcncrshSendStatus send_bus_home(
         const V5NativeMotionAxisParameters *axis = axis_for_slot(parameters, slot);
         double target = axis ? nearest_zero_target(axis->axis, current[slot]) : 0.0;
         if (!axis ||
-            !send_increment(config, axis, coordinated, target - current[slot]) ||
-            !wait_axis_target(config, axis, coordinated, current[slot], target, &moved[slot])) {
+            !send_increment(config, axis, target - current[slot]) ||
+            !wait_axis_target(config, axis, current[slot], target, &moved[slot])) {
             result_code(result, "BUS_HOME_ZERO_MOVE_NOT_CONFIRMED");
             return V5_LINUXCNCRSH_SEND_IO_ERROR;
         }
@@ -262,18 +360,21 @@ static V5LinuxcncrshSendStatus send_bus_home(
         const V5NativeMotionAxisParameters *axis = axis_for_slot(parameters, slot);
         double position;
         if (!axis || !moved[slot] ||
-            !(coordinated
-                ? v5_linuxcncrsh_get_axis_position(config, axis->axis, 0, &position)
-                : v5_linuxcncrsh_get_joint_position(config, axis->status_slot, &position)) ||
+            !v5_linuxcncrsh_get_joint_position(config, axis->status_slot, &position) ||
             target_error(axis->axis, position, 0.0) > V5_HOME_TARGET_TOLERANCE) {
             result_code(result, "BUS_HOME_REAL_MOVE_READBACK_FAILED");
             return V5_LINUXCNCRSH_SEND_IO_ERROR;
         }
     }
     if (v5_linuxcncrsh_send_line(config, "Set Mode Manual") != V5_LINUXCNCRSH_SEND_SENT ||
-        v5_linuxcncrsh_send_line(config, "Set Home -1") != V5_LINUXCNCRSH_SEND_SENT ||
-        !wait_all_homed(config, parameters->active_axis_count, 100U)) {
+        !sync_homed_in_configured_order(config, parameters)) {
+        (void)v5_linuxcncrsh_send_line(config, "Set Teleop_Enable On");
         result_code(result, "BUS_HOME_HOMED_SYNC_FAILED");
+        return V5_LINUXCNCRSH_SEND_IO_ERROR;
+    }
+    if (v5_linuxcncrsh_send_line(config, "Set Teleop_Enable On") != V5_LINUXCNCRSH_SEND_SENT ||
+        !wait_teleop_enabled(config, 1)) {
+        result_code(result, "BUS_HOME_TELEOP_RESTORE_FAILED");
         return V5_LINUXCNCRSH_SEND_IO_ERROR;
     }
     for (slot = 0U; slot < parameters->active_axis_count; ++slot) {
@@ -309,8 +410,9 @@ static V5LinuxcncrshSendStatus send_pulse_home(
     int moved[V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT] = {0, 0, 0, 0, 0, 0};
     unsigned int attempt;
     unsigned int slot;
-    if (!read_all_positions(config, parameters, 0, start) ||
+    if (!read_all_positions(config, parameters, start) ||
         v5_linuxcncrsh_send_line(config, "Set Mode Manual") != V5_LINUXCNCRSH_SEND_SENT ||
+        v5_linuxcncrsh_send_line(config, "Set Teleop_Enable Off") != V5_LINUXCNCRSH_SEND_SENT ||
         v5_linuxcncrsh_send_line(config, "Set Home -1") != V5_LINUXCNCRSH_SEND_SENT) {
         result_code(result, "PULSE_HOME_COMMAND_REJECTED");
         return V5_LINUXCNCRSH_SEND_IO_ERROR;
@@ -335,6 +437,10 @@ static V5LinuxcncrshSendStatus send_pulse_home(
             }
             if (!all_moved) {
                 result_code(result, "PULSE_HOME_REAL_MOVE_NOT_CONFIRMED");
+                return V5_LINUXCNCRSH_SEND_IO_ERROR;
+            }
+            if (v5_linuxcncrsh_send_line(config, "Set Teleop_Enable On") != V5_LINUXCNCRSH_SEND_SENT) {
+                result_code(result, "PULSE_HOME_TELEOP_RESTORE_FAILED");
                 return V5_LINUXCNCRSH_SEND_IO_ERROR;
             }
             for (slot = 0U; slot < parameters->active_axis_count; ++slot) {

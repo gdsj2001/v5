@@ -28,6 +28,15 @@ int v5_settings_parameter_store_write_axis(
     const char *field_key,
     const char *value);
 
+int v5_settings_parameter_store_write_axis_pair(
+    const char *project_root,
+    V5SettingsParameterDiskTable table,
+    const char *first_axis,
+    const char *second_axis,
+    const char *field_key,
+    const char *first_value,
+    const char *second_value);
+
 #ifdef __cplusplus
 }
 #endif

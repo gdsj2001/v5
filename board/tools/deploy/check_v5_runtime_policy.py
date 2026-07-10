@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import configparser
 import importlib.util
 import re
 import sys
@@ -298,7 +299,24 @@ def check_rotary_wrapped_mask_policy() -> int:
         rc = 1
     else:
         hal_text = bus_hal.read_text(encoding="utf-8", errors="ignore")
-        ini_text = bus_ini.read_text(encoding="utf-8", errors="ignore")
+        registry_path = ROOT / "services" / "command_gate" / "v5_motion_model_registry.h"
+        registry_text = registry_path.read_text(encoding="utf-8", errors="strict") if registry_path.exists() else ""
+        registry = {
+            match.group("canonical"): {
+                "display": match.group("display"),
+                "module": match.group("module"),
+                "coordinates": match.group("coordinates"),
+                "traj": match.group("traj"),
+                "wrapped_mask": match.group("wrapped_mask"),
+            }
+            for match in re.finditer(
+                r'\{\s*\d+U,\s*"(?P<canonical>[^"]+)",\s*"(?P<display>[^"]+)",\s*'
+                r'\{[^}]*\},\s*"(?P<module>[^"]+)",\s*"(?P<coordinates>[^"]+)",\s*'
+                r'"(?P<traj>[^"]+)",\s*(?P<wrapped_mask>\d+)U,',
+                registry_text,
+                re.DOTALL,
+            )
+        }
         required_hal = (
             "loadrt [RTCP]KINS_MODULE coordinates=[RTCP]KINS_COORDINATES sparm=identityfirst",
             "z20_wrapped_rotary_mask=[RTCP]WRAPPED_ROTARY_MASK",
@@ -309,28 +327,49 @@ def check_rotary_wrapped_mask_policy() -> int:
             if token not in hal_text:
                 print(f"ACTIVE_MODEL_KINS_HAL_CONTRACT_MISSING: {bus_hal.relative_to(ROOT)} lacks {token}", file=sys.stderr)
                 rc = 1
-        forbidden_hal = (
-            "loadrt xyzac-trt-kins",
-            "xyzac-trt-kins.tool-offset",
-            "setp xyzac-trt-kins.",
-        )
-        for token in forbidden_hal:
-            if token in hal_text:
-                print(f"ACTIVE_MODEL_KINS_HAL_HARDCODED_AC: {bus_hal.relative_to(ROOT)} contains {token}", file=sys.stderr)
-                rc = 1
-        required_ini = (
-            "MODEL = XYZAC_TRT",
-            "KINS_MODULE = xyzac-trt-kins",
-            "KINS_COORDINATES = XYZAC",
-            "KINS_PREFIX = xyzac-trt-kins",
-            "KINS_TOOL_OFFSET_PIN = xyzac-trt-kins.tool-offset",
-            "KINS_X_ROT_POINT_PIN = xyzac-trt-kins.x-rot-point",
-            "WRAPPED_ROTARY_MASK = 24",
-        )
-        for token in required_ini:
-            if token not in ini_text:
-                print(f"ACTIVE_MODEL_KINS_INI_DEFAULT_MISSING: {bus_ini.relative_to(ROOT)} lacks {token}", file=sys.stderr)
-                rc = 1
+        for descriptor in registry.values():
+            for token in (
+                f"loadrt {descriptor['module']}",
+                f"{descriptor['module']}.tool-offset",
+                f"setp {descriptor['module']}.",
+            ):
+                if token in hal_text:
+                    print(f"ACTIVE_MODEL_KINS_HAL_HARDCODED_MODEL: {bus_hal.relative_to(ROOT)} contains {token}", file=sys.stderr)
+                    rc = 1
+        parser = configparser.ConfigParser(interpolation=None)
+        parser.optionxform = str
+        parser.read(bus_ini, encoding="utf-8")
+        model = parser.get("RTCP", "MODEL", fallback="").strip()
+        descriptor = registry.get(model)
+        if not descriptor:
+            print(f"ACTIVE_MODEL_KINS_UNREGISTERED: {bus_ini.relative_to(ROOT)} MODEL={model!r}", file=sys.stderr)
+            rc = 1
+        else:
+            expected = {
+                ("RTCP", "MOTION_MODEL"): descriptor["display"],
+                ("RTCP", "KINS_MODULE"): descriptor["module"],
+                ("RTCP", "KINS_COORDINATES"): descriptor["coordinates"],
+                ("RTCP", "KINS_PREFIX"): descriptor["module"],
+                ("RTCP", "KINS_TOOL_OFFSET_PIN"): f"{descriptor['module']}.tool-offset",
+                ("RTCP", "KINS_X_ROT_POINT_PIN"): f"{descriptor['module']}.x-rot-point",
+                ("RTCP", "KINS_Y_ROT_POINT_PIN"): f"{descriptor['module']}.y-rot-point",
+                ("RTCP", "KINS_Z_ROT_POINT_PIN"): f"{descriptor['module']}.z-rot-point",
+                ("RTCP", "KINS_X_OFFSET_PIN"): f"{descriptor['module']}.x-offset",
+                ("RTCP", "KINS_Y_OFFSET_PIN"): f"{descriptor['module']}.y-offset",
+                ("RTCP", "KINS_Z_OFFSET_PIN"): f"{descriptor['module']}.z-offset",
+                ("RTCP", "WRAPPED_ROTARY_MASK"): descriptor["wrapped_mask"],
+                ("KINS", "KINEMATICS"): f"{descriptor['module']} coordinates={descriptor['coordinates']} sparm=identityfirst",
+                ("TRAJ", "COORDINATES"): descriptor["traj"],
+            }
+            for (section, key), wanted in expected.items():
+                actual = parser.get(section, key, fallback="").strip()
+                if actual != wanted:
+                    print(
+                        f"ACTIVE_MODEL_KINS_INI_MISMATCH: {bus_ini.relative_to(ROOT)} "
+                        f"[{section}] {key}={actual!r} expected={wanted!r} model={model}",
+                        file=sys.stderr,
+                    )
+                    rc = 1
 
     expected = (
         (

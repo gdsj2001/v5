@@ -57,6 +57,13 @@ int v5_linuxcncrsh_get_joint_position(
     const V5LinuxcncrshConfig *config,
     unsigned int joint,
     double *position_out);
+int v5_linuxcncrsh_get_joint_homed(
+    const V5LinuxcncrshConfig *config,
+    unsigned int joint,
+    int *homed_out);
+int v5_linuxcncrsh_get_teleop_enabled(
+    const V5LinuxcncrshConfig *config,
+    int *enabled_out);
 int v5_linuxcncrsh_get_all_homed(
     const V5LinuxcncrshConfig *config,
     unsigned int expected_joint_count,

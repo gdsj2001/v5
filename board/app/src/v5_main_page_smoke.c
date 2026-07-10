@@ -1,5 +1,6 @@
 #include "v5_main_page.h"
 #include "v5_lvgl_headless.h"
+#include "v5_settings_page.h"
 #include "v5_ui_status_view.h"
 #include "v5_settings_axis_table.h"
 
@@ -86,6 +87,8 @@ int main(void)
     V5ProgramController controller;
     V5ProgramOpenResult open_result;
     V5NativeReadback readback;
+    V5NativeReadback settings_readback;
+    V5SettingsPage settings_page;
     double wcs_offsets[V5_NATIVE_READBACK_WCS_OFFSET_COUNT] = {10.0, 12.0, 8.0, 0.0, 0.0};
     double g53_centers[V5_NATIVE_READBACK_G53_CENTER_COUNT][V5_NATIVE_READBACK_G53_AXIS_COUNT] = {
         {0.0, 20.0, -50.0},
@@ -196,6 +199,33 @@ int main(void)
     v5_main_page_bind_program_controller(&page, &controller);
     if (!build_status(&status)) {
         return 3;
+    }
+    if (!v5_settings_page_create(&settings_page, screen)) {
+        return 60;
+    }
+    v5_native_readback_init(&settings_readback);
+    v5_native_readback_set_motion_model(&settings_readback, "XYZBC_TRT");
+    if (!v5_settings_page_set_native_readback(&settings_page, &settings_readback) ||
+        strcmp(lv_label_get_text(settings_page.mcs_axis_labels[3]), "B") != 0 ||
+        strcmp(lv_label_get_text(settings_page.mcs_axis_labels[4]), "C") != 0 ||
+        settings_page.mcs_status_slots[3] != 3U || settings_page.mcs_status_slots[4] != 4U ||
+        !v5_settings_page_apply_status(&settings_page, &status) ||
+        strstr(lv_label_get_text(settings_page.mcs_labels[3]), "5.500") == 0) {
+        return 61;
+    }
+    v5_native_readback_set_motion_model(&settings_readback, "UNREGISTERED_MODEL");
+    if (v5_settings_page_set_native_readback(&settings_page, &settings_readback) ||
+        strcmp(lv_label_get_text(settings_page.mcs_axis_labels[3]), "-") != 0 ||
+        strcmp(lv_label_get_text(settings_page.mcs_axis_labels[4]), "-") != 0 ||
+        !v5_settings_page_apply_status(&settings_page, &status) ||
+        strcmp(lv_label_get_text(settings_page.mcs_labels[3]), "--") != 0) {
+        return 62;
+    }
+    v5_native_readback_set_motion_model(&settings_readback, "XYZAC_TRT");
+    if (!v5_settings_page_set_native_readback(&settings_page, &settings_readback) ||
+        strcmp(lv_label_get_text(settings_page.mcs_axis_labels[3]), "A") != 0 ||
+        strcmp(lv_label_get_text(settings_page.mcs_axis_labels[4]), "C") != 0) {
+        return 63;
     }
     if (!v5_main_page_apply_status(&page, &status)) {
         return 4;

@@ -368,8 +368,8 @@ int main(void)
           "Y\tslave\t1\n"
           "Z\tslave\t2\n"
           "A\tslave\t3\n"
-          "B\tslave\t4\n"
-          "C\tslave\t5\n"
+          "B\tslave\tNAT\n"
+          "C\tslave\t4\n"
           "GANTRY\tslave\t6\n"
           "TOOLMAG\tslave\t7\n"
           "G53\ttool_setter_x\t0\n"
@@ -488,6 +488,49 @@ int main(void)
             return 52;
         }
     }
+    {
+        char a_slave[64] = "";
+        char b_slave[64] = "";
+        char axis_b_min[64] = "";
+        char joint_3_min[64] = "";
+        char axis_b_scale[64] = "";
+        char joint_3_scale[64] = "";
+        if (!v5_settings_parameter_store_read_axis(
+                ".", V5_SETTINGS_PARAMETER_DISK_SELF, "A", "slave", a_slave, sizeof(a_slave)) ||
+            !v5_settings_parameter_store_read_axis(
+                ".", V5_SETTINGS_PARAMETER_DISK_SELF, "B", "slave", b_slave, sizeof(b_slave)) ||
+            strcmp(a_slave, "NAT") != 0 || strcmp(b_slave, "3") != 0 ||
+            strcmp(v5_settings_axis_table_value(3U, 2U), "NAT") != 0 ||
+            strcmp(v5_settings_axis_table_value(4U, 2U), "3") != 0 ||
+            !read_section_ini_key("linuxcnc/ini/v5_bus.ini", "AXIS_B", "MIN_LIMIT", axis_b_min, sizeof(axis_b_min)) ||
+            !read_section_ini_key("linuxcnc/ini/v5_bus.ini", "JOINT_3", "MIN_LIMIT", joint_3_min, sizeof(joint_3_min)) ||
+            !read_section_ini_key("linuxcnc/ini/v5_bus.ini", "AXIS_B", "SCALE", axis_b_scale, sizeof(axis_b_scale)) ||
+            !read_section_ini_key("linuxcnc/ini/v5_bus.ini", "JOINT_3", "SCALE", joint_3_scale, sizeof(joint_3_scale)) ||
+            strcmp(axis_b_min, joint_3_min) != 0 || strcmp(axis_b_scale, joint_3_scale) != 0) {
+            fprintf(stderr, "BC model binding/joint activation mismatch: A=%s B=%s uiA=%s uiB=%s bmin=%s jmin=%s bscale=%s jscale=%s\n",
+                    a_slave, b_slave,
+                    v5_settings_axis_table_value(3U, 2U),
+                    v5_settings_axis_table_value(4U, 2U),
+                    axis_b_min, joint_3_min, axis_b_scale, joint_3_scale);
+            return 53;
+        }
+    }
+    if (!v5_settings_axis_table_commit_motion_model("XYZAC_TRT") ||
+        strcmp(v5_settings_axis_table_value(3U, 2U), "3") != 0 ||
+        strcmp(v5_settings_axis_table_value(4U, 2U), "NAT") != 0) {
+        fprintf(stderr, "BC to AC model roundtrip failed: A=%s B=%s\n",
+                v5_settings_axis_table_value(3U, 2U),
+                v5_settings_axis_table_value(4U, 2U));
+        return 54;
+    }
+    if (!v5_settings_axis_table_commit_motion_model("XYZBC_TRT") ||
+        strcmp(v5_settings_axis_table_value(3U, 2U), "NAT") != 0 ||
+        strcmp(v5_settings_axis_table_value(4U, 2U), "3") != 0) {
+        fprintf(stderr, "AC to BC model roundtrip failed: A=%s B=%s\n",
+                v5_settings_axis_table_value(3U, 2U),
+                v5_settings_axis_table_value(4U, 2U));
+        return 55;
+    }
     if (strcmp(v5_settings_axis_table_value(0U, 16U), "777") != 0 ||
         strcmp(v5_settings_axis_table_value(0U, 17U), "888") != 0 ||
         strcmp(v5_settings_axis_table_value(0U, 18U), "slave-ok") != 0) {
@@ -551,10 +594,17 @@ int main(void)
                 } else {
                     ++native_or_runtime;
                 }
+                if (c != 2U && same_text(v5_settings_axis_table_value(r, 2U), "NAT")) {
+                    continue;
+                }
                 if (!v5_settings_axis_table_value_is_real(r, c) ||
-                    same_text(v5_settings_axis_table_value(r, c), "NAT") ||
+                    (c != 2U && same_text(v5_settings_axis_table_value(r, c), "NAT")) ||
                     same_text(v5_settings_axis_table_value(r, c), "--")) {
-                    fprintf(stderr, "axis value missing: %s=%s\n", id, v5_settings_axis_table_value(r, c));
+                    fprintf(stderr, "axis value missing: %s=%s real=%d row_slave=%s\n",
+                            id,
+                            v5_settings_axis_table_value(r, c),
+                            v5_settings_axis_table_value_is_real(r, c),
+                            v5_settings_axis_table_value(r, 2U));
                     return 6;
                 }
             }

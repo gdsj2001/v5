@@ -259,6 +259,7 @@ static int shell_refresh_native_readback(int force)
     }
 
     v5_main_page_set_native_readback(&g_main_page, &readback);
+    (void)v5_settings_page_set_native_readback(&g_settings_page, &readback);
     shell_update_top_status_label();
     return 1;
 }

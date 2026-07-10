@@ -1170,6 +1170,174 @@ static int ini_write_section_text(
     return numeric_required ? settings_apply_values_match(readback, value) : strcmp(readback, value) == 0;
 }
 
+typedef struct V5IniTextUpdate {
+    const char *section;
+    const char *key;
+    const char *value;
+    int section_seen;
+    int written;
+} V5IniTextUpdate;
+
+static void ini_write_missing_updates(
+    FILE *out,
+    const char *section,
+    V5IniTextUpdate *updates,
+    size_t update_count,
+    int *last_had_newline)
+{
+    size_t i;
+    if (!out || !section || !section[0] || !updates) {
+        return;
+    }
+    for (i = 0U; i < update_count; ++i) {
+        if (!updates[i].written && strcmp(updates[i].section, section) == 0) {
+            ini_write_key_text(out, updates[i].key, updates[i].value, last_had_newline);
+            updates[i].written = 1;
+        }
+    }
+}
+
+static int ini_write_text_updates(
+    const char *path,
+    V5IniTextUpdate *updates,
+    size_t update_count)
+{
+    FILE *in;
+    FILE *out;
+    char tmp_path[512];
+    char raw[512];
+    char current_section[64] = "";
+    int last_had_newline = 1;
+    size_t i;
+    int n;
+    if (!path || !updates || update_count == 0U) {
+        return 0;
+    }
+    for (i = 0U; i < update_count; ++i) {
+        size_t j;
+        if (!updates[i].section || !updates[i].section[0] || !updates[i].key || !updates[i].key[0] ||
+            !settings_apply_safe_ini_value(updates[i].value)) {
+            return 0;
+        }
+        for (j = 0U; j < i; ++j) {
+            if (strcmp(updates[i].section, updates[j].section) == 0 &&
+                strcmp(updates[i].key, updates[j].key) == 0) {
+                return 0;
+            }
+        }
+        updates[i].section_seen = 0;
+        updates[i].written = 0;
+    }
+    n = snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path);
+    if (n <= 0 || (size_t)n >= sizeof(tmp_path)) {
+        return 0;
+    }
+    in = fopen(path, "rb");
+    if (!in) {
+        return 0;
+    }
+    out = fopen(tmp_path, "wb");
+    if (!out) {
+        fclose(in);
+        return 0;
+    }
+    while (fgets(raw, sizeof(raw), in)) {
+        char section[64];
+        size_t len = strlen(raw);
+        int replaced = 0;
+        if (ini_section_line(raw, section, sizeof(section))) {
+            ini_write_missing_updates(out, current_section, updates, update_count, &last_had_newline);
+            snprintf(current_section, sizeof(current_section), "%s", section);
+            for (i = 0U; i < update_count; ++i) {
+                if (strcmp(updates[i].section, current_section) == 0) {
+                    updates[i].section_seen = 1;
+                }
+            }
+        } else {
+            for (i = 0U; i < update_count; ++i) {
+                if (strcmp(updates[i].section, current_section) == 0 &&
+                    ini_key_line(raw, updates[i].key, 0)) {
+                    ini_write_key_text(out, updates[i].key, updates[i].value, &last_had_newline);
+                    updates[i].written = 1;
+                    replaced = 1;
+                    break;
+                }
+            }
+        }
+        if (!replaced) {
+            fputs(raw, out);
+            last_had_newline = (len == 0U || raw[len - 1U] == '\n') ? 1 : 0;
+        }
+    }
+    ini_write_missing_updates(out, current_section, updates, update_count, &last_had_newline);
+    fclose(in);
+    if (fclose(out) != 0) {
+        remove(tmp_path);
+        return 0;
+    }
+    for (i = 0U; i < update_count; ++i) {
+        if (!updates[i].section_seen || !updates[i].written) {
+            remove(tmp_path);
+            return 0;
+        }
+    }
+    if (rename(tmp_path, path) != 0) {
+        remove(tmp_path);
+        return 0;
+    }
+    return 1;
+}
+
+static int write_text_file_atomic(const char *path, const char *text)
+{
+    char tmp_path[512];
+    FILE *fp;
+    size_t size;
+    int n;
+    int ok;
+    if (!path || !text) {
+        return 0;
+    }
+    n = snprintf(tmp_path, sizeof(tmp_path), "%s.rollback.tmp", path);
+    if (n <= 0 || (size_t)n >= sizeof(tmp_path)) {
+        return 0;
+    }
+    fp = fopen(tmp_path, "wb");
+    if (!fp) {
+        return 0;
+    }
+    size = strlen(text);
+    ok = size == 0U || fwrite(text, 1U, size, fp) == size;
+    if (fclose(fp) != 0) {
+        ok = 0;
+    }
+    if (!ok) {
+        remove(tmp_path);
+        return 0;
+    }
+    if (rename(tmp_path, path) != 0) {
+        remove(tmp_path);
+        return 0;
+    }
+    return 1;
+}
+
+static int ini_updates_readback_match(
+    const char *path,
+    const V5IniTextUpdate *updates,
+    size_t update_count)
+{
+    char readback[128];
+    size_t i;
+    for (i = 0U; i < update_count; ++i) {
+        if (!ini_read_section_text(path, updates[i].section, updates[i].key, readback, sizeof(readback)) ||
+            strcmp(readback, updates[i].value) != 0) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 static int settings_apply_joint_index_from_ini(const char *ini_path, const char *axis, unsigned int *joint_out)
 {
     FILE *fp;
@@ -1412,11 +1580,75 @@ static int settings_apply_motion_model_values(
     return 1;
 }
 
+#define V5_MODEL_JOINT_KEY_COUNT 10U
+#define V5_MODEL_INI_UPDATE_MAX 48U
+
+static const char *const k_model_joint_keys[V5_MODEL_JOINT_KEY_COUNT] = {
+    "TYPE",
+    "HOME",
+    "MIN_LIMIT",
+    "MAX_LIMIT",
+    "MAX_VELOCITY",
+    "MAX_ACCELERATION",
+    "SCALE",
+    "HOME_SEARCH_VEL",
+    "HOME_SEQUENCE",
+    "BACKLASH",
+};
+
+static int ini_update_add(
+    V5IniTextUpdate *updates,
+    size_t *count,
+    size_t cap,
+    const char *section,
+    const char *key,
+    const char *value)
+{
+    if (!updates || !count || *count >= cap || !section || !key || !value) {
+        return 0;
+    }
+    updates[*count].section = section;
+    updates[*count].key = key;
+    updates[*count].value = value;
+    updates[*count].section_seen = 0;
+    updates[*count].written = 0;
+    ++*count;
+    return 1;
+}
+
+static const V5MotionModelDescriptor *settings_apply_alternate_model(
+    const V5MotionModelDescriptor *target,
+    const V5MotionModelDescriptor *current)
+{
+    size_t i;
+    if (!target) {
+        return 0;
+    }
+    if (current && current->first_status_slot == target->first_status_slot &&
+        current->first_rotary_axis != target->first_rotary_axis) {
+        return current;
+    }
+    for (i = 0U; i < v5_motion_model_registry_count(); ++i) {
+        const V5MotionModelDescriptor *candidate = v5_motion_model_registry_at(i);
+        if (candidate && candidate->first_status_slot == target->first_status_slot &&
+            candidate->first_rotary_axis != target->first_rotary_axis) {
+            return candidate;
+        }
+    }
+    return 0;
+}
+
 static int settings_apply_commit_motion_model(
     const V5SettingsApplyAxisCommitRequest *request,
     V5SettingsApplyAxisCommitResult *result)
 {
+    const V5MotionModelDescriptor *target_model;
+    const V5MotionModelDescriptor *current_model = 0;
+    const V5MotionModelDescriptor *alternate_model;
+    V5IniTextUpdate updates[V5_MODEL_INI_UPDATE_MAX];
+    size_t update_count = 0U;
     char ini_path[512];
+    char current_model_text[64];
     char canonical[32];
     char display[32];
     char kins_module[32];
@@ -1432,22 +1664,28 @@ static int settings_apply_commit_motion_model(
     char traj_coordinates[32];
     char kinematics[96];
     char wrapped_mask[16];
-    char canonical_readback[64];
-    char display_readback[64];
-    char kins_module_readback[64];
-    char kins_coordinates_readback[64];
-    char kins_prefix_readback[64];
-    char kins_tool_offset_pin_readback[96];
-    char kins_x_rot_point_pin_readback[96];
-    char kins_y_rot_point_pin_readback[96];
-    char kins_z_rot_point_pin_readback[96];
-    char kins_x_offset_pin_readback[96];
-    char kins_y_offset_pin_readback[96];
-    char kins_z_offset_pin_readback[96];
-    char traj_coordinates_readback[64];
-    char kinematics_readback[128];
-    char wrapped_mask_readback[32];
+    char target_axis[2];
+    char alternate_axis[2] = "";
+    char snapshot_axis[2];
+    char target_axis_section[32];
+    char snapshot_axis_section[32];
+    char joint_section[32];
+    char target_slave[64] = "";
+    char alternate_slave[64] = "";
+    char final_target_slave[64] = "";
+    char final_alternate_slave[64] = "";
+    char joint_snapshot[V5_MODEL_JOINT_KEY_COUNT][64];
+    char target_joint[V5_MODEL_JOINT_KEY_COUNT][64];
+    char target_slave_readback[64];
+    char alternate_slave_readback[64];
+    char *original_ini;
     unsigned int wrapped_rotary_mask = 0U;
+    unsigned int i;
+    int pair_needed = 0;
+    int pair_written = 0;
+    int target_is_nat = 0;
+    int alternate_is_nat = 1;
+    int ok = 0;
     if (!request || !request->value_text ||
         !settings_apply_motion_model_values(
             request->value_text,
@@ -1465,6 +1703,69 @@ static int settings_apply_commit_motion_model(
         !build_runtime_ini_path(ini_path, sizeof(ini_path), request->project_root)) {
         return 0;
     }
+    target_model = v5_motion_model_find(canonical);
+    if (!target_model) {
+        return 0;
+    }
+    if (ini_read_section_text(ini_path, "RTCP", "MODEL", current_model_text, sizeof(current_model_text))) {
+        current_model = v5_motion_model_find(current_model_text);
+    }
+    alternate_model = settings_apply_alternate_model(target_model, current_model);
+    target_axis[0] = target_model->first_rotary_axis;
+    target_axis[1] = '\0';
+    snapshot_axis[0] = target_axis[0];
+    snapshot_axis[1] = '\0';
+    if (alternate_model) {
+        alternate_axis[0] = alternate_model->first_rotary_axis;
+        alternate_axis[1] = '\0';
+        if (!v5_settings_parameter_store_read_axis(
+                request->project_root, V5_SETTINGS_PARAMETER_DISK_SELF,
+                target_axis, "slave", target_slave, sizeof(target_slave)) ||
+            !v5_settings_parameter_store_read_axis(
+                request->project_root, V5_SETTINGS_PARAMETER_DISK_SELF,
+                alternate_axis, "slave", alternate_slave, sizeof(alternate_slave))) {
+            return 0;
+        }
+        snprintf(final_target_slave, sizeof(final_target_slave), "%s", target_slave);
+        snprintf(final_alternate_slave, sizeof(final_alternate_slave), "%s", alternate_slave);
+        target_is_nat = strcmp(target_slave, "NAT") == 0;
+        alternate_is_nat = strcmp(alternate_slave, "NAT") == 0;
+        if (target_is_nat && !alternate_is_nat) {
+            snprintf(final_target_slave, sizeof(final_target_slave), "%s", alternate_slave);
+            snprintf(final_alternate_slave, sizeof(final_alternate_slave), "%s", "NAT");
+            snapshot_axis[0] = alternate_axis[0];
+            pair_needed = 1;
+        } else if (!target_is_nat && alternate_is_nat) {
+            snapshot_axis[0] = target_axis[0];
+        } else if (!target_is_nat && !alternate_is_nat) {
+            if (strcmp(target_slave, alternate_slave) != 0) {
+                return 0;
+            }
+            snprintf(final_alternate_slave, sizeof(final_alternate_slave), "%s", "NAT");
+            snapshot_axis[0] = current_model &&
+                current_model->first_rotary_axis == alternate_axis[0] ? alternate_axis[0] : target_axis[0];
+            pair_needed = 1;
+        } else if (current_model && current_model->first_status_slot == target_model->first_status_slot) {
+            snapshot_axis[0] = current_model->first_rotary_axis;
+        }
+    }
+    snprintf(target_axis_section, sizeof(target_axis_section), "AXIS_%c", target_axis[0]);
+    snprintf(snapshot_axis_section, sizeof(snapshot_axis_section), "AXIS_%c", snapshot_axis[0]);
+    snprintf(joint_section, sizeof(joint_section), "JOINT_%u", target_model->first_status_slot);
+    for (i = 0U; i < V5_MODEL_JOINT_KEY_COUNT; ++i) {
+        if (!ini_read_section_text(
+                ini_path, joint_section, k_model_joint_keys[i],
+                joint_snapshot[i], sizeof(joint_snapshot[i]))) {
+            return 0;
+        }
+        if (snapshot_axis[0] == target_axis[0]) {
+            snprintf(target_joint[i], sizeof(target_joint[i]), "%s", joint_snapshot[i]);
+        } else if (!ini_read_section_text(
+                       ini_path, target_axis_section, k_model_joint_keys[i],
+                       target_joint[i], sizeof(target_joint[i]))) {
+            return 0;
+        }
+    }
     snprintf(kins_prefix, sizeof(kins_prefix), "%s", kins_module);
     snprintf(kins_tool_offset_pin, sizeof(kins_tool_offset_pin), "%s.tool-offset", kins_prefix);
     snprintf(kins_x_rot_point_pin, sizeof(kins_x_rot_point_pin), "%s.x-rot-point", kins_prefix);
@@ -1475,55 +1776,72 @@ static int settings_apply_commit_motion_model(
     snprintf(kins_z_offset_pin, sizeof(kins_z_offset_pin), "%s.z-offset", kins_prefix);
     snprintf(kinematics, sizeof(kinematics), "%s coordinates=%s sparm=identityfirst", kins_module, kins_coordinates);
     snprintf(wrapped_mask, sizeof(wrapped_mask), "%u", wrapped_rotary_mask);
-    if (!ini_write_section_text(ini_path, "RTCP", "MODEL", canonical, 0, canonical_readback, sizeof(canonical_readback)) ||
-        !ini_write_section_text(ini_path, "RTCP", "MOTION_MODEL", display, 0, display_readback, sizeof(display_readback)) ||
-        !ini_write_section_text(ini_path, "RTCP", "KINS_MODULE", kins_module, 0, kins_module_readback, sizeof(kins_module_readback)) ||
-        !ini_write_section_text(ini_path, "RTCP", "KINS_COORDINATES", kins_coordinates, 0, kins_coordinates_readback, sizeof(kins_coordinates_readback)) ||
-        !ini_write_section_text(ini_path, "RTCP", "KINS_PREFIX", kins_prefix, 0, kins_prefix_readback, sizeof(kins_prefix_readback)) ||
-        !ini_write_section_text(ini_path, "RTCP", "KINS_TOOL_OFFSET_PIN", kins_tool_offset_pin, 0, kins_tool_offset_pin_readback, sizeof(kins_tool_offset_pin_readback)) ||
-        !ini_write_section_text(ini_path, "RTCP", "KINS_X_ROT_POINT_PIN", kins_x_rot_point_pin, 0, kins_x_rot_point_pin_readback, sizeof(kins_x_rot_point_pin_readback)) ||
-        !ini_write_section_text(ini_path, "RTCP", "KINS_Y_ROT_POINT_PIN", kins_y_rot_point_pin, 0, kins_y_rot_point_pin_readback, sizeof(kins_y_rot_point_pin_readback)) ||
-        !ini_write_section_text(ini_path, "RTCP", "KINS_Z_ROT_POINT_PIN", kins_z_rot_point_pin, 0, kins_z_rot_point_pin_readback, sizeof(kins_z_rot_point_pin_readback)) ||
-        !ini_write_section_text(ini_path, "RTCP", "KINS_X_OFFSET_PIN", kins_x_offset_pin, 0, kins_x_offset_pin_readback, sizeof(kins_x_offset_pin_readback)) ||
-        !ini_write_section_text(ini_path, "RTCP", "KINS_Y_OFFSET_PIN", kins_y_offset_pin, 0, kins_y_offset_pin_readback, sizeof(kins_y_offset_pin_readback)) ||
-        !ini_write_section_text(ini_path, "RTCP", "KINS_Z_OFFSET_PIN", kins_z_offset_pin, 0, kins_z_offset_pin_readback, sizeof(kins_z_offset_pin_readback)) ||
-        !ini_write_section_text(ini_path, "RTCP", "WRAPPED_ROTARY_MASK", wrapped_mask, 0, wrapped_mask_readback, sizeof(wrapped_mask_readback)) ||
-        !ini_write_section_text(ini_path, "KINS", "KINEMATICS", kinematics, 0, kinematics_readback, sizeof(kinematics_readback)) ||
-        !ini_write_section_text(ini_path, "TRAJ", "COORDINATES", traj_coordinates, 0, traj_coordinates_readback, sizeof(traj_coordinates_readback)) ||
-        !ini_read_section_text(ini_path, "RTCP", "MODEL", canonical_readback, sizeof(canonical_readback)) ||
-        !ini_read_section_text(ini_path, "RTCP", "MOTION_MODEL", display_readback, sizeof(display_readback)) ||
-        !ini_read_section_text(ini_path, "RTCP", "KINS_MODULE", kins_module_readback, sizeof(kins_module_readback)) ||
-        !ini_read_section_text(ini_path, "RTCP", "KINS_COORDINATES", kins_coordinates_readback, sizeof(kins_coordinates_readback)) ||
-        !ini_read_section_text(ini_path, "RTCP", "KINS_PREFIX", kins_prefix_readback, sizeof(kins_prefix_readback)) ||
-        !ini_read_section_text(ini_path, "RTCP", "KINS_TOOL_OFFSET_PIN", kins_tool_offset_pin_readback, sizeof(kins_tool_offset_pin_readback)) ||
-        !ini_read_section_text(ini_path, "RTCP", "KINS_X_ROT_POINT_PIN", kins_x_rot_point_pin_readback, sizeof(kins_x_rot_point_pin_readback)) ||
-        !ini_read_section_text(ini_path, "RTCP", "KINS_Y_ROT_POINT_PIN", kins_y_rot_point_pin_readback, sizeof(kins_y_rot_point_pin_readback)) ||
-        !ini_read_section_text(ini_path, "RTCP", "KINS_Z_ROT_POINT_PIN", kins_z_rot_point_pin_readback, sizeof(kins_z_rot_point_pin_readback)) ||
-        !ini_read_section_text(ini_path, "RTCP", "KINS_X_OFFSET_PIN", kins_x_offset_pin_readback, sizeof(kins_x_offset_pin_readback)) ||
-        !ini_read_section_text(ini_path, "RTCP", "KINS_Y_OFFSET_PIN", kins_y_offset_pin_readback, sizeof(kins_y_offset_pin_readback)) ||
-        !ini_read_section_text(ini_path, "RTCP", "KINS_Z_OFFSET_PIN", kins_z_offset_pin_readback, sizeof(kins_z_offset_pin_readback)) ||
-        !ini_read_section_text(ini_path, "RTCP", "WRAPPED_ROTARY_MASK", wrapped_mask_readback, sizeof(wrapped_mask_readback)) ||
-        !ini_read_section_text(ini_path, "KINS", "KINEMATICS", kinematics_readback, sizeof(kinematics_readback)) ||
-        !ini_read_section_text(ini_path, "TRAJ", "COORDINATES", traj_coordinates_readback, sizeof(traj_coordinates_readback)) ||
-        !settings_apply_values_match(canonical_readback, canonical) ||
-        !settings_apply_values_match(display_readback, display) ||
-        !settings_apply_values_match(kins_module_readback, kins_module) ||
-        !settings_apply_values_match(kins_coordinates_readback, kins_coordinates) ||
-        !settings_apply_values_match(kins_prefix_readback, kins_prefix) ||
-        !settings_apply_values_match(kins_tool_offset_pin_readback, kins_tool_offset_pin) ||
-        !settings_apply_values_match(kins_x_rot_point_pin_readback, kins_x_rot_point_pin) ||
-        !settings_apply_values_match(kins_y_rot_point_pin_readback, kins_y_rot_point_pin) ||
-        !settings_apply_values_match(kins_z_rot_point_pin_readback, kins_z_rot_point_pin) ||
-        !settings_apply_values_match(kins_x_offset_pin_readback, kins_x_offset_pin) ||
-        !settings_apply_values_match(kins_y_offset_pin_readback, kins_y_offset_pin) ||
-        !settings_apply_values_match(kins_z_offset_pin_readback, kins_z_offset_pin) ||
-        !settings_apply_values_match(wrapped_mask_readback, wrapped_mask) ||
-        !settings_apply_values_match(kinematics_readback, kinematics) ||
-        !settings_apply_values_match(traj_coordinates_readback, traj_coordinates)) {
+    if (!ini_update_add(updates, &update_count, V5_MODEL_INI_UPDATE_MAX, "RTCP", "MODEL", canonical) ||
+        !ini_update_add(updates, &update_count, V5_MODEL_INI_UPDATE_MAX, "RTCP", "MOTION_MODEL", display) ||
+        !ini_update_add(updates, &update_count, V5_MODEL_INI_UPDATE_MAX, "RTCP", "KINS_MODULE", kins_module) ||
+        !ini_update_add(updates, &update_count, V5_MODEL_INI_UPDATE_MAX, "RTCP", "KINS_COORDINATES", kins_coordinates) ||
+        !ini_update_add(updates, &update_count, V5_MODEL_INI_UPDATE_MAX, "RTCP", "KINS_PREFIX", kins_prefix) ||
+        !ini_update_add(updates, &update_count, V5_MODEL_INI_UPDATE_MAX, "RTCP", "KINS_TOOL_OFFSET_PIN", kins_tool_offset_pin) ||
+        !ini_update_add(updates, &update_count, V5_MODEL_INI_UPDATE_MAX, "RTCP", "KINS_X_ROT_POINT_PIN", kins_x_rot_point_pin) ||
+        !ini_update_add(updates, &update_count, V5_MODEL_INI_UPDATE_MAX, "RTCP", "KINS_Y_ROT_POINT_PIN", kins_y_rot_point_pin) ||
+        !ini_update_add(updates, &update_count, V5_MODEL_INI_UPDATE_MAX, "RTCP", "KINS_Z_ROT_POINT_PIN", kins_z_rot_point_pin) ||
+        !ini_update_add(updates, &update_count, V5_MODEL_INI_UPDATE_MAX, "RTCP", "KINS_X_OFFSET_PIN", kins_x_offset_pin) ||
+        !ini_update_add(updates, &update_count, V5_MODEL_INI_UPDATE_MAX, "RTCP", "KINS_Y_OFFSET_PIN", kins_y_offset_pin) ||
+        !ini_update_add(updates, &update_count, V5_MODEL_INI_UPDATE_MAX, "RTCP", "KINS_Z_OFFSET_PIN", kins_z_offset_pin) ||
+        !ini_update_add(updates, &update_count, V5_MODEL_INI_UPDATE_MAX, "RTCP", "WRAPPED_ROTARY_MASK", wrapped_mask) ||
+        !ini_update_add(updates, &update_count, V5_MODEL_INI_UPDATE_MAX, "KINS", "KINEMATICS", kinematics) ||
+        !ini_update_add(updates, &update_count, V5_MODEL_INI_UPDATE_MAX, "TRAJ", "COORDINATES", traj_coordinates)) {
         return 0;
     }
+    for (i = 0U; i < V5_MODEL_JOINT_KEY_COUNT; ++i) {
+        if (!ini_update_add(
+                updates, &update_count, V5_MODEL_INI_UPDATE_MAX,
+                snapshot_axis_section, k_model_joint_keys[i], joint_snapshot[i]) ||
+            !ini_update_add(
+                updates, &update_count, V5_MODEL_INI_UPDATE_MAX,
+                joint_section, k_model_joint_keys[i], target_joint[i])) {
+            return 0;
+        }
+    }
+    original_ini = read_text_file_limited(ini_path);
+    if (!original_ini || !ini_write_text_updates(ini_path, updates, update_count)) {
+        free(original_ini);
+        return 0;
+    }
+    if (pair_needed) {
+        pair_written = v5_settings_parameter_store_write_axis_pair(
+            request->project_root, V5_SETTINGS_PARAMETER_DISK_SELF,
+            target_axis, alternate_axis, "slave", final_target_slave, final_alternate_slave);
+        if (!pair_written) {
+            (void)write_text_file_atomic(ini_path, original_ini);
+            free(original_ini);
+            return 0;
+        }
+    }
+    ok = ini_updates_readback_match(ini_path, updates, update_count);
+    if (ok && alternate_model) {
+        ok = v5_settings_parameter_store_read_axis(
+                 request->project_root, V5_SETTINGS_PARAMETER_DISK_SELF,
+                 target_axis, "slave", target_slave_readback, sizeof(target_slave_readback)) &&
+             v5_settings_parameter_store_read_axis(
+                 request->project_root, V5_SETTINGS_PARAMETER_DISK_SELF,
+                 alternate_axis, "slave", alternate_slave_readback, sizeof(alternate_slave_readback)) &&
+             strcmp(target_slave_readback, final_target_slave) == 0 &&
+             strcmp(alternate_slave_readback, final_alternate_slave) == 0;
+    }
+    if (!ok) {
+        (void)write_text_file_atomic(ini_path, original_ini);
+        if (pair_written) {
+            (void)v5_settings_parameter_store_write_axis_pair(
+                request->project_root, V5_SETTINGS_PARAMETER_DISK_SELF,
+                target_axis, alternate_axis, "slave", target_slave, alternate_slave);
+        }
+        free(original_ini);
+        return 0;
+    }
+    free(original_ini);
     if (result) {
-        snprintf(result->readback_value, sizeof(result->readback_value), "%s", display_readback);
+        snprintf(result->readback_value, sizeof(result->readback_value), "%s", display);
     }
     return 1;
 }

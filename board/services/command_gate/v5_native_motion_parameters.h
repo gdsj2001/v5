@@ -25,6 +25,7 @@ typedef struct V5NativeMotionAxisParameters {
     double max_acceleration;
     double min_limit;
     double max_limit;
+    int home_sequence;
     unsigned int valid_mask;
 } V5NativeMotionAxisParameters;
 

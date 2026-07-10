@@ -1,7 +1,9 @@
 #!/bin/sh
 set -eu
 
-repo_root="${V5_REPO_ROOT:-/root/Desktop/v5}"
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+default_repo_root=$(CDPATH= cd -- "$script_dir/../.." && pwd)
+repo_root="${V5_REPO_ROOT:-$default_repo_root}"
 board_ssh="${V5_BOARD_SSH:-}"
 board_ssh_port="${V5_BOARD_SSH_PORT:-22}"
 golden_local="${V5_GOLDEN_PROGRAM:-$repo_root/gcode/golden/cc.ngc}"
@@ -63,10 +65,10 @@ if [ ! -d "$board_build_dir" ]; then
 fi
 
 cmake --build "$board_build_dir" --target $board_build_targets
-V5_BOARD_BUILD_DIR="$board_build_dir" V5_BOARD_SSH="$board_ssh" V5_BOARD_SSH_PORT="$board_ssh_port" "$repo_root/tools/deploy/precheck_v5_board.sh"
-V5_BOARD_BUILD_DIR="$board_build_dir" V5_BOARD_SSH="$board_ssh" V5_BOARD_SSH_PORT="$board_ssh_port" "$repo_root/tools/deploy/push_v5_runtime_to_board.sh" --apply
-V5_BOARD_SSH="$board_ssh" V5_BOARD_SSH_PORT="$board_ssh_port" "$repo_root/tools/deploy/verify_v5_board_runtime.sh"
-V5_BOARD_SSH="$board_ssh" V5_BOARD_SSH_PORT="$board_ssh_port" "$repo_root/tools/deploy/capture_v5_board_ui.sh" --apply
+V5_REPO_ROOT="$repo_root" V5_BOARD_BUILD_DIR="$board_build_dir" V5_BOARD_SSH="$board_ssh" V5_BOARD_SSH_PORT="$board_ssh_port" "$repo_root/tools/deploy/precheck_v5_board.sh"
+V5_REPO_ROOT="$repo_root" V5_BOARD_BUILD_DIR="$board_build_dir" V5_BOARD_SSH="$board_ssh" V5_BOARD_SSH_PORT="$board_ssh_port" "$repo_root/tools/deploy/push_v5_runtime_to_board.sh" --apply
+V5_REPO_ROOT="$repo_root" V5_BOARD_SSH="$board_ssh" V5_BOARD_SSH_PORT="$board_ssh_port" "$repo_root/tools/deploy/verify_v5_board_runtime.sh"
+V5_REPO_ROOT="$repo_root" V5_BOARD_SSH="$board_ssh" V5_BOARD_SSH_PORT="$board_ssh_port" "$repo_root/tools/deploy/capture_v5_board_ui.sh" --apply
 
 if [ "$motion" -eq 0 ]; then
   echo "acceptance source/deploy/verify/ui-capture complete; collect real-finger touch and UI action evidence before operator-path claims; golden motion not requested"
