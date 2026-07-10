@@ -397,6 +397,7 @@ TOUCH_OWNER_DOWNSHIFT:
 TOOLING:
 - Repetitive work should be automated with small task tools/scripts when practical
 - MCP_FIRST: When an MCP tool/resource is available for the target VM, board, browser, repository, filesystem, or service, use MCP first. Use SSH, shell commands, browser automation, or ad hoc probes only when the relevant MCP path is unavailable, insufficient, or explicitly not suited to the task; state the fallback reason in the final reply when it affects verification.
+- V5_MCP_BOUNDARY: For this project, the only v5 remote MCP execution entries are VM `vm_exec` and board `board_exec`; do not use or add separate VM build/scan/sync or board diagnostic MCP entries. Use the canonical project sync/build/deploy scripts through these execution entries.
 - REPEAT_WORK_TOOL_FIRST: If a task requires repeated checks, repeated edits, repeated migration, repeated verification, or broad pattern application, use an existing focused tool first. If no suitable tool exists, build the smallest task-appropriate tool or script, verify it on a narrow sample, then continue the repeated work through that tool instead of manual repetition.
 - Prefer reusable project tools under `D:\v5\board\tools\` for project-wide checks; do not create or preserve `D:\v5\tools` as a second tool source.
 - Use repo_ignored/<short_task>/scratch/ for task-only scratch tools
