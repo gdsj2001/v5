@@ -4,9 +4,9 @@
 loadrt [RTCP]KINS_MODULE coordinates=[RTCP]KINS_COORDINATES sparm=identityfirst
 loadrt [EMCMOT]TPMOD
 loadrt [EMCMOT]HOMEMOD
-# Active model equivalent-zero uses motmod wrapped rotary normalization:
-# first rotary joint=3, C joint=4 => 0x18.
-loadrt [EMCMOT]EMCMOT servo_period_nsec=[EMCMOT]SERVO_PERIOD num_joints=[KINS]JOINTS z20_wrapped_rotary_mask=[RTCP]WRAPPED_ROTARY_MASK
+# Active model equivalent target mask contains EmcPose rotary-axis bits only:
+# AC=A/C => 0x28; BC=B/C => 0x30. BUS raw joint/motor state stays continuous.
+loadrt [EMCMOT]EMCMOT servo_period_nsec=[EMCMOT]SERVO_PERIOD num_joints=[KINS]JOINTS v5_wrapped_rotary_mask=[RTCP]WRAPPED_ROTARY_MASK
 loadrt cia402 count=5
 loadrt bitslice names=x-din,y-din,z-din,a-din,c-din personality=31,31,31,31,31
 loadrt mux2 count=1

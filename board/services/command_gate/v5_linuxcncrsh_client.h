@@ -48,6 +48,11 @@ int v5_linuxcncrsh_probe_estop(
     size_t out_size);
 int v5_linuxcncrsh_probe_active_driver_mode(char *out, size_t out_size);
 int v5_linuxcncrsh_gate_preconnect(const V5LinuxcncrshConfig *config);
+int v5_linuxcncrsh_format_axis_position_query(
+    char axis,
+    int relative,
+    char *out,
+    size_t out_size);
 int v5_linuxcncrsh_get_axis_position(
     const V5LinuxcncrshConfig *config,
     char axis,

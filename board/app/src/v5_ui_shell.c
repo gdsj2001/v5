@@ -1,6 +1,7 @@
 #include "v5_app.h"
 
 #include "lvgl.h"
+#include "v5_button_visuals.h"
 #include "v5_lvgl_headless.h"
 #include "v5_lvgl_remote_display.h"
 #include "v5_lvgl_remote_input.h"
@@ -1105,21 +1106,6 @@ static lv_obj_t *shell_make_panel(lv_obj_t *parent, int x, int y, int w, int h, 
     return panel;
 }
 
-static void shell_clear_button_pressed_visual_now(lv_obj_t *button)
-{
-    if (!button) {
-        return;
-    }
-    lv_obj_clear_state(button, LV_STATE_PRESSED);
-    lv_obj_invalidate(button);
-    lv_refr_now(NULL);
-}
-
-static void shell_button_release_visual_cb(lv_event_t *event)
-{
-    shell_clear_button_pressed_visual_now(lv_event_get_target(event));
-}
-
 static lv_obj_t *shell_text_button(lv_obj_t *parent, const char *text, int x, int y, int w, int h, uint8_t r, uint8_t g, uint8_t b, lv_event_cb_t cb)
 {
     lv_obj_t *button = lv_btn_create(parent);
@@ -1128,12 +1114,10 @@ static lv_obj_t *shell_text_button(lv_obj_t *parent, const char *text, int x, in
     lv_obj_set_pos(button, x, y);
     lv_obj_set_size(button, w, h);
     lv_obj_set_style_bg_color(button, shell_rgb(r, g, b), 0);
-    lv_obj_set_style_bg_color(button, shell_rgb(245, 214, 82), LV_STATE_PRESSED);
     lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(button, 1, 0);
     lv_obj_set_style_border_color(button, shell_rgb(76, 119, 146), 0);
-    lv_obj_add_event_cb(button, shell_button_release_visual_cb, LV_EVENT_RELEASED, 0);
-    lv_obj_add_event_cb(button, shell_button_release_visual_cb, LV_EVENT_CLICKED, 0);
+    v5_button_visual_bind(button);
     if (cb) {
         lv_obj_add_event_cb(button, cb, LV_EVENT_CLICKED, 0);
     }

@@ -72,14 +72,16 @@ static void remote_input_read_cb(lv_indev_drv_t *driver, lv_indev_data_t *data)
     g_remote_dragging = 0;
 }
 
-static void pump_lvgl(unsigned int ms)
+static void pump_lvgl(unsigned int reads)
 {
-    unsigned int elapsed = 0;
-    do {
-        lv_tick_inc(10);
+    unsigned int i;
+    if (!g_remote_driver.read_timer) {
+        return;
+    }
+    for (i = 0U; i < reads; ++i) {
+        lv_timer_ready(g_remote_driver.read_timer);
         lv_timer_handler();
-        elapsed += 10;
-    } while (elapsed < ms);
+    }
 }
 
 static void log_remote_input_event(const char *phase, int x, int y, int ok)
@@ -122,7 +124,7 @@ int v5_lvgl_remote_input_setup(void)
 
 int v5_lvgl_remote_input_pointer_event(const char *phase, int x, int y)
 {
-    unsigned int pump_ms = 30U;
+    unsigned int pump_reads = 1U;
     int dx;
     int dy;
     if (!v5_lvgl_remote_input_accepts_pointer() || !g_remote_indev || !phase || x < 0 || y < 0) {
@@ -138,7 +140,6 @@ int v5_lvgl_remote_input_pointer_event(const char *phase, int x, int y)
         g_remote_seen_press = 0;
         g_remote_release_pending = 0;
         g_remote_dragging = 0;
-        pump_ms = 60U;
     } else if (strcmp(phase, "move") == 0) {
         if (!g_remote_active || !g_remote_pressed) {
             log_remote_input_event(phase, x, y, 0);
@@ -155,7 +156,6 @@ int v5_lvgl_remote_input_pointer_event(const char *phase, int x, int y)
         }
         g_remote_active = 1;
         g_remote_pressed = 1;
-        pump_ms = 20U;
     } else if (strcmp(phase, "up") == 0 || strcmp(phase, "cancel") == 0) {
         if (g_remote_dragging) {
             g_remote_point.x = (lv_coord_t)x;
@@ -170,12 +170,12 @@ int v5_lvgl_remote_input_pointer_event(const char *phase, int x, int y)
             g_remote_pressed = 1;
             g_remote_release_pending = 1;
         }
-        pump_ms = 120U;
+        pump_reads = 2U;
     } else {
         log_remote_input_event(phase, x, y, 0);
         return 0;
     }
-    pump_lvgl(pump_ms);
+    pump_lvgl(pump_reads);
     log_remote_input_event(phase, x, y, 1);
     return 1;
 }

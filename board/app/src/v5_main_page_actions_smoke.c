@@ -1,4 +1,5 @@
 #include "v5_main_page.h"
+#include "v5_button_visuals.h"
 #include "v5_command_gate_ipc.h"
 #include "v5_lvgl_headless.h"
 
@@ -220,6 +221,31 @@ static int button_pressed_state_clears_on_release(V5MainPage *page, V5MainPageAc
     return !lv_obj_has_state(button, LV_STATE_PRESSED);
 }
 
+static int button_visual_state_cycle(V5MainPage *page, V5MainPageActionKind action)
+{
+    lv_obj_t *button = button_for_action(page, action);
+    if (!button) {
+        return 0;
+    }
+    lv_obj_add_state(button, LV_STATE_PRESSED);
+    lv_event_send(button, LV_EVENT_PRESS_LOST, 0);
+    if (lv_obj_has_state(button, LV_STATE_PRESSED)) {
+        return 0;
+    }
+    lv_obj_add_state(button, LV_STATE_PRESSED);
+    lv_event_send(button, LV_EVENT_CANCEL, 0);
+    if (lv_obj_has_state(button, LV_STATE_PRESSED)) {
+        return 0;
+    }
+    v5_button_visual_set_transaction_active(button, 1);
+    if (!lv_obj_has_state(button, LV_STATE_USER_1) ||
+        !button_bg_matches(page, action, 29, 151, 104)) {
+        return 0;
+    }
+    v5_button_visual_set_transaction_active(button, 0);
+    return !lv_obj_has_state(button, LV_STATE_USER_1);
+}
+
 static int exercise_jog_press_timing(V5MainPage *page)
 {
     lv_obj_t *button;
@@ -357,6 +383,9 @@ int main(void)
     }
     if (!button_pressed_state_clears_on_release(&page, V5_MAIN_PAGE_ACTION_HOME)) {
         return 65;
+    }
+    if (!button_visual_state_cycle(&page, V5_MAIN_PAGE_ACTION_HOME)) {
+        return 67;
     }
     v5_program_controller_init(&controller);
     v5_main_page_bind_program_controller(&page, &controller);

@@ -449,7 +449,6 @@ int main(void)
         char kins_prefix[64];
         char kins_tool_offset_pin[96];
         char kins_x_rot_point_pin[96];
-        char wrapped_mask[64];
         char kinematics[128];
         char traj_coordinates[64];
         if (!read_rtcp_ini_key("linuxcnc/ini/v5_bus.ini", "MODEL", model, sizeof(model)) ||
@@ -459,7 +458,6 @@ int main(void)
             !read_rtcp_ini_key("linuxcnc/ini/v5_bus.ini", "KINS_PREFIX", kins_prefix, sizeof(kins_prefix)) ||
             !read_rtcp_ini_key("linuxcnc/ini/v5_bus.ini", "KINS_TOOL_OFFSET_PIN", kins_tool_offset_pin, sizeof(kins_tool_offset_pin)) ||
             !read_rtcp_ini_key("linuxcnc/ini/v5_bus.ini", "KINS_X_ROT_POINT_PIN", kins_x_rot_point_pin, sizeof(kins_x_rot_point_pin)) ||
-            !read_rtcp_ini_key("linuxcnc/ini/v5_bus.ini", "WRAPPED_ROTARY_MASK", wrapped_mask, sizeof(wrapped_mask)) ||
             !read_section_ini_key("linuxcnc/ini/v5_bus.ini", "KINS", "KINEMATICS", kinematics, sizeof(kinematics)) ||
             !read_section_ini_key("linuxcnc/ini/v5_bus.ini", "TRAJ", "COORDINATES", traj_coordinates, sizeof(traj_coordinates)) ||
             strcmp(model, "XYZBC_TRT") != 0 ||
@@ -469,11 +467,10 @@ int main(void)
             strcmp(kins_prefix, "xyzbc-trt-kins") != 0 ||
             strcmp(kins_tool_offset_pin, "xyzbc-trt-kins.tool-offset") != 0 ||
             strcmp(kins_x_rot_point_pin, "xyzbc-trt-kins.x-rot-point") != 0 ||
-            strcmp(wrapped_mask, "24") != 0 ||
             strcmp(kinematics, "xyzbc-trt-kins coordinates=XYZBC sparm=identityfirst") != 0 ||
             strcmp(traj_coordinates, "X Y Z B C") != 0 ||
             strstr(v5_settings_axis_table_motion_model_value(), "BC") == 0) {
-            fprintf(stderr, "motion model readback mismatch: model=%s display=%s kins=%s coords=%s prefix=%s tool_pin=%s xrot_pin=%s mask=%s line=%s traj=%s ui=%s\n",
+            fprintf(stderr, "motion model readback mismatch: model=%s display=%s kins=%s coords=%s prefix=%s tool_pin=%s xrot_pin=%s line=%s traj=%s ui=%s\n",
                     model,
                     display,
                     kins_module,
@@ -481,7 +478,6 @@ int main(void)
                     kins_prefix,
                     kins_tool_offset_pin,
                     kins_x_rot_point_pin,
-                    wrapped_mask,
                     kinematics,
                     traj_coordinates,
                     v5_settings_axis_table_motion_model_value());
@@ -515,13 +511,15 @@ int main(void)
             return 53;
         }
     }
-    if (!v5_settings_axis_table_commit_motion_model("XYZAC_TRT") ||
-        strcmp(v5_settings_axis_table_value(3U, 2U), "3") != 0 ||
-        strcmp(v5_settings_axis_table_value(4U, 2U), "NAT") != 0) {
-        fprintf(stderr, "BC to AC model roundtrip failed: A=%s B=%s\n",
-                v5_settings_axis_table_value(3U, 2U),
-                v5_settings_axis_table_value(4U, 2U));
-        return 54;
+    {
+        if (!v5_settings_axis_table_commit_motion_model("XYZAC_TRT") ||
+            strcmp(v5_settings_axis_table_value(3U, 2U), "3") != 0 ||
+            strcmp(v5_settings_axis_table_value(4U, 2U), "NAT") != 0) {
+            fprintf(stderr, "BC to AC model roundtrip failed: A=%s B=%s\n",
+                    v5_settings_axis_table_value(3U, 2U),
+                    v5_settings_axis_table_value(4U, 2U));
+            return 54;
+        }
     }
     if (!v5_settings_axis_table_commit_motion_model("XYZBC_TRT") ||
         strcmp(v5_settings_axis_table_value(3U, 2U), "NAT") != 0 ||

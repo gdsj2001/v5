@@ -563,21 +563,46 @@ static int v5_linuxcncrsh_send_request_text(int fd, const char *request, char *o
            !v5_linuxcncrsh_response_has_word(response, "ERROR");
 }
 
-static int v5_linuxcncrsh_axis_letter_ok(char axis)
+static int v5_linuxcncrsh_axis_index(char axis, unsigned int *index_out)
 {
-    axis = (char)toupper((unsigned char)axis);
-    return axis == 'X' || axis == 'Y' || axis == 'Z' || axis == 'A' || axis == 'B' || axis == 'C';
+    const char *axes = "XYZABC";
+    const char *match = strchr(axes, toupper((unsigned char)axis));
+    if (!match || !index_out) {
+        return 0;
+    }
+    *index_out = (unsigned int)(match - axes);
+    return 1;
+}
+
+int v5_linuxcncrsh_format_axis_position_query(
+    char axis,
+    int relative,
+    char *out,
+    size_t out_size)
+{
+    unsigned int axis_index;
+    int rc;
+    if (!out || out_size == 0U || !v5_linuxcncrsh_axis_index(axis, &axis_index)) {
+        return 0;
+    }
+    rc = snprintf(
+        out,
+        out_size,
+        "Get %s %u",
+        relative ? "REL_ACT_POS" : "ABS_ACT_POS",
+        axis_index);
+    return v5_linuxcncrsh_format_ok(rc, out_size);
 }
 
 static int v5_linuxcncrsh_parse_axis_position(
     const char *response,
     const char *key,
-    char axis,
+    unsigned int expected_axis_index,
     double *position_out)
 {
     const char *match = 0;
     const char *scan;
-    char *end = 0;
+    unsigned int response_axis_index;
     double value;
     if (!response || !key || !position_out) {
         return 0;
@@ -594,26 +619,9 @@ static int v5_linuxcncrsh_parse_axis_position(
     while (*scan && isspace((unsigned char)*scan)) {
         ++scan;
     }
-    if (toupper((unsigned char)*scan) == toupper((unsigned char)axis) &&
-        isspace((unsigned char)scan[1])) {
-        ++scan;
-        while (*scan && isspace((unsigned char)*scan)) {
-            ++scan;
-        }
-    }
-    value = strtod(scan, &end);
-    if (end == scan || !isfinite(value)) {
+    if (sscanf(scan, "%u %lf", &response_axis_index, &value) != 2 ||
+        response_axis_index != expected_axis_index || !isfinite(value)) {
         return 0;
-    }
-    while (*end && isspace((unsigned char)*end)) {
-        ++end;
-    }
-    if (*end) {
-        char *second_end = 0;
-        double second = strtod(end, &second_end);
-        if (second_end != end && isfinite(second)) {
-            value = second;
-        }
     }
     *position_out = value;
     return 1;
@@ -637,21 +645,22 @@ int v5_linuxcncrsh_get_axis_position(
     char command[64];
     char response[512];
     const char *key = relative ? "REL_ACT_POS" : "ABS_ACT_POS";
+    unsigned int axis_index;
     axis = (char)toupper((unsigned char)axis);
-    if (!position_out || !v5_linuxcncrsh_axis_letter_ok(axis)) {
+    if (!position_out || !v5_linuxcncrsh_axis_index(axis, &axis_index)) {
         return 0;
     }
     fd = v5_linuxcncrsh_gate_connect(config);
     if (fd < 0) {
         return 0;
     }
-    rc = snprintf(command, sizeof(command), "Get %s %c", key, axis);
-    if (!v5_linuxcncrsh_format_ok(rc, sizeof(command)) ||
+    rc = v5_linuxcncrsh_format_axis_position_query(axis, relative, command, sizeof(command));
+    if (!rc ||
         !v5_linuxcncrsh_send_request_text(fd, command, response, sizeof(response))) {
         v5_linuxcncrsh_gate_close();
         return 0;
     }
-    return v5_linuxcncrsh_parse_axis_position(response, key, axis, position_out);
+    return v5_linuxcncrsh_parse_axis_position(response, key, axis_index, position_out);
 #endif
 }
 

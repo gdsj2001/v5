@@ -4,8 +4,8 @@
 # LinuxCNC HAL adapter for the Z20 step/dir hardware path.
 
 loadrt trivkins coordinates=xyzabc
-# A/C equivalent-zero uses motmod wrapped rotary normalization: xyzabc joints A=3, C=5 => 0x28.
-loadrt motmod servo_period_nsec=[EMCMOT]SERVO_PERIOD num_joints=6 z20_wrapped_rotary_mask=40
+# A/C equivalent targets use motmod EmcPose bits A=3 and C=5 => 0x28.
+loadrt motmod servo_period_nsec=[EMCMOT]SERVO_PERIOD num_joints=6 v5_wrapped_rotary_mask=40
 
 addf motion-command-handler servo-thread
 addf motion-controller servo-thread
@@ -88,4 +88,3 @@ net c-pos-cmd joint.5.motor-pos-cmd => zynq_stepgen_hw.5.pos-cmd
 net c-vel-cmd joint.5.vel-cmd => zynq_stepgen_hw.5.vel-cmd
 net c-pos-fb zynq_stepgen_hw.5.pos-fb => joint.5.motor-pos-fb
 net c-enc-count zynq_stepgen_hw.5.enc-count
-

@@ -1,4 +1,5 @@
 #include "v5_v3_local_pages.h"
+#include "v5_button_visuals.h"
 #include "v5_native_wcs_status.h"
 
 #include <math.h>
@@ -55,21 +56,6 @@ static lv_obj_t *panel(lv_obj_t *parent, int x, int y, int w, int h, uint8_t r, 
     return obj;
 }
 
-static void clear_button_pressed_visual_now(lv_obj_t *button)
-{
-    if (!button) {
-        return;
-    }
-    lv_obj_clear_state(button, LV_STATE_PRESSED);
-    lv_obj_invalidate(button);
-    lv_refr_now(NULL);
-}
-
-static void button_release_visual_cb(lv_event_t *event)
-{
-    clear_button_pressed_visual_now(lv_event_get_target(event));
-}
-
 static lv_obj_t *label(lv_obj_t *parent, const char *text, int x, int y, int w, int h, uint8_t r, uint8_t g, uint8_t b, lv_text_align_t align)
 {
     lv_obj_t *obj = lv_label_create(parent);
@@ -90,12 +76,10 @@ static lv_obj_t *button(lv_obj_t *parent, const char *text, int x, int y, int w,
     lv_obj_set_pos(obj, x, y);
     lv_obj_set_size(obj, w, h);
     lv_obj_set_style_bg_color(obj, c(r, g, b), 0);
-    lv_obj_set_style_bg_color(obj, c(245, 214, 82), LV_STATE_PRESSED);
     lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(obj, 1, 0);
     lv_obj_set_style_border_color(obj, c(76, 119, 146), 0);
-    lv_obj_add_event_cb(obj, button_release_visual_cb, LV_EVENT_RELEASED, 0);
-    lv_obj_add_event_cb(obj, button_release_visual_cb, LV_EVENT_CLICKED, 0);
+    v5_button_visual_bind(obj);
     if (cb) {
         lv_obj_add_event_cb(obj, cb, LV_EVENT_CLICKED, user);
     }

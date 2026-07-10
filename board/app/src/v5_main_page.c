@@ -1,8 +1,10 @@
 #include "v5_main_page.h"
 
 #include "v5_command_gate_ipc.h"
+#include "v5_button_visuals.h"
 #include "v5_native_wcs_status.h"
 #include "v5_layout_icons.h"
+#include "v5_lvgl_clock.h"
 #include "v5_motion_model_registry.h"
 #include "v5_remote_metrics.h"
 
@@ -2515,15 +2517,6 @@ static void create_main_program_edit_hit_area(V5MainPage *page)
     page->program_edit_hit_area = hit;
 }
 
-static void clear_button_pressed_visual_now(lv_obj_t *button)
-{
-    if (!button) {
-        return;
-    }
-    lv_obj_clear_state(button, LV_STATE_PRESSED);
-    lv_obj_invalidate(button);
-}
-
 static void reset_selection_idle_timer(V5MainPage *page)
 {
     if (!page || !page->selection_idle_timer || page->selection.all_axes) {
@@ -2545,11 +2538,6 @@ static void selection_idle_timer_cb(lv_timer_t *timer)
     }
     v5_main_page_select_all_axes(page);
     log_coordinate_select_event(page);
-}
-
-static void button_release_visual_cb(lv_event_t *event)
-{
-    clear_button_pressed_visual_now(lv_event_get_target(event));
 }
 
 static int trigger_jog_for_captured_axis(
@@ -2657,7 +2645,7 @@ static void jog_button_event_cb(lv_event_t *event)
         return;
     }
     if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
-        clear_button_pressed_visual_now(button);
+        v5_button_visual_release_now(button);
         finish_jog_press(page, button);
     }
 }
@@ -2713,7 +2701,7 @@ static void button_event_cb(lv_event_t *event)
         if (page->buttons[i] == target) {
             V5MainPageActionReport report;
             int ok;
-            clear_button_pressed_visual_now(target);
+            v5_button_visual_release_now(target);
             ok = v5_main_page_trigger_action(page, page->button_actions[i], &report);
             log_button_event(page->button_actions[i], ok, ok ? &report : 0);
             return;
@@ -2733,18 +2721,15 @@ static void make_button_rgb(V5MainPage *page, int x, int y, int w, int h, V5Main
     lv_obj_set_pos(button, x, y);
     lv_obj_set_size(button, w, h);
     lv_obj_set_style_bg_color(button, rgb(r, g, b), 0);
-    lv_obj_set_style_bg_color(button, rgb(245, 214, 82), LV_STATE_PRESSED);
     lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(button, 1, 0);
     lv_obj_set_style_border_color(button, rgb(76, 119, 146), 0);
-    lv_obj_set_style_border_color(button, rgb(255, 232, 120), LV_STATE_PRESSED);
+    v5_button_visual_bind(button);
     if (action == V5_MAIN_PAGE_ACTION_JOG_PLUS || action == V5_MAIN_PAGE_ACTION_JOG_MINUS) {
         lv_obj_add_event_cb(button, jog_button_event_cb, LV_EVENT_PRESSED, page);
         lv_obj_add_event_cb(button, jog_button_event_cb, LV_EVENT_RELEASED, page);
         lv_obj_add_event_cb(button, jog_button_event_cb, LV_EVENT_PRESS_LOST, page);
     } else {
-        lv_obj_add_event_cb(button, button_release_visual_cb, LV_EVENT_RELEASED, 0);
-        lv_obj_add_event_cb(button, button_release_visual_cb, LV_EVENT_PRESS_LOST, 0);
         lv_obj_add_event_cb(button, button_event_cb, LV_EVENT_CLICKED, page);
     }
 
@@ -2950,12 +2935,19 @@ static void update_home_button_visuals(V5MainPage *page)
 
 static void set_home_transaction_active(V5MainPage *page, int active, int flush)
 {
+    unsigned int i;
     (void)flush;
     if (!page) {
         return;
     }
     page->home_transaction_active = active ? 1 : 0;
     update_home_button_visuals(page);
+    for (i = 0U; i < page->button_count; ++i) {
+        if (page->button_actions[i] == V5_MAIN_PAGE_ACTION_HOME) {
+            v5_button_visual_set_transaction_active(page->buttons[i], active);
+            return;
+        }
+    }
 }
 
 static void update_main_page_state_button_visuals(V5MainPage *page)
@@ -4002,6 +3994,7 @@ static void execute_prepared_command_if_enabled(V5MainPage *page, V5MainPageActi
         set_home_transaction_active(page, 1, 1);
     }
     if (!v5_command_gate_send_prepared(&report->command, &report->request, &gate_result, gate_timeout_ms)) {
+        v5_lvgl_clock_advance();
         if (home_button_transaction) {
             set_home_transaction_active(page, 0, 1);
         }
@@ -4016,6 +4009,7 @@ static void execute_prepared_command_if_enabled(V5MainPage *page, V5MainPageActi
              (int)sizeof(report->command_line) - 1, gate_result.command_line);
     snprintf(report->readback_code, sizeof(report->readback_code), "%.*s",
              (int)sizeof(report->readback_code) - 1, gate_result.readback_code);
+    v5_lvgl_clock_advance();
     if (home_button_transaction) {
         set_home_transaction_active(page, 0, 1);
     }

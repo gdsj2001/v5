@@ -290,7 +290,7 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
     return rc
 
 
-def check_rotary_wrapped_mask_policy() -> int:
+def check_rotary_native_target_policy() -> int:
     rc = 0
     bus_hal = ROOT / "linuxcnc" / "hal" / "v5_bus_2ms.hal"
     bus_ini = ROOT / "linuxcnc" / "ini" / "v5_bus.ini"
@@ -307,19 +307,65 @@ def check_rotary_wrapped_mask_policy() -> int:
                 "module": match.group("module"),
                 "coordinates": match.group("coordinates"),
                 "traj": match.group("traj"),
-                "wrapped_mask": match.group("wrapped_mask"),
+                "first_axis": match.group("first_axis"),
+                "second_axis": match.group("second_axis"),
+                "first_slot": int(match.group("first_slot")),
+                "second_slot": int(match.group("second_slot")),
             }
             for match in re.finditer(
                 r'\{\s*\d+U,\s*"(?P<canonical>[^"]+)",\s*"(?P<display>[^"]+)",\s*'
                 r'\{[^}]*\},\s*"(?P<module>[^"]+)",\s*"(?P<coordinates>[^"]+)",\s*'
-                r'"(?P<traj>[^"]+)",\s*(?P<wrapped_mask>\d+)U,',
+                r'"(?P<traj>[^"]+)",\s*\d+U,\s*'
+                r"'(?P<first_axis>[ABC])',\s*'(?P<second_axis>[ABC])',\s*"
+                r'(?P<first_slot>\d+)U,\s*(?P<second_slot>\d+)U,',
                 registry_text,
                 re.DOTALL,
             )
         }
+        motion_patch = ROOT / "linuxcnc" / "patches" / "0001-v5-native-rotary-nearest-target.patch"
+        if not motion_patch.exists():
+            print(f"ROTARY_NATIVE_PATCH_MISSING: {motion_patch.relative_to(ROOT)}", file=sys.stderr)
+            rc = 1
+        else:
+            motion_patch_text = motion_patch.read_text(encoding="utf-8", errors="strict")
+            for token in (
+                "v5_prepare_wrapped_rotary_target",
+                "v5_wrapped_rotary_turn_offset_deg",
+                "v5_commit_wrapped_rotary_turn_offset",
+                "v5_reset_wrapped_rotary_turn_offsets",
+                "GM_FLAG_DISTANCE_MODE",
+                "GM_FIELD_G_MODE_0",
+            ):
+                if token not in motion_patch_text:
+                    print(
+                        f"ROTARY_NATIVE_PATCH_CONTRACT_MISSING: {motion_patch.relative_to(ROOT)} lacks {token}",
+                        file=sys.stderr,
+                    )
+                    rc = 1
+            for forbidden in (
+                "z20_normalize_wrapped_rotaries_if_idle",
+                "z20_apply_wrapped_rotary_traverse_target",
+                "z20_wrapped_rotary_mask",
+                "src/emc/task/taskintf.cc",
+            ):
+                if forbidden in motion_patch_text:
+                    print(
+                        f"ROTARY_NATIVE_PATCH_FORBIDDEN_IDLE_OR_DISPLAY_PATH: "
+                        f"{motion_patch.relative_to(ROOT)} contains {forbidden}",
+                        file=sys.stderr,
+                    )
+                    rc = 1
+            if not re.search(
+                r"case EMCMOT_ABORT:\n\+\s+v5_reset_wrapped_rotary_turn_offsets\(\);",
+                motion_patch_text,
+            ):
+                print(
+                    f"ROTARY_NATIVE_ABORT_SYNC_RESET_MISSING: {motion_patch.relative_to(ROOT)}",
+                    file=sys.stderr,
+                )
+                rc = 1
         required_hal = (
             "loadrt [RTCP]KINS_MODULE coordinates=[RTCP]KINS_COORDINATES sparm=identityfirst",
-            "z20_wrapped_rotary_mask=[RTCP]WRAPPED_ROTARY_MASK",
             "motion.tooloffset.z => [RTCP]KINS_TOOL_OFFSET_PIN",
             "setp [RTCP]KINS_X_ROT_POINT_PIN [RTCP]X_ROT_POINT",
         )
@@ -357,7 +403,6 @@ def check_rotary_wrapped_mask_policy() -> int:
                 ("RTCP", "KINS_X_OFFSET_PIN"): f"{descriptor['module']}.x-offset",
                 ("RTCP", "KINS_Y_OFFSET_PIN"): f"{descriptor['module']}.y-offset",
                 ("RTCP", "KINS_Z_OFFSET_PIN"): f"{descriptor['module']}.z-offset",
-                ("RTCP", "WRAPPED_ROTARY_MASK"): descriptor["wrapped_mask"],
                 ("KINS", "KINEMATICS"): f"{descriptor['module']} coordinates={descriptor['coordinates']} sparm=identityfirst",
                 ("TRAJ", "COORDINATES"): descriptor["traj"],
             }
@@ -370,43 +415,6 @@ def check_rotary_wrapped_mask_policy() -> int:
                         file=sys.stderr,
                     )
                     rc = 1
-
-    expected = (
-        (
-            ROOT / "linuxcnc" / "hal" / "v5_pulse.hal",
-            "loadrt motmod",
-            "z20_wrapped_rotary_mask=40",
-            "Pulse xyzabc A/C wrapped rotary mask must be 0x28",
-        ),
-    )
-    for path, loadrt_token, mask_token, reason in expected:
-        if not path.exists():
-            print(f"ROTARY_WRAPPED_MASK_HAL_MISSING: {path.relative_to(ROOT)}", file=sys.stderr)
-            rc = 1
-            continue
-        matched_line = None
-        for line_no, line in enumerate(path.read_text(encoding="utf-8", errors="ignore").splitlines(), 1):
-            stripped = line.strip()
-            if stripped.startswith("#"):
-                continue
-            if loadrt_token in line:
-                matched_line = (line_no, line)
-                break
-        if matched_line is None:
-            print(
-                f"ROTARY_WRAPPED_MASK_LOADRT_MISSING: {path.relative_to(ROOT)} lacks {loadrt_token}",
-                file=sys.stderr,
-            )
-            rc = 1
-            continue
-        line_no, line = matched_line
-        if "z20_wrapped_rotary_mask=0" in line or mask_token not in line:
-            print(
-                f"ROTARY_WRAPPED_MASK_WRONG: {path.relative_to(ROOT)}:{line_no}: "
-                f"{reason}; line must contain {mask_token}: {line.strip()}",
-                file=sys.stderr,
-            )
-            rc = 1
     return rc
 
 
@@ -826,7 +834,7 @@ def main() -> int:
         check_settings_runtime_schema_guard() |
         check_remote_relay_access_control() |
         check_cc_golden_model_specific_motion() |
-        check_rotary_wrapped_mask_policy() |
+        check_rotary_native_target_policy() |
         check_settings_parameter_table_deploy_kind() |
         check_settings_parameter_table_backup_before_merge() |
         check_board_owner_refresh_before_bundle()

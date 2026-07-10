@@ -1,4 +1,5 @@
 #include "v5_settings_page.h"
+#include "v5_button_visuals.h"
 #include "v5_settings_actions.h"
 #include "v5_settings_axis_table.h"
 #include "v5_lvgl_remote_display.h"
@@ -304,6 +305,58 @@ static void settings_popup_show(V5SettingsPage *page, const char *action, const 
     lv_obj_move_foreground(page->popup_overlay);
 }
 
+static void settings_action_visual_clear(V5SettingsPage *page, int clear_binding)
+{
+    if (!page) {
+        return;
+    }
+    if (page->action_visual_active && page->action_visual_button) {
+        v5_button_visual_set_transaction_active(page->action_visual_button, 0);
+    }
+    page->action_visual_active = 0;
+    if (clear_binding) {
+        page->action_visual_button = 0;
+        page->action_visual_name[0] = '\0';
+    }
+}
+
+static void settings_action_visual_bind(V5SettingsPage *page, lv_obj_t *button, const char *action)
+{
+    if (!page) {
+        return;
+    }
+    settings_action_visual_clear(page, 1);
+    if (!button || !action || !action[0]) {
+        return;
+    }
+    page->action_visual_button = button;
+    snprintf(page->action_visual_name, sizeof(page->action_visual_name), "%s", action);
+}
+
+static void settings_action_visual_apply_status(
+    V5SettingsPage *page,
+    const V5SettingsActionStatus *status)
+{
+    int matches;
+    if (!page || !status || !status->available || !page->action_visual_button ||
+        !page->action_visual_name[0]) {
+        settings_action_visual_clear(page, status && status->available ? 0 : 1);
+        return;
+    }
+    matches = strcmp(page->action_visual_name, status->action) == 0;
+    if (!matches) {
+        return;
+    }
+    if (status->busy) {
+        if (!page->action_visual_active) {
+            v5_button_visual_set_transaction_active(page->action_visual_button, 1);
+            page->action_visual_active = 1;
+        }
+        return;
+    }
+    settings_action_visual_clear(page, 1);
+}
+
 static void settings_popup_hide(V5SettingsPage *page)
 {
     if (!page) {
@@ -313,6 +366,7 @@ static void settings_popup_hide(V5SettingsPage *page)
         lv_obj_add_flag(page->popup_overlay, LV_OBJ_FLAG_HIDDEN);
     }
     if (page->popup_close) {
+        v5_button_visual_set_transaction_active(page->popup_close, 0);
         lv_obj_clear_state(page->popup_close, LV_STATE_DISABLED);
     }
     page->popup_active = 0;
@@ -352,27 +406,12 @@ static void settings_popup_update_final(V5SettingsPage *page, const char *title,
     settings_popup_show(page, page->popup_action, title, body, 1, ok);
 }
 
-static void clear_button_pressed_visual_now(lv_obj_t *button)
-{
-    if (!button) {
-        return;
-    }
-    lv_obj_clear_state(button, LV_STATE_PRESSED);
-    lv_obj_invalidate(button);
-    lv_refr_now(NULL);
-}
-
-static void button_release_visual_cb(lv_event_t *event)
-{
-    clear_button_pressed_visual_now(lv_event_get_target(event));
-}
-
 static void settings_popup_close_cb(lv_event_t *event)
 {
     V5SettingsPage *page = (V5SettingsPage *)lv_event_get_user_data(event);
     V5SettingsActionStatus status;
     if (!page || lv_event_get_code(event) != LV_EVENT_RELEASED) return;
-    clear_button_pressed_visual_now(lv_event_get_target(event));
+    v5_button_visual_release_now(lv_event_get_target(event));
     if (page->popup_final) {
         settings_popup_hide(page);
         return;
@@ -385,6 +424,7 @@ static void settings_popup_close_cb(lv_event_t *event)
     if (!page->popup_cancel_pending && page->popup_run_id[0] &&
         v5_settings_action_cancel(page->popup_run_id)) {
         page->popup_cancel_pending = 1;
+        v5_button_visual_set_transaction_active(page->popup_close, 1);
         if (page->popup_close) {
             lv_obj_add_state(page->popup_close, LV_STATE_DISABLED);
         }
@@ -415,10 +455,9 @@ static void settings_popup_create(V5SettingsPage *page)
     lv_obj_set_pos(page->popup_close, 434, 348);
     lv_obj_set_size(page->popup_close, 118, 44);
     lv_obj_set_style_bg_color(page->popup_close, rgb(42, 86, 116), 0);
-    lv_obj_set_style_bg_color(page->popup_close, rgb(245, 214, 82), LV_STATE_PRESSED);
     lv_obj_set_style_border_width(page->popup_close, 1, 0);
     lv_obj_set_style_border_color(page->popup_close, rgb(76, 119, 146), 0);
-    lv_obj_add_event_cb(page->popup_close, button_release_visual_cb, LV_EVENT_RELEASED, 0);
+    v5_button_visual_bind(page->popup_close);
     lv_obj_add_event_cb(page->popup_close, settings_popup_close_cb, LV_EVENT_RELEASED, page);
     close_label = lv_label_create(page->popup_close);
     lv_label_set_text(close_label, "关闭");
@@ -443,11 +482,13 @@ static void settings_status_timer_cb(lv_timer_t *timer)
         return;
     }
     if (!v5_settings_action_poll_status(&status) || !status.available) {
+        settings_action_visual_clear(page, 1);
         if (page->popup_active && !page->popup_final) {
             settings_popup_update_running(page, 0, "等待后台状态...");
         }
         return;
     }
+    settings_action_visual_apply_status(page, &status);
     settings_status_popup_title(&status, label, sizeof(label));
     detail = status.message[0] ? status.message : status.code;
     if (status.busy) {
@@ -581,9 +622,14 @@ static void button_event_cb(lv_event_t *event)
     for (i = 0; i < page->button_count; ++i) {
         if (page->buttons[i] == target) {
             V5MainPageActionReport report;
-            clear_button_pressed_visual_now(target);
+            v5_button_visual_release_now(target);
             if (v5_settings_page_trigger_action(page, page->button_actions[i], &report)) {
                 log_button_event(report.action, &report);
+                if (report.prepared && !report.local_only && page->popup_action[0]) {
+                    settings_action_visual_bind(page, target, page->popup_action);
+                } else {
+                    settings_action_visual_clear(page, 1);
+                }
             }
             return;
         }
@@ -602,10 +648,9 @@ static lv_obj_t *make_button(V5SettingsPage *page, const char *text, int x, int 
     lv_obj_set_pos(button, x, y);
     lv_obj_set_size(button, w, h);
     lv_obj_set_style_bg_color(button, rgb(r, g, b), 0);
-    lv_obj_set_style_bg_color(button, rgb(245, 214, 82), LV_STATE_PRESSED);
     lv_obj_set_style_border_width(button, 1, 0);
     lv_obj_set_style_border_color(button, rgb(76, 119, 146), 0);
-    lv_obj_add_event_cb(button, button_release_visual_cb, LV_EVENT_RELEASED, 0);
+    v5_button_visual_bind(button);
     lv_obj_add_event_cb(button, button_event_cb, LV_EVENT_CLICKED, page);
     label = lv_label_create(button);
     lv_label_set_text(label, text ? text : "");

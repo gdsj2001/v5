@@ -3,8 +3,8 @@ SETTINGS	bus_pulse_setting	总线
 X	slave	0
 Y	slave	1
 Z	slave	2
-A	slave	NAT
-B	slave	3
+A	slave	3
+B	slave	NAT
 C	slave	4
 GANTRY	slave	NAT
 TOOLMAG	slave	NAT

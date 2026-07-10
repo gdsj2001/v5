@@ -11,6 +11,35 @@ set(LV_LVGL_H_INCLUDE_SIMPLE ON CACHE BOOL "Use simple LVGL include" FORCE)
 
 add_subdirectory("${V5_LVGL_DIR}" "${CMAKE_BINARY_DIR}/third_party/lvgl" EXCLUDE_FROM_ALL)
 
+add_library(v5_button_visuals STATIC
+    src/v5_button_visuals.c
+)
+
+add_library(v5_lvgl_clock STATIC
+    src/v5_lvgl_clock.c
+)
+
+target_include_directories(v5_button_visuals PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+
+target_include_directories(v5_lvgl_clock PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+
+target_compile_definitions(v5_button_visuals PRIVATE
+    LV_CONF_INCLUDE_SIMPLE
+    LV_LVGL_H_INCLUDE_SIMPLE
+)
+
+target_compile_definitions(v5_lvgl_clock PRIVATE
+    LV_CONF_INCLUDE_SIMPLE
+    LV_LVGL_H_INCLUDE_SIMPLE
+)
+
+target_link_libraries(v5_button_visuals PUBLIC lvgl)
+target_link_libraries(v5_lvgl_clock PUBLIC lvgl)
+
 add_executable(v5_coordinate_digits_smoke
     src/lv_font_zh_16.c
     src/v5_coordinate_digits_smoke.c
@@ -269,7 +298,7 @@ target_compile_definitions(v5_main_page_actions_smoke PRIVATE
     LV_LVGL_H_INCLUDE_SIMPLE
 )
 
-target_link_libraries(v5_main_page_actions_smoke PRIVATE lvgl v5_program_commands v5_command_gate_core v5_microkernel_contract m)
+target_link_libraries(v5_main_page_actions_smoke PRIVATE lvgl v5_button_visuals v5_lvgl_clock v5_program_commands v5_command_gate_core v5_microkernel_contract m)
 
 add_executable(v5_main_page_smoke
     src/lv_font_zh_16.c
@@ -309,7 +338,7 @@ target_compile_definitions(v5_main_page_smoke PRIVATE
     LV_LVGL_H_INCLUDE_SIMPLE
 )
 
-target_link_libraries(v5_main_page_smoke PRIVATE lvgl v5_program_commands v5_command_gate_core v5_microkernel_contract m)
+target_link_libraries(v5_main_page_smoke PRIVATE lvgl v5_button_visuals v5_lvgl_clock v5_program_commands v5_command_gate_core v5_microkernel_contract m)
 
 add_executable(v5_ui_display_models_smoke
     src/v5_ui_display_models_smoke.c
@@ -460,6 +489,7 @@ target_compile_definitions(v5_settings_axis_table_smoke PRIVATE
 
 target_link_libraries(v5_settings_axis_table_smoke PRIVATE
     lvgl
+    v5_button_visuals
     v5_command_gate_core
     v5_microkernel_contract
 )
@@ -481,7 +511,7 @@ target_compile_definitions(v5_program_page_double_click_smoke PRIVATE
     V5_UI_SHELL_TEST_HOOKS
 )
 
-target_link_libraries(v5_program_page_double_click_smoke PRIVATE lvgl v5_status_shm_projection v5_microkernel_contract v5_program_commands v5_command_gate_core m)
+target_link_libraries(v5_program_page_double_click_smoke PRIVATE lvgl v5_button_visuals v5_lvgl_clock v5_status_shm_projection v5_microkernel_contract v5_program_commands v5_command_gate_core m)
 
 target_include_directories(v5_lvgl_shell PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -499,4 +529,4 @@ target_compile_definitions(v5_lvgl_shell PRIVATE
     _CRT_SECURE_NO_WARNINGS
 )
 
-target_link_libraries(v5_lvgl_shell PRIVATE lvgl v5_status_shm_projection v5_microkernel_contract v5_program_commands v5_command_gate_client m)
+target_link_libraries(v5_lvgl_shell PRIVATE lvgl v5_button_visuals v5_lvgl_clock v5_status_shm_projection v5_microkernel_contract v5_program_commands v5_command_gate_client m)

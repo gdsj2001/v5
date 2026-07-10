@@ -40,6 +40,9 @@ typedef struct V5SettingsPage {
     char popup_action[64];
     char popup_run_id[64];
     int popup_cancel_pending;
+    lv_obj_t *action_visual_button;
+    char action_visual_name[64];
+    int action_visual_active;
     V5MainPageActionReport last_action;
     char last_axis_table_refresh_run_id[64];
     V5UiNavigationCallback navigation_cb;

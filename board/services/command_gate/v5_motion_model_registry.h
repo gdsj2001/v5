@@ -14,7 +14,7 @@ typedef struct V5MotionModelDescriptor {
     const char *kins_module;
     const char *kins_coordinates;
     const char *traj_coordinates;
-    unsigned int wrapped_rotary_mask;
+    unsigned int wrapped_rotary_mask; /* motmod EmcPose target bits for active rotary axes */
     char first_rotary_axis;
     char second_rotary_axis;
     unsigned int first_status_slot;
@@ -35,7 +35,7 @@ static const V5MotionModelDescriptor v5_motion_model_registry[] = {
         "xyzac-trt-kins",
         "XYZAC",
         "X Y Z A C",
-        24U,
+        40U,
         'A',
         'C',
         3U,
@@ -54,7 +54,7 @@ static const V5MotionModelDescriptor v5_motion_model_registry[] = {
         "xyzbc-trt-kins",
         "XYZBC",
         "X Y Z B C",
-        24U,
+        48U,
         'B',
         'C',
         3U,

@@ -77,6 +77,7 @@ int main(void)
     V5CommandPrepared prepared;
     V5CommandRequest request;
     V5NativeReadback readback;
+    char axis_query[64];
     int rtcp_enabled = 0;
 
     if (!check_simple("pause", "Set Pause", v5_command_pause_prepare)) {
@@ -136,6 +137,12 @@ int main(void)
         strcmp(prepared.name, "axis_zero_position") != 0 ||
         strcmp(prepared.owner, "native_axis_zero_position") != 0) {
         return 19;
+    }
+    if (!v5_linuxcncrsh_format_axis_position_query('A', 0, axis_query, sizeof(axis_query)) ||
+        strcmp(axis_query, "Get ABS_ACT_POS 3") != 0 ||
+        !v5_linuxcncrsh_format_axis_position_query('B', 1, axis_query, sizeof(axis_query)) ||
+        strcmp(axis_query, "Get REL_ACT_POS 4") != 0) {
+        return 20;
     }
     if (!v5_command_feed_override_prepare(120, &prepared, &request) ||
         !expect_line("feed_override", "Set Feed_Override 120", &prepared, &request)) {

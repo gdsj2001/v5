@@ -1,5 +1,6 @@
 #include "v5_app.h"
 #include "v5_lvgl_remote_display.h"
+#include "v5_lvgl_clock.h"
 #include "v5_process_residency.h"
 #include "v5_remote_input_ipc.h"
 
@@ -90,8 +91,9 @@ int main(int argc, char **argv)
     signal(SIGPIPE, SIG_IGN);
     printf("v5 UI remote framebuffer IPC ready: path=/run/8ax_v5_product_ui/remote_framebuffer.bgra dirty=/run/8ax_v5_product_ui/remote_dirty format=bgra32\n");
     fflush(stdout);
+    v5_lvgl_clock_init();
     while (!g_stop_requested) {
-        lv_tick_inc(V5_UI_SHELL_LOOP_MS);
+        v5_lvgl_clock_advance();
         (void)v5_ui_shell_refresh_once();
         if (!v5_remote_frame_ipc_pump()) {
             fprintf(stderr, "v5 UI remote framebuffer IPC failed\n");
