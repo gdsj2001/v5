@@ -30,7 +30,8 @@ config	config/hardware/hardware_profile.json	/opt/8ax/v5/config/hardware_profile
 config	config/auth/device_auth_public.pem	/etc/6x-cnc/device_auth_public.pem	0644
 runtime_seed_merge	config/settings/self_parameter_table.tsv	/opt/8ax/v5/config/settings/self_parameter_table.tsv	0644
 runtime_seed	config/settings/drive_parameter_table.tsv	/opt/8ax/v5/config/settings/drive_parameter_table.tsv	0644
-gcode	gcode/golden/cc.ngc	/opt/8ax/v5/gcode/golden/cc.ngc	0644
+gcode	gcode/golden/cc-ac.ngc	/opt/8ax/v5/gcode/golden/cc-ac.ngc	0644
+gcode	gcode/golden/cc-bc.ngc	/opt/8ax/v5/gcode/golden/cc-bc.ngc	0644
 script	services/auth_download/v5_device_dna_register.py	/usr/libexec/8ax/auth_download/v5_device_dna_register.py	0755
 script	services/auth_download/v5_device_authorization_download.py	/usr/libexec/8ax/auth_download/v5_device_authorization_download.py	0755
 script	services/auth_download/v5_drive_profile_download.py	/usr/libexec/8ax/auth_download/v5_drive_profile_download.py	0755

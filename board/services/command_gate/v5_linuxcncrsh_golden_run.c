@@ -1,4 +1,5 @@
 #include "v5_linuxcncrsh_client.h"
+#include "v5_native_g53_geometry_status.h"
 #include "v5_native_home.h"
 #include "v5_native_motion_parameters.h"
 
@@ -26,8 +27,77 @@ static unsigned int parse_u32(const char *text, unsigned int default_value)
 
 static void usage(void)
 {
-    printf("usage: v5_linuxcncrsh_golden_run --program /tmp/v5_golden/cc.ngc [--start --ini PATH] [--host 127.0.0.1] [--port 5007] [--password TEXT] [--timeout-ms 1000]\n");
-    printf("opens the exact LinuxCNC native program path through command gate; --start also requires V5_ALLOW_MOTION=1 and confirms Machine On\n");
+    printf("usage: v5_linuxcncrsh_golden_run --program /tmp/v5_golden/cc-ac.ngc [--start --ini PATH] [--host 127.0.0.1] [--port 5007] [--password TEXT] [--timeout-ms 1000]\n");
+    printf("       v5_linuxcncrsh_golden_run --print-active-model\n");
+    printf("opens only the exact cc-ac.ngc or cc-bc.ngc matching fresh native active-model readback; --start also requires V5_ALLOW_MOTION=1 and confirms Machine On\n");
+}
+
+static const char *program_filename(const char *path)
+{
+    const char *slash;
+    const char *backslash;
+    if (!path) {
+        return "";
+    }
+    slash = strrchr(path, '/');
+    backslash = strrchr(path, '\\');
+    if (slash && backslash) {
+        return (slash > backslash ? slash : backslash) + 1;
+    }
+    if (slash) {
+        return slash + 1;
+    }
+    return backslash ? backslash + 1 : path;
+}
+
+static const char *golden_program_expected_model(const char *program_path)
+{
+    const char *name = program_filename(program_path);
+    if (strcmp(name, "cc-ac.ngc") == 0) {
+        return "XYZAC_TRT";
+    }
+    if (strcmp(name, "cc-bc.ngc") == 0) {
+        return "XYZBC_TRT";
+    }
+    return 0;
+}
+
+static int read_active_motion_model(char *model, size_t model_cap)
+{
+    V5NativeReadback readback;
+    if (!model || model_cap == 0U) {
+        return 0;
+    }
+    model[0] = '\0';
+    v5_native_readback_init(&readback);
+    if (!v5_native_g53_geometry_status_read(
+            V5_NATIVE_G53_GEOMETRY_STATUS_DEFAULT_PATH,
+            V5_NATIVE_G53_GEOMETRY_STATUS_DEFAULT_MAX_AGE_MS,
+            &readback) ||
+        !v5_native_readback_motion_model_known(&readback)) {
+        return 0;
+    }
+    snprintf(model, model_cap, "%s", readback.motion_model);
+    return 1;
+}
+
+static int golden_program_matches_active_model(const char *program_path, char *active_model, size_t active_model_cap)
+{
+    const char *expected_model = golden_program_expected_model(program_path);
+    if (!expected_model) {
+        fprintf(stderr, "unsupported golden program filename: %s\n", program_filename(program_path));
+        return 0;
+    }
+    if (!read_active_motion_model(active_model, active_model_cap)) {
+        fprintf(stderr, "fresh native active model readback unavailable\n");
+        return 0;
+    }
+    if (strcmp(active_model, expected_model) != 0) {
+        fprintf(stderr, "golden program model mismatch: program=%s expected=%s active=%s\n",
+                program_filename(program_path), expected_model, active_model);
+        return 0;
+    }
+    return 1;
 }
 
 static void poll_sleep_ms(unsigned int delay_ms)
@@ -150,7 +220,9 @@ int main(int argc, char **argv)
     V5NativeMotionParameters motion_parameters;
     const char *program_path = 0;
     const char *ini_path = getenv("V5_LINUXCNC_INI");
+    char active_model[V5_NATIVE_READBACK_MOTION_MODEL_CAP];
     char motion_code[64];
+    int print_active_model = 0;
     int start = 0;
     int i;
 
@@ -167,6 +239,8 @@ int main(int argc, char **argv)
             program_path = argv[++i];
         } else if (strcmp(argv[i], "--start") == 0) {
             start = 1;
+        } else if (strcmp(argv[i], "--print-active-model") == 0) {
+            print_active_model = 1;
         } else if (strcmp(argv[i], "--host") == 0 && i + 1 < argc) {
             config.host = argv[++i];
         } else if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
@@ -186,10 +260,26 @@ int main(int argc, char **argv)
         }
     }
 
+    if (print_active_model) {
+        if (program_path || start) {
+            fprintf(stderr, "--print-active-model cannot be combined with --program or --start\n");
+            return 2;
+        }
+        if (!read_active_motion_model(active_model, sizeof(active_model))) {
+            fprintf(stderr, "fresh native active model readback unavailable\n");
+            return 11;
+        }
+        printf("%s\n", active_model);
+        return 0;
+    }
     if (!program_path || !program_path[0]) {
         fprintf(stderr, "--program is required\n");
         return 3;
     }
+    if (!golden_program_matches_active_model(program_path, active_model, sizeof(active_model))) {
+        return 12;
+    }
+    printf("native active model confirmed: %s program=%s\n", active_model, program_filename(program_path));
     if (start && (!getenv("V5_ALLOW_MOTION") || strcmp(getenv("V5_ALLOW_MOTION"), "1") != 0)) {
         fprintf(stderr, "V5_ALLOW_MOTION=1 is required for --start\n");
         return 4;

@@ -16,7 +16,7 @@ int main(void)
     request.index_value = 0;
     request.enabled_value = 0;
     request.axis_value = 0.0;
-    request.text_value = "/opt/8ax/v5/gcode/golden/cc.ngc";
+    request.text_value = "/opt/8ax/v5/gcode/golden/cc-ac.ngc";
 
     if (!v5_command_gate_prepare(&request, &prepared)) {
         return 1;
@@ -32,7 +32,7 @@ int main(void)
     config.timeout_ms = 50U;
     send_status = v5_linuxcncrsh_send_prepared(&config, &prepared, &request);
 
-    if (strcmp(line, "Set Open /opt/8ax/v5/gcode/golden/cc.ngc\nSet Mode Auto\nSet Run 0\nSet Resume") != 0) {
+    if (strcmp(line, "Set Open /opt/8ax/v5/gcode/golden/cc-ac.ngc\nSet Mode Auto\nSet Run 0\nSet Resume") != 0) {
         return 4;
     }
 

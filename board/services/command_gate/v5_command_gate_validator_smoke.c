@@ -80,7 +80,7 @@ int main(void)
     frame.index_value = 1;
     frame.axis_mask = V5_COMMAND_AXIS_X_MASK;
     frame.point_axis[0] = 1.0;
-    snprintf(frame.text_value, sizeof(frame.text_value), "/opt/8ax/v5/gcode/golden/cc.ngc");
+    snprintf(frame.text_value, sizeof(frame.text_value), "/opt/8ax/v5/gcode/golden/cc-ac.ngc");
     snprintf(frame.secondary_text_value, sizeof(frame.secondary_text_value),
              "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
     if (!expect_accept(&frame)) return 8;
@@ -107,7 +107,7 @@ int main(void)
     if (!expect_reject(&frame, "start_missing_path")) return 10;
 
     init_frame(&frame, V5_COMMAND_START);
-    snprintf(frame.text_value, sizeof(frame.text_value), "/opt/8ax/v5/gcode/golden/cc.ngc");
+    snprintf(frame.text_value, sizeof(frame.text_value), "/opt/8ax/v5/gcode/golden/cc-ac.ngc");
     if (!expect_accept(&frame)) return 11;
 
     printf("v5 command gate validator smoke passed\n");

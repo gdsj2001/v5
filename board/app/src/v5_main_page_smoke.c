@@ -364,7 +364,7 @@ int main(void)
         v5_program_controller_destroy(&controller);
         return 7;
     }
-    if (!v5_main_page_open_program(&page, "gcode/golden/cc.ngc", &open_result) || !open_result.ok) {
+    if (!v5_main_page_open_program(&page, "gcode/golden/cc-ac.ngc", &open_result) || !open_result.ok) {
         v5_program_controller_destroy(&controller);
         return 8;
     }

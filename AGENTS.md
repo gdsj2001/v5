@@ -239,7 +239,7 @@ FINISH_LINE_MATRIX:
 - non_board_local_code: update doc first if behavior changed -> edit source/config -> run targeted compile/unit/contract/static gates -> final status `local_verified_only` unless board closure also ran.
 - board_program_change: update doc first if behavior changed -> edit board source/config/script/service/deploy files in the owning truth location -> run focused local gates -> configure and build the full current board source from the Windows truth synchronized into the VM build directory -> deploy canonical artifact to the board -> restart/reload the affected board runtime closure -> trigger the original UI/operator/control path automatically -> collect deployment identity and behavior evidence -> final status `board_verified` only after the verification actually ran.
 - board_visible_function_code: update doc first if behavior changed -> edit source/config in the owning truth location -> build full current board source when runtime is involved -> deploy canonical artifact -> trigger the original UI/operator path automatically -> collect the minimal verification outputs needed for the claim -> final status `board_verified` only after the verification actually ran.
-- motion_capable_code: complete board_visible_function_code plus `nc/cc.ngc` golden motion run result; no golden loop means no pass/fixed/done claim.
+- motion_capable_code: complete board_visible_function_code plus native active model 对应的 `board/gcode/golden/cc-ac.ngc` 或 `board/gcode/golden/cc-bc.ngc` golden motion run result；no golden loop means no pass/fixed/done claim.
 - blocked_or_unsafe: keep source state honest -> record exact blocker and missing test in final reply -> final status `blocked` or `source_only`; never claim fixed/done/verified. Do not append/update LEGACY_FILE unless the user explicitly asks for a persistent blocker record.
 DO_NOT_STOP_AT:
 - source edits only
@@ -449,7 +449,7 @@ LOCAL_FIRST_FAST_PROGRESS:
 - If existing tools do not cover the needed owner-local, VM, board, SHM, Broker, ABI, artifact-identity, or motion evidence, build the missing tool before changing product behavior: reusable project tools go under `D:\v5\board\tools\` with focused tests; one-off diagnostic probes stay under `repo_ignored/<short_task>/` and must never become product runtime paths or hidden fallbacks.
 - For C/LVGL or board-shipped runtime changes, use the existing `RUNTIME_SOURCE_ROOT` v5 tooling instead of ad hoc copies: edit `D:\v5\board`, sync it to the VM build workspace, build there, deploy with the synced `tools/deploy/run_v5_board_acceptance.sh --apply` or the focused v5 deploy/verify script required by the owner, then run the focused operator or motion probe required by that owner.
 - A failed final VM/board/operator/motion pipeline should be treated as evidence: fix the canonical source, rerun the relevant local gates first, and only rerun the required final pipeline stage after the local failure class is closed.
-- After multiple fields reach `local_verified_only`, review the accumulated current source truth directly before the final integration board slice: sync full current `RUNTIME_SOURCE_ROOT`, build in the VM workspace, deploy the canonical artifact, trigger the original UI/operator path, collect SHM, Broker result, events/logs, screenshot or relay evidence, and run `nc/cc.ngc` for motion-related claims.
+- After multiple fields reach `local_verified_only`, review the accumulated current source truth directly before the final integration board slice: sync full current `RUNTIME_SOURCE_ROOT`, build in the VM workspace, deploy the canonical artifact, trigger the original UI/operator path, collect SHM, Broker result, events/logs, screenshot or relay evidence, and run the native active model matching `board/gcode/golden/cc-ac.ngc` or `board/gcode/golden/cc-bc.ngc` for motion-related claims.
 - If dry-run or touched-path classification requires `operator` or `motion`, do not run the final pipeline without an explicit probe. Provide `--operator-probe` and a task-local `--operator-probe-config` under `repo_ignored/<short_task>/` unless the selected pipeline mode already has a built-in probe.
 - For Python shipped to the board, local Python may be newer than board Python; avoid runtime-evaluated modern type aliases or syntax in product modules unless target import/build proves compatibility.
 
@@ -460,7 +460,7 @@ BOARD_CLOSURE_ENTRY:
 - Before any board deploy, operator probe, or motion probe, perform a live board/VM busy check. Do not create lock files while `LOCKS_PAUSED_BY_USER=true`; stop as `blocked` only for real process/resource contention, not historical lock files.
 - For driver profile, driver parameter, authorization, or VPS-downloaded map changes, evidence must include local SHA256, uploaded/board SHA256, and runtime-loaded identity where applicable. A mismatch is fail-closed and cannot support a pass claim.
 - Board deploy artifacts must be ARM/Linux ELF from the VM/ARM toolchain. Verify `file`/`readelf -h` before upload; x86/x86-64/Windows/host-built artifacts fail with `ARTIFACT_ARCH_MISMATCH` and must not overwrite the board.
-- Status words such as `relay_ready`, `board_deployed`, or `board_runtime_ready` do not override `PASS_CLAIM_GATE`; motion claims still require original operator path plus `nc/cc.ngc`.
+- Status words such as `relay_ready`, `board_deployed`, or `board_runtime_ready` do not override `PASS_CLAIM_GATE`; motion claims still require original operator path plus the native active model matching `cc-ac.ngc` or `cc-bc.ngc`.
 
 BOARD_REQUIRED_WHEN:
 - Use `BOARD_FUNCTION_CLOSURE_REQUIRED`, `INCREMENTAL_UI_AUTOMATION_GATE`, and `PASS_CLAIM_GATE` to decide board need; this block is only a fast reminder.
@@ -469,7 +469,7 @@ BOARD_REQUIRED_WHEN:
 BOARD_CLOSURE:
 - Board closure follows `BOARD_FUNCTION_CLOSURE_REQUIRED`: full current `RUNTIME_SOURCE_ROOT` sync, VM build/deploy, canonical artifact, original UI/operator path, and minimal SHM/Broker/log/screenshot or relay evidence.
 - Direct UDS is diagnostic unless the original defect is UDS/API; UI issues require simulated screen tap/button path.
-- Motion-capable closure requires the `nc/cc.ngc` golden motion loop; simulated UI input is the trigger path, not a substitute.
+- Motion-capable closure requires the native active model matching `cc-ac.ngc` or `cc-bc.ngc` golden motion loop; simulated UI input is the trigger path, not a substitute.
 - Do not use direct `/dev/fb0` dump/capture scripts for screenshots; use product remote relay/LVGL flush framebuffer or another verified color-correct path.
 
 - Do not leave `/run/8ax_v3_product_ui/disable_remote_relay` or `/run/8ax_v3_product_ui/disable_remote_input` present at handoff unless the user explicitly asked for remote access to remain disabled.
@@ -481,9 +481,9 @@ PASS_CLAIM_GATE:
 - Output paths are required only when files are actually generated or needed to substantiate the verification; do not create separate basis files just to satisfy process.
 
 MOTION_OR_REAL_MACHINE:
-- Home/Jog/Start/run/E-stop/program/axis/rotary validation requires cc.ngc golden motion verification before any pass claim
-- Motion-related "passed/verified/board_verified" requires UI original-path trigger plus cc.ngc golden loop verification
-- cc.ngc is validation input; do not modify nc/cc.ngc or cc programs unless user explicitly requests
+- Home/Jog/Start/run/E-stop/program/axis/rotary validation requires native active model 对应的 `cc-ac.ngc` 或 `cc-bc.ngc` golden motion verification before any pass claim
+- Motion-related "passed/verified/board_verified" requires UI original-path trigger plus model-matched golden loop verification
+- `cc-ac.ngc` and `cc-bc.ngc` are model-specific validation inputs; do not rewrite or axis-substitute either program at runtime
 - If cc loop fails, fix code/config/build/deploy/probe/SHM/UI/toolpath, not G-code
 
 ## P0_DELIVERY

@@ -425,23 +425,7 @@ def _strip_gcode_comment(line: str) -> str:
     return "".join(out)
 
 
-def check_cc_golden_rtcp_before_ac_motion() -> int:
-    program = ROOT / "gcode" / "golden" / "cc.ngc"
-    runner = ROOT / "services" / "command_gate" / "v5_linuxcncrsh_golden_run.c"
-    hal = ROOT / "linuxcnc" / "hal" / "v5_bus_2ms.hal"
-    rtcp_publisher = ROOT / "services" / "state_publisher" / "v5_rtcp_status_publisher.py"
-    if not program.exists():
-        print("CC_GOLDEN_PROGRAM_MISSING: gcode/golden/cc.ngc", file=sys.stderr)
-        return 1
-    if not runner.exists():
-        print("CC_GOLDEN_RUNNER_MISSING: services/command_gate/v5_linuxcncrsh_golden_run.c", file=sys.stderr)
-        return 1
-    if not hal.exists():
-        print("CC_GOLDEN_RTCP_HAL_MISSING: linuxcnc/hal/v5_bus_2ms.hal", file=sys.stderr)
-        return 1
-    if not rtcp_publisher.exists():
-        print("CC_GOLDEN_RTCP_PUBLISHER_MISSING: services/state_publisher/v5_rtcp_status_publisher.py", file=sys.stderr)
-        return 1
+def _check_cc_golden_program(program: Path, expected_axis: str, forbidden_axis: str) -> int:
     pending_spring_anchor = False
     seen_spring_anchor = False
     seen_cutting_trajectory = False
@@ -449,6 +433,7 @@ def check_cc_golden_rtcp_before_ac_motion() -> int:
     seen_program_rtcp_on = False
     seen_program_rtcp_off = False
     seen_machine_return = False
+    seen_expected_axis = False
     for line_no, raw in enumerate(program.read_text(encoding="ascii", errors="ignore").splitlines(), 1):
         raw_upper = raw.upper()
         if "SPRING ANCHOR" in raw_upper:
@@ -466,6 +451,15 @@ def check_cc_golden_rtcp_before_ac_motion() -> int:
         line = _strip_gcode_comment(raw).strip().upper()
         if not line:
             continue
+        if re.search(rf"(?<![A-Z]){forbidden_axis}\s*[-+]?(?:\d|\.)", line):
+            print(
+                f"CC_GOLDEN_WRONG_MODEL_AXIS: {program.relative_to(ROOT)}:{line_no}: "
+                f"contains {forbidden_axis} axis: {raw.strip()}",
+                file=sys.stderr,
+            )
+            return 1
+        if re.search(rf"(?<![A-Z]){expected_axis}\s*[-+]?(?:\d|\.)", line):
+            seen_expected_axis = True
         if re.search(r"\bG43\.4\b", line):
             print(f"CC_GOLDEN_UNSUPPORTED_G43_4: {program.relative_to(ROOT)}:{line_no}: {raw.strip()}", file=sys.stderr)
             return 1
@@ -535,20 +529,56 @@ def check_cc_golden_rtcp_before_ac_motion() -> int:
                 file=sys.stderr,
             )
             return 1
-    if not seen_spring_anchor:
-        print("CC_GOLDEN_PROGRAM_SPRING_ANCHOR_MISSING: gcode/golden/cc.ngc lacks spring anchor motion", file=sys.stderr)
-        return 1
-    if not seen_spring_feed:
-        print("CC_GOLDEN_PROGRAM_SPRING_FEED_MISSING: gcode/golden/cc.ngc lacks spring G1 feed", file=sys.stderr)
-        return 1
-    if not seen_program_rtcp_on:
-        print("CC_GOLDEN_PROGRAM_RTCP_ON_MISSING: gcode/golden/cc.ngc lacks M64 P0", file=sys.stderr)
-        return 1
-    if not seen_program_rtcp_off:
-        print("CC_GOLDEN_PROGRAM_RTCP_OFF_MISSING: gcode/golden/cc.ngc lacks M65 P0", file=sys.stderr)
-        return 1
+    required = (
+        (seen_spring_anchor, "SPRING_ANCHOR_MISSING"),
+        (seen_spring_feed, "SPRING_FEED_MISSING"),
+        (seen_program_rtcp_on, "RTCP_ON_MISSING"),
+        (seen_program_rtcp_off, "RTCP_OFF_MISSING"),
+        (seen_expected_axis, f"{expected_axis}_AXIS_MOTION_MISSING"),
+    )
+    for present, code in required:
+        if not present:
+            print(f"CC_GOLDEN_PROGRAM_{code}: {program.relative_to(ROOT)}", file=sys.stderr)
+            return 1
+    return 0
 
+
+def check_cc_golden_model_specific_motion() -> int:
+    programs = (
+        (ROOT / "gcode" / "golden" / "cc-ac.ngc", "A", "B"),
+        (ROOT / "gcode" / "golden" / "cc-bc.ngc", "B", "A"),
+    )
+    legacy_program = ROOT / "gcode" / "golden" / "cc.ngc"
+    runner = ROOT / "services" / "command_gate" / "v5_linuxcncrsh_golden_run.c"
+    acceptance = ROOT / "tools" / "deploy" / "run_v5_board_acceptance.sh"
+    manifest = ROOT / "config" / "deploy" / "v5_runtime_deploy_manifest.tsv"
+    hal = ROOT / "linuxcnc" / "hal" / "v5_bus_2ms.hal"
+    rtcp_publisher = ROOT / "services" / "state_publisher" / "v5_rtcp_status_publisher.py"
     rc = 0
+    if legacy_program.exists():
+        print("CC_GOLDEN_LEGACY_PROGRAM_SURVIVOR: gcode/golden/cc.ngc", file=sys.stderr)
+        rc = 1
+    for program, expected_axis, forbidden_axis in programs:
+        if not program.exists():
+            print(f"CC_GOLDEN_PROGRAM_MISSING: {program.relative_to(ROOT)}", file=sys.stderr)
+            rc = 1
+            continue
+        rc |= _check_cc_golden_program(program, expected_axis, forbidden_axis)
+    if not runner.exists():
+        print("CC_GOLDEN_RUNNER_MISSING: services/command_gate/v5_linuxcncrsh_golden_run.c", file=sys.stderr)
+        return 1
+    if not acceptance.exists():
+        print("CC_GOLDEN_ACCEPTANCE_MISSING: tools/deploy/run_v5_board_acceptance.sh", file=sys.stderr)
+        return 1
+    if not manifest.exists():
+        print("CC_GOLDEN_DEPLOY_MANIFEST_MISSING: config/deploy/v5_runtime_deploy_manifest.tsv", file=sys.stderr)
+        return 1
+    if not hal.exists():
+        print("CC_GOLDEN_RTCP_HAL_MISSING: linuxcnc/hal/v5_bus_2ms.hal", file=sys.stderr)
+        return 1
+    if not rtcp_publisher.exists():
+        print("CC_GOLDEN_RTCP_PUBLISHER_MISSING: services/state_publisher/v5_rtcp_status_publisher.py", file=sys.stderr)
+        return 1
     runner_text = runner.read_text(encoding="utf-8", errors="ignore")
     forbidden_runner = (
         "v5_native_rtcp_control_set(1",
@@ -559,6 +589,39 @@ def check_cc_golden_rtcp_before_ac_motion() -> int:
         if token in runner_text:
             print(f"CC_GOLDEN_RUNNER_EXTERNAL_RTCP_SURVIVOR: {runner.relative_to(ROOT)} contains {token}", file=sys.stderr)
             rc = 1
+    required_runner = (
+        "--print-active-model",
+        "cc-ac.ngc",
+        "cc-bc.ngc",
+        "XYZAC_TRT",
+        "XYZBC_TRT",
+        "v5_native_g53_geometry_status_read",
+        "golden_program_matches_active_model",
+    )
+    for token in required_runner:
+        if token not in runner_text:
+            print(f"CC_GOLDEN_RUNNER_MODEL_GATE_MISSING: {runner.relative_to(ROOT)} lacks {token}", file=sys.stderr)
+            rc = 1
+
+    acceptance_text = acceptance.read_text(encoding="utf-8", errors="ignore")
+    required_acceptance = ("--print-active-model", "cc-ac.ngc", "cc-bc.ngc", "XYZAC_TRT", "XYZBC_TRT")
+    for token in required_acceptance:
+        if token not in acceptance_text:
+            print(f"CC_GOLDEN_ACCEPTANCE_MODEL_SELECTION_MISSING: {acceptance.relative_to(ROOT)} lacks {token}", file=sys.stderr)
+            rc = 1
+    for token in ("V5_GOLDEN_PROGRAM", "V5_REMOTE_GOLDEN_PROGRAM"):
+        if token in acceptance_text:
+            print(f"CC_GOLDEN_ACCEPTANCE_LEGACY_FALLBACK: {acceptance.relative_to(ROOT)} contains {token}", file=sys.stderr)
+            rc = 1
+
+    manifest_text = manifest.read_text(encoding="utf-8", errors="ignore")
+    for token in ("gcode/golden/cc-ac.ngc", "gcode/golden/cc-bc.ngc"):
+        if token not in manifest_text:
+            print(f"CC_GOLDEN_DEPLOY_ROW_MISSING: {manifest.relative_to(ROOT)} lacks {token}", file=sys.stderr)
+            rc = 1
+    if "gcode/golden/cc.ngc" in manifest_text:
+        print(f"CC_GOLDEN_DEPLOY_LEGACY_SURVIVOR: {manifest.relative_to(ROOT)}", file=sys.stderr)
+        rc = 1
 
     hal_text = hal.read_text(encoding="utf-8", errors="ignore")
     required_hal = (
@@ -762,7 +825,7 @@ def main() -> int:
         check_linuxcnc_rtapi_affinity_owner() |
         check_settings_runtime_schema_guard() |
         check_remote_relay_access_control() |
-        check_cc_golden_rtcp_before_ac_motion() |
+        check_cc_golden_model_specific_motion() |
         check_rotary_wrapped_mask_policy() |
         check_settings_parameter_table_deploy_kind() |
         check_settings_parameter_table_backup_before_merge() |

@@ -185,6 +185,8 @@ enable_boot_services() {
 cleanup_retired_runtime_files() {
   rm -f /run/8ax_v5_drive/settings_self_parameter_table.json
   rm -f /opt/8ax/v5/config/settings/microkernel_parameter_table.tsv
+  rm -f /opt/8ax/v5/gcode/golden/cc.ngc
+  rm -f /tmp/v5_golden/cc.ngc
 }
 
 install_runtime_drive_profiles() {
