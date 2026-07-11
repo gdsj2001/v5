@@ -218,7 +218,7 @@ run_petalinux_build "-c linuxcnc-prebuilt"
 configure_persistent_downloads
 run_petalinux_build ""
 
-work_root="$petalinux_root/build/tmp/work"
+work_root="$build_root/petalinux/output/tmp/work"
 motmod=$(find "$work_root" -type f -path '*/linuxcnc-prebuilt/*/image/usr/lib/linuxcnc/modules/motmod.so' -print | sort | tail -n 1)
 if [ -z "$motmod" ]; then
     echo "built LinuxCNC image root was not found under $work_root" >&2
