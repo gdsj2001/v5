@@ -86,7 +86,11 @@ int v5_settings_apply_ini_key_line(const char *raw, const char *key, const char 
     return 1;
 }
 
-static int ini_read_section_number(const char *path, const char *section_name, const char *key, double *out)
+int v5_settings_apply_ini_read_section_number(
+    const char *path,
+    const char *section_name,
+    const char *key,
+    double *out)
 {
     FILE *fp;
     char raw[512];
@@ -122,10 +126,10 @@ static int ini_read_section_number(const char *path, const char *section_name, c
 
 int v5_settings_apply_ini_read_preferred_number(const char *path, const char *primary_section, const char *fallback_section, const char *key, double *out)
 {
-    if (ini_read_section_number(path, primary_section, key, out)) {
+    if (v5_settings_apply_ini_read_section_number(path, primary_section, key, out)) {
         return 1;
     }
-    return ini_read_section_number(path, fallback_section, key, out);
+    return v5_settings_apply_ini_read_section_number(path, fallback_section, key, out);
 }
 
 int v5_settings_apply_ini_write_scale_and_limits(

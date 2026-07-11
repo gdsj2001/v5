@@ -18,6 +18,10 @@ typedef struct V5IniTextUpdate {
 
 int v5_settings_apply_file_exists(const char *path);
 char *v5_settings_apply_read_text_file_limited(const char *path);
+int v5_settings_apply_field_is_scale_chain(const char *field_name);
+int v5_settings_apply_json_object_for_key(
+    const char *start, const char *end, const char *key,
+    const char **object_start, const char **object_end);
 int v5_settings_apply_json_number_value(
     const char *start, const char *end, const char *key, double *out);
 int v5_settings_apply_runtime_axis_object(
@@ -31,6 +35,8 @@ int v5_settings_apply_ini_key_line(
 int v5_settings_apply_ini_read_preferred_number(
     const char *path, const char *primary_section, const char *fallback_section,
     const char *key, double *out);
+int v5_settings_apply_ini_read_section_number(
+    const char *path, const char *section_name, const char *key, double *out);
 int v5_settings_apply_ini_write_scale_and_limits(
     const char *path, const char *axis_section, const char *joint_section,
     int write_scale, double scale, double raw_min, double raw_max);

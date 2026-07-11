@@ -16,6 +16,11 @@ int v5_linuxcncrsh_gate_connect(const V5LinuxcncrshConfig *config);
 int v5_linuxcncrsh_send_request_text(
     int fd, const char *request, char *out, size_t out_size);
 int v5_linuxcncrsh_send_fifo_commands(int fd, const char *line);
+int v5_linuxcncrsh_wait_machine_enabled_actual(
+    const V5LinuxcncrshConfig *config,
+    int expected_enabled,
+    unsigned int attempts,
+    unsigned int delay_us);
 #endif
 
 #endif

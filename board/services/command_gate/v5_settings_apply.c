@@ -12,7 +12,7 @@
 #include <sys/stat.h>
 #include "v5_settings_apply_internal.h"
 
-static int field_is_scale_chain(const char *field_name)
+int v5_settings_apply_field_is_scale_chain(const char *field_name)
 {
     return field_name &&
            (strstr(field_name, "_precision") != 0 ||
@@ -63,7 +63,8 @@ int v5_settings_apply_prepare(
     if (v5_parameter_table_field_uses_shm(request->field_name)) {
         return 0;
     }
-    if (field_is_scale_chain(request->field_name) && !parse_positive_finite(request->value_text)) {
+    if (v5_settings_apply_field_is_scale_chain(request->field_name) &&
+        !parse_positive_finite(request->value_text)) {
         return 0;
     }
     if (result) {
@@ -72,7 +73,8 @@ int v5_settings_apply_prepare(
         result->readback_owner = record.readback_owner;
         result->restart_required = record.field->restart_required;
         result->drive_only_allowed = record.field->drive_only_allowed;
-        result->scale_chain_transaction_required = field_is_scale_chain(request->field_name);
+        result->scale_chain_transaction_required =
+            v5_settings_apply_field_is_scale_chain(request->field_name);
         result->raw_limits_recompute_required = result->scale_chain_transaction_required;
     }
     return 1;

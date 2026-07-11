@@ -29,13 +29,13 @@ int main(void)
         axis->home_sequence != 1) {
         return 2;
     }
-    axis = v5_native_motion_parameters_axis(&parameters, 'B');
+    axis = v5_native_motion_parameters_axis(&parameters, 'A');
     if (!axis || !close_enough(axis->max_velocity, 833.333333333) ||
         !close_enough(axis->max_acceleration, 2000.0) || axis->status_slot != 3U ||
         axis->home_sequence != 3) {
         return 3;
     }
-    if (v5_native_motion_parameters_axis(&parameters, 'A')) {
+    if (v5_native_motion_parameters_axis(&parameters, 'B')) {
         return 4;
     }
     memset(&request, 0, sizeof(request));

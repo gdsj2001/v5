@@ -66,41 +66,6 @@ static int compute_scale_from_chain(
     return isfinite(*scale_out) && *scale_out > 0.0;
 }
 
-int v5_settings_apply_prepare(
-    const V5SettingsApplyRequest *request,
-    V5SettingsApplyResult *result)
-{
-    V5ParameterOwnerRecord record;
-
-    if (result) {
-        memset(result, 0, sizeof(*result));
-    }
-    if (!request || !request->field_name || !request->field_name[0] ||
-        !request->value_text || !request->value_text[0] ||
-        request->owner_generation == 0U || request->readback_token == 0U) {
-        return 0;
-    }
-    if (!v5_parameter_owner_lookup(request->field_name, &record) || !record.field->writable) {
-        return 0;
-    }
-    if (v5_parameter_table_field_uses_shm(request->field_name)) {
-        return 0;
-    }
-    if (field_is_scale_chain(request->field_name) && !parse_positive_finite(request->value_text)) {
-        return 0;
-    }
-    if (result) {
-        result->status = V5_SETTINGS_APPLY_ACCEPTED;
-        result->write_owner = record.write_owner;
-        result->readback_owner = record.readback_owner;
-        result->restart_required = record.field->restart_required;
-        result->drive_only_allowed = record.field->drive_only_allowed;
-        result->scale_chain_transaction_required = field_is_scale_chain(request->field_name);
-        result->raw_limits_recompute_required = result->scale_chain_transaction_required;
-    }
-    return 1;
-}
-
 int v5_settings_apply_scale_chain_commit(
     const char *project_root,
     const char *settings_runtime_json_path,
@@ -137,7 +102,8 @@ int v5_settings_apply_scale_chain_commit(
         memset(result, 0, sizeof(*result));
         v5_settings_apply_scale_chain_result_code(result, "SCALE_CHAIN_NOT_ATTEMPTED");
     }
-    if (!axis || !axis[0] || !field_name || !field_is_scale_chain(field_name)) {
+    if (!axis || !axis[0] || !field_name ||
+        !v5_settings_apply_field_is_scale_chain(field_name)) {
         if (result) {
             result->skipped = 1;
             v5_settings_apply_scale_chain_result_code(result, "SCALE_CHAIN_NOT_REQUIRED");
@@ -173,7 +139,8 @@ int v5_settings_apply_scale_chain_commit(
     snprintf(axis_section, sizeof(axis_section), "AXIS_%s", axis);
     snprintf(joint_section, sizeof(joint_section), "JOINT_%u", axis_index);
     if (!v5_settings_apply_runtime_axis_object(json, axis, &axis_obj_start, &axis_obj_end) ||
-        !json_object_for_key(axis_obj_start, axis_obj_end, "zero_model", &zero_obj_start, &zero_obj_end)) {
+        !v5_settings_apply_json_object_for_key(
+            axis_obj_start, axis_obj_end, "zero_model", &zero_obj_start, &zero_obj_end)) {
         free(json);
         if (result) {
             result->skipped = 1;
@@ -208,10 +175,14 @@ int v5_settings_apply_scale_chain_commit(
     if (!v5_settings_apply_json_number_value(zero_obj_start, zero_obj_end, "raw_zero_position", &old_zero)) {
         old_zero = zero_counts / current_scale;
     }
-    if (!(ini_read_section_number(ini_path, joint_section, "MIN_LIMIT", &raw_min_current) &&
-          ini_read_section_number(ini_path, joint_section, "MAX_LIMIT", &raw_max_current)) &&
-        !(ini_read_section_number(ini_path, axis_section, "MIN_LIMIT", &raw_min_current) &&
-          ini_read_section_number(ini_path, axis_section, "MAX_LIMIT", &raw_max_current))) {
+    if (!(v5_settings_apply_ini_read_section_number(
+              ini_path, joint_section, "MIN_LIMIT", &raw_min_current) &&
+          v5_settings_apply_ini_read_section_number(
+              ini_path, joint_section, "MAX_LIMIT", &raw_max_current)) &&
+        !(v5_settings_apply_ini_read_section_number(
+              ini_path, axis_section, "MIN_LIMIT", &raw_min_current) &&
+          v5_settings_apply_ini_read_section_number(
+              ini_path, axis_section, "MAX_LIMIT", &raw_max_current))) {
         free(json);
         v5_settings_apply_scale_chain_result_code(result, "RAW_LIMIT_CURRENT_MISSING");
         return 0;

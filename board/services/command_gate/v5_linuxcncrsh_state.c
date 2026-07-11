@@ -194,7 +194,7 @@ int v5_linuxcncrsh_probe_machine_enabled(
 }
 
 #ifndef _WIN32
-static int v5_linuxcncrsh_wait_machine_enabled_actual(
+int v5_linuxcncrsh_wait_machine_enabled_actual(
     const V5LinuxcncrshConfig *config,
     int expected_enabled,
     unsigned int attempts,

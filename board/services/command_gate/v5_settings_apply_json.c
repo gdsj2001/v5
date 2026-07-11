@@ -142,6 +142,31 @@ static const char *json_value_for_key(const char *start, const char *end, const 
     return 0;
 }
 
+int v5_settings_apply_json_object_for_key(
+    const char *start,
+    const char *end,
+    const char *key,
+    const char **object_start,
+    const char **object_end)
+{
+    const char *value;
+    const char *close;
+    if (!object_start || !object_end) {
+        return 0;
+    }
+    value = json_value_for_key(start, end, key);
+    if (!value || value >= end || *value != '{') {
+        return 0;
+    }
+    close = json_matching_delim(value, end, '{', '}');
+    if (!close) {
+        return 0;
+    }
+    *object_start = value;
+    *object_end = close + 1;
+    return 1;
+}
+
 static int json_string_value(const char *start, const char *end, const char *key, char *out, size_t out_cap)
 {
     const char *p = json_value_for_key(start, end, key);
