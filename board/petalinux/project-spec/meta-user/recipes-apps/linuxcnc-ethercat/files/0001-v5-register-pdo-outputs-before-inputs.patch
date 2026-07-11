@@ -1,0 +1,114 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: V5 Build <v5@example.invalid>
+Date: Sat, 16 May 2026 16:20:00 +0800
+Subject: [PATCH] v5: add PDO direction append helper
+
+The V5 native LinuxCNC EtherCAT path uses IgH/lcec directly.  Keep the
+motion chain native. Add a helper that lets the recipe register all
+output PDO entries before input PDO entries so the master can build
+continuous LWR/LRD domain windows instead of alternating output/input
+FMMUs per drive.
+---
+ src/lcec.h          |  2 ++
+ src/lcec_ethercat.c | 65 +++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 67 insertions(+)
+
+diff --git a/src/lcec.h b/src/lcec.h
+index 7c40f4b..51a0586 100644
+--- a/src/lcec.h
++++ b/src/lcec.h
+@@ -428,6 +428,8 @@ lcec_pdo_entry_reg_t *lcec_allocate_pdo_entry_reg(int size);
+ int lcec_pdo_init(lcec_slave_t *slave, uint16_t idx, uint16_t sidx, unsigned int *os, unsigned int *bp);
+ int lcec_pdo_entry_reg_len(lcec_pdo_entry_reg_t *reg);
+ int lcec_append_pdo_entry_reg(lcec_pdo_entry_reg_t *dest, lcec_pdo_entry_reg_t *src);
++int lcec_append_pdo_entry_reg_by_dir(lcec_pdo_entry_reg_t *dest,
++    lcec_pdo_entry_reg_t *src, lcec_slave_t *slave, ec_direction_t dir);
+ 
+ void *lcec_hal_malloc(size_t size, const char *file, const char *func, int line);
+ void *lcec_malloc(size_t size, const char *file, const char *func, int line);
+diff --git a/src/lcec_ethercat.c b/src/lcec_ethercat.c
+index 7c40f4b..ed4c8f7 100644
+--- a/src/lcec_ethercat.c
++++ b/src/lcec_ethercat.c
+@@ -635,6 +635,47 @@ int lcec_pdo_init(lcec_slave_t *slave, uint16_t idx, uint8_t sidx, unsigned int
+   return 0;
+ }
+ 
++static ec_direction_t lcec_pdo_entry_reg_dir(lcec_slave_t *slave, const ec_pdo_entry_reg_t *reg) {
++  if (slave == NULL || slave->sync_info == NULL || reg == NULL) {
++    return EC_DIR_INVALID;
++  }
++
++  for (const ec_sync_info_t *sync = slave->sync_info;
++       sync->index != (uint8_t)EC_END;
++       sync++) {
++    if (sync->pdos == NULL) {
++      continue;
++    }
++
++    for (unsigned int pdo_idx = 0; pdo_idx < sync->n_pdos; pdo_idx++) {
++      const ec_pdo_info_t *pdo = &sync->pdos[pdo_idx];
++      if (pdo->entries == NULL) {
++        continue;
++      }
++
++      for (unsigned int entry_idx = 0; entry_idx < pdo->n_entries; entry_idx++) {
++        const ec_pdo_entry_info_t *entry = &pdo->entries[entry_idx];
++        if (entry->index == reg->index && entry->subindex == reg->subindex) {
++          return sync->dir;
++        }
++      }
++    }
++  }
++
++  return EC_DIR_INVALID;
++}
++
++static int lcec_append_one_pdo_entry_reg(lcec_pdo_entry_reg_t *dest, const ec_pdo_entry_reg_t *src) {
++  if ((dest->current + 1) > dest->max) {
++    rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "lcec_append_pdo_entry_reg_by_dir() failed due to lack of space!\n");
++    return -1;
++  }
++
++  dest->pdo_entry_regs[dest->current] = *src;
++  dest->current++;
++  return 0;
++}
++
+ /// @brief Return the number of entries in a lcec_pdo_entry_reg_t
+ int lcec_pdo_entry_reg_len(lcec_pdo_entry_reg_t *reg) { return reg->current; }
+ 
+@@ -673,3 +714,33 @@ int lcec_append_pdo_entry_reg(lcec_pdo_entry_reg_t *dest, lcec_pdo_entry_reg_t *
+   }
+   return 0;
+ }
++
++/// @brief Append PDO entries that belong to one sync-manager direction.
++///
++/// Registering all outputs before inputs keeps the IgH domain memory
++/// contiguous by direction. This is still native LinuxCNC/lcec motion; it only
++/// changes FMMU/domain ordering so the master can use LWR/LRD process-data
++/// windows instead of an alternating output/input sequence.
++int lcec_append_pdo_entry_reg_by_dir(lcec_pdo_entry_reg_t *dest,
++    lcec_pdo_entry_reg_t *src, lcec_slave_t *slave, ec_direction_t dir) {
++  for (int i = 0; i < src->current; i++) {
++    ec_pdo_entry_reg_t *entry = &src->pdo_entry_regs[i];
++    ec_direction_t entry_dir = lcec_pdo_entry_reg_dir(slave, entry);
++
++    if (entry_dir != dir) {
++      continue;
++    }
++
++    if (entry_dir == EC_DIR_INVALID) {
++      rtapi_print_msg(RTAPI_MSG_WARN,
++          LCEC_MSG_PFX "PDO %04x:%02x for slave %s.%s was not found in sync_info; appending after directed PDOs\n",
++          entry->index, entry->subindex, slave->master->name, slave->name);
++    }
++
++    if (lcec_append_one_pdo_entry_reg(dest, entry) != 0) {
++      return -1;
++    }
++  }
++
++  return 0;
++}

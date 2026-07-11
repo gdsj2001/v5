@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: MIT
+# intel-quark-tiny.scc
+#
+# Tiny ktype for 32 bit Quark / X1000 CPUs
+#
+
+define KMACHINE intel-quark
+define KARCH i386
+define KTYPE tiny
+
+include ktypes/tiny/tiny.scc
+# trying to drop this patch since we aren't carrying patche
+# branch intel
+
+include intel-common.scc
+include features/power/intel.scc
+include intel-common-drivers-32-essential.scc
+include intel-quark.scc

@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: V5 Project <v5@example.invalid>
+Date: Sat, 16 May 2026 22:05:00 +0800
+Subject: [PATCH] v5: keep sent datagram state on duplicate queue
+
+The V5 native LinuxCNC EtherCAT path uses two cyclic domain datagrams
+(LWR/LRD) through IgH's generic backend. When a valid process-data reply is
+late enough that the next servo cycle queues the same domain datagram again,
+upstream IgH detects the duplicate queue entry, increments skip_count, and
+then forcibly changes the datagram state back to EC_DATAGRAM_QUEUED. The code
+comment notes that this can cause an unmatched datagram.
+
+On the Zynq GEM + SV630N chain, that is exactly the observed failure chain:
+domain datagram SKIPPED, then UNMATCHED, then Domain 0 WKC drops 0/10 and
+recovers to 10/10. Preserve EC_DATAGRAM_SENT for an already-queued sent
+datagram so the late reply can still match by index/type/size and be dequeued
+normally. Non-sent duplicate entries keep the existing recovery behavior.
+
+This keeps the motion path LinuxCNC/IgH/lcec-native and avoids masking WKC or
+servo faults in userspace.
+---
+ master/master.c | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/master/master.c b/master/master.c
+index 4444444..5555555 100644
+--- a/master/master.c
++++ b/master/master.c
+@@ -979,7 +979,14 @@ void ec_master_queue_datagram(
+             EC_MASTER_DBG(master, 1,
+                     "Datagram %p already queued (skipping).\n", datagram);
+ #endif
+-            datagram->state = EC_DATAGRAM_QUEUED;
++            /*
++             * V5 native EtherCAT: if a cyclic domain datagram is still
++             * waiting for its reply, do not turn it back into QUEUED. Keeping
++             * SENT lets a late but valid reply match instead of becoming a
++             * self-induced UNMATCHED datagram.
++             */
++            if (datagram->state != EC_DATAGRAM_SENT)
++                datagram->state = EC_DATAGRAM_QUEUED;
+             return;
+         }
+     }
+-- 
+2.39.2

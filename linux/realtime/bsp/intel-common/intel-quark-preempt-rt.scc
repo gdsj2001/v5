@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: MIT
+# intel-quark-preempt-rt.scc
+#
+# preempt-rt ktype for 32 bit Quark / X1000 CPUs
+#
+
+define KMACHINE intel-quark
+define KARCH i386
+define KTYPE preempt-rt
+
+include ktypes/preempt-rt/preempt-rt.scc
+# trying to drop this branch, since we aren't carrying patches
+# branch intel
+
+# Enable booting from USB for Standard Kernel Image
+include cfg/usb-mass-storage.scc
+include cfg/boot-live.scc
+
+include intel-common.scc
+include features/power/intel.scc
+include intel-common-drivers-32.scc
+include intel-quark.scc

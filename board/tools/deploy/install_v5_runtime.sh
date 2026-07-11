@@ -1,7 +1,9 @@
 #!/bin/sh
 set -eu
 
-repo_root="${V5_REPO_ROOT:-/root/Desktop/v5}"
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+default_repo_root=$(CDPATH= cd -- "$script_dir/../.." && pwd)
+repo_root="${V5_REPO_ROOT:-$default_repo_root}"
 manifest="${1:-$repo_root/config/deploy/v5_runtime_deploy_manifest.tsv}"
 apply=0
 project_root="$repo_root"

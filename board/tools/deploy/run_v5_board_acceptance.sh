@@ -12,12 +12,9 @@ golden_remote_dir="/tmp/v5_golden"
 golden_local=""
 golden_remote=""
 linuxcncrsh_port="${V5_LINUXCNCRSH_PORT:-5007}"
-project_root="$repo_root"
-case "$project_root" in
-  */board) project_root="${project_root%/board}" ;;
-  *\\board) project_root="${project_root%\\board}" ;;
-esac
-board_build_dir="${V5_BOARD_BUILD_DIR:-$project_root/build/board}"
+home_dir="${HOME:?HOME is required}"
+build_root="${V5_BUILD_ROOT:-$home_dir/v5-build}"
+board_build_dir="${V5_BOARD_BUILD_DIR:-$build_root/board}"
 board_build_targets="${V5_BOARD_BUILD_TARGETS:-v5_lvgl_shell v5_state_publisher v5_touch_diagnostics v5_linuxcncrsh_probe v5_linuxcncrsh_golden_run}"
 apply=0
 motion=0

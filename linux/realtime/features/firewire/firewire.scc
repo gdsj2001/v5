@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: MIT
+define KFEATURE_DESCRIPTION "Enable IEEE-1394 Firewire support"
+define KFEATURE_COMPATIBILITY board
+
+kconf hardware firewire.cfg

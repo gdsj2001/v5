@@ -406,7 +406,7 @@ static void VerifyUpdateDefaults()
 static void VerifyRelayReconnectContract()
 {
     string repoRoot = FindRepoRoot(AppContext.BaseDirectory);
-    string source = File.ReadAllText(Path.Combine(repoRoot, "8ax-win", "src", "8ax.WinRemote", "MainWindow.xaml.cs"));
+    string source = ReadMainWindowSource(Path.Combine(repoRoot, "8ax-win"));
     string readme = File.ReadAllText(Path.Combine(repoRoot, "8ax-win", "README.md"));
     Require(true, source.Contains("RunRelayLoopAsync", StringComparison.Ordinal), "relay reconnect loop exists");
     Require(true, source.Contains("relay_reconnect_scheduled", StringComparison.Ordinal), "relay reconnect evidence exists");
@@ -430,7 +430,7 @@ static void VerifyRelayReconnectContract()
 static void VerifyRelayStreamFailureNoFallbackContract()
 {
     string repoRoot = FindRepoRoot(AppContext.BaseDirectory);
-    string mainWindow = File.ReadAllText(Path.Combine(repoRoot, "8ax-win", "src", "8ax.WinRemote", "MainWindow.xaml.cs"));
+    string mainWindow = ReadMainWindowSource(Path.Combine(repoRoot, "8ax-win"));
     string relayClient = File.ReadAllText(Path.Combine(repoRoot, "8ax-win", "src", "8ax.WinRemote", "Transport", "RemoteRelayClient.cs"));
     string readme = File.ReadAllText(Path.Combine(repoRoot, "8ax-win", "README.md"));
     Require(false, mainWindow.Contains("RunFullFramePollingAsync", StringComparison.Ordinal), "relay HTTP polling fallback is retired");
@@ -451,7 +451,7 @@ static void VerifyRelayStreamFailureNoFallbackContract()
 static void VerifyRelayDisplayRefreshRateContract()
 {
     string winRoot = FindWinRemoteRoot(AppContext.BaseDirectory);
-    string mainWindow = ReadWinRemoteFile(winRoot, "src", "8ax.WinRemote", "MainWindow.xaml.cs");
+    string mainWindow = ReadMainWindowSource(winRoot);
     string mockRelay = ReadWinRemoteFile(winRoot, "tools", "mock-relay", "Program.cs");
     string readme = ReadWinRemoteFile(winRoot, "README.md");
     Require(true, mainWindow.Contains("RelayStreamTargetFps = 30", StringComparison.Ordinal), "relay target fps is 30");
@@ -471,7 +471,7 @@ static void VerifyRelayDisplayRefreshRateContract()
 static void VerifyRelayInputRetryContract()
 {
     string repoRoot = FindRepoRoot(AppContext.BaseDirectory);
-    string source = File.ReadAllText(Path.Combine(repoRoot, "8ax-win", "src", "8ax.WinRemote", "MainWindow.xaml.cs"));
+    string source = ReadMainWindowSource(Path.Combine(repoRoot, "8ax-win"));
     Require(true, source.Contains("EnsureRelayInputReadyAsync", StringComparison.Ordinal), "relay input retry helper exists");
     Require(true, source.Contains("relay_input_retry_started", StringComparison.Ordinal), "relay input retry evidence starts");
     Require(true, source.Contains("relay_input_retry_ready", StringComparison.Ordinal), "relay input retry ready evidence exists");
@@ -482,7 +482,7 @@ static void VerifyRelayInputRetryContract()
 static void VerifyRelayInputStaleSocketRecoveryContract()
 {
     string winRoot = FindWinRemoteRoot(AppContext.BaseDirectory);
-    string mainWindow = ReadWinRemoteFile(winRoot, "src", "8ax.WinRemote", "MainWindow.xaml.cs");
+    string mainWindow = ReadMainWindowSource(winRoot);
     string relayClient = ReadWinRemoteFile(winRoot, "src", "8ax.WinRemote", "Transport", "RemoteRelayClient.cs");
     Require(true, relayClient.Contains("ResetInputSocketLocked", StringComparison.Ordinal), "stale relay input socket is reset after pointer failure");
     Require(true, relayClient.Contains("catch", StringComparison.Ordinal) && relayClient.Contains("ResetInputSocketLocked();", StringComparison.Ordinal), "pointer send failure discards cached input socket");
@@ -496,7 +496,7 @@ static void VerifySystemMetricsTopBarContract()
 {
     string winRoot = FindWinRemoteRoot(AppContext.BaseDirectory);
     string xaml = ReadWinRemoteFile(winRoot, "src", "8ax.WinRemote", "MainWindow.xaml");
-    string mainWindow = ReadWinRemoteFile(winRoot, "src", "8ax.WinRemote", "MainWindow.xaml.cs");
+    string mainWindow = ReadMainWindowSource(winRoot);
     string protocol = ReadWinRemoteFile(winRoot, "src", "8ax.WinRemote", "Protocol", "RemoteMessage.cs");
     string readme = ReadWinRemoteFile(winRoot, "README.md");
     Require(true, xaml.Contains("SystemMetricsText", StringComparison.Ordinal), "top bar system metrics text exists");
@@ -524,7 +524,7 @@ static void VerifyBottomStatusBarStableContract()
 {
     string winRoot = FindWinRemoteRoot(AppContext.BaseDirectory);
     string xaml = ReadWinRemoteFile(winRoot, "src", "8ax.WinRemote", "MainWindow.xaml");
-    string mainWindow = ReadWinRemoteFile(winRoot, "src", "8ax.WinRemote", "MainWindow.xaml.cs");
+    string mainWindow = ReadMainWindowSource(winRoot);
     Require(true, xaml.Contains("x:Name=\"StatusFrameText\"", StringComparison.Ordinal), "bottom frame status slot exists");
     Require(true, xaml.Contains("x:Name=\"StatusFpsText\"", StringComparison.Ordinal), "bottom fps status slot exists");
     Require(true, xaml.Contains("x:Name=\"StatusRelayText\"", StringComparison.Ordinal), "bottom relay status slot exists");
@@ -560,7 +560,7 @@ static void VerifyWinRemoteBoardTimeSyncContract()
 static void VerifyUpgradeProgressContract()
 {
     string repoRoot = FindRepoRoot(AppContext.BaseDirectory);
-    string mainWindow = File.ReadAllText(Path.Combine(repoRoot, "8ax-win", "src", "8ax.WinRemote", "MainWindow.xaml.cs"));
+    string mainWindow = ReadMainWindowSource(Path.Combine(repoRoot, "8ax-win"));
     string updater = File.ReadAllText(Path.Combine(repoRoot, "8ax-win", "src", "8ax.WinRemote", "Update", "WinRemoteUpdater.cs"));
     string dialog = File.ReadAllText(Path.Combine(repoRoot, "8ax-win", "src", "8ax.WinRemote", "Update", "UpdateProgressDialog.cs"));
     Require(true, mainWindow.Contains("UpdateProgressDialog", StringComparison.Ordinal), "upgrade opens progress dialog");
@@ -614,7 +614,7 @@ static void VerifyOperatorButtonsContract()
 {
     string winRoot = FindWinRemoteRoot(AppContext.BaseDirectory);
     string xaml = ReadWinRemoteFile(winRoot, "src", "8ax.WinRemote", "MainWindow.xaml");
-    string mainWindow = ReadWinRemoteFile(winRoot, "src", "8ax.WinRemote", "MainWindow.xaml.cs");
+    string mainWindow = ReadMainWindowSource(winRoot);
     string otaWindow = ReadWinRemoteFile(winRoot, "src", "8ax.WinRemote", "MainWindow.OtaUpgrade.cs");
     string relayClient = ReadWinRemoteFile(winRoot, "src", "8ax.WinRemote", "Transport", "RemoteRelayClient.cs");
     string programDialog = ReadWinRemoteFile(winRoot, "src", "8ax.WinRemote", "ProgramDirectoryDialog.cs");
@@ -1050,4 +1050,14 @@ static string ReadWinRemoteFile(string winRoot, params string[] relativeParts)
     parts[0] = winRoot;
     Array.Copy(relativeParts, 0, parts, 1, relativeParts.Length);
     return File.ReadAllText(Path.Combine(parts));
+}
+
+static string ReadMainWindowSource(string winRoot)
+{
+    string sourceRoot = Path.Combine(winRoot, "src", "8ax.WinRemote");
+    return String.Join(
+        Environment.NewLine,
+        Directory.GetFiles(sourceRoot, "MainWindow*.cs", SearchOption.TopDirectoryOnly)
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .Select(File.ReadAllText));
 }

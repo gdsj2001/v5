@@ -1,17 +1,16 @@
 #!/bin/sh
 set -eu
 
-repo_root="${V5_REPO_ROOT:-/root/Desktop/v5}"
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+default_repo_root=$(CDPATH= cd -- "$script_dir/../.." && pwd)
+repo_root="${V5_REPO_ROOT:-$default_repo_root}"
 manifest="${1:-$repo_root/config/deploy/v5_runtime_deploy_manifest.tsv}"
 board_ssh="${V5_BOARD_SSH:-}"
 board_ssh_port="${V5_BOARD_SSH_PORT:-22}"
 strict_remote="${V5_PRECHECK_STRICT_REMOTE:-0}"
-project_root="$repo_root"
-case "$project_root" in
-  */board) project_root="${project_root%/board}" ;;
-  *\\board) project_root="${project_root%\\board}" ;;
-esac
-board_build_dir="${V5_BOARD_BUILD_DIR:-$project_root/build/board}"
+home_dir="${HOME:?HOME is required}"
+build_root="${V5_BUILD_ROOT:-$home_dir/v5-build}"
+board_build_dir="${V5_BOARD_BUILD_DIR:-$build_root/board}"
 
 if [ ! -r "$manifest" ]; then
   echo "FAIL missing deploy manifest: $manifest" >&2

@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import configparser
+import hashlib
 import importlib.util
+import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -89,7 +92,15 @@ def check_settings_runtime_schema_guard() -> int:
         print(f"SETTINGS_RUNTIME_GUARD_IMPORT_FAILED: {module_path}", file=sys.stderr)
         return 1
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module_dir = str(module_path.parent)
+    path_added = module_dir not in sys.path
+    if path_added:
+        sys.path.insert(0, module_dir)
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        if path_added:
+            sys.path.remove(module_dir)
     good_payload = {
         "schema": module.SETTINGS_RUNTIME_SCHEMA,
         "axes": [
@@ -140,12 +151,19 @@ def check_remote_relay_access_control() -> int:
     rc = 0
     source = ROOT / "app" / "src" / "v5_lvgl_remote_display.c"
     relay = ROOT / "services" / "ui" / "v5_remote_ui_relay.py"
+    relay_modules = (
+        relay,
+        ROOT / "services" / "ui" / "v5_remote_ui_state.py",
+        ROOT / "services" / "ui" / "v5_remote_ui_support.py",
+        ROOT / "services" / "ui" / "v5_remote_ui_protocol.py",
+        ROOT / "services" / "ui" / "v5_remote_ui_contract.py",
+    )
     init = ROOT / "services" / "ui" / "init.d" / "v5-ui-relay"
-    if not source.exists() or not relay.exists() or not init.exists():
+    if not source.exists() or not all(path.exists() for path in relay_modules) or not init.exists():
         print("REMOTE_RELAY_ACCESS_CONTROL_MISSING_SOURCE", file=sys.stderr)
         return 1
     source_text = source.read_text(encoding="utf-8", errors="ignore")
-    relay_text = relay.read_text(encoding="utf-8", errors="ignore")
+    relay_text = "\n".join(path.read_text(encoding="utf-8", errors="ignore") for path in relay_modules)
     init_text = init.read_text(encoding="utf-8", errors="ignore")
     required_source = (
         "remote_framebuffer.bgra",
@@ -201,7 +219,7 @@ def check_remote_relay_access_control() -> int:
     )
     for token in required_relay:
         if token not in relay_text:
-            print(f"REMOTE_RELAY_PYTHON_BOUNDARY_MISSING: {relay.relative_to(ROOT)} lacks {token}", file=sys.stderr)
+            print(f"REMOTE_RELAY_PYTHON_BOUNDARY_MISSING: canonical relay modules lack {token}", file=sys.stderr)
             rc = 1
     required_init = (
         "V5_UI_REMOTE_BIND",
@@ -322,12 +340,18 @@ def check_rotary_native_target_policy() -> int:
                 re.DOTALL,
             )
         }
-        motion_patch = ROOT / "linuxcnc" / "patches" / "0001-v5-native-rotary-nearest-target.patch"
-        if not motion_patch.exists():
-            print(f"ROTARY_NATIVE_PATCH_MISSING: {motion_patch.relative_to(ROOT)}", file=sys.stderr)
+        linuxcnc_source = ROOT.parent / "linuxcnc"
+        command_source = linuxcnc_source / "src" / "emc" / "motion" / "command.c"
+        control_source = linuxcnc_source / "src" / "emc" / "motion" / "control.c"
+        private_source = linuxcnc_source / "src" / "emc" / "motion" / "mot_priv.h"
+        task_source = linuxcnc_source / "src" / "emc" / "task" / "taskintf.cc"
+        required_sources = (command_source, control_source, private_source, task_source)
+        if not all(path.is_file() for path in required_sources):
+            print(f"ROTARY_NATIVE_SOURCE_MISSING: {linuxcnc_source}", file=sys.stderr)
             rc = 1
         else:
-            motion_patch_text = motion_patch.read_text(encoding="utf-8", errors="strict")
+            command_text = command_source.read_text(encoding="utf-8", errors="strict")
+            private_text = private_source.read_text(encoding="utf-8", errors="strict")
             for token in (
                 "v5_prepare_wrapped_rotary_target",
                 "v5_wrapped_rotary_turn_offset_deg",
@@ -336,31 +360,45 @@ def check_rotary_native_target_policy() -> int:
                 "GM_FLAG_DISTANCE_MODE",
                 "GM_FIELD_G_MODE_0",
             ):
-                if token not in motion_patch_text:
+                if token not in command_text:
                     print(
-                        f"ROTARY_NATIVE_PATCH_CONTRACT_MISSING: {motion_patch.relative_to(ROOT)} lacks {token}",
+                        f"ROTARY_NATIVE_SOURCE_CONTRACT_MISSING: {command_source} lacks {token}",
                         file=sys.stderr,
                     )
                     rc = 1
-            for forbidden in (
-                "z20_normalize_wrapped_rotaries_if_idle",
-                "z20_apply_wrapped_rotary_traverse_target",
-                "z20_wrapped_rotary_mask",
-                "src/emc/task/taskintf.cc",
-            ):
-                if forbidden in motion_patch_text:
+            if "extern void v5_reset_wrapped_rotary_turn_offsets(void);" not in private_text:
+                print(f"ROTARY_NATIVE_SOURCE_CONTRACT_MISSING: {private_source}", file=sys.stderr)
+                rc = 1
+            forbidden_sources = {
+                control_source: (
+                    "z20_normalize_wrapped_rotaries_if_idle",
+                    "z20_apply_wrapped_rotary_traverse_target",
+                    "z20_wrapped_rotary_mask",
+                    "z20_wrapped_rotary_planner_idle",
+                ),
+                task_source: (
+                    "z20_wrap_public_degrees",
+                    "z20_wrap_public_pose",
+                    "z20_wrap_public_joint_position",
+                    "WRAPPED_ROTARY",
+                ),
+            }
+            for source, forbidden_tokens in forbidden_sources.items():
+                source_text = source.read_text(encoding="utf-8", errors="strict")
+                for forbidden in forbidden_tokens:
+                    if forbidden not in source_text:
+                        continue
                     print(
-                        f"ROTARY_NATIVE_PATCH_FORBIDDEN_IDLE_OR_DISPLAY_PATH: "
-                        f"{motion_patch.relative_to(ROOT)} contains {forbidden}",
+                        f"ROTARY_NATIVE_SOURCE_FORBIDDEN_PATH: {source} contains {forbidden}",
                         file=sys.stderr,
                     )
                     rc = 1
             if not re.search(
-                r"case EMCMOT_ABORT:\n\+\s+v5_reset_wrapped_rotary_turn_offsets\(\);",
-                motion_patch_text,
+                r"case EMCMOT_ABORT:\s+v5_reset_wrapped_rotary_turn_offsets\(\);",
+                command_text,
             ):
                 print(
-                    f"ROTARY_NATIVE_ABORT_SYNC_RESET_MISSING: {motion_patch.relative_to(ROOT)}",
+                    f"ROTARY_NATIVE_ABORT_SYNC_RESET_MISSING: {command_source}",
                     file=sys.stderr,
                 )
                 rc = 1
@@ -416,6 +454,79 @@ def check_rotary_native_target_policy() -> int:
                     )
                     rc = 1
     return rc
+
+
+def check_linuxcnc_source_rebuild_policy() -> int:
+    project_root = ROOT.parent
+    source_root = project_root / "linuxcnc"
+    identity_path = source_root / "v5_linuxcnc_source_identity.json"
+    recipe_path = ROOT / "linuxcnc" / "yocto" / "linuxcnc-prebuilt.bb"
+    verifier_path = ROOT / "tools" / "linuxcnc" / "verify_v5_linuxcnc_source.py"
+    build_path = ROOT / "tools" / "linuxcnc" / "build_v5_linuxcnc_petalinux.sh"
+    sync_path = ROOT / "linuxcnc" / "tools" / "sync_v5_linuxcnc_recipe_to_petalinux.sh"
+    retired_paths = (
+        ROOT / "linuxcnc" / "v5_linuxcnc_source.lock.json",
+        ROOT / "linuxcnc" / "patches" / "0001-v5-native-rotary-nearest-target.patch",
+    )
+    required_paths = (identity_path, recipe_path, verifier_path, build_path)
+    for path in required_paths:
+        if not path.is_file():
+            print(f"LINUXCNC_REBUILD_OWNER_MISSING: {path}", file=sys.stderr)
+            return 1
+    for path in (*retired_paths, sync_path):
+        if path.exists():
+            print(f"LINUXCNC_REBUILD_RETIRED_PATH_PRESENT: {path}", file=sys.stderr)
+            return 1
+    try:
+        identity = json.loads(identity_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        print(f"LINUXCNC_REBUILD_IDENTITY_INVALID: {exc}", file=sys.stderr)
+        return 1
+    if identity.get("schema") != "v5-linuxcnc-vendored-source-v1":
+        print("LINUXCNC_REBUILD_IDENTITY_SCHEMA_INVALID", file=sys.stderr)
+        return 1
+    commit = identity.get("upstream", {}).get("commit", "")
+    recipe = recipe_path.read_text(encoding="utf-8", errors="strict")
+    if len(commit) != 40 or "inherit pkgconfig externalsrc" not in recipe:
+        print("LINUXCNC_REBUILD_EXTERNAL_SOURCE_NOT_PINNED", file=sys.stderr)
+        return 1
+    for required in (
+        'V5_LINUXCNC_EXTERNAL_SOURCE ?= ""',
+        'EXTERNALSRC = "${V5_LINUXCNC_EXTERNAL_SOURCE}"',
+        "v5_linuxcnc_source_identity.json",
+    ):
+        if required not in recipe:
+            print(f"LINUXCNC_REBUILD_EXTERNAL_SOURCE_GATE_MISSING: {required}", file=sys.stderr)
+            return 1
+    for forbidden in ("git://", "SRCREV", "0001-v5-native-rotary-nearest-target.patch", "/home/"):
+        if forbidden in recipe:
+            print(f"LINUXCNC_REBUILD_RETIRED_PATH: {forbidden}", file=sys.stderr)
+            return 1
+    build_script = build_path.read_text(encoding="utf-8", errors="strict")
+    for token in (
+        "findmnt -n -o FSTYPE,OPTIONS -T",
+        "mount -t overlay overlay",
+        'lowerdir=$source_root,upperdir=$overlay_upper,workdir=$overlay_work',
+        'ln -s "$integration_root/yocto/linuxcnc-prebuilt.bb"',
+        'V5_LINUXCNC_EXTERNAL_SOURCE="$overlay_merged"',
+    ):
+        if token not in build_script:
+            print(f"LINUXCNC_REBUILD_READONLY_OWNER_GATE_MISSING: {token}", file=sys.stderr)
+            return 1
+    if "sync_v5_linuxcnc_recipe_to_petalinux" in build_script:
+        print("LINUXCNC_REBUILD_RETIRED_SYNC_CALL_PRESENT", file=sys.stderr)
+        return 1
+    result = subprocess.run(
+        [sys.executable, str(verifier_path), "--project-root", str(project_root)],
+        cwd=project_root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        print(f"LINUXCNC_REBUILD_VERIFY_FAILED: {result.stderr.strip() or result.stdout.strip()}", file=sys.stderr)
+        return 1
+    return 0
 
 
 def _strip_gcode_comment(line: str) -> str:
@@ -769,59 +880,36 @@ def check_settings_parameter_table_backup_before_merge() -> int:
     return 0
 
 
-def check_board_owner_refresh_before_bundle() -> int:
+def check_unique_windows_source_delivery() -> int:
     script = ROOT / "tools" / "deploy" / "push_v5_runtime_to_board.sh"
     if not script.exists():
-        print("BOARD_OWNER_REFRESH_SCRIPT_MISSING: tools/deploy/push_v5_runtime_to_board.sh", file=sys.stderr)
+        print("UNIQUE_SOURCE_DEPLOY_SCRIPT_MISSING: tools/deploy/push_v5_runtime_to_board.sh", file=sys.stderr)
         return 1
     text = script.read_text(encoding="utf-8", errors="ignore")
-    required = (
+    forbidden = (
         "refresh_board_owner_files",
         "merge_board_self_parameter_table",
         "pull_board_owner_file",
         "local_backup_dir",
-        "config/settings/self_parameter_table.tsv",
-        "config/settings/drive_parameter_table.tsv",
-        "linuxcnc/ini/v5_bus.ini",
-        "linuxcnc/runtime/var/linuxcnc.var",
-        "linuxcnc/runtime/var/tool.tbl",
-        "/opt/8ax/v5/config/settings/self_parameter_table.tsv",
-        "/opt/8ax/v5/config/settings/drive_parameter_table.tsv",
-        "/opt/8ax/v5/linuxcnc/ini/v5_bus.ini",
-        "/opt/8ax/v5/linuxcnc/var/linuxcnc.var",
-        "/opt/8ax/v5/linuxcnc/var/tool.tbl",
-        "scp_legacy_protocol_opt",
-        "scp $scp_legacy_protocol_opt -q",
+        "--refresh-board-owner-files",
+        "V5_LOCAL_OWNER_BACKUP_DIR",
         "shutil.copy2(local, backup)",
         "os.replace(tmp_local, local)",
     )
-    for token in required:
-        if token not in text:
-            print(f"BOARD_OWNER_REFRESH_MISSING: {script.relative_to(ROOT)} lacks {token}", file=sys.stderr)
+    for token in forbidden:
+        if token in text:
+            print(f"UNIQUE_SOURCE_RETIRED_BOARD_PULL_PRESENT: {script.relative_to(ROOT)} contains {token}", file=sys.stderr)
             return 1
-    call_token = '\nrefresh_board_owner_files\n\nif [ "$refresh_only" -eq 1 ]; then'
-    archive_token = "\narchive_dir="
-    if call_token not in text or archive_token not in text or text.index(call_token) > text.index(archive_token):
-        print("BOARD_OWNER_REFRESH_NOT_BEFORE_ARCHIVE", file=sys.stderr)
-        return 1
     sync_script = ROOT / "tools" / "sync_win_source_to_vm.py"
-    sync_text = sync_script.read_text(encoding="utf-8", errors="ignore")
-    sync_required = (
-        "refresh_board_owner_files_before_sync",
-        "--refresh-board-owner-files",
-        "V5_REPO_ROOT",
-        "V5_LOCAL_OWNER_BACKUP_DIR",
-        "V5_BOARD_SSH",
-        "build_manifest(root, patterns)",
-    )
-    for token in sync_required:
-        if token not in sync_text:
-            print(f"BOARD_OWNER_REFRESH_SYNC_HOOK_MISSING: {sync_script.relative_to(ROOT)} lacks {token}", file=sys.stderr)
-            return 1
-    sync_call_token = "refresh_code = refresh_board_owner_files_before_sync"
-    if sync_call_token not in sync_text or sync_text.index(sync_call_token) > sync_text.index("build_manifest(root, patterns)"):
-        print("BOARD_OWNER_REFRESH_SYNC_HOOK_AFTER_MANIFEST", file=sys.stderr)
+    if sync_script.exists():
+        print(f"UNIQUE_SOURCE_RETIRED_VM_SYNC_PRESENT: {sync_script.relative_to(ROOT)}", file=sys.stderr)
         return 1
+    deploy_scripts = tuple((ROOT / "tools" / "deploy").glob("*.sh"))
+    for deploy_script in deploy_scripts:
+        deploy_text = deploy_script.read_text(encoding="utf-8", errors="ignore")
+        if "/root/Desktop/v5" in deploy_text:
+            print(f"UNIQUE_SOURCE_RETIRED_VM_MIRROR_PATH: {deploy_script.relative_to(ROOT)}", file=sys.stderr)
+            return 1
     return 0
 
 
@@ -835,9 +923,10 @@ def main() -> int:
         check_remote_relay_access_control() |
         check_cc_golden_model_specific_motion() |
         check_rotary_native_target_policy() |
+        check_linuxcnc_source_rebuild_policy() |
         check_settings_parameter_table_deploy_kind() |
         check_settings_parameter_table_backup_before_merge() |
-        check_board_owner_refresh_before_bundle()
+        check_unique_windows_source_delivery()
     )
 
 

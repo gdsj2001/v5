@@ -1,0 +1,45 @@
+From 0ea4bbf4b8a3428f8bb27e5c913ce62791ff4c94 Mon Sep 17 00:00:00 2001
+From: V5 Project <v5@example.invalid>
+Date: Sun, 5 Apr 2026 21:24:00 +0800
+Subject: [PATCH] pwm: add Digilent AXI PWM support hook
+
+Expose CONFIG_PWM_DGLNT and compile pwm-dglnt.c.
+---
+ drivers/pwm/Kconfig  | 8 ++++++++
+ drivers/pwm/Makefile | 1 +
+ 2 files changed, 9 insertions(+)
+
+diff --git a/drivers/pwm/Kconfig b/drivers/pwm/Kconfig
+index 919ec8b2..14f395aa 100644
+--- a/drivers/pwm/Kconfig
++++ b/drivers/pwm/Kconfig
+@@ -29,6 +29,14 @@ menuconfig PWM
+ 
+ if PWM
+ 
++config PWM_DGLNT
++	tristate "Digilent AXI PWM driver support"
++	depends on COMMON_CLK
++	help
++	  Simple Driver for Digilent AXI_PWM IP Core.
++
++	  To compile this driver as a module, choose M here: the module
++	  will be called pwm-dglnt.c
++
+ config PWM_SYSFS
+ 	bool
+ 	default y if SYSFS
+diff --git a/drivers/pwm/Makefile b/drivers/pwm/Makefile
+index ccddc06a..c31e9dbd 100644
+--- a/drivers/pwm/Makefile
++++ b/drivers/pwm/Makefile
+@@ -1,5 +1,6 @@
+ # SPDX-License-Identifier: GPL-2.0
+ obj-$(CONFIG_PWM)		+= core.o
+ obj-$(CONFIG_PWM_SYSFS)		+= sysfs.o
++obj-$(CONFIG_PWM_DGLNT)		+= pwm-dglnt.o
+ obj-$(CONFIG_PWM_AB8500)	+= pwm-ab8500.o
+ obj-$(CONFIG_PWM_ATMEL)		+= pwm-atmel.o
+ obj-$(CONFIG_PWM_ATMEL_HLCDC_PWM)	+= pwm-atmel-hlcdc.o
+-- 
+2.34.1

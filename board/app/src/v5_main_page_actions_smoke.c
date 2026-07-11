@@ -342,11 +342,12 @@ static int expect_missing_gate(V5MainPage *page, V5MainPageActionKind action)
 static int expect_power_on_home_block(
     V5MainPage *page,
     V5MainPageActionKind action,
-    const char *code)
+    const char *readback_code)
 {
     V5MainPageActionReport report;
+    const char *expected_title;
     const char *message;
-    if (!page || !code || !v5_main_page_trigger_action(page, action, &report)) {
+    if (!page || !readback_code || !v5_main_page_trigger_action(page, action, &report)) {
         return 0;
     }
     if (report.action != action || report.prepared || !report.local_only || report.executed ||
@@ -354,7 +355,7 @@ static int expect_power_on_home_block(
         report.request.kind != V5_COMMAND_UI_LOCAL ||
         !same_text(report.command.name, "power_on_home_precondition") ||
         !same_text(report.command.owner, "native_home_precondition") ||
-        report.command.accepted || !same_text(report.readback_code, code)) {
+        report.command.accepted || !same_text(report.readback_code, readback_code)) {
         return 0;
     }
     if (!page->power_on_home_popup || !page->power_on_home_popup_message ||
@@ -362,9 +363,13 @@ static int expect_power_on_home_block(
         lv_obj_has_flag(page->power_on_home_popup, LV_OBJ_FLAG_HIDDEN)) {
         return 0;
     }
+    expected_title = same_text(readback_code, "POWER_ON_HOME_REQUIRED") ?
+        "需要回零" : "回零状态不可用";
     message = lv_label_get_text(page->power_on_home_popup_message);
-    if (!message || !strstr(message, code) || !strstr(message, "原因:") ||
-        !strstr(message, "下一步:")) {
+    if (!message || strstr(message, readback_code) || !strstr(message, "提示:") ||
+        !strstr(message, expected_title) || !strstr(message, "原因:") ||
+        !strstr(message, "下一步:") || strstr(message, "LinuxCNC") ||
+        strstr(message, "linuxcnc")) {
         return 0;
     }
     lv_event_send(page->power_on_home_popup_close, LV_EVENT_RELEASED, 0);

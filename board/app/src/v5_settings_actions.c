@@ -1,14 +1,11 @@
 #include "v5_settings_actions.h"
+#include "v5_settings_action_ipc.h"
 
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
-#include <sys/socket.h>
 #include <sys/stat.h>
-#include <sys/time.h>
-#include <sys/un.h>
 #include <time.h>
-#include <unistd.h>
 
 #define V5_SETTINGS_RUN_DIR "/run/8ax_v5_product_ui"
 #define V5_SETTINGS_ACTIOND_SOCKET V5_SETTINGS_RUN_DIR "/settings_actiond.sock"
@@ -159,51 +156,47 @@ static void log_action_event(const V5SettingsActionSpec *spec, int accepted, con
     fclose(fp);
 }
 
+static void format_ipc_error(V5SettingsActionIpcError error, char *message, size_t message_size)
+{
+    const char *detail = strerror(errno);
+    switch (error) {
+    case V5_SETTINGS_ACTION_IPC_ERROR_SOCKET:
+        snprintf(message, message_size, "%s", detail);
+        break;
+    case V5_SETTINGS_ACTION_IPC_ERROR_CONNECT:
+        snprintf(message, message_size, "settings actiond unavailable: %s", detail);
+        break;
+    case V5_SETTINGS_ACTION_IPC_ERROR_WRITE:
+        snprintf(message, message_size, "settings actiond write failed: %s", detail);
+        break;
+    default:
+        snprintf(message, message_size, "settings actiond no response");
+        break;
+    }
+}
+
 static int send_daemon_request(const V5SettingsActionSpec *spec, char *message, size_t message_size)
 {
-    int fd;
-    struct sockaddr_un addr;
-    struct timeval tv;
     char request[256];
     char response[256];
-    ssize_t n;
+    V5SettingsActionIpcError error;
 
     if (!spec || !spec->daemon_action || !spec->daemon_action[0]) {
         snprintf(message, message_size, "missing action");
         return 0;
     }
 
-    fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (fd < 0) {
-        snprintf(message, message_size, "%s", strerror(errno));
-        return 0;
-    }
-    memset(&addr, 0, sizeof(addr));
-    addr.sun_family = AF_UNIX;
-    snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", V5_SETTINGS_ACTIOND_SOCKET);
-    tv.tv_sec = 1;
-    tv.tv_usec = 0;
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-    if (connect(fd, (const struct sockaddr *)&addr, sizeof(addr)) != 0) {
-        snprintf(message, message_size, "settings actiond unavailable: %s", strerror(errno));
-        close(fd);
-        return 0;
-    }
     snprintf(request, sizeof(request), "{\"action\":\"%s\"}\n", spec->daemon_action);
-    if (write(fd, request, strlen(request)) < 0) {
-        snprintf(message, message_size, "settings actiond write failed: %s", strerror(errno));
-        close(fd);
+    if (!v5_settings_action_ipc_request(V5_SETTINGS_ACTIOND_SOCKET,
+                                        request,
+                                        1000U,
+                                        response,
+                                        sizeof(response),
+                                        &error)) {
+        format_ipc_error(error, message, message_size);
         return 0;
     }
-    n = read(fd, response, sizeof(response) - 1);
-    close(fd);
-    if (n <= 0) {
-        snprintf(message, message_size, "settings actiond no response");
-        return 0;
-    }
-    response[n] = '\0';
-    if (strstr(response, "\"accepted\": true") || strstr(response, "\"accepted\":true")) {
+    if (v5_settings_action_ipc_response_accepted(response)) {
         snprintf(message, message_size, "accepted by resident actiond");
         return 1;
     }
@@ -213,53 +206,23 @@ static int send_daemon_request(const V5SettingsActionSpec *spec, char *message, 
 
 static int send_status_request(char *response, size_t response_size)
 {
-    int fd;
-    struct sockaddr_un addr;
-    struct timeval tv;
     const char *request = "{\"query\":\"last_status\"}\n";
-    ssize_t n;
     if (!response || response_size == 0U) {
         return 0;
     }
-    response[0] = '\0';
-    fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (fd < 0) {
-        return 0;
-    }
-    memset(&addr, 0, sizeof(addr));
-    addr.sun_family = AF_UNIX;
-    snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", V5_SETTINGS_ACTIOND_SOCKET);
-    tv.tv_sec = 0;
-    tv.tv_usec = 50000;
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-    if (connect(fd, (const struct sockaddr *)&addr, sizeof(addr)) != 0) {
-        close(fd);
-        return 0;
-    }
-    if (write(fd, request, strlen(request)) < 0) {
-        close(fd);
-        return 0;
-    }
-    n = read(fd, response, response_size - 1U);
-    close(fd);
-    if (n <= 0) {
-        response[0] = '\0';
-        return 0;
-    }
-    response[n] = '\0';
-    return 1;
+    return v5_settings_action_ipc_request(V5_SETTINGS_ACTIOND_SOCKET,
+                                          request,
+                                          50U,
+                                          response,
+                                          response_size,
+                                          0);
 }
 
 int v5_settings_action_cancel(const char *run_id)
 {
-    int fd;
-    struct sockaddr_un addr;
-    struct timeval tv;
     char request[160];
     char response[512];
     size_t i;
-    ssize_t n;
     if (!run_id || !run_id[0] || strlen(run_id) >= 64U) {
         return 0;
     }
@@ -270,34 +233,16 @@ int v5_settings_action_cancel(const char *run_id)
             return 0;
         }
     }
-    fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (fd < 0) {
-        return 0;
-    }
-    memset(&addr, 0, sizeof(addr));
-    addr.sun_family = AF_UNIX;
-    snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", V5_SETTINGS_ACTIOND_SOCKET);
-    tv.tv_sec = 1;
-    tv.tv_usec = 0;
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-    if (connect(fd, (const struct sockaddr *)&addr, sizeof(addr)) != 0) {
-        close(fd);
-        return 0;
-    }
     snprintf(request, sizeof(request), "{\"action\":\"job_cancel\",\"run_id\":\"%s\"}\n", run_id);
-    if (write(fd, request, strlen(request)) < 0) {
-        close(fd);
+    if (!v5_settings_action_ipc_request(V5_SETTINGS_ACTIOND_SOCKET,
+                                        request,
+                                        1000U,
+                                        response,
+                                        sizeof(response),
+                                        0)) {
         return 0;
     }
-    n = read(fd, response, sizeof(response) - 1U);
-    close(fd);
-    if (n <= 0) {
-        return 0;
-    }
-    response[n] = '\0';
-    return strstr(response, "\"accepted\": true") != 0 ||
-           strstr(response, "\"accepted\":true") != 0;
+    return v5_settings_action_ipc_response_accepted(response);
 }
 
 static int json_bool_value(const char *json, const char *key)
@@ -392,11 +337,8 @@ int v5_settings_axis_zero_start(const char *axis,
     };
     char request[512];
     char response_message[160];
-    int fd;
-    struct sockaddr_un addr;
-    struct timeval tv;
     char response[256];
-    ssize_t n;
+    V5SettingsActionIpcError error;
 
     if (result) {
         memset(result, 0, sizeof(*result));
@@ -412,40 +354,17 @@ int v5_settings_axis_zero_start(const char *axis,
              home_offset ? home_offset : "");
 
     response_message[0] = '\0';
-    fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (fd < 0) {
-        snprintf(response_message, sizeof(response_message), "%s", strerror(errno));
+    if (!v5_settings_action_ipc_request(V5_SETTINGS_ACTIOND_SOCKET,
+                                        request,
+                                        1000U,
+                                        response,
+                                        sizeof(response),
+                                        &error)) {
+        format_ipc_error(error, response_message, sizeof(response_message));
         log_action_event(&spec, 0, response_message);
         return 0;
     }
-    memset(&addr, 0, sizeof(addr));
-    addr.sun_family = AF_UNIX;
-    snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", V5_SETTINGS_ACTIOND_SOCKET);
-    tv.tv_sec = 1;
-    tv.tv_usec = 0;
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-    if (connect(fd, (const struct sockaddr *)&addr, sizeof(addr)) != 0) {
-        snprintf(response_message, sizeof(response_message), "settings actiond unavailable: %s", strerror(errno));
-        close(fd);
-        log_action_event(&spec, 0, response_message);
-        return 0;
-    }
-    if (write(fd, request, strlen(request)) < 0) {
-        snprintf(response_message, sizeof(response_message), "settings actiond write failed: %s", strerror(errno));
-        close(fd);
-        log_action_event(&spec, 0, response_message);
-        return 0;
-    }
-    n = read(fd, response, sizeof(response) - 1);
-    close(fd);
-    if (n <= 0) {
-        snprintf(response_message, sizeof(response_message), "settings actiond no response");
-        log_action_event(&spec, 0, response_message);
-        return 0;
-    }
-    response[n] = '\0';
-    if (!(strstr(response, "\"accepted\": true") || strstr(response, "\"accepted\":true"))) {
+    if (!v5_settings_action_ipc_response_accepted(response)) {
         snprintf(response_message, sizeof(response_message), "settings actiond rejected");
         log_action_event(&spec, 0, response_message);
         return 0;

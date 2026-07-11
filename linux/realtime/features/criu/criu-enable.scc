@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: MIT
+define KFEATURE_DESCRIPTION "Checkpoint Restore in Userspace"
+define KFEATURE_COMPATIBILITY all
+
+kconf non-hardware criu.cfg

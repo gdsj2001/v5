@@ -27,21 +27,28 @@ node_modules/
 .vs/
 
 # Build/cache/generated local output directories
-build/
-build-*/
-cmake-build-*/
-out/
-dist/
-**/bin/
-**/obj/
-vm-v5/
-tmp/
-temp/
-**/tmp/
-**/temp/
-logs/
-**/logs/
-bak/
+# Keep these root-scoped. Canonical Linux/LinuxCNC source contains real
+# directories named build and bin which must remain inside the Git range.
+/build/
+/build-*/
+/cmake-build-*/
+/out/
+/dist/
+/vm-v5/
+/tmp/
+/temp/
+/logs/
+/bak/
+
+# Known .NET generated output directories
+/board/tools/v5_git_nas_backup/bin/
+/board/tools/v5_git_nas_backup/obj/
+/8ax-win/**/bin/
+/8ax-win/**/obj/
+/8ax-dealer-client-source/**/bin/
+/8ax-dealer-client-source/**/obj/
+/8ax-factory-client-source/**/bin/
+/8ax-factory-client-source/**/obj/
 
 # CMake generated files
 CMakeFiles/

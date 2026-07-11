@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: MIT
+define KFEATURE_DESCRIPTION "Enable All WiFi Drivers"
+define KFEATURE_COMPATIBILITY board
+
+include wifi-pci.scc
+include wifi-sdio.scc
+include wifi-usb.scc
+

@@ -1,4 +1,6 @@
 #include "v5_command_gate_ipc.h"
+#include "v5_command_gate_server_io.h"
+#include "v5_command_gate_server_response.h"
 #include "v5_command_gate_validator.h"
 #include "v5_linuxcncrsh_client.h"
 #include "v5_native_axis_zero_position.h"
@@ -47,29 +49,6 @@ static void on_signal(int signo)
     g_stop_requested = 1;
 }
 
-static void copy_cstr(char *dst, size_t cap, const char *src)
-{
-    if (!dst || cap == 0U) {
-        return;
-    }
-    dst[0] = '\0';
-    if (!src || !src[0]) {
-        return;
-    }
-    snprintf(dst, cap, "%s", src);
-}
-
-static int set_socket_timeout_ms(int fd, unsigned int timeout_ms)
-{
-    struct timeval timeout;
-    if (timeout_ms == 0U) {
-        timeout_ms = 1U;
-    }
-    timeout.tv_sec = (time_t)(timeout_ms / 1000U);
-    timeout.tv_usec = (suseconds_t)((timeout_ms % 1000U) * 1000U);
-    return setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) == 0 &&
-           setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) == 0;
-}
 
 static void linuxcncrsh_lock(void)
 {
@@ -79,118 +58,6 @@ static void linuxcncrsh_lock(void)
 static void linuxcncrsh_unlock(void)
 {
     (void)pthread_mutex_unlock(&g_linuxcncrsh_lock);
-}
-
-static int read_all(int fd, void *data, size_t size)
-{
-    char *p = (char *)data;
-    while (size > 0U) {
-        ssize_t n = recv(fd, p, size, 0);
-        if (n < 0 && errno == EINTR) {
-            if (g_stop_requested) return 0;
-            continue;
-        }
-        if (n <= 0) {
-            return 0;
-        }
-        p += (size_t)n;
-        size -= (size_t)n;
-    }
-    return 1;
-}
-
-static int write_all(int fd, const void *data, size_t size)
-{
-    const char *p = (const char *)data;
-    while (size > 0U) {
-        ssize_t n = send(fd, p, size, MSG_NOSIGNAL);
-        if (n < 0 && errno == EINTR) {
-            if (g_stop_requested) return 0;
-            continue;
-        }
-        if (n <= 0) {
-            return 0;
-        }
-        p += (size_t)n;
-        size -= (size_t)n;
-    }
-    return 1;
-}
-
-static void response_init(V5CommandGateIpcResponseFrame *response)
-{
-    memset(response, 0, sizeof(*response));
-    response->magic = V5_COMMAND_GATE_IPC_MAGIC;
-    response->version = V5_COMMAND_GATE_IPC_VERSION;
-    response->size = (uint32_t)sizeof(*response);
-    response->send_status = V5_COMMAND_GATE_SEND_UNAVAILABLE;
-}
-
-static void response_copy_native_safety_result(
-    V5CommandGateIpcResponseFrame *response,
-    const V5NativeSafetyResult *result);
-
-static void fill_safety_readback(V5CommandGateIpcResponseFrame *response)
-{
-    V5NativeSafetyResult native_result;
-    if (v5_native_safety_read_status(&native_result) != V5_NATIVE_SAFETY_SEND_SENT) {
-        return;
-    }
-    response_copy_native_safety_result(response, &native_result);
-}
-
-static int fixed_text_has_nul(const char *text, size_t cap)
-{
-    return text && memchr(text, '\0', cap) != 0;
-}
-
-static void response_copy_settings_result(
-    V5CommandGateIpcResponseFrame *response,
-    const V5SettingsApplyAxisCommitResult *result)
-{
-    if (!response || !result) {
-        return;
-    }
-    response->settings_owner_written = result->owner_written ? 1 : 0;
-    response->settings_source_readback_confirmed = result->source_readback_confirmed ? 1 : 0;
-    response->settings_restart_pending = result->restart_pending ? 1 : 0;
-    response->settings_scale_chain_attempted = result->scale_chain.attempted ? 1 : 0;
-    response->settings_scale_recomputed = result->scale_chain.scale_recomputed ? 1 : 0;
-    response->settings_raw_limits_recomputed = result->scale_chain.raw_limits_recomputed ? 1 : 0;
-    response->settings_effective_scale = result->scale_chain.effective_scale;
-    response->settings_raw_zero_position = result->scale_chain.raw_zero_position;
-    response->settings_raw_min_limit = result->scale_chain.raw_min_limit;
-    response->settings_raw_max_limit = result->scale_chain.raw_max_limit;
-    copy_cstr(response->settings_readback_value, sizeof(response->settings_readback_value), result->readback_value);
-    copy_cstr(response->settings_scale_chain_code, sizeof(response->settings_scale_chain_code), result->scale_chain.code);
-}
-
-static void response_copy_native_safety_result(
-    V5CommandGateIpcResponseFrame *response,
-    const V5NativeSafetyResult *result)
-{
-    if (!response || !result) {
-        return;
-    }
-    response->safety_estop_known = result->safety_estop_known ? 1 : 0;
-    response->safety_estop_active = result->safety_estop_active ? 1 : 0;
-    response->machine_enable_known = result->machine_enable_known ? 1 : 0;
-    response->machine_enabled = result->machine_enabled ? 1 : 0;
-    response->machine_on_requested = result->machine_on_requested ? 1 : 0;
-    response->machine_on_status = (int32_t)result->machine_on_status;
-    copy_cstr(response->readback_code, sizeof(response->readback_code), result->code);
-}
-
-static int owner_is_allowed(const char *owner)
-{
-    return owner &&
-        (strcmp(owner, "native_linuxcncrsh") == 0 ||
-         strcmp(owner, "native_home_mode_gate") == 0 ||
-         strcmp(owner, "native_safety") == 0 ||
-         strcmp(owner, "native_first_point") == 0 ||
-         strcmp(owner, "native_axis_zero_position") == 0 ||
-         strcmp(owner, "native_work_zero") == 0 ||
-         strcmp(owner, "native_rtcp_control") == 0);
 }
 
 static int restore_machine_on_after_estop_reset(V5NativeSafetyResult *native_result)
@@ -216,7 +83,7 @@ static int restore_machine_on_after_estop_reset(V5NativeSafetyResult *native_res
             }
             return V5_NATIVE_SAFETY_SEND_SENT;
         }
-        copy_cstr(native_result ? native_result->code : 0,
+        v5_command_gate_response_copy_text(native_result ? native_result->code : 0,
                   native_result ? sizeof(native_result->code) : 0,
                   "NATIVE_SAFETY_MACHINE_ON_FAILED");
         return V5_NATIVE_SAFETY_SEND_IO_ERROR;
@@ -237,7 +104,7 @@ static int power_on_home_gate_accepts(
             g_motion_parameters.active_axis_count,
             &all_homed)) {
         response->send_status = V5_COMMAND_GATE_SEND_INVALID;
-        copy_cstr(
+        v5_command_gate_response_copy_text(
             response->readback_code,
             sizeof(response->readback_code),
             "POWER_ON_HOME_STATUS_UNAVAILABLE");
@@ -245,7 +112,7 @@ static int power_on_home_gate_accepts(
     }
     if (!all_homed) {
         response->send_status = V5_COMMAND_GATE_SEND_INVALID;
-        copy_cstr(
+        v5_command_gate_response_copy_text(
             response->readback_code,
             sizeof(response->readback_code),
             "POWER_ON_HOME_REQUIRED");
@@ -260,45 +127,45 @@ static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5Command
     V5CommandPrepared prepared;
     int status = V5_COMMAND_GATE_SEND_INVALID;
     char reject_reason[64];
-    response_init(response);
+    v5_command_gate_response_init(response);
     reject_reason[0] = '\0';
     if (!v5_command_gate_validate_execute_frame(frame, &request, reject_reason, sizeof(reject_reason)) ||
-        !v5_command_gate_prepare(&request, &prepared) || !prepared.accepted || !owner_is_allowed(prepared.owner)) {
+        !v5_command_gate_prepare(&request, &prepared) || !prepared.accepted || !v5_command_gate_response_owner_is_allowed(prepared.owner)) {
         response->send_status = V5_COMMAND_GATE_SEND_INVALID;
-        copy_cstr(response->readback_code, sizeof(response->readback_code),
+        v5_command_gate_response_copy_text(response->readback_code, sizeof(response->readback_code),
                   reject_reason[0] ? reject_reason : "COMMAND_GATE_REJECTED");
         return;
     }
 
     if (request.kind == V5_COMMAND_ESTOP_FORCE && strcmp(prepared.owner, "native_safety") == 0) {
         V5NativeSafetyResult native_result;
-        copy_cstr(response->command_line, sizeof(response->command_line), "native_safety.estop_force");
+        v5_command_gate_response_copy_text(response->command_line, sizeof(response->command_line), "native_safety.estop_force");
         status = v5_native_safety_estop_force(&native_result);
-        response_copy_native_safety_result(response, &native_result);
+        v5_command_gate_response_copy_native_safety(response, &native_result);
         response->send_status = (int32_t)status;
         response->executed = status == V5_NATIVE_SAFETY_SEND_SENT ? 1 : 0;
         return;
     }
     if (request.kind == V5_COMMAND_ESTOP_RESET && strcmp(prepared.owner, "native_safety") == 0) {
         V5NativeSafetyResult native_result;
-        copy_cstr(response->command_line, sizeof(response->command_line), "native_safety.estop_reset | Set Machine On");
+        v5_command_gate_response_copy_text(response->command_line, sizeof(response->command_line), "native_safety.estop_reset | Set Machine On");
         status = v5_native_safety_estop_reset_latch(&native_result);
         if (status == V5_NATIVE_SAFETY_SEND_SENT) {
             status = restore_machine_on_after_estop_reset(&native_result);
         }
-        response_copy_native_safety_result(response, &native_result);
+        v5_command_gate_response_copy_native_safety(response, &native_result);
         response->send_status = (int32_t)status;
         response->executed = status == V5_NATIVE_SAFETY_SEND_SENT ? 1 : 0;
         return;
     }
     if (request.kind == V5_COMMAND_RTCP_SET && strcmp(prepared.owner, "native_rtcp_control") == 0) {
         V5NativeRtcpControlResult native_result;
-        copy_cstr(
+        v5_command_gate_response_copy_text(
             response->command_line,
             sizeof(response->command_line),
             request.enabled_value ? "native_rtcp_control.set ON" : "native_rtcp_control.set OFF");
         status = v5_native_rtcp_control_set(request.enabled_value, &native_result);
-        copy_cstr(response->readback_code, sizeof(response->readback_code), native_result.code);
+        v5_command_gate_response_copy_text(response->readback_code, sizeof(response->readback_code), native_result.code);
         response->send_status = (int32_t)status;
         response->executed = status == V5_NATIVE_RTCP_CONTROL_SEND_SENT ? 1 : 0;
         return;
@@ -331,7 +198,7 @@ static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5Command
             &prepared,
             &request,
             &native_result);
-        copy_cstr(response->readback_code, sizeof(response->readback_code), native_result.code);
+        v5_command_gate_response_copy_text(response->readback_code, sizeof(response->readback_code), native_result.code);
     } else if (request.kind == V5_COMMAND_WORK_ZERO && strcmp(prepared.owner, "native_work_zero") == 0) {
         V5NativeWorkZeroResult native_result;
         if (!v5_linuxcncrsh_format_line(
@@ -346,7 +213,7 @@ static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5Command
             &prepared,
             &request,
             &native_result);
-        copy_cstr(response->readback_code, sizeof(response->readback_code), native_result.code);
+        v5_command_gate_response_copy_text(response->readback_code, sizeof(response->readback_code), native_result.code);
     } else if (request.kind == V5_COMMAND_HOME && strcmp(prepared.owner, "native_home_mode_gate") == 0) {
         V5NativeHomeResult native_result;
         snprintf(
@@ -356,7 +223,7 @@ static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5Command
             v5_native_driver_mode_text(g_motion_parameters.driver_mode));
         status = v5_native_home_send(
             &g_linuxcncrsh_config, &g_motion_parameters, &native_result);
-        copy_cstr(
+        v5_command_gate_response_copy_text(
             response->readback_code,
             sizeof(response->readback_code),
             native_result.code[0] ? native_result.code : "HOME_RESULT_MISSING");
@@ -369,7 +236,7 @@ static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5Command
                  &g_motion_parameters, &request, jog_code, sizeof(jog_code)) ||
              v5_linuxcncrsh_send_line(&g_linuxcncrsh_config, "Set Mode Manual") != V5_LINUXCNCRSH_SEND_SENT)) {
             response->send_status = V5_COMMAND_GATE_SEND_INVALID;
-            copy_cstr(response->readback_code, sizeof(response->readback_code),
+            v5_command_gate_response_copy_text(response->readback_code, sizeof(response->readback_code),
                       jog_code[0] ? jog_code : "JOG_NATIVE_PARAMETERS_REJECTED");
             linuxcncrsh_unlock();
             return;
@@ -383,7 +250,7 @@ static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5Command
         if (request.kind == V5_COMMAND_JOG_INCREMENT ||
             request.kind == V5_COMMAND_JOG_CONTINUOUS ||
             request.kind == V5_COMMAND_JOG_STOP) {
-            copy_cstr(response->readback_code, sizeof(response->readback_code), jog_code);
+            v5_command_gate_response_copy_text(response->readback_code, sizeof(response->readback_code), jog_code);
         }
     }
     response->send_status = (int32_t)status;
@@ -398,19 +265,19 @@ static void execute_settings_axis_commit(
     V5SettingsApplyAxisCommitRequest request;
     V5SettingsApplyAxisCommitResult result;
     int ok;
-    response_init(response);
-    if (!fixed_text_has_nul(frame->settings_project_root, sizeof(frame->settings_project_root)) ||
-        !fixed_text_has_nul(frame->settings_axis, sizeof(frame->settings_axis)) ||
-        !fixed_text_has_nul(frame->settings_field_key, sizeof(frame->settings_field_key)) ||
-        !fixed_text_has_nul(frame->settings_field_name, sizeof(frame->settings_field_name)) ||
-        !fixed_text_has_nul(frame->settings_value_text, sizeof(frame->settings_value_text)) ||
+    v5_command_gate_response_init(response);
+    if (!v5_command_gate_response_fixed_text_has_nul(frame->settings_project_root, sizeof(frame->settings_project_root)) ||
+        !v5_command_gate_response_fixed_text_has_nul(frame->settings_axis, sizeof(frame->settings_axis)) ||
+        !v5_command_gate_response_fixed_text_has_nul(frame->settings_field_key, sizeof(frame->settings_field_key)) ||
+        !v5_command_gate_response_fixed_text_has_nul(frame->settings_field_name, sizeof(frame->settings_field_name)) ||
+        !v5_command_gate_response_fixed_text_has_nul(frame->settings_value_text, sizeof(frame->settings_value_text)) ||
         !frame->settings_project_root[0] ||
         !frame->settings_axis[0] ||
         !frame->settings_field_key[0] ||
         !frame->settings_field_name[0] ||
         !frame->settings_value_text[0]) {
         response->send_status = V5_COMMAND_GATE_SEND_INVALID;
-        copy_cstr(response->readback_code, sizeof(response->readback_code), "SETTINGS_AXIS_COMMIT_BAD_REQUEST");
+        v5_command_gate_response_copy_text(response->readback_code, sizeof(response->readback_code), "SETTINGS_AXIS_COMMIT_BAD_REQUEST");
         return;
     }
     memset(&request, 0, sizeof(request));
@@ -423,15 +290,15 @@ static void execute_settings_axis_commit(
     request.owner_generation = frame->settings_owner_generation;
     request.readback_token = frame->settings_readback_token;
     ok = v5_settings_apply_commit_axis_value(&request, &result);
-    response_copy_settings_result(response, &result);
+    v5_command_gate_response_copy_settings(response, &result);
     if (ok && result.source_readback_confirmed) {
         response->send_status = V5_COMMAND_GATE_SEND_SENT;
         response->executed = 1;
-        copy_cstr(response->readback_code, sizeof(response->readback_code), "SETTINGS_AXIS_COMMIT_OK");
+        v5_command_gate_response_copy_text(response->readback_code, sizeof(response->readback_code), "SETTINGS_AXIS_COMMIT_OK");
     } else {
         response->send_status = V5_COMMAND_GATE_SEND_INVALID;
         response->executed = 0;
-        copy_cstr(response->readback_code, sizeof(response->readback_code),
+        v5_command_gate_response_copy_text(response->readback_code, sizeof(response->readback_code),
                   result.scale_chain.code[0] ? result.scale_chain.code : "SETTINGS_AXIS_COMMIT_REJECTED");
     }
 }
@@ -439,21 +306,21 @@ static void execute_settings_axis_commit(
 static void handle_frame(const V5CommandGateIpcRequestFrame *request, V5CommandGateIpcResponseFrame *response)
 {
     char reject_reason[64];
-    response_init(response);
+    v5_command_gate_response_init(response);
     reject_reason[0] = '\0';
     if (!request || request->magic != V5_COMMAND_GATE_IPC_MAGIC || request->version != V5_COMMAND_GATE_IPC_VERSION ||
         request->size != (uint32_t)sizeof(*request)) {
         response->send_status = V5_COMMAND_GATE_SEND_INVALID;
-        copy_cstr(response->readback_code, sizeof(response->readback_code), "BAD_ENVELOPE");
+        v5_command_gate_response_copy_text(response->readback_code, sizeof(response->readback_code), "BAD_ENVELOPE");
         return;
     }
     if (request->op == V5_COMMAND_GATE_IPC_OP_PROBE_SAFETY) {
         if (!v5_command_gate_validate_envelope(request, V5_COMMAND_GATE_IPC_OP_PROBE_SAFETY, reject_reason, sizeof(reject_reason))) {
             response->send_status = V5_COMMAND_GATE_SEND_INVALID;
-            copy_cstr(response->readback_code, sizeof(response->readback_code), reject_reason);
+            v5_command_gate_response_copy_text(response->readback_code, sizeof(response->readback_code), reject_reason);
             return;
         }
-        fill_safety_readback(response);
+        v5_command_gate_response_fill_safety(response);
         response->send_status = (response->safety_estop_known || response->machine_enable_known) ? V5_COMMAND_GATE_SEND_SENT : V5_COMMAND_GATE_SEND_UNAVAILABLE;
         response->executed = 0;
         return;
@@ -467,7 +334,7 @@ static void handle_frame(const V5CommandGateIpcRequestFrame *request, V5CommandG
         return;
     }
     response->send_status = V5_COMMAND_GATE_SEND_INVALID;
-    copy_cstr(response->readback_code, sizeof(response->readback_code), "BAD_OPCODE");
+    v5_command_gate_response_copy_text(response->readback_code, sizeof(response->readback_code), "BAD_OPCODE");
 }
 
 static void serve_client(int client_fd)
@@ -477,11 +344,13 @@ static void serve_client(int client_fd)
     if (g_stop_requested) {
         return;
     }
-    if (!read_all(client_fd, &request, sizeof(request))) {
+    if (!v5_command_gate_server_read_all(
+            client_fd, &request, sizeof(request), &g_stop_requested)) {
         return;
     }
     handle_frame(&request, &response);
-    if (!write_all(client_fd, &response, sizeof(response))) {
+    if (!v5_command_gate_server_write_all(
+            client_fd, &response, sizeof(response), &g_stop_requested)) {
         return;
     }
 }
@@ -525,17 +394,17 @@ static void parse_args(int argc, char **argv)
     int i;
     for (i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--socket") == 0 && i + 1 < argc) {
-            copy_cstr(g_socket_path, sizeof(g_socket_path), argv[++i]);
+            v5_command_gate_response_copy_text(g_socket_path, sizeof(g_socket_path), argv[++i]);
         } else if (strcmp(argv[i], "--host") == 0 && i + 1 < argc) {
-            copy_cstr(g_host, sizeof(g_host), argv[++i]);
+            v5_command_gate_response_copy_text(g_host, sizeof(g_host), argv[++i]);
         } else if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
             g_linuxcncrsh_config.port = (unsigned short)atoi(argv[++i]);
         } else if (strcmp(argv[i], "--password") == 0 && i + 1 < argc) {
-            copy_cstr(g_password, sizeof(g_password), argv[++i]);
+            v5_command_gate_response_copy_text(g_password, sizeof(g_password), argv[++i]);
         } else if (strcmp(argv[i], "--timeout-ms") == 0 && i + 1 < argc) {
             g_linuxcncrsh_config.timeout_ms = (unsigned int)atoi(argv[++i]);
         } else if (strcmp(argv[i], "--ini") == 0 && i + 1 < argc) {
-            copy_cstr(g_ini_path, sizeof(g_ini_path), argv[++i]);
+            v5_command_gate_response_copy_text(g_ini_path, sizeof(g_ini_path), argv[++i]);
         }
     }
     g_linuxcncrsh_config.host = g_host;
@@ -584,7 +453,7 @@ int main(int argc, char **argv)
             }
             break;
         }
-        (void)set_socket_timeout_ms(client_fd, V5_COMMAND_GATE_CLIENT_IO_TIMEOUT_MS);
+        (void)v5_command_gate_server_set_timeout(client_fd, V5_COMMAND_GATE_CLIENT_IO_TIMEOUT_MS);
         if (pthread_create(&thread, 0, serve_client_thread, (void *)(intptr_t)client_fd) != 0) {
             close(client_fd);
             continue;

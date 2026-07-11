@@ -1,0 +1,15 @@
+{
+  "schema": "v5-linux-kernel-vendored-source-v1",
+  "source_owner": "linux/kernel",
+  "upstream": {
+    "name": "Xilinx Linux",
+    "version": "5.4",
+    "url": "https://github.com/Xilinx/linux-xlnx.git",
+    "branch": "xlnx_rebase_v5.4",
+    "commit": "62ea514294a0c9a80455e51f1f4de36e66e8c546",
+    "tree": "0c55c83b2e27806e0eb582884ac299a8bd8a5b12"
+  },
+  "content_sha256": "5c3d295aeab3a6a1fe0c6df0751b609661a07900d22d87a4e59d82c909821bed",
+  "file_count": 66044,
+  "symlink_count": 35
+}

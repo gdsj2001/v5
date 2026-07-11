@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: V5 Project <v5@example.invalid>
+Date: Sat, 16 May 2026 13:12:00 +0800
+Subject: [PATCH] v5: relax generic frame timeout
+
+The V5 board currently uses the IgH generic Ethernet backend on the Zynq
+GEM path. LinuxCNC/lcec owns cyclic motion natively, but frame responses can
+arrive later than the upstream 500 us datagram timeout during startup state
+transitions. When that happens the master marks a valid late frame as timed
+out and then treats the response as unmatched, preventing the slaves from
+reaching OP.
+
+Keep the native LinuxCNC EtherCAT path and relax only the frame timeout for
+this board profile.
+---
+ master/globals.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/master/globals.h b/master/globals.h
+index 1111111..2222222 100644
+--- a/master/globals.h
++++ b/master/globals.h
+@@
+ /** Datagram timeout in microseconds. */
+-#define EC_IO_TIMEOUT 500
++#define EC_IO_TIMEOUT 5000
+-- 
+2.39.2

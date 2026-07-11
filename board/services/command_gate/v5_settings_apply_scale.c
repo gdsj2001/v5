@@ -1,0 +1,250 @@
+#include "v5_settings_apply.h"
+
+#include "v5_parameter_owner_map.h"
+#include "v5_motion_model_registry.h"
+#include "v5_settings_parameter_store.h"
+
+#include <ctype.h>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include "v5_settings_apply_internal.h"
+
+static int axis_is_rotary(const char *axis)
+{
+    return axis && axis[1] == '\0' && (axis[0] == 'A' || axis[0] == 'B' || axis[0] == 'C');
+}
+
+static int compute_scale_from_chain(
+    const char *ini_path,
+    const char *axis_section,
+    const char *joint_section,
+    const char *axis_obj_start,
+    const char *axis_obj_end,
+    const char *axis,
+    double *scale_out)
+{
+    double pitch = 0.0;
+    double motor_rev = 0.0;
+    double load_rev = 0.0;
+    double ratio = 0.0;
+    double counts = 0.0;
+    double rotary_counts = 0.0;
+    if (!scale_out) {
+        return 0;
+    }
+    if (v5_settings_apply_json_number_value(axis_obj_start, axis_obj_end, "motor_revs_per_load_rev", &ratio) ||
+        v5_settings_apply_json_number_value(axis_obj_start, axis_obj_end, "reducer_ratio", &ratio)) {
+        /* ratio loaded from drive-only evidence */
+    }
+    if (v5_settings_apply_ini_read_preferred_number(ini_path, axis_section, joint_section, "MOTOR_REV", &motor_rev) &&
+        v5_settings_apply_ini_read_preferred_number(ini_path, axis_section, joint_section, "LOAD_REV", &load_rev) &&
+        motor_rev > 0.0 && load_rev > 0.0) {
+        ratio = motor_rev / load_rev;
+    }
+    if (axis_is_rotary(axis)) {
+        if (v5_settings_apply_json_number_value(axis_obj_start, axis_obj_end, "rotary_load_counts_per_rev", &rotary_counts) &&
+            rotary_counts > 0.0) {
+            *scale_out = rotary_counts / 360.0;
+            return isfinite(*scale_out) && *scale_out > 0.0;
+        }
+    } else {
+        if (!v5_settings_apply_ini_read_preferred_number(ini_path, axis_section, joint_section, "PITCH", &pitch) || pitch <= 0.0) {
+            return 0;
+        }
+    }
+    if (!(v5_settings_apply_json_number_value(axis_obj_start, axis_obj_end, "actual_counts_per_motor_rev", &counts) ||
+          v5_settings_apply_json_number_value(axis_obj_start, axis_obj_end, "drive_command_counts_per_motor_rev", &counts) ||
+          v5_settings_apply_json_number_value(axis_obj_start, axis_obj_end, "target_command_counts_per_motor_rev", &counts) ||
+          v5_settings_apply_json_number_value(axis_obj_start, axis_obj_end, "feedback_counts_per_motor_rev", &counts)) ||
+        counts <= 0.0 || ratio <= 0.0) {
+        return 0;
+    }
+    *scale_out = axis_is_rotary(axis) ? (counts * ratio) / 360.0 : (counts * ratio) / pitch;
+    return isfinite(*scale_out) && *scale_out > 0.0;
+}
+
+int v5_settings_apply_prepare(
+    const V5SettingsApplyRequest *request,
+    V5SettingsApplyResult *result)
+{
+    V5ParameterOwnerRecord record;
+
+    if (result) {
+        memset(result, 0, sizeof(*result));
+    }
+    if (!request || !request->field_name || !request->field_name[0] ||
+        !request->value_text || !request->value_text[0] ||
+        request->owner_generation == 0U || request->readback_token == 0U) {
+        return 0;
+    }
+    if (!v5_parameter_owner_lookup(request->field_name, &record) || !record.field->writable) {
+        return 0;
+    }
+    if (v5_parameter_table_field_uses_shm(request->field_name)) {
+        return 0;
+    }
+    if (field_is_scale_chain(request->field_name) && !parse_positive_finite(request->value_text)) {
+        return 0;
+    }
+    if (result) {
+        result->status = V5_SETTINGS_APPLY_ACCEPTED;
+        result->write_owner = record.write_owner;
+        result->readback_owner = record.readback_owner;
+        result->restart_required = record.field->restart_required;
+        result->drive_only_allowed = record.field->drive_only_allowed;
+        result->scale_chain_transaction_required = field_is_scale_chain(request->field_name);
+        result->raw_limits_recompute_required = result->scale_chain_transaction_required;
+    }
+    return 1;
+}
+
+int v5_settings_apply_scale_chain_commit(
+    const char *project_root,
+    const char *settings_runtime_json_path,
+    const char *axis,
+    unsigned int axis_index,
+    const char *field_name,
+    V5SettingsApplyScaleChainResult *result)
+{
+    char ini_path[512];
+    char axis_section[32];
+    char joint_section[32];
+    const char *runtime_path;
+    char *json;
+    const char *axis_obj_start = 0;
+    const char *axis_obj_end = 0;
+    const char *zero_obj_start = 0;
+    const char *zero_obj_end = 0;
+    double zero_counts = 0.0;
+    double old_zero = 0.0;
+    double current_scale = 0.0;
+    double effective_scale = 0.0;
+    double chain_scale = 0.0;
+    double raw_min_current = 0.0;
+    double raw_max_current = 0.0;
+    double min_distance;
+    double max_distance;
+    double new_zero;
+    double new_min;
+    double new_max;
+    int precision_field;
+    int write_scale = 0;
+
+    if (result) {
+        memset(result, 0, sizeof(*result));
+        v5_settings_apply_scale_chain_result_code(result, "SCALE_CHAIN_NOT_ATTEMPTED");
+    }
+    if (!axis || !axis[0] || !field_name || !field_is_scale_chain(field_name)) {
+        if (result) {
+            result->skipped = 1;
+            v5_settings_apply_scale_chain_result_code(result, "SCALE_CHAIN_NOT_REQUIRED");
+        }
+        return 1;
+    }
+    if (result) {
+        result->attempted = 1;
+    }
+    if (!v5_settings_apply_build_runtime_ini_path(ini_path, sizeof(ini_path), project_root)) {
+        v5_settings_apply_scale_chain_result_code(result, "RUNTIME_INI_PATH_INVALID");
+        return 0;
+    }
+    runtime_path = settings_runtime_json_path;
+    if (!runtime_path || !runtime_path[0]) {
+        runtime_path = getenv("V5_SETTINGS_RUNTIME_JSON");
+    }
+    if (!runtime_path || !runtime_path[0]) {
+        runtime_path = V5_SETTINGS_RUNTIME_JSON_DEFAULT;
+    }
+    if (!v5_settings_apply_file_exists(runtime_path)) {
+        if (result) {
+            result->skipped = 1;
+            v5_settings_apply_scale_chain_result_code(result, "SETTINGS_RUNTIME_ZERO_MODEL_ABSENT");
+        }
+        return 1;
+    }
+    json = v5_settings_apply_read_text_file_limited(runtime_path);
+    if (!json) {
+        v5_settings_apply_scale_chain_result_code(result, "SETTINGS_RUNTIME_READ_FAILED");
+        return 0;
+    }
+    snprintf(axis_section, sizeof(axis_section), "AXIS_%s", axis);
+    snprintf(joint_section, sizeof(joint_section), "JOINT_%u", axis_index);
+    if (!v5_settings_apply_runtime_axis_object(json, axis, &axis_obj_start, &axis_obj_end) ||
+        !json_object_for_key(axis_obj_start, axis_obj_end, "zero_model", &zero_obj_start, &zero_obj_end)) {
+        free(json);
+        if (result) {
+            result->skipped = 1;
+            v5_settings_apply_scale_chain_result_code(result, "SETTINGS_RUNTIME_ZERO_MODEL_ABSENT");
+        }
+        return 1;
+    }
+    if (result) {
+        result->zero_model_present = 1;
+    }
+    if (!(v5_settings_apply_json_number_value(zero_obj_start, zero_obj_end, "zero_anchor_counts", &zero_counts) ||
+          v5_settings_apply_json_number_value(zero_obj_start, zero_obj_end, "actual_counts", &zero_counts) ||
+          v5_settings_apply_json_number_value(zero_obj_start, zero_obj_end, "zero_counts", &zero_counts) ||
+          v5_settings_apply_json_number_value(zero_obj_start, zero_obj_end, "actual_position_counts", &zero_counts))) {
+        free(json);
+        v5_settings_apply_scale_chain_result_code(result, "ZERO_MODEL_COUNTS_MISSING");
+        return 0;
+    }
+    if (!v5_settings_apply_ini_read_preferred_number(ini_path, joint_section, axis_section, "SCALE", &current_scale) ||
+        current_scale <= 0.0 || !isfinite(current_scale)) {
+        free(json);
+        v5_settings_apply_scale_chain_result_code(result, "RUNTIME_SCALE_MISSING");
+        return 0;
+    }
+    effective_scale = current_scale;
+    precision_field = strstr(field_name, "_precision") != 0;
+    if (!precision_field &&
+        compute_scale_from_chain(ini_path, axis_section, joint_section, axis_obj_start, axis_obj_end, axis, &chain_scale)) {
+        effective_scale = chain_scale;
+        write_scale = fabs(chain_scale - current_scale) > 1.0e-9;
+    }
+    if (!v5_settings_apply_json_number_value(zero_obj_start, zero_obj_end, "raw_zero_position", &old_zero)) {
+        old_zero = zero_counts / current_scale;
+    }
+    if (!(ini_read_section_number(ini_path, joint_section, "MIN_LIMIT", &raw_min_current) &&
+          ini_read_section_number(ini_path, joint_section, "MAX_LIMIT", &raw_max_current)) &&
+        !(ini_read_section_number(ini_path, axis_section, "MIN_LIMIT", &raw_min_current) &&
+          ini_read_section_number(ini_path, axis_section, "MAX_LIMIT", &raw_max_current))) {
+        free(json);
+        v5_settings_apply_scale_chain_result_code(result, "RAW_LIMIT_CURRENT_MISSING");
+        return 0;
+    }
+    if (old_zero < raw_min_current || old_zero > raw_max_current) {
+        free(json);
+        v5_settings_apply_scale_chain_result_code(result, "RAW_ZERO_OUTSIDE_LIMITS");
+        return 0;
+    }
+    min_distance = v5_settings_apply_nearest_integer(raw_min_current - old_zero);
+    max_distance = v5_settings_apply_nearest_integer(raw_max_current - old_zero);
+    new_zero = zero_counts / effective_scale;
+    new_min = v5_settings_apply_nearest_integer(new_zero + min_distance);
+    new_max = v5_settings_apply_nearest_integer(new_zero + max_distance);
+    if (!isfinite(new_zero) || !isfinite(new_min) || !isfinite(new_max) || new_min >= new_max) {
+        free(json);
+        v5_settings_apply_scale_chain_result_code(result, "RAW_LIMIT_RECOMPUTE_INVALID");
+        return 0;
+    }
+    if (!v5_settings_apply_ini_write_scale_and_limits(ini_path, axis_section, joint_section, write_scale, effective_scale, new_min, new_max)) {
+        free(json);
+        v5_settings_apply_scale_chain_result_code(result, "RAW_LIMIT_WRITE_FAILED");
+        return 0;
+    }
+    free(json);
+    if (result) {
+        result->scale_recomputed = write_scale ? 1 : 0;
+        result->raw_limits_recomputed = 1;
+        result->effective_scale = effective_scale;
+        result->raw_zero_position = new_zero;
+        result->raw_min_limit = new_min;
+        result->raw_max_limit = new_max;
+        v5_settings_apply_scale_chain_result_code(result, "SCALE_CHAIN_RAW_LIMITS_RECOMPUTED");
+    }
+    return 1;
+}

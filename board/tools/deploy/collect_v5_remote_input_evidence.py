@@ -174,13 +174,15 @@ def remote_action(host, port, kind, args):
         return {"ok": True, "protocol": "v3_pointer_ws", "session_id": session_id, "grant": grant, "acks": acks}
 
 def main():
+    build_root = Path(os.environ.get("V5_BUILD_ROOT", Path.home() / "v5-build"))
+    evidence_root = Path(os.environ.get("V5_EVIDENCE_ROOT", build_root / "evidence"))
     parser = argparse.ArgumentParser(
         description="Capture before/after frames around one v3-compatible WebSocket pointer input action."
     )
     parser.add_argument("--ssh", required=True, help="board SSH host")
     parser.add_argument("--host", default="192.168.1.221", help="relay host/IP")
     parser.add_argument("--port", type=int, default=18080)
-    parser.add_argument("--out-dir", default="/root/Desktop/v5/artifacts/board_remote_input")
+    parser.add_argument("--out-dir", default=str(evidence_root / "board_remote_input"))
     sub = parser.add_subparsers(dest="kind", required=True)
     click = sub.add_parser("click")
     click.add_argument("--x", type=int, required=True)

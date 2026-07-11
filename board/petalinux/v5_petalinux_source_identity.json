@@ -1,0 +1,42 @@
+{
+  "schema": "v5-petalinux-project-source-v1",
+  "source_owner": "board/petalinux",
+  "petalinux_version": "2020.2",
+  "content_sha256": "cd82dca3020573500ac2d9bdd970153534e7709f8dc00e231eb8a95e257c20e8",
+  "file_count": 73,
+  "hardware": {
+    "xsa_path": "project-spec/hw-description/system.xsa",
+    "xsa_sha256": "e18be2cda814c20d34a6ffab9eb0c4c5752a9253338dd97efd7a07124448818e",
+    "bit_path": "project-spec/hw-description/system.bit",
+    "bit_sha256": "c0ee18f9eb1a2ff94cb65805e8772322f7285fd962e14fe2e573d2979bd407fb"
+  },
+  "external_sources": [
+    {
+      "name": "IgH EtherCAT master",
+      "url": "https://gitlab.com/etherlab.org/ethercat.git",
+      "branch": "stable-1.6",
+      "commit": "b709e58147e65b5e3251b45f48c01ef33cc7366f"
+    },
+    {
+      "name": "LinuxCNC EtherCAT",
+      "url": "https://github.com/linuxcnc-ethercat/linuxcnc-ethercat.git",
+      "branch": "master",
+      "commit": "de7e377f76873fa99e8ea5dcafd7df916e118024"
+    },
+    {
+      "name": "Yapps2",
+      "url": "https://files.pythonhosted.org/packages/7f/5d/f8b7dec89104f27d14b11711baf057194670ab220ebb8262f9bc1a450380/Yapps2-2.2.0.tar.gz",
+      "sha256": "fb5842d17177abc377e321edcc7349b1b903e4d883981784f27fa5bee1ab0091"
+    }
+  ],
+  "migration_provenance": {
+    "source_kind": "retired VM PetaLinux project",
+    "retired_product_recipe": "z20-cnc-overlay",
+    "implementation": "in_tree_v5_recipes"
+  },
+  "allowed_external_facts": [
+    "CONFIG_SUBSYSTEM_HOSTNAME=\"z20_plnx\"",
+    "CONFIG_SUBSYSTEM_PRODUCT=\"z20_plnx\"",
+    "generated hardware node z20_dna_reader"
+  ]
+}

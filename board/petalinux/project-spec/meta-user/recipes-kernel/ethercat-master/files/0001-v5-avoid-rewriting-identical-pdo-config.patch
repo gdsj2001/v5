@@ -1,0 +1,89 @@
+diff --git a/master/fsm_pdo.c b/master/fsm_pdo.c
+index 0d5f87e1..7f8cbdf1 100644
+--- a/master/fsm_pdo.c
++++ b/master/fsm_pdo.c
+@@ -533,12 +533,17 @@ void ec_fsm_pdo_conf_action_check_mapping(
+             && fsm->slave->sii.has_general
+             && fsm->slave->sii.coe_details.enable_pdo_configuration) {
+ 
+-        // always write PDO mapping
+-        ec_fsm_pdo_entry_start_configuration(&fsm->fsm_pdo_entry, fsm->slave,
+-                fsm->pdo, &fsm->slave_pdo);
+-        fsm->state = ec_fsm_pdo_conf_state_mapping;
+-        fsm->state(fsm, datagram); // execure immediately
+-        return;
++        if (!ec_pdo_equal_entries(fsm->pdo, &fsm->slave_pdo)) {
++            ec_fsm_pdo_entry_start_configuration(&fsm->fsm_pdo_entry,
++                    fsm->slave, fsm->pdo, &fsm->slave_pdo);
++            fsm->state = ec_fsm_pdo_conf_state_mapping;
++            fsm->state(fsm, datagram); // execure immediately
++            return;
++        }
++
++        EC_SLAVE_DBG(fsm->slave, 1,
++                "PDO 0x%04X mapping already matches; not rewriting.\n",
++                fsm->pdo->index);
+     }
+     else if (!ec_pdo_equal_entries(fsm->pdo, &fsm->slave_pdo)) {
+         EC_SLAVE_WARN(fsm->slave, "Slave does not support"
+@@ -607,31 +612,38 @@ void ec_fsm_pdo_conf_action_check_assignment(
+             && fsm->slave->sii.has_general
+             && fsm->slave->sii.coe_details.enable_pdo_assign) {
+ 
+-        // always write PDO assignment
+-        if (fsm->slave->master->debug_level) {
+-            EC_SLAVE_DBG(fsm->slave, 1, "Setting PDO assignment of SM%u:\n",
+-                    fsm->sync_index);
+-            EC_SLAVE_DBG(fsm->slave, 1, ""); ec_fsm_pdo_print(fsm);
+-        }
+-
+-        if (ec_sdo_request_alloc(&fsm->request, 2)) {
+-            fsm->state = ec_fsm_pdo_state_error;
++        if (!ec_pdo_list_equal(&fsm->sync->pdos, &fsm->pdos)) {
++            if (fsm->slave->master->debug_level) {
++                EC_SLAVE_DBG(fsm->slave, 1,
++                        "Setting PDO assignment of SM%u:\n",
++                        fsm->sync_index);
++                EC_SLAVE_DBG(fsm->slave, 1, ""); ec_fsm_pdo_print(fsm);
++            }
++
++            if (ec_sdo_request_alloc(&fsm->request, 2)) {
++                fsm->state = ec_fsm_pdo_state_error;
++                return;
++            }
++
++            // set mapped PDO count to zero
++            EC_WRITE_U8(fsm->request.data, 0); // zero PDOs mapped
++            fsm->request.data_size = 1;
++            ecrt_sdo_request_index(&fsm->request,
++                    0x1C10 + fsm->sync_index, 0);
++            ecrt_sdo_request_write(&fsm->request);
++
++            EC_SLAVE_DBG(fsm->slave, 1, "Setting number of assigned"
++                    " PDOs to zero.\n");
++
++            fsm->state = ec_fsm_pdo_conf_state_zero_pdo_count;
++            ec_fsm_coe_transfer(fsm->fsm_coe, fsm->slave, &fsm->request);
++            ec_fsm_coe_exec(fsm->fsm_coe, datagram); // execute immediately
+             return;
+         }
+ 
+-        // set mapped PDO count to zero
+-        EC_WRITE_U8(fsm->request.data, 0); // zero PDOs mapped
+-        fsm->request.data_size = 1;
+-        ecrt_sdo_request_index(&fsm->request, 0x1C10 + fsm->sync_index, 0);
+-        ecrt_sdo_request_write(&fsm->request);
+-
+-        EC_SLAVE_DBG(fsm->slave, 1, "Setting number of assigned"
+-                " PDOs to zero.\n");
+-
+-        fsm->state = ec_fsm_pdo_conf_state_zero_pdo_count;
+-        ec_fsm_coe_transfer(fsm->fsm_coe, fsm->slave, &fsm->request);
+-        ec_fsm_coe_exec(fsm->fsm_coe, datagram); // execute immediately
+-        return;
++        EC_SLAVE_DBG(fsm->slave, 1,
++                "PDO assignment of SM%u already matches; not rewriting.\n",
++                fsm->sync_index);
+     }
+     else if (!ec_pdo_list_equal(&fsm->sync->pdos, &fsm->pdos)) {
+         EC_SLAVE_WARN(fsm->slave, "Slave does not support assigning PDOs!\n");

@@ -9,5 +9,6 @@
 
   <ItemGroup>
     <EmbeddedResource Include="v5_git_nas_backup.ps1" LogicalName="v5_git_nas_backup.ps1" />
+    <EmbeddedResource Include="v5_git_scope.ps1" LogicalName="v5_git_scope.ps1" />
   </ItemGroup>
 </Project>

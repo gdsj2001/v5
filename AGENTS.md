@@ -16,7 +16,7 @@ FIRST_90_SECONDS:
 3. 先看 `git status` 和相关 diff；不要覆盖用户已有改动。
 4. 如果是产品功能/行为变化，先走 `功能/需求真源索引.md` 找单一 `REQ-*` owner，再改 owner 文档，然后改代码。
 5. 如果只是 `AGENTS.md`、规则、说明文档整理，备份被改文件后直接改目标文档，跑 `git diff --check`。
-6. 如果改 `D:\v5\board` 下板端可见代码，必须从 Windows source truth 同步到 VM、完整构建、部署并走原始 UI/operator 路径验证；没有板端证据只能报 `source_only` 或 `local_verified_only`。
+6. 如果改 `D:\v5\board` 下板端可见代码，VM 必须直接只读挂载 Windows 唯一 source truth 后完整构建、部署并走原始 UI/operator 路径验证；禁止同步或复制源码到 VM，没有板端证据只能报 `source_only` 或 `local_verified_only`。
 7. 最终回复只讲改了什么、验证了什么、缺什么；不要写命令试错过程。
 
 TASK_ROUTER:
@@ -25,7 +25,7 @@ TASK_ROUTER:
 | Product behavior / feature requirement | `功能/需求真源索引.md` then one indexed owner | indexed `功能/` owner | code/config + targeted tests; board-visible changes need board closure |
 | Specific `待做工作/*.md` request | named workdoc, then indexed `功能/` owner | indexed `功能/` owner if behavior changes | implementation against owner, not stale workdoc text |
 | Rule/workflow cleanup | `AGENTS.md` matching section | `AGENTS.md` only unless user names another file | `git diff --check` |
-| Board runtime source change | `AGENTS.md`, indexed owner if behavior changes, relevant `D:\v5\board` source | Windows `D:\v5\board` source truth | sync to VM, full build, deploy, original operator-path proof |
+| Board runtime source change | `AGENTS.md`, indexed owner if behavior changes, relevant `D:\v5\board` source | Windows `D:\v5\board` unique source truth | direct-mounted VM full build, deploy, original operator-path proof |
 | Local non-board code/tool change | relevant source + focused owner docs | canonical local source/tool | nearest compile/unit/contract/static gate |
 | Pure question / review | relevant docs/source only | no edit unless requested | answer with evidence and status limits |
 
@@ -38,9 +38,9 @@ CONFLICT_PRIORITY:
 6. Old notes, comments, tests, generated files, VM/board copies, and chat summaries are stale when they conflict with the above.
 
 SOURCE_AND_DELIVERY_SHORTCUTS:
-- Source truth: docs/Windows-owned files under `D:\v5`; runtime/Linux/native/LVGL/tools under `D:\v5\board`; VM and board copies are generated/deployed copies only.
-- Source-first board delivery is mandatory: fix source under `D:\v5` / `D:\v5\board`, then sync/build/package/deploy to the board. Do not SSH/SCP/edit files directly on the board as the way to implement a change.
-- SD-card rebuild invariant: the board SD card is disposable and may fail at any time. The system must be rebuildable from Windows source truth plus the controlled VM build workspace; never make the SD card or any board-side file the only place a source change exists.
+- Unique source truth: every maintainable V5 source file exists only in the Windows Git worktree under `D:\v5`, with three non-overlapping owners: Linux kernel plus PREEMPT_RT source in `LINUX_KERNEL_SOURCE_ROOT` (`D:\v5\linux`), complete LinuxCNC source plus V5 native changes in `LINUXCNC_SOURCE_ROOT` (`D:\v5\linuxcnc`), and board runtime/LVGL/services/integration/tools in `RUNTIME_SOURCE_ROOT` (`D:\v5\board`). VM source mirrors, sync staging trees, task source copies, duplicate patch implementations, and editable board copies are forbidden.
+- Source-first board delivery is mandatory: fix source under `D:\v5` / `D:\v5\board`, let the VM build directly from a read-only mount of that same tree, then package/deploy to the board. Do not sync source to the VM or SSH/SCP/edit files directly on the board as the way to implement a change.
+- SD-card rebuild invariant: the board SD card is disposable and may fail at any time. The system must be rebuildable from the Windows unique source plus the VM toolchain/build-output directory; never make the VM, SD card, or any board-side file the only place a source change exists.
 - Deletion beats fallback: remove retired/shadow/duplicate/bypass paths instead of adding wrappers or compatibility branches.
 - SHM is display projection only unless an indexed owner explicitly says otherwise; native/microkernel actuals must come from native owner/readback.
 - Board-facing behavior is not fixed until the real board/operator path is proven. Local tests are pre-board gates, not closure.
@@ -61,7 +61,7 @@ ONE_SENTENCE_MODEL:
 - `功能/` owns settled product truth.
 - `AGENTS.md` owns workflow, cleanup, placement, and verification.
 - `待做工作/` is active input/progress, not final truth after settlement.
-- Source truth is split by owner: Windows `D:\v5\board` is the Linux/native/LVGL/runtime-service and project-tool source truth; Windows `D:\v5` remains the Markdown, screenshots, and Windows/Vivado owner; `D:\v3` is read-only reference only.
+- Source truth is split only inside Windows `D:\v5`: `linux/` owns Linux kernel/PREEMPT_RT, `linuxcnc/` owns complete LinuxCNC/V5 native source, `board/` owns board integration/LVGL/runtime services/project tools, and the project root owns Markdown, screenshots and Windows/Vivado source; `D:\v3` is read-only reference only.
 
 DEFAULT_ACTION:
 - Implement/fix/verify to the required endpoint.
@@ -91,13 +91,14 @@ FILE_PLACEMENT:
 SOURCE_TRUTH:
 - Do not use `D:\v3` as live source; it is frozen read-only reference only.
 - New v5 maintainable entries must use v5 names, not new `z20_*` names. Existing hardware hostnames/SSH aliases may appear only as external facts.
-- Windows local `D:\v5` is the source truth. Runtime source edits belong in `D:\v5\board`; docs and Windows/Vivado owners stay under `D:\v5`. The VM v5 directory is a generated copy only, must not be edited directly, and must be refreshed immediately after local Windows source changes before VM build/deploy work.
+- Windows local `D:\v5` is the only active V5 source tree. Linux kernel/PREEMPT_RT edits belong only in `D:\v5\linux`; LinuxCNC source/native edits belong only in `D:\v5\linuxcnc`; board HAL/INI/runtime packaging, LVGL, services and project tools belong in `D:\v5\board`; docs and Windows/Vivado owners stay under `D:\v5`. `D:\v5\board\linuxcnc` may contain only board runtime integration such as HAL, INI, runtime parameter/tool files, component contracts and image recipes; it must not contain a second LinuxCNC source tree, active source patch stack or source lock. No VM directory may contain a copied, synced, unpacked, generated, or editable V5 source tree.
 - The board SD card is not durable and is never a source repository. Treat every board filesystem path, including `/opt/8ax`, LinuxCNC runtime directories, service units, deployed scripts, binaries, HAL/INI files, and runtime state, as rebuildable output. A clean SD card must be reconstructable from the Windows source tree, documented external prerequisites, and the canonical VM build/deploy workflow.
-- Source-bearing workspaces are limited to the Windows canonical source tree and the controlled VM sync/build workspace generated from it. Do not create source copies in board directories, desktop temp folders, backup folders, `bak/`, `repo_ignored/`, NAS mirrors, deploy staging folders, or SD-card paths. Archives/backups may exist only as non-source recovery/evidence artifacts and must not be edited, built from, or treated as owner truth.
+- The Windows Git worktree is the only source-bearing workspace. Do not create source copies in VM directories, board directories, desktop temp folders, backup folders, `bak/`, `repo_ignored/`, NAS mirrors, deploy staging folders, SD-card paths, Git worktrees, task directories, or archives. Version-control remotes and immutable disaster-recovery archives are non-active recovery artifacts only: they must not be edited, mounted as a second worktree, built from, or treated as owner truth.
 - Direct board editing is forbidden as an implementation path. Do not use SSH, SCP, `sed`, `tee`, `vi`, `nano`, inline shell redirection, or ad hoc copy commands to modify `/opt/8ax`, LinuxCNC configs, services, scripts, UI binaries, HAL/INI files, or other product/runtime files on the board. Board-side access is for inspection, logs, runtime probes, safe recovery, and deployment of artifacts built from the Windows source truth only.
 - If a temporary board-side diagnostic patch is ever required to understand a fault, it is not a source fix and cannot close the task. Reproduce the change in the owning Windows source under `D:\v5` / `D:\v5\board`, remove the temporary board mutation by redeploying from source, then verify the original operator path before claiming fixed.
-- Use `D:\v5\board\tools\sync_win_source_to_vm.py` as the canonical one-way sync tool from Windows truth to the VM v5 copy. The tool performs manifest-based incremental overwrite: normal runs transfer only changed/deleted local truth, and the default remote drift check re-hashes VM copy files so any manual VM edit is overwritten by the Windows truth without a full resend. Do not create or edit VM source mirrors by hand.
-- Do not install, enable, or use WSL on Windows for this project. When Linux userspace/tooling is required, sync `D:\v5\board` to the existing VM staging/build workspace and run the VM toolchain there.
+- VM Linux builds must read the Windows unique source through `VM_SOURCE_MOUNT_ROOT`; that mount must resolve to a live network/shared-filesystem mount and must be read-only from the VM. All CMake/Ninja state, generated files, objects, packages, and artifacts must be written under `VM_BUILD_ROOT`, outside the source mount.
+- `board/tools/sync_win_source_to_vm.py`, VM source manifests, source archives used as build input, and all workflow references that create a VM source mirror are retired and must be physically deleted in the same migration. Existing `/root/Desktop/v5` and any other VM source copy must be removed after confirming the Windows owner contains the required source; do not rename, archive, or retain it as fallback.
+- Do not install, enable, or use WSL on Windows for this project. When Linux userspace/tooling is required, use the VM toolchain against the direct Windows source mount; if the mount is unavailable, the VM build is `blocked`, and copying source is not an allowed fallback.
 
 BOARD_UNREACHABLE_RECOVERY:
 - If board SSH/MCP/relay is unreachable, do not just wait or add a nicer error.
@@ -173,9 +174,12 @@ RULE_READING_ORDER:
 
 HUMAN_CHAT_FEEDBACK_PRECEDENCE=Within this project, the current human user's explicit chat feedback is the highest requirement-change input, but settled product truth must be written into `功能/需求真源索引.md` and the relevant `功能/` owner before implementation continues. If AGENTS.md, feature docs, legacy docs, tests, code comments, old AI notes, or prior chat assumptions conflict with the latest explicit user feedback, update the conflicting `功能/` owner or stale non-owner document first, then implement from the indexed `功能/` owner.
 LATEST_USER_FEEDBACK_WINS=When multiple user feedback items conflict in the same scope, the newest explicit user feedback wins. Preserve earlier requirements only when they do not conflict with the newest instruction.
-HUMAN_FEEDBACK_BOUNDARY=This project-local precedence rule does not override system/developer/tool safety instructions, legal/safety constraints, destructive-operation approval requirements, or physical machine safety. Project-local lock files are paused by the current user instruction and are not higher-priority blockers.
-LOCKS_PAUSED_BY_USER=true
-LOCKS_PAUSED_SCOPE=All `repo_ignored/locks/` source, VM, board, deploy, operator, motion, and resource-lock coordination requirements are paused. Do not create new lock files, do not wait on existing lock files, and treat existing lock files as historical records only. This pause does not remove live process/status checks, board idle checks, artifact identity checks, physical machine safety checks, incremental UI verification, or the requirement to stop/diagnose real running process/resource contention.
+HUMAN_FEEDBACK_BOUNDARY=This project-local precedence rule does not override system/developer/tool safety instructions, legal/safety constraints, destructive-operation approval requirements, or physical machine safety. Short-lived project-local file/resource locks are active coordination gates, not source truth and not a substitute for live process/status checks.
+LOCKS_ACTIVE_BY_USER=true
+LOCK_ROOT=repo_ignored/locks
+FILE_LOCK_PROTOCOL=Before changing a tracked file, atomically create `repo_ignored/locks/files/<project-relative-path>.lock` with only `lock_version=1`, `thread_id`, `file`, and `created_at`. If that exact active lock already exists, do not overwrite it or create a copy/fork; continue unrelated unlocked work and return after the owner releases it.
+FILE_LOCK_RELEASE=Hold a file lock only while editing that file and running its immediate focused text/syntax check. Delete the lock immediately after the final write/check; never retain a file lock through unrelated tests, VM build, deploy, operator work, or handoff. Reclaim a stale lock only after live confirmation that its owner is no longer editing.
+LOCK_LIGHTWEIGHT_RULE=Locks exist only to prevent accidental same-file edits and simultaneous VM/board operations. Do not add a lock daemon, database, heartbeat, TTL service, source generation, per-write receipt, persistent lock history, approval queue, repository-wide edit lock, module-wide lock, or automatic waiting system.
 
 ## P0_DOC_SINGLE_SOURCE
 
@@ -312,30 +316,33 @@ USER_FEEDBACK_NOISE_FILTER:
 
 AI_LOCKS_SINGLE_MAINLINE:
 - This project has one authoritative mainline only: current `main` plus the current PROJECT_ROOT working tree after synchronizing with `origin/main`.
-- Project-local lock files are paused by the current user instruction. Do not create new `repo_ignored/locks/` files and do not treat existing lock files as blockers.
-- Before editing, committing, syncing, building, deploying, or verifying, still inspect `git status` and `git diff`; account for dirty files and do not overwrite unrelated user work.
-- Existing files under `repo_ignored/locks/` are historical records only while `LOCKS_PAUSED_BY_USER=true`.
-- Do not create side branches, per-AI module forks, shadow product truths, stale VM copies, or alternate runtime owners to bypass lock conflicts.
+- Code may be changed only on that authoritative mainline. Do not create side branches, Git worktrees, per-AI source trees, task source copies, module forks, shadow product truths, stale VM source copies, or alternate runtime owners.
+- Before editing, inspect `git status` and the focused diff, then atomically acquire the exact file lock defined by `FILE_LOCK_PROTOCOL`. Different AIs may edit different unlocked files, but the same file must never be edited concurrently.
+- An active file lock is a real ownership signal. Never overwrite or ignore it, and never route around it with a renamed/copy file; coordinate or wait while continuing only unrelated unlocked work.
+- After the final write and immediate focused text/syntax check, release that file lock at once as required by `FILE_LOCK_RELEASE`. Later work must reread the current file/diff; if another AI changed it after release, accept the new mainline and rerun affected checks instead of restoring a private version. Do not create per-edit hashes, receipts, or generation bookkeeping.
+- Before committing, syncing, building, deploying, or verifying, inspect `git status` and `git diff` again; account for all current mainline changes and do not overwrite unrelated user work.
 
 VM_BOARD_SINGLE_OPERATOR:
-- VM sync, VM/ARM build, package, board deploy, board UI restart, operator probe, and motion closure are global single-operator resources.
-- Do not acquire or wait on `repo_ignored/locks/vm_board_*` while locks are paused. Before starting any VM sync/build, package, board deploy, board UI restart, operator probe, or motion closure, confirm the VM and board are idle by live process/status probes.
+- VM source-mount validation, VM/ARM build, package, board deploy, board UI restart, operator probe, and motion closure are global single-operator resources.
+- Immediately before an actual source-mount validation, native compile, ARM compile, package, board deploy, board UI restart, operator probe, or motion closure command, atomically acquire `repo_ignored/locks/resources/vm_board.lock` and confirm the relevant VM/board process is idle. The lock covers only that active remote operation and must be released as soon as the command finishes or stops; do not acquire it during planning, local editing, or local tests.
+- VM native compilation and VM ARM compilation must never run simultaneously, even though they use different canonical build directories. A second AI that finds `vm_board.lock` active must continue unrelated local work instead of starting another VM compile or waiting idly.
 - If a real VM, board, build, deploy, UI restart, operator, or motion process is busy, diagnose it. The current user authorizes ending other blocking processes when it is safe and non-destructive; otherwise stop the VM/board step and report the real process/resource blocker.
-- Never sync while another real build is running, build while another real sync is running, deploy while another real build/deploy is running, or run board verification while another real operator/motion process is controlling the board.
+- Never change/remount the source mount while a build is running, deploy while another real build/deploy is running, or run board verification while another real operator/motion process is controlling the board.
 - NAS/off-machine backup rsync jobs that only copy existing deliverables or backup folders are not VM build/deploy/operator resources. Do not wait for them, do not stop them, and do not treat them as blockers for VM build, ARM build, board deploy, or board verification unless they are actively modifying the current owner source/build/deploy directory.
-- Every VM/ARM build must use a task-specific staging/build directory and must not reuse unknown old artifacts.
-- Board deployment must use the full current `RUNTIME_SOURCE_ROOT` runtime source after it is synced into a clean VM build workspace, plus freshly built VM/ARM artifacts from that source; partial deploys or stale artifacts cannot close board delivery.
+- VM source input and build output have one canonical line only: read-only Windows source mount `VM_SOURCE_MOUNT_ROOT`, native build `VM_LINUX_BUILD_DIR`, and ARM build `VM_BOARD_BUILD_DIR`. Do not create any VM source tree or per-AI/per-task source/build directory.
+- Before configuring or compiling, use `findmnt`/equivalent to prove `VM_SOURCE_MOUNT_ROOT` is a live read-only shared-filesystem mount rather than local VM storage, then verify the canonical CMake cache source path, toolchain and target architecture. If stale or mismatched, clean/reconfigure the same canonical build directory while holding the VM/board resource lock; do not create an alternate source or build tree.
+- Board deployment must use the full current `RUNTIME_SOURCE_ROOT` directly through `VM_SOURCE_MOUNT_ROOT`, plus freshly built artifacts from the canonical build directories. Recheck Windows `git status`/diff and the mounted file identity before deploy; if the mainline changed after build, discard the pending artifact and rebuild. Partial deploys or stale artifacts cannot close board delivery.
 
 BOARD_UNREACHABLE_RECOVERY_RULE:
 - If the development board is unreachable by ping/SSH/remote relay during a board deploy, restart, recovery, or verification slice, treat the failure as a recoverable board-access fault before declaring `blocked`: use the existing tools relay power-cycle path for the development board plus COM/serial boot monitoring when available, then re-probe ping, SSH, port 18080, `/remote/info`, and board relay/input readiness.
-- Relay power-cycle and COM monitoring are recovery/diagnostic steps only. They must not patch board product files, bypass full-current `RUNTIME_SOURCE_ROOT` sync/build/deploy, replace original UI/operator-path verification, or become a hidden runtime fallback.
+- Relay power-cycle and COM monitoring are recovery/diagnostic steps only. They must not patch board product files, bypass full-current direct-mounted `RUNTIME_SOURCE_ROOT` build/deploy, replace original UI/operator-path verification, or become a hidden runtime fallback.
 - Use bounded attempts and preserve evidence in generated verification output where needed; summarize only the relevant result in the final reply. If relay control or COM monitoring cannot restore access after meaningful attempts, report the exact remaining blocker, attempts made, missing verification, and next acceptance condition in the final reply; do not append/update `待做工作/遗留.md` unless the user explicitly asks.
 
 SOURCE_TRUTH:
-- Runtime source truth is split by owner: Linux/native/LVGL/runtime-service source and project tools belong in `RUNTIME_SOURCE_ROOT` (`D:\v5\board`); Markdown, screenshots, and Windows/Vivado-owned sources belong in `PROJECT_ROOT` (`D:\v5`); `D:\v3` is read-only reference only. Board `/opt/8ax/...`, VM staging/build workspaces, deploy outputs, `bak/`, `repo_ignored/`, `artifacts/`, `deploy_tmp/`, old builds, and temp clean copies are not source truth.
-- Source fixes must be made in the owning truth location. If a board copy, VM staging copy, or temporary artifact is inspected or patched for diagnosis, reproduce the change in `RUNTIME_SOURCE_ROOT` or `PROJECT_ROOT` according to owner, rebuild from that owner, and redeploy before any source/fix claim.
-- Every VM/board build/package/deploy must use the full latest `RUNTIME_SOURCE_ROOT` runtime source after current diffs and relevant untracked source files are understood, then sync that source into the VM build workspace before compiling. Partial copies, partial builds, side branches, stale VM/board copies, stale artifacts, or single-file deploys are diagnostic only and cannot close delivery.
-- Destructive mirror delete/overwrite options are forbidden unless the source is the full current worktree and excluded files are recorded as generated/ignored/non-source.
+- Source truth is split by owner only inside the one Windows worktree: Linux kernel and PREEMPT_RT source belong in `LINUX_KERNEL_SOURCE_ROOT`; complete LinuxCNC source and V5 native motion changes belong in `LINUXCNC_SOURCE_ROOT`; board HAL/INI/runtime packaging, LVGL, services and project tools belong in `RUNTIME_SOURCE_ROOT`; Markdown, screenshots, and Windows/Vivado-owned sources belong in `PROJECT_ROOT`; `D:\v3` is read-only reference only. `RUNTIME_SOURCE_ROOT/linuxcnc` is board integration only and must not duplicate LinuxCNC source or active source patches. VM source trees, board `/opt/8ax/...`, deploy outputs, `bak/`, `repo_ignored/`, `artifacts/`, `deploy_tmp/`, old builds, and temp copies are not source truth.
+- Source fixes must be made only in the owning Windows path. The VM source mount is read-only and board/runtime artifacts must never be patched as an implementation path; rebuild from the Windows owner and redeploy before any source/fix claim.
+- Every VM/board build/package/deploy must use the full latest Windows `RUNTIME_SOURCE_ROOT` directly through the read-only mount after current diffs and relevant untracked source files are understood. Partial copies, source archives, side branches, stale artifacts, or single-file deploys are diagnostic only and cannot close delivery.
+- Existing VM source mirrors must be deleted once their required content is confirmed in Windows. Destructive deletion is allowed only for the verified non-owner VM mirror path; verify the resolved absolute target and the active mount boundary first, and never delete the Windows owner or VM build-output root.
 
 DOC_FIRST:
 - Any new or changed product requirement starts in `功能/`: update `功能/需求真源索引.md` only to locate or assign the single `REQ-*` owner, then update that owner document before changing code, tests, plans, backlog, legacy notes, or other docs.
@@ -408,7 +415,7 @@ TOOLING:
 - Prefer reusable project tools under `D:\v5\board\tools\` for project-wide checks; do not create or preserve `D:\v5\tools` as a second tool source.
 - Use repo_ignored/<short_task>/scratch/ for task-only scratch tools
 - Record useful tool command/path in final reply or generated verification output when it is needed for handoff
-- Do not install, enable, configure, or depend on WSL. Linux build/test work must use the synced VM build workspace generated from `RUNTIME_SOURCE_ROOT`, or existing board/VM tools only; runtime source edits still belong in `D:\v5\board`.
+- Do not install, enable, configure, or depend on WSL. Linux build/test work must use the VM toolchain against the read-only Windows source mount, or existing board/VM tools only; runtime source edits still belong only in `D:\v5\board`.
 
 TOOL_GAP_FIRST:
 - If the required local, VM, board, SHM, Broker, ABI, artifact-identity, or motion evidence cannot be produced by existing tools, build or extend the smallest appropriate tool before changing product behavior further.
@@ -432,7 +439,7 @@ BOARD_FUNCTION_CLOSURE_REQUIRED:
 - Any code/config/script change intended to implement, repair, or change a board-facing operator function must run real board closed-loop verification before any pass/fixed/done claim.
 - Board-facing operator functions include main-page buttons, setting-page buttons, popups/error reasons, Home, Jog, Start, Stop/Pause, E-stop, program open/run, MDI, axis zero, drive/profile actions, coordinates, following error, toolpath, RTCP/rotary display, remote input, Broker actions, SHM publisher/reader, state freshness, and any UI-visible status derived from the board.
 - Local compile/unit/mock tests are required but not sufficient for board-facing operator functions; they are only pre-board gates.
-- The required board sequence is: sync full current `RUNTIME_SOURCE_ROOT` (`D:\v5\board`) into a clean VM build workspace -> build VM/ARM artifacts there -> deploy canonical artifact -> trigger the original operator path automatically -> collect the minimal Broker result, SHM/status, events/touch logs, UI screenshot/framebuffer, or service logs needed to prove the specific claim -> run motion golden verification when motion-capable.
+- The required board sequence is: prove the VM read-only mount resolves the full current Windows `RUNTIME_SOURCE_ROOT` (`D:\v5\board`) -> build VM/ARM artifacts in the canonical external build directories -> deploy canonical artifact -> trigger the original operator path automatically -> collect the minimal Broker result, SHM/status, events/touch logs, UI screenshot/framebuffer, or service logs needed to prove the specific claim -> run motion golden verification when motion-capable.
 - Writing documentation, adding a legacy item, showing a plan, or running only local tests cannot close a board-facing code change.
 - If the board is unavailable, a live board/VM/operator/motion process is active, hardware is unsafe, or a required precondition is missing, retry or work around when practical; if still blocked, mark the task blocked/source-only in the final reply, and do not claim the feature is fixed or board-verified. Do not append/update `待做工作/遗留.md` unless the user explicitly asks.
 
@@ -442,7 +449,7 @@ LOCAL_GATES:
 - focused pytest/contract tests
 - UDS/SHM simulation for protocol/state changes
 - rg/static scans for forbidden paths
-- for microkernel-owned parameter work, run the current parameter audit tool from `D:\v5\board\tools\` when such a v5 tool exists, using the synced VM workspace if Linux execution is required, then scan/classify settings_runtime.json/current_tool_state.json/linuxcnc_modal_defaults.var/config_cache/Broker snapshot/SHM snapshot usages, direct linuxcnc.command/halcmd access, V3 private parameter files, and stale unnumbered boot-parameter doc references before claiming the rule/doc is aligned
+- for microkernel-owned parameter work, run the current parameter audit tool from `D:\v5\board\tools\` when such a v5 tool exists, using the VM read-only Windows source mount if Linux execution is required, then scan/classify settings_runtime.json/current_tool_state.json/linuxcnc_modal_defaults.var/config_cache/Broker snapshot/SHM snapshot usages, direct linuxcnc.command/halcmd access, V3 private parameter files, and stale unnumbered boot-parameter doc references before claiming the rule/doc is aligned
 - git diff --check for touched files
 
 CODE_CHANGE_BATCH_CADENCE:
@@ -454,17 +461,17 @@ LOCAL_FIRST_FAST_PROGRESS:
 - Default cadence is batch-local-then-one-board: keep iterating source fixes against local/static/unit/contract gates until they are clean, then run one final full-current VM build, board deploy, and operator/motion closure for the accumulated slice. Do not repeatedly build/deploy/operate the board for every small local edit unless the current blocker is board-only or the user explicitly asks for incremental board probing.
 - Field-level work must stop at `local_verified_only` until it joins an integration board slice. For each field or field group, first run current v5 audit tools under `D:\v5\board\tools\` when microkernel/native truth is relevant, touched-file `python -m py_compile`, focused pytest/contract tests, and `git diff --check`. Until the integration board slice runs, the only allowed positive conclusion is `local_verified_only`; do not write fixed/done/verified/board_verified/works on board/live/board usable equivalents.
 - If existing tools do not cover the needed owner-local, VM, board, SHM, Broker, ABI, artifact-identity, or motion evidence, build the missing tool before changing product behavior: reusable project tools go under `D:\v5\board\tools\` with focused tests; one-off diagnostic probes stay under `repo_ignored/<short_task>/` and must never become product runtime paths or hidden fallbacks.
-- For C/LVGL or board-shipped runtime changes, use the existing `RUNTIME_SOURCE_ROOT` v5 tooling instead of ad hoc copies: edit `D:\v5\board`, sync it to the VM build workspace, build there, deploy with the synced `tools/deploy/run_v5_board_acceptance.sh --apply` or the focused v5 deploy/verify script required by the owner, then run the focused operator or motion probe required by that owner.
+- For C/LVGL or board-shipped runtime changes, use the existing `RUNTIME_SOURCE_ROOT` v5 tooling without copies: edit `D:\v5\board`, build from the VM read-only mount, deploy with the mounted `tools/deploy/run_v5_board_acceptance.sh --apply` or the focused v5 deploy/verify script required by the owner, then run the focused operator or motion probe required by that owner.
 - A failed final VM/board/operator/motion pipeline should be treated as evidence: fix the canonical source, rerun the relevant local gates first, and only rerun the required final pipeline stage after the local failure class is closed.
-- After multiple fields reach `local_verified_only`, review the accumulated current source truth directly before the final integration board slice: sync full current `RUNTIME_SOURCE_ROOT`, build in the VM workspace, deploy the canonical artifact, trigger the original UI/operator path, collect SHM, Broker result, events/logs, screenshot or relay evidence, and run the native active model matching `board/gcode/golden/cc-ac.ngc` or `board/gcode/golden/cc-bc.ngc` for motion-related claims.
+- After multiple fields reach `local_verified_only`, review the accumulated Windows source truth directly before the final integration board slice: prove the VM read-only mount is current, build in the canonical external VM build directories, deploy the canonical artifact, trigger the original UI/operator path, collect SHM, Broker result, events/logs, screenshot or relay evidence, and run the native active model matching `board/gcode/golden/cc-ac.ngc` or `board/gcode/golden/cc-bc.ngc` for motion-related claims.
 - If dry-run or touched-path classification requires `operator` or `motion`, do not run the final pipeline without an explicit probe. Provide `--operator-probe` and a task-local `--operator-probe-config` under `repo_ignored/<short_task>/` unless the selected pipeline mode already has a built-in probe.
 - For Python shipped to the board, local Python may be newer than board Python; avoid runtime-evaluated modern type aliases or syntax in product modules unless target import/build proves compatibility.
 
 BOARD_CLOSURE_ENTRY:
 - Do not cite a missing orchestration tool as a required or optional closure path. A new orchestration entry may be named only after a real tool is added in the same slice with tests.
-- Board-visible closure uses the existing direct v5 tools: sync full-current `RUNTIME_SOURCE_ROOT` into the VM workspace, run VM/ARM build there, deploy/verify through the synced `tools/deploy/run_v5_board_acceptance.sh --apply` or the focused v5 deploy script required by the owner, then the focused operator or motion probe required by that owner.
+- Board-visible closure uses the existing direct v5 tools from the read-only Windows mount: run VM/ARM build into the canonical external build directories, deploy/verify through the mounted `tools/deploy/run_v5_board_acceptance.sh --apply` or the focused v5 deploy script required by the owner, then the focused operator or motion probe required by that owner.
 - stdout/stderr/result files must be redacted before persistence. Tokens, passwords, authorization headers, private key material, cookies, and secret-like environment values must not be written to `repo_ignored/` evidence.
-- Before any board deploy, operator probe, or motion probe, perform a live board/VM busy check. Do not create lock files while `LOCKS_PAUSED_BY_USER=true`; stop as `blocked` only for real process/resource contention, not historical lock files.
+- Before any board deploy, operator probe, or motion probe, acquire the short-lived VM/board resource lock and perform a live board/VM busy check. Release the lock immediately when the operation slice finishes; stop as `blocked` only for an active lock owner, real process/resource contention, or another genuine blocker.
 - For driver profile, driver parameter, authorization, or VPS-downloaded map changes, evidence must include local SHA256, uploaded/board SHA256, and runtime-loaded identity where applicable. A mismatch is fail-closed and cannot support a pass claim.
 - Board deploy artifacts must be ARM/Linux ELF from the VM/ARM toolchain. Verify `file`/`readelf -h` before upload; x86/x86-64/Windows/host-built artifacts fail with `ARTIFACT_ARCH_MISMATCH` and must not overwrite the board.
 - Status words such as `relay_ready`, `board_deployed`, or `board_runtime_ready` do not override `PASS_CLAIM_GATE`; motion claims still require original operator path plus the native active model matching `cc-ac.ngc` or `cc-bc.ngc`.
@@ -474,7 +481,7 @@ BOARD_REQUIRED_WHEN:
 - Board closure is required for user-visible pass/verified/board_verified/release_ready claims, board-facing button/function behavior, and motion/state/control path behavior.
 
 BOARD_CLOSURE:
-- Board closure follows `BOARD_FUNCTION_CLOSURE_REQUIRED`: full current `RUNTIME_SOURCE_ROOT` sync, VM build/deploy, canonical artifact, original UI/operator path, and minimal SHM/Broker/log/screenshot or relay evidence.
+- Board closure follows `BOARD_FUNCTION_CLOSURE_REQUIRED`: full current Windows `RUNTIME_SOURCE_ROOT` direct mount, VM build/deploy, canonical artifact, original UI/operator path, and minimal SHM/Broker/log/screenshot or relay evidence.
 - Direct UDS is diagnostic unless the original defect is UDS/API; UI issues require simulated screen tap/button path.
 - Motion-capable closure requires the native active model matching `cc-ac.ngc` or `cc-bc.ngc` golden motion loop; simulated UI input is the trigger path, not a substitute.
 - Do not use direct `/dev/fb0` dump/capture scripts for screenshots; use product remote relay/LVGL flush framebuffer or another verified color-correct path.
@@ -524,15 +531,19 @@ WIN_CLIENT=8ax-win
 VM_SSH_TARGET=z20-vm
 VM_PATH_USER=root
 RUNTIME_SOURCE_ROOT=D:\v5\board
-VM_SYNC_SOURCE_ROOT=/root/Desktop/v5
-VM_BUILD_ROOT=/root/Desktop/v5_build/build
+LINUX_KERNEL_SOURCE_ROOT=D:\v5\linux
+LINUXCNC_SOURCE_ROOT=D:\v5\linuxcnc
+VM_SOURCE_MOUNT_ROOT=/mnt/v5-source
+VM_BUILD_ROOT=/root/v5-build
+VM_LINUX_BUILD_DIR=/root/v5-build/linux
+VM_BOARD_BUILD_DIR=/root/v5-build/board
 ARCHIVE_ROOT=repo_ignored
 
 VM_ACCESS:
 - Preferred target for Linux build/deploy execution is the existing VM MCP access; use the existing SSH alias only as fallback when MCP is unavailable or insufficient. Do not invent credentials or require a different user unless that is already configured.
-- Before any VM build, first confirm `RUNTIME_SOURCE_ROOT` exists on Windows, then sync Windows `D:\v5` one-way into `VM_SYNC_SOURCE_ROOT` with `D:\v5\board\tools\sync_win_source_to_vm.py`; use the default remote drift check unless there is a measured reason to pass `--skip-remote-drift-check`. Probe the VM copy path with `test -d /root/Desktop/v5 && readlink -f /root/Desktop/v5` through VM MCP first, then the existing SSH alias if MCP cannot provide the probe.
-- If MCP and SSH alias are unavailable, use the existing VM console/hypervisor network setup or documented `vm-bak/` recovery notes; do not install/enable WSL as a workaround
-- Treat Windows `PROJECT_ROOT`/`RUNTIME_SOURCE_ROOT` as the canonical source. Treat VM `VM_SYNC_SOURCE_ROOT` as a generated copy refreshed from Windows before build/deploy. VM copies and build directories must not be edited or treated as source truth.
+- Before any VM build, confirm `RUNTIME_SOURCE_ROOT` exists on Windows and use VM MCP to prove `VM_SOURCE_MOUNT_ROOT` is a live read-only CIFS/VMware shared-folder/equivalent mount of that same Windows tree. `findmnt -T`, mount options, and a current source identity/hash must all agree; a local ext4 directory, bind mount of a VM copy, archive extraction, rsync/scp staging, or stale mount fails closed.
+- If MCP and SSH alias are unavailable, use the existing VM console or hypervisor network setup; do not restore a retired VM source backup and do not install or enable WSL as a workaround.
+- Treat Windows `PROJECT_ROOT`/`RUNTIME_SOURCE_ROOT` as the unique source. VM source copies are forbidden; VM build directories contain generated output only and must never be edited or treated as source truth. If the direct mount is unavailable, stop the build instead of creating a source copy.
 
 ## P1_FEATURE_DOCS
 

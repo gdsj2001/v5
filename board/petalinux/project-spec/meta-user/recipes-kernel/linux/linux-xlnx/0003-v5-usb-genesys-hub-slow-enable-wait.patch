@@ -1,0 +1,30 @@
+--- a/drivers/usb/core/hub.c
++++ b/drivers/usb/core/hub.c
+@@ -2746,9 +2746,14 @@ static int hub_port_wait_reset(struct usb_hub *hub, int port1,
+ 	u16 portstatus;
+ 	u16 portchange;
+ 	u32 ext_portstatus = 0;
++	unsigned int reset_timeout = HUB_RESET_TIMEOUT;
++
++	if (!hub_is_superspeed(hub->hdev) &&
++	    (hub->hdev->quirks & USB_QUIRK_HUB_SLOW_RESET))
++		reset_timeout = 3000;
+ 
+ 	for (delay_time = 0;
+-			delay_time < HUB_RESET_TIMEOUT;
++			delay_time < reset_timeout;
+ 			delay_time += delay) {
+ 		/* wait to give the device a chance to reset */
+ 		msleep(delay);
+--- a/drivers/usb/core/quirks.c
++++ b/drivers/usb/core/quirks.c
+@@ -315,6 +315,9 @@ static const struct usb_device_id usb_quirk_list[] = {
+ 	/* Genesys Logic hub, internally used by Moshi USB to Ethernet Adapter */
+ 	{ USB_DEVICE(0x05e3, 0x0616), .driver_info = USB_QUIRK_NO_LPM },
+ 
++	/* V5 board USB hub: allow slower downstream port enable recovery. */
++	{ USB_DEVICE(0x05e3, 0x0608), .driver_info = USB_QUIRK_HUB_SLOW_RESET },
++
+ 	/* ELSA MicroLink 56K */
+ 	{ USB_DEVICE(0x05cc, 0x2267), .driver_info =
+ 			USB_QUIRK_NO_SET_INTF },

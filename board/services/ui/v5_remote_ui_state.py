@@ -1,0 +1,382 @@
+from __future__ import annotations
+
+import mmap
+import os
+import threading
+import time
+from collections import deque
+from pathlib import Path
+
+from v5_remote_ui_contract import (
+    DIRTY_EVENT_HISTORY_LIMIT,
+    DIRTY_FIFO_EMPTY_SLEEP_SECONDS,
+    DIRTY_FIFO_NAME,
+    FRAMEBUFFER_NAME,
+    INPUT_FIFO_NAME,
+    LARGE_DIRTY_MIN_INTERVAL_SECONDS,
+    LARGE_DIRTY_PIXEL_RATIO,
+    MAX_DIRTY_RECTS_PER_FRAME,
+    FramePayload,
+    PayloadViews,
+)
+
+class FrameState:
+    def __init__(self, run_dir: Path, width: int, height: int):
+        self.run_dir = run_dir
+        self.width = width
+        self.height = height
+        self.stride = width * 4
+        self.frame_id = 1
+        self.latest_event: dict | None = None
+        self.dirty_events = deque(maxlen=DIRTY_EVENT_HISTORY_LIMIT)
+        self.condition = threading.Condition()
+        self.metrics_lock = threading.Lock()
+        self.metrics = {
+            "full_frame_requests": 0,
+            "stream_sessions": 0,
+            "stream_active_sessions": 0,
+            "stream_initial_full_frames": 0,
+            "stream_repair_full_frames": 0,
+            "stream_repair_missing_dirty_events": 0,
+            "stream_idle_pings": 0,
+            "stream_disconnects": 0,
+            "stream_send_failures": 0,
+            "dirty_events": 0,
+            "dirty_coalesced_events": 0,
+            "dirty_rect_frames": 0,
+            "dirty_payload_bytes": 0,
+            "dirty_payload_rows": 0,
+            "dirty_payload_rects": 0,
+            "dirty_payload_contiguous_frames": 0,
+            "dirty_payload_union_frames": 0,
+            "dirty_payload_union_source_rects": 0,
+            "dirty_large_frames": 0,
+            "dirty_large_pixels": 0,
+            "dirty_large_throttle_sleeps": 0,
+            "dirty_large_throttle_ms": 0,
+            "dirty_fifo_empty_reads": 0,
+            "framebuffer_mmap_refreshes": 0,
+            "input_sessions": 0,
+            "input_active_sessions": 0,
+            "input_disconnects": 0,
+            "input_messages": 0,
+            "input_accepted": 0,
+            "input_rejected": 0,
+        }
+        self._framebuffer_mmap: mmap.mmap | None = None
+        self._framebuffer_key: tuple[int, int, int] | None = None
+
+    @property
+    def framebuffer_path(self) -> Path:
+        return self.run_dir / FRAMEBUFFER_NAME
+
+    @property
+    def dirty_fifo_path(self) -> Path:
+        return self.run_dir / DIRTY_FIFO_NAME
+
+    @property
+    def input_fifo_path(self) -> Path:
+        return self.run_dir / INPUT_FIFO_NAME
+
+    @property
+    def frame_size(self) -> int:
+        return self.stride * self.height
+
+    def close_framebuffer_map(self) -> None:
+        if self._framebuffer_mmap is not None:
+            try:
+                self._framebuffer_mmap.close()
+            except BufferError:
+                return
+            except OSError:
+                pass
+        self._framebuffer_mmap = None
+        self._framebuffer_key = None
+
+    def framebuffer_map(self) -> mmap.mmap | None:
+        try:
+            st = self.framebuffer_path.stat()
+        except OSError:
+            self.close_framebuffer_map()
+            return None
+        if st.st_size < self.frame_size:
+            self.close_framebuffer_map()
+            return None
+        key = (int(st.st_dev), int(st.st_ino), int(st.st_size))
+        if self._framebuffer_mmap is not None and self._framebuffer_key == key:
+            return self._framebuffer_mmap
+        self.close_framebuffer_map()
+        try:
+            fd = os.open(self.framebuffer_path, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0))
+        except OSError:
+            return None
+        try:
+            mapped = mmap.mmap(fd, self.frame_size, access=mmap.ACCESS_READ)
+        except OSError:
+            os.close(fd)
+            return None
+        os.close(fd)
+        self._framebuffer_mmap = mapped
+        self._framebuffer_key = key
+        self.mark_metric("framebuffer_mmap_refreshes")
+        return mapped
+
+    def full_frame(self) -> tuple[int, bytes] | None:
+        mapped = self.framebuffer_map()
+        if mapped is None:
+            return None
+        data = mapped[:self.frame_size]
+        if len(data) != self.frame_size:
+            return None
+        with self.condition:
+            frame_id = max(1, self.frame_id)
+        return frame_id, data
+
+    def mark_metric(self, name: str, delta: int = 1) -> None:
+        with self.metrics_lock:
+            self.metrics[name] = int(self.metrics.get(name, 0)) + delta
+
+    def decrement_metric_floor(self, name: str) -> None:
+        with self.metrics_lock:
+            self.metrics[name] = max(0, int(self.metrics.get(name, 0)) - 1)
+
+    def metrics_snapshot(self) -> dict:
+        with self.metrics_lock:
+            return dict(self.metrics)
+
+    def _single_union_rect(self, rects: list[dict]) -> dict | None:
+        if not rects:
+            return None
+        x1 = self.width
+        y1 = self.height
+        x2 = 0
+        y2 = 0
+        for rect in rects:
+            x = int(rect["x"])
+            y = int(rect["y"])
+            w = int(rect["w"])
+            h = int(rect["h"])
+            x1 = min(x1, x)
+            y1 = min(y1, y)
+            x2 = max(x2, x + w)
+            y2 = max(y2, y + h)
+        if x1 >= x2 or y1 >= y2:
+            return None
+        return {"x": x1, "y": y1, "w": x2 - x1, "h": y2 - y1, "codec": "raw"}
+
+    def normalized_dirty_rects(self, event: dict) -> list[dict] | None:
+        source_rects = event.get("rects")
+        if source_rects is None:
+            source_rects = [event]
+        rects = []
+        for source in source_rects:
+            x = int(source["x"])
+            y = int(source["y"])
+            w = int(source["w"])
+            h = int(source["h"])
+            if x < 0 or y < 0 or w <= 0 or h <= 0 or x + w > self.width or y + h > self.height:
+                return None
+            rects.append({"x": x, "y": y, "w": w, "h": h, "codec": "raw"})
+        if len(rects) > MAX_DIRTY_RECTS_PER_FRAME:
+            union = self._single_union_rect(rects)
+            self.mark_metric("dirty_payload_union_frames")
+            self.mark_metric("dirty_payload_union_source_rects", len(rects))
+            return [union] if union else None
+        return rects
+
+    def dirty_area_pixels(self, event: dict) -> int:
+        source_rects = event.get("rects")
+        if source_rects is None:
+            source_rects = [event]
+        rects = []
+        for source in source_rects:
+            rects.append({
+                "x": int(source["x"]),
+                "y": int(source["y"]),
+                "w": int(source["w"]),
+                "h": int(source["h"]),
+            })
+        if len(rects) > MAX_DIRTY_RECTS_PER_FRAME:
+            union = self._single_union_rect(rects)
+            if union is None:
+                return 0
+            return max(0, int(union["w"])) * max(0, int(union["h"]))
+        return sum(max(0, int(rect["w"])) * max(0, int(rect["h"])) for rect in rects)
+
+    def is_large_dirty(self, event: dict) -> bool:
+        frame_pixels = max(1, self.width * self.height)
+        threshold = max(1, int(frame_pixels * LARGE_DIRTY_PIXEL_RATIO))
+        return self.dirty_area_pixels(event) >= threshold
+
+    def throttle_large_dirty(self, event: dict, last_sent_at: float) -> float:
+        if not self.is_large_dirty(event):
+            return last_sent_at
+        pixels = self.dirty_area_pixels(event)
+        self.mark_metric("dirty_large_frames")
+        self.mark_metric("dirty_large_pixels", pixels)
+        if last_sent_at > 0.0:
+            delay = LARGE_DIRTY_MIN_INTERVAL_SECONDS - (time.monotonic() - last_sent_at)
+            if delay > 0.0:
+                self.mark_metric("dirty_large_throttle_sleeps")
+                self.mark_metric("dirty_large_throttle_ms", int(round(delay * 1000.0)))
+                time.sleep(delay)
+        return time.monotonic()
+
+    def dirty_payload(self, event: dict) -> tuple[FramePayload, list[dict]] | None:
+        rects = self.normalized_dirty_rects(event)
+        if not rects:
+            return None
+        mapped = self.framebuffer_map()
+        if mapped is None:
+            return None
+        total_bytes = sum(int(rect["w"]) * int(rect["h"]) * 4 for rect in rects)
+        total_rows = sum(int(rect["h"]) for rect in rects)
+        src = memoryview(mapped)
+        payload_parts: list[memoryview] = []
+        for rect in rects:
+            x = int(rect["x"])
+            y = int(rect["y"])
+            w = int(rect["w"])
+            h = int(rect["h"])
+            row_bytes = w * 4
+            if x == 0 and w == self.width:
+                start = (y * self.stride) + (x * 4)
+                end = start + (row_bytes * h)
+                if end > self.frame_size:
+                    return None
+                payload_parts.append(src[start:end])
+                self.mark_metric("dirty_payload_contiguous_frames")
+                continue
+            for row in range(h):
+                src_start = ((y + row) * self.stride) + (x * 4)
+                src_end = src_start + row_bytes
+                if src_end > self.frame_size:
+                    return None
+                payload_parts.append(src[src_start:src_end])
+        self.mark_metric("dirty_payload_bytes", total_bytes)
+        self.mark_metric("dirty_payload_rows", total_rows)
+        self.mark_metric("dirty_payload_rects", len(rects))
+        return PayloadViews(payload_parts, total_bytes), rects
+
+    def publish_dirty(self, event: dict) -> None:
+        with self.condition:
+            if int(event["frame_id"]) >= self.frame_id:
+                self.frame_id = int(event["frame_id"])
+            stored = dict(event)
+            self.latest_event = stored
+            self.dirty_events.append(stored)
+            self.condition.notify_all()
+
+    def wait_dirty_batch_after(self, frame_id: int, timeout: float, coalesce_seconds: float) -> dict | None:
+        deadline = time.monotonic() + timeout
+        with self.condition:
+            while True:
+                if any(int(event["frame_id"]) > frame_id for event in self.dirty_events):
+                    break
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+                self.condition.wait(min(remaining, 1.0))
+            settle_deadline = time.monotonic() + max(0.0, coalesce_seconds)
+            while True:
+                remaining = settle_deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                self.condition.wait(remaining)
+            events = [dict(event) for event in self.dirty_events if int(event["frame_id"]) > frame_id]
+        return self.coalesce_dirty_events(frame_id, events)
+
+    def coalesce_dirty_events(self, base_frame_id: int, events: list[dict]) -> dict | None:
+        if not events:
+            return None
+        events.sort(key=lambda event: int(event["frame_id"]))
+        expected_base = int(base_frame_id)
+        latest_frame = expected_base
+        rects = []
+        merged = 0
+        for event in events:
+            event_frame = int(event["frame_id"])
+            event_base = int(event["base_frame_id"])
+            if event_frame <= expected_base:
+                continue
+            if event_base != expected_base:
+                return {
+                    "needs_full": True,
+                    "frame_id": max(latest_frame, event_frame),
+                    "base_frame_id": base_frame_id,
+                    "reason": "missing_dirty_event",
+                }
+            x = int(event["x"])
+            y = int(event["y"])
+            w = int(event["w"])
+            h = int(event["h"])
+            rects.append({"x": x, "y": y, "w": w, "h": h, "codec": "raw"})
+            expected_base = event_frame
+            latest_frame = event_frame
+            merged += 1
+        if merged == 0:
+            return None
+        return {
+            "frame_id": latest_frame,
+            "base_frame_id": int(base_frame_id),
+            "rects": rects,
+            "merged_events": merged,
+        }
+
+
+class DirtyReader(threading.Thread):
+    def __init__(self, state: FrameState):
+        super().__init__(daemon=True)
+        self.state = state
+        self.stop_requested = threading.Event()
+
+    def run(self) -> None:
+        self.state.run_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            os.mkfifo(self.state.dirty_fifo_path, 0o600)
+        except FileExistsError:
+            pass
+        fd = os.open(self.state.dirty_fifo_path, os.O_RDWR | os.O_NONBLOCK)
+        buffer = b""
+        try:
+            while not self.stop_requested.is_set():
+                ready, _, _ = select.select([fd], [], [], 0.5)
+                if not ready:
+                    continue
+                try:
+                    data = os.read(fd, 4096)
+                except BlockingIOError:
+                    time.sleep(DIRTY_FIFO_EMPTY_SLEEP_SECONDS)
+                    continue
+                if not data:
+                    self.state.mark_metric("dirty_fifo_empty_reads")
+                    time.sleep(DIRTY_FIFO_EMPTY_SLEEP_SECONDS)
+                    continue
+                buffer += data
+                while b"\n" in buffer:
+                    line, buffer = buffer.split(b"\n", 1)
+                    self.handle_line(line.decode("ascii", errors="ignore").strip())
+        finally:
+            os.close(fd)
+
+    def handle_line(self, line: str) -> None:
+        parts = line.split()
+        if len(parts) < 6:
+            return
+        try:
+            frame_id, base_frame_id, x, y, w, h = [int(part) for part in parts[:6]]
+        except ValueError:
+            return
+        if frame_id <= 0 or base_frame_id < 0 or w <= 0 or h <= 0:
+            return
+        if x < 0 or y < 0 or x + w > self.state.width or y + h > self.state.height:
+            return
+        self.state.mark_metric("dirty_events")
+        self.state.publish_dirty({
+            "frame_id": frame_id,
+            "base_frame_id": base_frame_id,
+            "x": x,
+            "y": y,
+            "w": w,
+            "h": h,
+        })

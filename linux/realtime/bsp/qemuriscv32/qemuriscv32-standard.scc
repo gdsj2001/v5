@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: MIT
+define KMACHINE qemuriscv32
+define KTYPE standard
+define KARCH riscv32
+
+include ktypes/standard/standard.scc
+
+include cfg/virtio.scc
+include qemuriscv32.scc

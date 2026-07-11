@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: MIT
+define KMACHINE common-pc
+define KMACHINE qemux86
+define KTYPE standard
+define KARCH i386
+
+include ktypes/standard/standard.scc
+
+include common-pc.scc
+
+# default policy for standard kernels
+include cfg/boot-live.scc
+include cfg/usb-mass-storage.scc
+include cfg/virtio.scc
+include features/media/media-usb-webcams.scc
+include features/sound/snd_hda_intel.scc

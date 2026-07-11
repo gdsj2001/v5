@@ -1,0 +1,42 @@
+From 9c6a10a8f0b04cb6879c5f1434d9b2284f98c7d0 Mon Sep 17 00:00:00 2001
+From: V5 Project <v5@example.invalid>
+Date: Sun, 5 Apr 2026 21:16:00 +0800
+Subject: [PATCH] drm: xlnx: add ATK LCD encoder hook
+
+Add Kconfig/Makefile entries required to build xlnx_atk_lcd.c on
+linux-xlnx 2020.2.
+---
+ drivers/gpu/drm/xlnx/Kconfig  | 6 ++++++
+ drivers/gpu/drm/xlnx/Makefile | 2 ++
+ 2 files changed, 8 insertions(+)
+
+diff --git a/drivers/gpu/drm/xlnx/Kconfig b/drivers/gpu/drm/xlnx/Kconfig
+index 52ebd54d..2bcc8405 100644
+--- a/drivers/gpu/drm/xlnx/Kconfig
++++ b/drivers/gpu/drm/xlnx/Kconfig
+@@ -120,3 +120,9 @@ config DRM_XLNX_BRIDGE_VTC
+ 	  this option to make VTC a part of the CRTC in display pipeline.
+ 	  Currently the support is added to the Xilinx Video Mixer and
+ 	  Xilinx PL display CRTC drivers. This driver provides ability
++	  to generate timings through the bridge layer.
++
++config DRM_XLNX_ATK_LCD
++	tristate "Alientek LCD DRM TX Driver"
++	depends on DRM_XLNX
++	help
++	  LCD DRM slave encoder for Video-out on Alientek boards.
+diff --git a/drivers/gpu/drm/xlnx/Makefile b/drivers/gpu/drm/xlnx/Makefile
+index 702a31ef..538706a9 100644
+--- a/drivers/gpu/drm/xlnx/Makefile
++++ b/drivers/gpu/drm/xlnx/Makefile
+@@ -17,6 +17,8 @@ obj-$(CONFIG_DRM_XLNX_MIXER) += xlnx_mixer.o
+ 
+ obj-$(CONFIG_DRM_XLNX_PL_DISP) += xlnx_pl_disp.o
+ 
++obj-$(CONFIG_DRM_XLNX_ATK_LCD) += xlnx_atk_lcd.o
++
+ xlnx-sdi-objs += xlnx_sdi.o xlnx_sdi_timing.o
+ obj-$(CONFIG_DRM_XLNX_SDI) += xlnx-sdi.o
+ 
+-- 
+2.34.1

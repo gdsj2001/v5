@@ -1,0 +1,15 @@
+#!/bin/sh
+
+case "$1" in
+    start|"")
+        for mp in /media/sd-mmcblk0p1 /run/media/mmcblk0p1 /media/card; do
+            if mountpoint -q "$mp" 2>/dev/null; then
+                mount -o remount,ro,noatime "$mp" 2>/dev/null || true
+            fi
+        done
+        ;;
+    stop|restart|reload|force-reload)
+        ;;
+esac
+
+exit 0

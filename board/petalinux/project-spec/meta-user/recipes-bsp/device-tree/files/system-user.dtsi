@@ -1,0 +1,22 @@
+/include/ "system-conf.dtsi"
+/ {
+	usb0_vbus: regulator-usb0-vbus {
+		compatible = "regulator-fixed";
+		regulator-name = "usb0-vbus";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		regulator-always-on;
+	};
+};
+
+&{/amba/usb@e0002000} {
+	dr_mode = "host";
+	phy_type = "ulpi";
+	vbus-supply = <&usb0_vbus>;
+};
+
+&amba_pl {
+	atk_lcd_drm {
+		/* timing2 => 1024x600 */
+	};
+};

@@ -1,0 +1,58 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: V5 Project <v5@example.invalid>
+Date: Sat, 16 May 2026 16:55:00 +0800
+Subject: [PATCH] v5: ignore outgoing generic packet echo
+
+The V5 native LinuxCNC EtherCAT path uses IgH's generic PF_PACKET backend on
+the Zynq GEM interface. PF_PACKET can deliver locally transmitted EtherCAT
+frames back to the raw socket as PACKET_OUTGOING. Passing those self-echoed
+frames into ecdev_receive() makes the master see its own LWR/LRD/FRMW frames
+as unmatched replies before the real slave response is processed, which keeps
+lcec slaves in INIT.
+
+Filter PACKET_OUTGOING in the native generic backend. This keeps motion in the
+LinuxCNC/IgH/lcec chain; it only prevents local TX echo from polluting the
+master receive queue.
+---
+ devices/generic.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/devices/generic.c b/devices/generic.c
+index 1111111..2222222 100644
+--- a/devices/generic.c
++++ b/devices/generic.c
+@@ -28,5 +28,6 @@
+ #include <linux/if_arp.h> /* ARPHRD_ETHER */
+ #include <linux/etherdevice.h>
++#include <linux/if_packet.h>
+ 
+ #include "../globals.h"
+ #include "ecdev.h"
+@@ -331,6 +332,7 @@ void ec_gen_device_poll(
+         )
+ {
+     struct msghdr msg;
++    struct sockaddr_ll addr;
+     struct kvec iov;
+     int ret, budget = 10; // FIXME
+ 
+@@ -341,9 +343,16 @@ void ec_gen_device_poll(
+         iov.iov_base = dev->rx_buf;
+         iov.iov_len = EC_GEN_RX_BUF_SIZE;
+         memset(&msg, 0, sizeof(msg));
++        memset(&addr, 0, sizeof(addr));
++        msg.msg_name = &addr;
++        msg.msg_namelen = sizeof(addr);
+ 
+         ret = kernel_recvmsg(dev->socket, &msg, &iov, 1, iov.iov_len,
+                 MSG_DONTWAIT);
+         if (ret > 0) {
++            if (addr.sll_pkttype == PACKET_OUTGOING) {
++                continue;
++            }
++
+             ecdev_receive(dev->ecdev, dev->rx_buf, ret);
+         } else if (ret < 0) {
+             break;
+-- 
+2.39.2

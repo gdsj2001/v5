@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: MIT
+define KFEATURE_DESCRIPTION "Enable support for Bosch Pressure Sensors"
+define KFEATURE_COMPATIBILITY all
+
+kconf hardware bosch-pressure-sensor-i2c.cfg
+

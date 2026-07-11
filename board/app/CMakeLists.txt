@@ -76,21 +76,53 @@ add_executable(v5_lvgl_shell
     src/v5_remote_metrics.c
     src/v5_lvgl_touch_input.c
     src/v5_main_page.c
+    src/v5_main_page_model_projection.c
+    src/v5_main_page_fit.c
+    src/v5_main_page_status_text.c
+    src/v5_main_page_toolpath_primitives.c
+    src/v5_main_page_toolpath_geometry.c
+    src/v5_main_page_toolpath_program.c
+    src/v5_main_page_program_preview.c
+    src/v5_main_page_input.c
+    src/v5_main_page_action_guard.c
+    src/v5_main_page_button_state.c
+    src/v5_main_page_view.c
+    src/v5_main_page_program_state.c
+    src/v5_main_page_action_execute.c
     src/v5_settings_page.c
-    src/v5_boot_closure.c
+    src/v5_settings_page_support.c
+    src/v5_settings_page_status.c
+    src/v5_settings_page_actions.c
+    src/v5_settings_page_widgets.c
     src/v5_runtime_registry.c
     src/v5_settings_axis_table.c
+    src/v5_settings_axis_table_resident.c
+    src/v5_settings_axis_table_runtime.c
+    src/v5_settings_axis_table_readback.c
+    src/v5_settings_axis_table_widgets.c
+    src/v5_settings_axis_table_commit.c
+    src/v5_settings_axis_table_options.c
+    src/v5_settings_axis_table_dropdown.c
+    src/v5_settings_axis_table_keyboard.c
+    src/v5_settings_axis_table_layout.c
     ../services/drive_profile/v5_drive_profile_snapshot.c
     src/v5_settings_actions.c
+    src/v5_settings_action_ipc.c
     src/v5_main_page_actions.c
     src/v5_parameter_table.c
     src/v5_toolpath_display.c
     src/v5_ui_model.c
     src/v5_ui_shell.c
-    src/v5_v3_local_pages.c
+    src/v5_ui_shell_status.c
+    src/v5_ui_shell_program_scan.c
+    src/v5_ui_shell_program_actions.c
+    src/v5_ui_shell_pages.c
+    src/v5_ui_shell_navigation.c
+    src/v5_ui_shell_refresh.c
+    src/v5_v3_page_widgets.c
+    src/v5_v3_tool_page.c
+    src/v5_v3_offset_page.c
     src/v5_ui_status_view.c
-    src/v5_runtime_registry.c
-    ../services/drive_profile/v5_drive_profile_snapshot.c
 )
 
 add_executable(v5_program_page_double_click_smoke
@@ -109,17 +141,52 @@ add_executable(v5_program_page_double_click_smoke
     src/v5_remote_metrics.c
     src/v5_lvgl_touch_input.c
     src/v5_main_page.c
+    src/v5_main_page_model_projection.c
+    src/v5_main_page_fit.c
+    src/v5_main_page_status_text.c
+    src/v5_main_page_toolpath_primitives.c
+    src/v5_main_page_toolpath_geometry.c
+    src/v5_main_page_toolpath_program.c
+    src/v5_main_page_program_preview.c
+    src/v5_main_page_input.c
+    src/v5_main_page_action_guard.c
+    src/v5_main_page_button_state.c
+    src/v5_main_page_view.c
+    src/v5_main_page_program_state.c
+    src/v5_main_page_action_execute.c
     src/v5_settings_page.c
+    src/v5_settings_page_support.c
+    src/v5_settings_page_status.c
+    src/v5_settings_page_actions.c
+    src/v5_settings_page_widgets.c
     src/v5_runtime_registry.c
     src/v5_settings_axis_table.c
+    src/v5_settings_axis_table_resident.c
+    src/v5_settings_axis_table_runtime.c
+    src/v5_settings_axis_table_readback.c
+    src/v5_settings_axis_table_widgets.c
+    src/v5_settings_axis_table_commit.c
+    src/v5_settings_axis_table_options.c
+    src/v5_settings_axis_table_dropdown.c
+    src/v5_settings_axis_table_keyboard.c
+    src/v5_settings_axis_table_layout.c
     ../services/drive_profile/v5_drive_profile_snapshot.c
     src/v5_settings_actions.c
+    src/v5_settings_action_ipc.c
     src/v5_main_page_actions.c
     src/v5_parameter_table.c
     src/v5_toolpath_display.c
     src/v5_ui_model.c
     src/v5_ui_shell.c
-    src/v5_v3_local_pages.c
+    src/v5_ui_shell_status.c
+    src/v5_ui_shell_program_scan.c
+    src/v5_ui_shell_program_actions.c
+    src/v5_ui_shell_pages.c
+    src/v5_ui_shell_navigation.c
+    src/v5_ui_shell_refresh.c
+    src/v5_v3_page_widgets.c
+    src/v5_v3_tool_page.c
+    src/v5_v3_offset_page.c
     src/v5_ui_status_view.c
 )
 
@@ -186,6 +253,9 @@ add_library(v5_command_gate_core STATIC
     src/v5_settings_parameter_store.c
     ../services/command_gate/v5_command_gate_validator.c
     ../services/command_gate/v5_linuxcncrsh_client.c
+    ../services/command_gate/v5_linuxcncrsh_transport.c
+    ../services/command_gate/v5_linuxcncrsh_state.c
+    ../services/command_gate/v5_linuxcncrsh_position.c
     ../services/command_gate/v5_linuxcncrsh_format.c
     ../services/state_publisher/v5_native_sample.c
     ../services/command_gate/v5_native_first_point.c
@@ -202,6 +272,14 @@ add_library(v5_command_gate_core STATIC
     ../services/command_gate/v5_native_work_zero.c
     ../services/command_gate/v5_parameter_owner_map.c
     ../services/command_gate/v5_settings_apply.c
+    ../services/command_gate/v5_settings_apply_json.c
+    ../services/command_gate/v5_settings_apply_ini_numeric.c
+    ../services/command_gate/v5_settings_apply_scale.c
+    ../services/command_gate/v5_settings_apply_values.c
+    ../services/command_gate/v5_settings_apply_ini_text.c
+    ../services/command_gate/v5_settings_apply_runtime.c
+    ../services/command_gate/v5_settings_apply_model.c
+    ../services/command_gate/v5_settings_apply_geometry.c
 )
 
 target_include_directories(v5_command_gate_core PUBLIC
@@ -234,6 +312,7 @@ add_executable(v5_microkernel_manifest_smoke
 target_link_libraries(v5_microkernel_manifest_smoke PRIVATE v5_microkernel_contract)
 
 add_library(v5_program_runtime STATIC
+    ../services/program_runtime/v5_program_preview.c
     ../services/program_runtime/v5_program_runtime.c
     ../services/program_runtime/v5_sha256.c
 )
@@ -278,13 +357,40 @@ add_executable(v5_main_page_actions_smoke
     src/v5_lvgl_headless.c
     src/v5_ui_first_frame_guard.c
     src/v5_main_page.c
+    src/v5_main_page_model_projection.c
+    src/v5_main_page_fit.c
+    src/v5_main_page_status_text.c
+    src/v5_main_page_toolpath_primitives.c
+    src/v5_main_page_toolpath_geometry.c
+    src/v5_main_page_toolpath_program.c
+    src/v5_main_page_program_preview.c
+    src/v5_main_page_input.c
+    src/v5_main_page_action_guard.c
+    src/v5_main_page_button_state.c
+    src/v5_main_page_view.c
+    src/v5_main_page_program_state.c
+    src/v5_main_page_action_execute.c
     src/v5_remote_metrics.c
     src/v5_settings_page.c
+    src/v5_settings_page_support.c
+    src/v5_settings_page_status.c
+    src/v5_settings_page_actions.c
+    src/v5_settings_page_widgets.c
     src/v5_boot_closure.c
     src/v5_runtime_registry.c
     src/v5_settings_axis_table.c
+    src/v5_settings_axis_table_resident.c
+    src/v5_settings_axis_table_runtime.c
+    src/v5_settings_axis_table_readback.c
+    src/v5_settings_axis_table_widgets.c
+    src/v5_settings_axis_table_commit.c
+    src/v5_settings_axis_table_options.c
+    src/v5_settings_axis_table_dropdown.c
+    src/v5_settings_axis_table_keyboard.c
+    src/v5_settings_axis_table_layout.c
     ../services/drive_profile/v5_drive_profile_snapshot.c
     src/v5_settings_actions.c
+    src/v5_settings_action_ipc.c
     src/v5_main_page_actions.c
     src/v5_coordinate_panel.c
     src/v5_coordinate_digits.c
@@ -318,13 +424,40 @@ add_executable(v5_main_page_smoke
     src/v5_lvgl_headless.c
     src/v5_ui_first_frame_guard.c
     src/v5_main_page.c
+    src/v5_main_page_model_projection.c
+    src/v5_main_page_fit.c
+    src/v5_main_page_status_text.c
+    src/v5_main_page_toolpath_primitives.c
+    src/v5_main_page_toolpath_geometry.c
+    src/v5_main_page_toolpath_program.c
+    src/v5_main_page_program_preview.c
+    src/v5_main_page_input.c
+    src/v5_main_page_action_guard.c
+    src/v5_main_page_button_state.c
+    src/v5_main_page_view.c
+    src/v5_main_page_program_state.c
+    src/v5_main_page_action_execute.c
     src/v5_remote_metrics.c
     src/v5_settings_page.c
+    src/v5_settings_page_support.c
+    src/v5_settings_page_status.c
+    src/v5_settings_page_actions.c
+    src/v5_settings_page_widgets.c
     src/v5_boot_closure.c
     src/v5_runtime_registry.c
     src/v5_settings_axis_table.c
+    src/v5_settings_axis_table_resident.c
+    src/v5_settings_axis_table_runtime.c
+    src/v5_settings_axis_table_readback.c
+    src/v5_settings_axis_table_widgets.c
+    src/v5_settings_axis_table_commit.c
+    src/v5_settings_axis_table_options.c
+    src/v5_settings_axis_table_dropdown.c
+    src/v5_settings_axis_table_keyboard.c
+    src/v5_settings_axis_table_layout.c
     ../services/drive_profile/v5_drive_profile_snapshot.c
     src/v5_settings_actions.c
+    src/v5_settings_action_ipc.c
     src/v5_main_page_actions.c
     src/v5_coordinate_panel.c
     src/v5_coordinate_digits.c
@@ -403,6 +536,8 @@ target_link_libraries(v5_linuxcncrsh_probe PRIVATE v5_command_gate_core)
 
 add_executable(v5_command_gate_server
     ../services/command_gate/v5_command_gate_server.c
+    ../services/command_gate/v5_command_gate_server_io.c
+    ../services/command_gate/v5_command_gate_server_response.c
     src/v5_process_residency.c
 )
 
@@ -486,6 +621,15 @@ add_executable(v5_settings_axis_table_smoke
     src/v5_boot_closure.c
     src/v5_runtime_registry.c
     src/v5_settings_axis_table.c
+    src/v5_settings_axis_table_resident.c
+    src/v5_settings_axis_table_runtime.c
+    src/v5_settings_axis_table_readback.c
+    src/v5_settings_axis_table_widgets.c
+    src/v5_settings_axis_table_commit.c
+    src/v5_settings_axis_table_options.c
+    src/v5_settings_axis_table_dropdown.c
+    src/v5_settings_axis_table_keyboard.c
+    src/v5_settings_axis_table_layout.c
     ../services/drive_profile/v5_drive_profile_snapshot.c
 )
 

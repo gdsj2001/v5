@@ -1,16 +1,18 @@
 #!/bin/sh
 set -eu
 
-repo_root="${V5_REPO_ROOT:-/root/Desktop/v5}"
+home_dir="${HOME:?HOME is required}"
+build_root="${V5_BUILD_ROOT:-$home_dir/v5-build}"
+evidence_root="${V5_EVIDENCE_ROOT:-$build_root/evidence}"
 board_ssh="${V5_BOARD_SSH:-}"
 board_ssh_port="${V5_BOARD_SSH_PORT:-22}"
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 remote_raw="${V5_REMOTE_UI_RAW:-/tmp/v5_board_ui.raw}"
 remote_meta="${V5_REMOTE_UI_META:-/tmp/v5_board_ui.meta}"
-local_out="${V5_UI_SCREENSHOT_OUT:-$repo_root/artifacts/board_ui/v5_board_ui_${stamp}.png}"
-local_raw="${V5_UI_RAW_OUT:-$repo_root/artifacts/board_ui/v5_board_ui_${stamp}.raw}"
-local_meta="${V5_UI_META_OUT:-$repo_root/artifacts/board_ui/v5_board_ui_${stamp}.meta}"
-local_ppm="${V5_UI_PPM_OUT:-$repo_root/artifacts/board_ui/v5_board_ui_${stamp}.ppm}"
+local_out="${V5_UI_SCREENSHOT_OUT:-$evidence_root/board_ui/v5_board_ui_${stamp}.png}"
+local_raw="${V5_UI_RAW_OUT:-$evidence_root/board_ui/v5_board_ui_${stamp}.raw}"
+local_meta="${V5_UI_META_OUT:-$evidence_root/board_ui/v5_board_ui_${stamp}.meta}"
+local_ppm="${V5_UI_PPM_OUT:-$evidence_root/board_ui/v5_board_ui_${stamp}.ppm}"
 apply=0
 
 for arg in "$@"; do

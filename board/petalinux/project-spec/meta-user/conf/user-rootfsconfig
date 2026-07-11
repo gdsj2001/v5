@@ -1,0 +1,12 @@
+#Note: Mention Each package in individual line
+#These packages will get added into rootfs menu entry
+
+CONFIG_v5-base-overlay
+CONFIG_v5-stepgen-module
+CONFIG_linuxcnc-prebuilt
+CONFIG_ethercat-master
+CONFIG_linuxcnc-ethercat
+CONFIG_hal-cia402
+CONFIG_wpa-supplicant
+CONFIG_wpa-supplicant-cli
+CONFIG_wpa-supplicant-passphrase

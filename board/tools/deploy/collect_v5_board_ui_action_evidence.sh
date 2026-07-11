@@ -1,7 +1,9 @@
 #!/bin/sh
 set -eu
 
-repo_root="${V5_REPO_ROOT:-/root/Desktop/v5}"
+home_dir="${HOME:?HOME is required}"
+build_root="${V5_BUILD_ROOT:-$home_dir/v5-build}"
+evidence_root="${V5_EVIDENCE_ROOT:-$build_root/evidence}"
 board_ssh="${V5_BOARD_SSH:-}"
 board_ssh_port="${V5_BOARD_SSH_PORT:-22}"
 remote_touch_events="${V5_REMOTE_TOUCH_EVENTS:-/run/8ax_v5_product_ui/touch_events.jsonl}"
@@ -10,7 +12,7 @@ remote_enable="${V5_REMOTE_TOUCH_ENABLE:-/run/8ax_v5_product_ui/enable_touch_dia
 calibration_path="${V5_TOUCH_CALIBRATION_PATH:-/opt/8ax/safe_ui/re_touch_calibration.json}"
 old_calibration_path="${V5_OLD_TOUCH_CALIBRATION_PATH:-/opt/8ax/ui/re_touch_calibration.json}"
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
-local_dir="${V5_UI_ACTION_EVIDENCE_DIR:-$repo_root/artifacts/board_touch}"
+local_dir="${V5_UI_ACTION_EVIDENCE_DIR:-$evidence_root/board_touch}"
 local_touch_out="${V5_UI_ACTION_TOUCH_OUT:-$local_dir/v5_board_ui_action_${stamp}_touch.jsonl}"
 local_ui_out="${V5_UI_ACTION_UI_OUT:-$local_dir/v5_board_ui_action_${stamp}_ui.jsonl}"
 screenshot="${V5_UI_SCREENSHOT_EVIDENCE:-}"

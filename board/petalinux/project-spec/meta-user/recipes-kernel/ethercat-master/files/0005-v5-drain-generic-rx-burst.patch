@@ -1,0 +1,34 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: V5 Project <v5@example.invalid>
+Date: Sat, 16 May 2026 17:12:00 +0800
+Subject: [PATCH] v5: drain generic rx burst
+
+The V5 native LinuxCNC EtherCAT path uses IgH's generic PF_PACKET backend.
+During the first OP-thread cycles, the master can receive a burst of state,
+DC, mailbox, and process-data replies. The upstream generic backend polls only
+10 frames per receive pass, which leaves valid replies queued until the master
+has already timed out the datagrams; the same replies then arrive as
+UNMATCHED.
+
+Keep the LinuxCNC/IgH/lcec native motion path and only raise the generic
+backend's receive drain budget so a startup burst is consumed in the same
+cycle.
+---
+ devices/generic.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/devices/generic.c b/devices/generic.c
+index 2222222..3333333 100644
+--- a/devices/generic.c
++++ b/devices/generic.c
+@@ -334,7 +334,7 @@ void ec_gen_device_poll(
+     struct msghdr msg;
+     struct sockaddr_ll addr;
+     struct kvec iov;
+-    int ret, budget = 10; // FIXME
++    int ret, budget = 128; // V5: drain startup/status bursts in one pass.
+ 
+     if (dev->socket) {
+         do {
+-- 
+2.39.2

@@ -54,6 +54,10 @@ function Test-V5RepoRoot([string]$Path) {
         (Test-Path -LiteralPath $full -PathType Container) -and
         (Test-Path -LiteralPath (Join-Path $full "AGENTS.md") -PathType Leaf) -and
         (Test-Path -LiteralPath (Join-Path $full "board") -PathType Container) -and
+        (Test-Path -LiteralPath (Join-Path $full "board\petalinux") -PathType Container) -and
+        (Test-Path -LiteralPath (Join-Path $full "linux") -PathType Container) -and
+        (Test-Path -LiteralPath (Join-Path $full "linuxcnc") -PathType Container) -and
+        (Test-Path -LiteralPath (Join-Path $full "vivado_hw_project") -PathType Container) -and
         (Test-Path -LiteralPath (Join-Path $full ".git") -PathType Container)
     )
 }
@@ -183,6 +187,12 @@ function Get-GitOutput([string]$Repo, [string[]]$GitArgs) {
     return ($output -join "`n").Trim()
 }
 
+$gitScopeModule = Join-Path $PSScriptRoot "v5_git_scope.ps1"
+if (-not (Test-Path -LiteralPath $gitScopeModule -PathType Leaf)) {
+    Fail "Git scope module was not found: $gitScopeModule"
+}
+. $gitScopeModule
+
 function Ensure-GitIdentity([string]$Repo) {
     $name = Get-GitOutput $Repo @("config", "--get", "user.name")
     if ([string]::IsNullOrWhiteSpace($name)) {
@@ -206,98 +216,6 @@ function Ensure-GitRepository([string]$Repo, [string]$Remote, [string]$Branch) {
     }
 
     Ensure-GitIdentity $Repo
-}
-
-function Get-RobocopyExcludedDirectories {
-    return @(
-        ".git",
-        "repo_ignored",
-        ".pytest_cache",
-        ".mypy_cache",
-        ".ruff_cache",
-        "__pycache__",
-        "node_modules",
-        ".npm",
-        ".pnpm-store",
-        ".vs",
-        "CMakeFiles",
-        "bin",
-        "obj",
-        "build",
-        "build-*",
-        "cmake-build-*",
-        "out",
-        "dist",
-        "tmp",
-        "temp",
-        "logs",
-        "htmlcov",
-        ".Xil",
-        "*.cache",
-        "*.gen",
-        "*.hw",
-        "*.runs",
-        "artifacts",
-        "evidence",
-        "evidence_*",
-        "*_evidence",
-        "*evidence*",
-        "Temporary",
-        "release"
-    )
-}
-
-function Get-RobocopyExcludedFiles {
-    return @(
-        ".DS_Store",
-        "Thumbs.db",
-        "Desktop.ini",
-        "*~",
-        "*.swp",
-        "*.swo",
-        "*.tmp",
-        "*.temp",
-        "*.orig",
-        "*.pyc",
-        "*.pyo",
-        ".coverage",
-        "CMakeCache.txt",
-        "cmake_install.cmake",
-        "compile_commands.json",
-        "*.jou",
-        "*.str",
-        "*.log",
-        "*.wdb",
-        "*.vcd",
-        "*.zip",
-        "*.7z",
-        "*.rar",
-        "*.tar",
-        "*.tar.gz",
-        "*.tgz",
-        "*.tar.bz2",
-        "*.tbz2",
-        "*.tar.xz",
-        "*.txz",
-        "*.gz",
-        "*.bz2",
-        "*.xz",
-        "*.zst",
-        "*.deb",
-        "*.rpm",
-        "*.msi",
-        "*.dmg",
-        "*.pkg",
-        "*.AppImage",
-        "*.iso",
-        "*.raw",
-        "*.frame",
-        "*.jsonl",
-        "*frame*.json",
-        "*metrics*.json",
-        "*events*.json",
-        "*summary*.json"
-    )
 }
 
 function Register-NasCredentialIfProvided([string]$HostName) {
@@ -372,7 +290,7 @@ function Invoke-NasMirrorBackup([string]$SourceRoot, [string]$HostName, [string]
         "/NJH",
         "/A-:R",
         "/XD"
-    ) + (Get-RobocopyExcludedDirectories) + @("/XF") + (Get-RobocopyExcludedFiles)
+    ) + (Get-RobocopyExcludedDirectories $SourceRoot) + @("/XF") + (Get-RobocopyExcludedFiles)
 
     if ($DryRun) {
         $args += "/L"
@@ -387,88 +305,6 @@ function Invoke-NasMirrorBackup([string]$SourceRoot, [string]$HostName, [string]
     Write-Host "NAS backup finished. Robocopy exit code: $rc"
 }
 
-function Remove-ExcludedGitTracking([string]$Repo) {
-    $patterns = @(
-        ":(glob)**/.DS_Store",
-        ":(glob)**/Thumbs.db",
-        ":(glob)**/Desktop.ini",
-        ":(glob)**/*~",
-        ":(glob)**/*.swp",
-        ":(glob)**/*.swo",
-        ":(glob)**/*.tmp",
-        ":(glob)**/*.temp",
-        ":(glob)**/*.orig",
-        ":(glob)**/__pycache__/**",
-        ":(glob)**/*.pyc",
-        ":(glob)**/*.pyo",
-        ":(glob)**/.pytest_cache/**",
-        ":(glob)**/.mypy_cache/**",
-        ":(glob)**/.ruff_cache/**",
-        ":(glob)**/.coverage",
-        ":(glob)**/htmlcov/**",
-        ":(glob)**/node_modules/**",
-        ":(glob)**/.npm/**",
-        ":(glob)**/.pnpm-store/**",
-        ":(glob)**/.vs/**",
-        ":(glob)**/CMakeFiles/**",
-        ":(glob)**/CMakeCache.txt",
-        ":(glob)**/cmake_install.cmake",
-        ":(glob)**/compile_commands.json",
-        ":(glob)**/bin/**",
-        ":(glob)**/obj/**",
-        ":(glob)**/build/**",
-        ":(glob)**/build-*/**",
-        ":(glob)**/cmake-build-*/**",
-        ":(glob)**/out/**",
-        ":(glob)**/dist/**",
-        ":(glob)**/tmp/**",
-        ":(glob)**/temp/**",
-        ":(glob)**/logs/**",
-        ":(glob)**/.Xil/**",
-        ":(glob)**/*.cache/**",
-        ":(glob)**/*.gen/**",
-        ":(glob)**/*.hw/**",
-        ":(glob)**/*.runs/**",
-        ":(glob)**/*.jou",
-        ":(glob)**/*.str",
-        ":(glob)**/*.log",
-        ":(glob)**/*.wdb",
-        ":(glob)**/*.vcd",
-        ":(glob)**/*.zip",
-        ":(glob)**/*.7z",
-        ":(glob)**/*.rar",
-        ":(glob)**/*.tar",
-        ":(glob)**/*.tar.gz",
-        ":(glob)**/*.tgz",
-        ":(glob)**/*.tar.bz2",
-        ":(glob)**/*.tbz2",
-        ":(glob)**/*.tar.xz",
-        ":(glob)**/*.txz",
-        ":(glob)**/*.gz",
-        ":(glob)**/*.bz2",
-        ":(glob)**/*.xz",
-        ":(glob)**/*.zst",
-        ":(glob)**/*.deb",
-        ":(glob)**/*.rpm",
-        ":(glob)**/*.msi",
-        ":(glob)**/*.dmg",
-        ":(glob)**/*.pkg",
-        ":(glob)**/*.AppImage",
-        ":(glob)**/*.iso",
-        ":(glob)**/artifacts/**",
-        ":(glob)**/evidence/**",
-        ":(glob)**/evidence_*/**",
-        ":(glob)**/*_evidence/**",
-        ":(glob)**/*evidence*/**",
-        ":(glob)repo_ignored/**",
-        ":(glob)**/repo_ignored/**"
-    )
-
-    foreach ($pattern in $patterns) {
-        Invoke-GitChecked -Repo $Repo -GitArgs @("rm", "--cached", "-r", "--ignore-unmatch", "--", $pattern) | Out-Null
-    }
-}
-
 function Invoke-GitPushRepo([string]$Repo, [string]$Remote, [string]$Branch, [switch]$DryRun) {
     Write-Host ""
     Write-Host "=== Push v5 to git ==="
@@ -480,6 +316,7 @@ function Invoke-GitPushRepo([string]$Repo, [string]$Remote, [string]$Branch, [sw
     }
 
     Ensure-GitRepository $Repo $Remote $Branch
+    Assert-GitScopeFiles $Repo
 
     Write-Host ""
     Write-Host "Checking git status..."
@@ -487,7 +324,12 @@ function Invoke-GitPushRepo([string]$Repo, [string]$Remote, [string]$Branch, [sw
 
     if ($DryRun) {
         Write-Host "Checking add scope without changing the index..."
-        Invoke-GitChecked -Repo $Repo -GitArgs @("add", "-A", "--dry-run") | Out-Null
+        $normalCount = Get-GitDryRunCount $Repo @("add", "-A", "--dry-run")
+        $importedCount = Get-GitDryRunCount $Repo @(
+            "add", "-A", "-f", "--dry-run", "--",
+            "linux", "linuxcnc", "board/petalinux"
+        )
+        Write-Host "Dry-run changes: normal=$normalCount canonical_imported_source=$importedCount"
         Write-Host "Dry-run complete. Skipping commit and push."
         return
     }
@@ -498,6 +340,14 @@ function Invoke-GitPushRepo([string]$Repo, [string]$Remote, [string]$Branch, [sw
 
     Write-Host "Removing cache, temporary, generated build, package, and proof files from git tracking..."
     Remove-ExcludedGitTracking $Repo
+
+    Write-Host "Force-staging complete canonical Linux, LinuxCNC, and PetaLinux source owners..."
+    Invoke-GitChecked -Repo $Repo -GitArgs @(
+        "add", "-A", "-f", "--",
+        "linux", "linuxcnc", "board/petalinux"
+    ) | Out-Null
+
+    Assert-GitScopeTracked $Repo
 
     Write-Host "Checking staged patch after exclusions..."
     $checkRc = Invoke-GitChecked -Repo $Repo -GitArgs @("diff", "--cached", "--check") -AllowFailure
@@ -528,11 +378,11 @@ function Invoke-GitPushRepo([string]$Repo, [string]$Remote, [string]$Branch, [sw
 $resolvedRepoRoot = Resolve-V5RepoRoot $RepoRoot
 
 Write-Host "=== Push v5 to git and backup v5 to NAS ==="
-Write-Host "Version: 20260707-mainline"
+Write-Host "Version: 20260711-canonical-source-scope"
 Write-Host "Repo:    $resolvedRepoRoot"
-Write-Host "Excludes: .git, repo_ignored, cache, temporary, generated build/run outputs, packages, and proof files"
+Write-Host "Excludes: .git, repo_ignored, explicit generated outputs, packages, and proof files"
 Write-Host ""
-Write-Host "Scope: Windows v5 source truth only"
+Write-Host "Scope: complete Windows v5 source truth, including Linux/LinuxCNC/PetaLinux/Vivado"
 Write-Host "Git target: $GitRemote/$GitBranch"
 Write-Host "NAS target: \\$NasHost\$NasShareName\v5"
 

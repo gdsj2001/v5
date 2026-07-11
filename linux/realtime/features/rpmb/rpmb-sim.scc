@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: MIT
+define KFEATURE_DESCRIPTION "Enable Replay Protected Memory Block (RPMB) Simulation Device"
+define KFEATURE_COMPATIBILITY all
+
+include features/rpmb/rpmb-base.scc
+
+kconf hardware rpmb-sim.cfg

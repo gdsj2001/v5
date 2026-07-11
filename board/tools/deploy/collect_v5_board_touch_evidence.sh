@@ -1,7 +1,9 @@
 #!/bin/sh
 set -eu
 
-repo_root="${V5_REPO_ROOT:-/root/Desktop/v5}"
+home_dir="${HOME:?HOME is required}"
+build_root="${V5_BUILD_ROOT:-$home_dir/v5-build}"
+evidence_root="${V5_EVIDENCE_ROOT:-$build_root/evidence}"
 board_ssh="${V5_BOARD_SSH:-}"
 board_ssh_port="${V5_BOARD_SSH_PORT:-22}"
 screenshot_evidence="${V5_UI_SCREENSHOT_EVIDENCE:-}"
@@ -9,7 +11,7 @@ remote_events="${V5_REMOTE_TOUCH_EVENTS:-/run/8ax_v5_product_ui/touch_events.jso
 remote_enable="${V5_REMOTE_TOUCH_ENABLE:-/run/8ax_v5_product_ui/enable_touch_diagnostics}"
 calibration_path="${V5_TOUCH_CALIBRATION_PATH:-/opt/8ax/safe_ui/re_touch_calibration.json}"
 old_calibration_path="${V5_OLD_TOUCH_CALIBRATION_PATH:-/opt/8ax/ui/re_touch_calibration.json}"
-local_out="${V5_TOUCH_EVIDENCE_OUT:-$repo_root/artifacts/board_touch/v5_board_touch_$(date -u +%Y%m%dT%H%M%SZ).jsonl}"
+local_out="${V5_TOUCH_EVIDENCE_OUT:-$evidence_root/board_touch/v5_board_touch_$(date -u +%Y%m%dT%H%M%SZ).jsonl}"
 wait_seconds="${V5_TOUCH_WAIT_SECONDS:-10}"
 apply=0
 

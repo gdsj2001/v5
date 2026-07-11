@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 
 import v5_drive_bus_action as action
+import v5_drive_bus_contract as contract
 
 
 def write_text(path: Path, text: str) -> None:
@@ -16,22 +17,22 @@ def write_text(path: Path, text: str) -> None:
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="v5_drive_cache_smoke_") as tmp:
         root = Path(tmp)
-        action.PROJECT_ROOT = root
-        action.SELF_PARAMETER_TABLE = root / "config/settings/self_parameter_table.tsv"
-        action.DRIVE_PARAMETER_TABLE = root / "config/settings/drive_parameter_table.tsv"
-        action.SETTINGS_RUNTIME_JSON = root / "settings_runtime.json"
-        action.RUNTIME_SETTINGS_INI = root / "linuxcnc/ini/v5_bus.ini"
-        action.RESIDENT_SNAPSHOT = root / "run/drive_profile_resident_snapshot.json"
+        contract.PROJECT_ROOT = root
+        contract.SELF_PARAMETER_TABLE = root / "config/settings/self_parameter_table.tsv"
+        contract.DRIVE_PARAMETER_TABLE = root / "config/settings/drive_parameter_table.tsv"
+        contract.SETTINGS_RUNTIME_JSON = root / "settings_runtime.json"
+        contract.RUNTIME_SETTINGS_INI = root / "linuxcnc/ini/v5_bus.ini"
+        contract.RESIDENT_SNAPSHOT = root / "run/drive_profile_resident_snapshot.json"
         write_text(
-            action.SETTINGS_RUNTIME_JSON,
-            json.dumps({"schema": action.SETTINGS_RUNTIME_SCHEMA, "axes": [{"axis": "X"}]}),
+            contract.SETTINGS_RUNTIME_JSON,
+            json.dumps({"schema": contract.SETTINGS_RUNTIME_SCHEMA, "axes": [{"axis": "X"}]}),
         )
-        write_text(action.RESIDENT_SNAPSHOT, json.dumps({"profiles": [{"profile_id": "smoke"}]}))
-        write_text(action.RUNTIME_SETTINGS_INI, "[AXIS_X]\nMAX_VELOCITY = 1\n")
-        write_text(action.SELF_PARAMETER_TABLE, "X\tslave\t0\n")
+        write_text(contract.RESIDENT_SNAPSHOT, json.dumps({"profiles": [{"profile_id": "smoke"}]}))
+        write_text(contract.RUNTIME_SETTINGS_INI, "[AXIS_X]\nMAX_VELOCITY = 1\n")
+        write_text(contract.SELF_PARAMETER_TABLE, "X\tslave\t0\n")
         first = action.preload_resident_state()
         first_bindings = action.load_self_slave_bindings()
-        write_text(action.SELF_PARAMETER_TABLE, "X\tslave\tNAT\n")
+        write_text(contract.SELF_PARAMETER_TABLE, "X\tslave\tNAT\n")
         second = action.preload_resident_state()
         second_bindings = action.load_self_slave_bindings()
         if not first.get("ok") or not second.get("ok"):

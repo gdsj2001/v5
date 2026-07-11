@@ -1,7 +1,8 @@
 using System.Diagnostics;
 using System.Reflection;
 
-const string ResourceName = "v5_git_nas_backup.ps1";
+const string ScriptResourceName = "v5_git_nas_backup.ps1";
+const string ScopeResourceName = "v5_git_scope.ps1";
 
 static int Fail(string message)
 {
@@ -30,21 +31,29 @@ Console.InputEncoding = System.Text.Encoding.UTF8;
 Console.Title = "v5 Git + NAS Backup";
 
 var assembly = Assembly.GetExecutingAssembly();
-await using var resource = assembly.GetManifestResourceStream(ResourceName);
-if (resource is null)
+await using var scriptResource = assembly.GetManifestResourceStream(ScriptResourceName);
+await using var scopeResource = assembly.GetManifestResourceStream(ScopeResourceName);
+if (scriptResource is null || scopeResource is null)
 {
-    return Fail("Embedded backup script was not found.");
+    return Fail("Embedded backup scripts were not found.");
 }
 
 var tempDir = Path.Combine(Path.GetTempPath(), "v5_git_nas_backup");
 Directory.CreateDirectory(tempDir);
-var tempScript = Path.Combine(tempDir, $"v5_git_nas_backup_{Guid.NewGuid():N}.ps1");
+var runDir = Path.Combine(tempDir, Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(runDir);
+var tempScript = Path.Combine(runDir, "v5_git_nas_backup.ps1");
+var tempScope = Path.Combine(runDir, "v5_git_scope.ps1");
 
 try
 {
     await using (var output = File.Create(tempScript))
     {
-        await resource.CopyToAsync(output);
+        await scriptResource.CopyToAsync(output);
+    }
+    await using (var output = File.Create(tempScope))
+    {
+        await scopeResource.CopyToAsync(output);
     }
 
     var psi = new ProcessStartInfo
@@ -101,6 +110,14 @@ finally
         if (File.Exists(tempScript))
         {
             File.Delete(tempScript);
+        }
+        if (File.Exists(tempScope))
+        {
+            File.Delete(tempScope);
+        }
+        if (Directory.Exists(runDir))
+        {
+            Directory.Delete(runDir);
         }
     }
     catch

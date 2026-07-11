@@ -1,0 +1,121 @@
+#!/bin/sh
+PATH=/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin
+
+LOG=/var/volatile/v5-net.log
+WIRED_A=eth0
+WIRED_B=eth1
+WIFI_A=
+WIFI_B=
+WIRED_CIDR=192.168.1.221/24
+WIRED_ROUTE_IP=192.168.1.221
+WIFI_CIDR=192.168.1.220/24
+WIFI_ROUTE_IP=192.168.1.220
+WIRED_FORCE_MODE=auto
+WIRED_SET_MAC=0
+WIRED_WATCHDOG=1
+WIRED_A_MAC=00:0a:35:00:8b:87
+WIRED_B_MAC=00:0a:35:00:11:55
+GATEWAY=192.168.1.10
+DNS_PRIMARY=223.5.5.5
+DNS_SECONDARY=1.1.1.1
+WPA_CONF=/home/petalinux/.config/6x-cnc/usb_wifi/wpa_supplicant.conf
+DROPBEAR_BIN=/usr/sbin/dropbear
+SSH_BACKEND=dropbear
+SYSCTL_IFACES="eth0 eth1"
+NET_APPLY_DELAY_SECS=3
+WIRED_ONE_SHOT_REPAIR_DELAY_SECS=10
+
+ensure_interfaces_baseline() {
+cat > /etc/network/interfaces <<'EOF'
+# /etc/network/interfaces -- network baseline managed by S99v5-net
+
+auto lo
+iface lo inet loopback
+
+iface eth0 inet manual
+iface eth1 inet manual
+iface atml0 inet manual
+iface bnep0 inet manual
+
+iface usb0 inet static
+    address 192.168.7.2
+    netmask 255.255.255.0
+    network 192.168.7.0
+    gateway 192.168.7.1
+EOF
+}
+
+ensure_resolver_baseline() {
+cat > /etc/resolv.conf <<EOF
+nameserver $DNS_PRIMARY
+nameserver $DNS_SECONDARY
+EOF
+}
+
+exec >>"$LOG" 2>&1
+echo "===== $(date) S99v5-net start ====="
+
+ensure_interfaces_baseline || true
+ensure_resolver_baseline || true
+
+if [ ! -r /usr/local/sbin/v5_net_core.sh ]; then
+    echo "v5_net_core.sh is missing" >&2
+    exit 1
+fi
+. /usr/local/sbin/v5_net_core.sh
+start_ssh_backend || true
+if [ "${NET_APPLY_DELAY_SECS:-0}" -gt 0 ] 2>/dev/null; then
+    echo "[${NET_APPLY_DELAY_SECS}] delayed net apply for boot settle"
+    sleep "${NET_APPLY_DELAY_SECS}"
+fi
+v5_net_apply
+ensure_resolver_baseline || true
+
+if [ -x /usr/local/sbin/v5_usb_wifi_apply.sh ]; then
+    (
+        sleep 1
+        /usr/local/sbin/v5_usb_wifi_apply.sh boot || true
+    ) &
+fi
+
+(
+    sleep "${WIRED_ONE_SHOT_REPAIR_DELAY_SECS:-15}"
+    iface="${WIRED_SELECTED:-$V5_MAINT_IFACE_DEFAULT}"
+    state="$(cat "/sys/class/net/$iface/operstate" 2>/dev/null || echo unknown)"
+    has_route=0
+    has_ip=0
+    route -n 2>/dev/null | grep -q "^0.0.0.0[[:space:]].*[[:space:]]$iface\$" && has_route=1
+    if command -v ip >/dev/null 2>&1; then
+        ip -4 addr show dev "$iface" 2>/dev/null | grep -q "inet[[:space:]]\+$WIRED_ROUTE_IP/" && has_ip=1
+    else
+        ifconfig "$iface" 2>/dev/null | grep -q "inet addr:$WIRED_ROUTE_IP" && has_ip=1
+    fi
+    if [ "$has_route" -eq 1 ] && [ "$has_ip" -eq 1 ]; then
+        echo "[${WIRED_ONE_SHOT_REPAIR_DELAY_SECS}] one-shot repair skipped iface=$iface state=$state route=ok ip=ok"
+        exit 0
+    fi
+    sleep 2
+    has_route=0
+    has_ip=0
+    route -n 2>/dev/null | grep -q "^0.0.0.0[[:space:]].*[[:space:]]$iface\$" && has_route=1
+    if command -v ip >/dev/null 2>&1; then
+        ip -4 addr show dev "$iface" 2>/dev/null | grep -q "inet[[:space:]]\+$WIRED_ROUTE_IP/" && has_ip=1
+    else
+        ifconfig "$iface" 2>/dev/null | grep -q "inet addr:$WIRED_ROUTE_IP" && has_ip=1
+    fi
+    if [ "$has_route" -eq 1 ] && [ "$has_ip" -eq 1 ]; then
+        echo "[${WIRED_ONE_SHOT_REPAIR_DELAY_SECS}] one-shot repair skipped after settle iface=$iface state=$state route=ok ip=ok"
+        exit 0
+    fi
+    echo "[${WIRED_ONE_SHOT_REPAIR_DELAY_SECS}] one-shot repair reapplying iface=$iface state=$state route=$has_route ip=$has_ip"
+    v5_net_apply || true
+) &
+
+ifconfig "$WIRED_A" 2>/dev/null || true
+ifconfig "$WIRED_B" 2>/dev/null || true
+[ -n "$WIFI_A" ] && ifconfig "$WIFI_A" 2>/dev/null || true
+[ -n "$WIFI_B" ] && ifconfig "$WIFI_B" 2>/dev/null || true
+route -n 2>/dev/null || true
+
+echo "===== $(date) S99v5-net done ====="
+exit 0

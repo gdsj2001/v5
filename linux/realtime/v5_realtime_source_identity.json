@@ -1,0 +1,14 @@
+{
+  "schema": "v5-linux-realtime-metadata-v1",
+  "source_owner": "linux/realtime",
+  "upstream": {
+    "name": "Yocto Kernel Cache",
+    "url": "https://git.yoctoproject.org/yocto-kernel-cache",
+    "branch": "yocto-5.4",
+    "commit": "93b1325e4b9bff0d1ce7a2dd85aed0b26e3e76d7",
+    "tree": "d61839ef0a2bbe7191d66fc92ca0f28c2cafbbd9"
+  },
+  "content_sha256": "23db1002b92f25020c77878677f43fca467420feb04b69c60749898537c4727b",
+  "file_count": 1632,
+  "symlink_count": 0
+}
