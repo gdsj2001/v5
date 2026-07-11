@@ -141,9 +141,9 @@ rootfs_tar=$(latest_file 'petalinux-image-minimal-*.rootfs.tar.gz')
 fsbl=$(latest_file 'fsbl-*.elf')
 uboot=$(latest_file 'u-boot-*.elf')
 
-recipe_root=$(find "$build_root/petalinux/output/tmp/work/zynq_generic-xilinx-linux-gnueabi/linuxcnc-prebuilt" \
+recipe_root=$(find "$build_root/petalinux/output/tmp/work/zynq_generic-xilinx-linux-gnueabi/linux-xlnx" \
     -mindepth 1 -maxdepth 1 -type d -print | sort | tail -n 1)
-[ -n "$recipe_root" ] || fail "LinuxCNC Yocto sysroot is missing"
+[ -n "$recipe_root" ] || fail "kernel Yocto sysroot is missing"
 sysroot=$recipe_root/recipe-sysroot
 native_sysroot=$recipe_root/recipe-sysroot-native
 cc=$native_sysroot/usr/bin/arm-xilinx-linux-gnueabi/arm-xilinx-linux-gnueabi-gcc
