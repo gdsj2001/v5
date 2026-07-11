@@ -206,7 +206,11 @@ def validate_contract(source_root):
         (
             'CONFIG_YOCTO_BB_NUMBER_THREADS="1"',
             'CONFIG_YOCTO_PARALLEL_MAKE="2"',
+            'CONFIG_SUBSYSTEM_ROOTFS_EXT4=y',
+            'CONFIG_SUBSYSTEM_SDROOT_DEV="/dev/mmcblk0p2"',
+            'CONFIG_SUBSYSTEM_RFS_FORMATS="tar.gz ext4"',
         ),
+        ("CONFIG_SUBSYSTEM_ROOTFS_INITRD=y",),
     )
     require_tokens(
         source_root,
@@ -228,9 +232,20 @@ def validate_contract(source_root):
     )
     require_tokens(
         source_root,
-        "project-spec/meta-user/recipes-bsp/u-boot/u-boot-zynq-scr/boot.cmd.default.initrd",
-        ("8ax,pl-dna-source", "8ax,pl-dna-value", "refusing unverified FIT boot"),
-        ("z20,pl-dna", "v5,pl-dna", "falling back to normal FIT boot"),
+        "project-spec/meta-user/recipes-bsp/u-boot/u-boot-zynq-scr/boot.cmd.default.ext4",
+        (
+            "root=/dev/mmcblk0p2 rw rootwait",
+            "8ax,pl-dna-source",
+            "8ax,pl-dna-value",
+            "refusing unverified FIT boot",
+        ),
+        (
+            "root=/dev/ram0",
+            "bootm ramdisk",
+            "z20,pl-dna",
+            "v5,pl-dna",
+            "falling back to normal FIT boot",
+        ),
     )
     require_tokens(
         source_root,

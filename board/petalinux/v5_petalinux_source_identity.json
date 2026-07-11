@@ -2,7 +2,7 @@
   "schema": "v5-petalinux-project-source-v1",
   "source_owner": "board/petalinux",
   "petalinux_version": "2020.2",
-  "content_sha256": "cd82dca3020573500ac2d9bdd970153534e7709f8dc00e231eb8a95e257c20e8",
+  "content_sha256": "03c49f14840b136016b6375170960b686d8aa0d59317549c49841edc16094dd8",
   "file_count": 73,
   "hardware": {
     "xsa_path": "project-spec/hw-description/system.xsa",
