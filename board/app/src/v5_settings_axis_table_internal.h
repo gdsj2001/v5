@@ -231,6 +231,8 @@ void v5_settings_axis_dropdown_cell(lv_obj_t *parent, unsigned int row, unsigned
 
 void v5_settings_axis_close_keyboard_overlay(void);
 
+void v5_settings_axis_create_keyboard_overlay(void);
+
 void v5_settings_axis_open_keyboard_for_ref(V5AxisCellRef *ref);
 
 void v5_settings_axis_action_cell(lv_obj_t *parent, unsigned int row, unsigned int col_index, int x, int y, int w, int h, const char *text, lv_color_t text_color, const char *debug_id);

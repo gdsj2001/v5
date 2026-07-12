@@ -13,6 +13,7 @@ merged_root=$state_root/merged
 output_root=$build_root/petalinux/output
 tmp_output_root=$output_root/tmp
 verifier=$source_mount/board/tools/petalinux/verify_v5_petalinux_source.py
+linux_verifier=$source_mount/board/tools/petalinux/verify_v5_linux_source.py
 
 fail() {
     echo "V5_PETALINUX_OVERLAY_ERROR $*" >&2
@@ -27,6 +28,7 @@ validate_source_mount() {
     [ -d "$source_mount" ] || fail "source mount is missing: $source_mount"
     [ -d "$source_root" ] || fail "PetaLinux source owner is missing: $source_root"
     [ -f "$verifier" ] || fail "PetaLinux verifier is missing: $verifier"
+    [ -f "$linux_verifier" ] || fail "Linux source verifier is missing: $linux_verifier"
 
     mount_type=$(findmnt -n -o FSTYPE -T "$source_root")
     mount_options=$(findmnt -n -o OPTIONS -T "$source_root")
@@ -47,6 +49,10 @@ validate_source_mount() {
     esac
 
     python3 "$verifier" --project-root "$source_mount" --source-root "$source_root"
+    python3 "$linux_verifier" \
+        --project-root "$source_mount" \
+        --build-root "$build_root" \
+        --projection-root "$build_root/petalinux/linux-source-verify"
 }
 
 validate_build_root() {
@@ -91,6 +97,19 @@ configure_native_tmpdir() {
     chown "$build_user:$(id -gn "$build_user")" "$project_config"
 }
 
+configure_source_owner() {
+    layer_conf=$merged_root/project-spec/meta-user/conf/layer.conf
+    [ -f "$layer_conf" ] || fail "PetaLinux layer config is missing: $layer_conf"
+    case "$source_mount" in
+        *\"*) fail "source mount contains an unsupported quote" ;;
+    esac
+    sed -i '/^V5_PROJECT_SOURCE_ROOT = /d' "$layer_conf"
+    printf '\nV5_PROJECT_SOURCE_ROOT = "%s"\n' "$source_mount" >> "$layer_conf"
+    grep -Fqx "V5_PROJECT_SOURCE_ROOT = \"$source_mount\"" "$layer_conf" || \
+        fail "failed to bind the canonical Linux owner root"
+    chown "$build_user:$(id -gn "$build_user")" "$layer_conf"
+}
+
 prepare_overlay() {
     validate_source_mount
     validate_build_root
@@ -113,6 +132,7 @@ prepare_overlay() {
         "$merged_root/project-spec/configs" \
         "$merged_root/project-spec/meta-user"
     configure_native_tmpdir
+    configure_source_owner
     [ "$(findmnt -n -o FSTYPE -T "$tmp_output_root")" != "overlay" ] || \
         fail "PetaLinux TMPDIR must not run on OverlayFS: $tmp_output_root"
     echo "V5_PETALINUX_OVERLAY_READY lower=$source_root merged=$merged_root upper=$upper_root tmp=$tmp_output_root user=$build_user"
@@ -165,6 +185,9 @@ dry_run() {
     grep -Fqx "CONFIG_TMP_DIR_LOCATION=\"$tmp_output_root\"" \
         "$merged_root/project-spec/configs/config" || \
         fail "overlay project does not consume native TMPDIR"
+    grep -Fqx "V5_PROJECT_SOURCE_ROOT = \"$source_mount\"" \
+        "$merged_root/project-spec/meta-user/conf/layer.conf" || \
+        fail "overlay project does not consume the canonical Linux owner"
 
     after=$(python3 "$verifier" --project-root "$source_mount" --source-root "$source_root" --print-source-hash)
     [ "$before" = "$after" ] || fail "Windows source identity changed during overlay probe"

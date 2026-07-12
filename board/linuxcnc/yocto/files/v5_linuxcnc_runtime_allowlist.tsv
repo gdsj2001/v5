@@ -1,0 +1,33 @@
+# path	consumer
+/etc/linuxcnc/rtapi.conf	realtime loader configuration
+/usr/bin/halcmd	canonical HAL loader and control client
+/usr/bin/inivar	canonical INI parser used by the launcher
+/usr/bin/io	EMCIO task from both V5 INI owners
+/usr/bin/linuxcnc	headless LinuxCNC process launcher
+/usr/bin/linuxcnc_module_helper	realtime loader module helper
+/usr/bin/linuxcncrsh	V5 command-gate transport display
+/usr/bin/linuxcncsvr	NML channel owner
+/usr/bin/milltask	task layer and RS274 interpreter owner
+/usr/bin/rtapi_app	userspace realtime process owner
+/usr/lib/liblinuxcnchal.so.0	HAL userspace API
+/usr/lib/liblinuxcncini.so.0	INI parser API
+/usr/lib/libnml.so.0	NML transport API
+/usr/lib/libposemath.so.0	motion and interpreter pose math
+/usr/lib/libpyplugin.so.0	interpreter Python plugin bridge
+/usr/lib/librs274.so.0	RS274 interpreter
+/usr/lib/libtooldata.so.0	tool-table runtime owner
+/usr/lib/linuxcnc/realtime	userspace RTAPI lifecycle helper
+/usr/lib/linuxcnc/modules/hal_lib.so	HAL realtime core
+/usr/lib/linuxcnc/modules/motmod.so	V5 motion owner
+/usr/lib/linuxcnc/modules/tpmod.so	trajectory planner owner
+/usr/lib/linuxcnc/modules/homemod.so	native homing owner
+/usr/lib/linuxcnc/modules/trivkins.so	Pulse-mode kinematics
+/usr/lib/linuxcnc/modules/xyzac-trt-kins.so	AC active-model kinematics
+/usr/lib/linuxcnc/modules/xyzbc-trt-kins.so	BC active-model kinematics
+/usr/lib/linuxcnc/modules/bitslice.so	BUS digital-input adapter
+/usr/lib/linuxcnc/modules/mux2.so	BUS RTCP selector adapter
+/usr/lib/linuxcnc/modules/or2.so	BUS RTCP input combiner
+/usr/lib/python3/dist-packages/_hal.so	Python native HAL binding
+/usr/lib/python3/dist-packages/hal.py	Python HAL API shim
+/usr/lib/python3/dist-packages/linuxcnc.so	State Publisher native status API
+/usr/share/linuxcnc/linuxcnc.nml	canonical NML channel layout

@@ -1,4 +1,5 @@
 #include "v5_lvgl_remote_input.h"
+#include "v5_ui_first_frame_guard.h"
 
 #include "lvgl.h"
 
@@ -19,6 +20,7 @@ static int g_remote_pressed;
 static int g_remote_seen_press;
 static int g_remote_release_pending;
 static int g_remote_dragging;
+static V5UiOperatorInputSequence g_remote_post_modal_sequence;
 
 static double monotonic_seconds(void)
 {
@@ -84,6 +86,40 @@ static void pump_lvgl(unsigned int reads)
     }
 }
 
+static void reset_remote_pointer_state(void)
+{
+    g_remote_active = 0;
+    g_remote_pressed = 0;
+    g_remote_seen_press = 0;
+    g_remote_release_pending = 0;
+    g_remote_dragging = 0;
+}
+
+static int ignore_post_modal_remote_event(const char *phase, int x, int y)
+{
+    int is_down = strcmp(phase, "down") == 0;
+    int is_up = strcmp(phase, "up") == 0 || strcmp(phase, "cancel") == 0;
+    int allowed;
+    if (is_down) {
+        allowed = v5_ui_first_frame_guard_input_sequence_begin(
+            &g_remote_post_modal_sequence,
+            (lv_coord_t)x,
+            (lv_coord_t)y);
+    } else if (is_up) {
+        allowed = v5_ui_first_frame_guard_input_sequence_end(&g_remote_post_modal_sequence);
+    } else {
+        allowed = v5_ui_first_frame_guard_input_sequence_continue(&g_remote_post_modal_sequence);
+    }
+    if (allowed) {
+        return 0;
+    }
+    if (g_remote_indev) {
+        lv_indev_reset(g_remote_indev, NULL);
+    }
+    reset_remote_pointer_state();
+    return 1;
+}
+
 static void log_remote_input_event(const char *phase, int x, int y, int ok)
 {
     FILE *fp;
@@ -115,6 +151,7 @@ int v5_lvgl_remote_input_setup(void)
     g_remote_down_point = g_remote_point;
     g_remote_active = 0;
     g_remote_pressed = 0;
+    v5_ui_first_frame_guard_input_sequence_reset(&g_remote_post_modal_sequence);
     lv_indev_drv_init(&g_remote_driver);
     g_remote_driver.type = LV_INDEV_TYPE_POINTER;
     g_remote_driver.read_cb = remote_input_read_cb;
@@ -125,13 +162,27 @@ int v5_lvgl_remote_input_setup(void)
 int v5_lvgl_remote_input_pointer_event(const char *phase, int x, int y)
 {
     unsigned int pump_reads = 1U;
+    int is_down;
+    int is_move;
+    int is_up;
     int dx;
     int dy;
     if (!v5_lvgl_remote_input_accepts_pointer() || !g_remote_indev || !phase || x < 0 || y < 0) {
         log_remote_input_event(phase, x, y, 0);
         return 0;
     }
-    if (strcmp(phase, "down") == 0) {
+    is_down = strcmp(phase, "down") == 0;
+    is_move = strcmp(phase, "move") == 0;
+    is_up = strcmp(phase, "up") == 0 || strcmp(phase, "cancel") == 0;
+    if (!is_down && !is_move && !is_up) {
+        log_remote_input_event(phase, x, y, 0);
+        return 0;
+    }
+    if (ignore_post_modal_remote_event(phase, x, y)) {
+        log_remote_input_event(phase, x, y, 0);
+        return 1;
+    }
+    if (is_down) {
         g_remote_point.x = (lv_coord_t)x;
         g_remote_point.y = (lv_coord_t)y;
         g_remote_down_point = g_remote_point;
@@ -140,7 +191,7 @@ int v5_lvgl_remote_input_pointer_event(const char *phase, int x, int y)
         g_remote_seen_press = 0;
         g_remote_release_pending = 0;
         g_remote_dragging = 0;
-    } else if (strcmp(phase, "move") == 0) {
+    } else if (is_move) {
         if (!g_remote_active || !g_remote_pressed) {
             log_remote_input_event(phase, x, y, 0);
             return 0;
@@ -156,7 +207,7 @@ int v5_lvgl_remote_input_pointer_event(const char *phase, int x, int y)
         }
         g_remote_active = 1;
         g_remote_pressed = 1;
-    } else if (strcmp(phase, "up") == 0 || strcmp(phase, "cancel") == 0) {
+    } else if (is_up) {
         if (g_remote_dragging) {
             g_remote_point.x = (lv_coord_t)x;
             g_remote_point.y = (lv_coord_t)y;
@@ -171,9 +222,6 @@ int v5_lvgl_remote_input_pointer_event(const char *phase, int x, int y)
             g_remote_release_pending = 1;
         }
         pump_reads = 2U;
-    } else {
-        log_remote_input_event(phase, x, y, 0);
-        return 0;
     }
     pump_lvgl(pump_reads);
     log_remote_input_event(phase, x, y, 1);

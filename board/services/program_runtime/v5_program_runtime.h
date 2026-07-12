@@ -30,6 +30,7 @@ typedef struct V5ProgramRuntime {
     unsigned int line_count;
     V5StatusPoint preview_trajectory[V5_PROGRAM_PREVIEW_POINT_COUNT];
     int preview_wcs_indices[V5_PROGRAM_PREVIEW_POINT_COUNT];
+    unsigned char preview_break_before[V5_PROGRAM_PREVIEW_POINT_COUNT];
     unsigned int preview_trajectory_count;
     unsigned int preview_wcs_mask;
     int preview_program_wcs_index;
@@ -70,12 +71,24 @@ typedef struct V5ProgramOpenResult {
     const char *preview_strategy;
 } V5ProgramOpenResult;
 
+typedef struct V5ProgramDeleteResult {
+    int ok;
+    const char *code;
+    int removed;
+    int cleared_loaded_program;
+    unsigned int generation;
+} V5ProgramDeleteResult;
+
 void v5_program_runtime_init(V5ProgramRuntime *runtime);
 void v5_program_runtime_destroy(V5ProgramRuntime *runtime);
 int v5_program_runtime_open_file(
     V5ProgramRuntime *runtime,
     const char *path,
     V5ProgramOpenResult *result);
+int v5_program_runtime_delete_file(
+    V5ProgramRuntime *runtime,
+    const char *path,
+    V5ProgramDeleteResult *result);
 int v5_program_runtime_has_open_program(const V5ProgramRuntime *runtime);
 int v5_program_runtime_has_mdi(const V5ProgramRuntime *runtime);
 const char *v5_program_runtime_mdi_text(const V5ProgramRuntime *runtime);
@@ -96,6 +109,9 @@ int v5_program_runtime_preview_wcs_index(
     const V5ProgramRuntime *runtime,
     unsigned int point_index,
     int *wcs_index_out);
+int v5_program_runtime_preview_break_before(
+    const V5ProgramRuntime *runtime,
+    unsigned int point_index);
 int v5_program_runtime_preview_program_wcs_index(const V5ProgramRuntime *runtime);
 unsigned int v5_program_runtime_preview_wcs_mask(const V5ProgramRuntime *runtime);
 int v5_program_runtime_prepare_start(

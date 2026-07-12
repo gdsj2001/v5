@@ -17,6 +17,8 @@
 #include "v5_settings_page.h"
 #include "v5_settings_axis_table.h"
 #include "v5_status_shm.h"
+#include "v5_ui_first_frame_guard.h"
+#include "v5_ui_page_cache_registry.h"
 #include "v5_ui_model.h"
 #include "v5_v3_local_pages.h"
 
@@ -126,10 +128,31 @@ static int shell_status_display_equal(const V5UiStatusView *before, const V5UiSt
     return 1;
 }
 
+static int shell_settings_status_equal(const V5UiStatusView *before, const V5UiStatusView *after)
+{
+    int before_valid;
+    int after_valid;
+    if (!before || !after) {
+        return 0;
+    }
+    before_valid = (before->valid_mask & V5_STATUS_VALID_MCS) != 0U;
+    after_valid = (after->valid_mask & V5_STATUS_VALID_MCS) != 0U;
+    if (before_valid != after_valid) {
+        return 0;
+    }
+    return !before_valid || shell_axis_values_equal(before->mcs, after->mcs, 1000.0);
+}
+
 int v5_ui_shell_refresh_once(void)
 {
     unsigned long long now;
     unsigned int flags = 0U;
+    int main_cache_changed = 0;
+    int settings_cache_changed = 0;
+    int settings_projection_changed = 0;
+    int overlay_active;
+    unsigned int dirty_mask;
+    unsigned int page;
 
     if (!g_v5_shell_ui_ready || !g_v5_shell_main_page.root) {
         return 0;
@@ -140,38 +163,66 @@ int v5_ui_shell_refresh_once(void)
         (void)v5_ui_model_refresh_status_from_shm(&g_v5_shell_model, V5_STATUS_SHM_PATH);
         if (shell_refresh_modal_line_readback(0)) {
             flags |= V5_MAIN_PAGE_REFRESH_DYNAMIC;
+            main_cache_changed = 1;
         }
         if (shell_refresh_operator_error(0)) {
             flags |= V5_MAIN_PAGE_REFRESH_DYNAMIC;
         }
         if (!shell_status_display_equal(&before, &g_v5_shell_model.status_view)) {
             flags |= V5_MAIN_PAGE_REFRESH_DYNAMIC;
+            main_cache_changed = 1;
+        }
+        if (!shell_settings_status_equal(&before, &g_v5_shell_model.status_view)) {
+            settings_cache_changed = 1;
+            settings_projection_changed = 1;
         }
     }
     if (shell_refresh_due(now, &g_v5_shell_ui_estop_last_refresh_ns, V5_UI_ESTOP_REFRESH_NS)) {
-        (void)shell_refresh_safety_readback(0);
+        if (shell_refresh_safety_readback(0)) {
+            main_cache_changed = 1;
+        }
         flags |= V5_MAIN_PAGE_REFRESH_ESTOP;
     }
     if (shell_refresh_due(now, &g_v5_shell_ui_button_last_refresh_ns, V5_UI_BUTTON_REFRESH_NS)) {
         flags |= V5_MAIN_PAGE_REFRESH_BUTTONS;
     }
     if (shell_refresh_due(now, &g_v5_shell_ui_slow_last_refresh_ns, V5_UI_SLOW_REFRESH_NS)) {
-        (void)shell_refresh_native_readback(0);
+        if (shell_refresh_native_readback(0)) {
+            main_cache_changed = 1;
+        }
         flags |= V5_MAIN_PAGE_REFRESH_SLOW;
     }
-    if (flags != 0U) {
-        int applied = 0;
+
+    overlay_active = v5_ui_first_frame_guard_overlay_active();
+    dirty_mask = v5_ui_page_cache_affected_mask(
+        (unsigned int)g_v5_shell_current_page,
+        (unsigned int)V5_SHELL_PAGE_MAIN,
+        (unsigned int)V5_SHELL_PAGE_SETTINGS,
+        overlay_active,
+        main_cache_changed,
+        settings_cache_changed);
+    for (page = 0U; page < (unsigned int)V5_SHELL_PAGE_COUNT; ++page) {
+        if ((dirty_mask & (1U << page)) != 0U) {
+            shell_mark_page_cache_dirty((V5ShellPageKind)page);
+        }
+    }
+
+    if (!overlay_active && flags != 0U) {
         if (g_v5_shell_current_page == V5_SHELL_PAGE_MAIN) {
             (void)v5_main_page_apply_status_flags(&g_v5_shell_main_page, &g_v5_shell_model.status_view, flags);
-            applied = 1;
         }
-        if ((flags & V5_MAIN_PAGE_REFRESH_DYNAMIC) != 0U && g_v5_shell_current_page == V5_SHELL_PAGE_SETTINGS) {
+        if (g_v5_shell_current_page == V5_SHELL_PAGE_SETTINGS &&
+            (settings_projection_changed || settings_cache_changed)) {
             (void)v5_settings_page_apply_status(&g_v5_shell_settings_page, &g_v5_shell_model.status_view);
-            applied = 1;
         }
-        if (applied) {
-            lv_timer_handler();
-        }
+        lv_timer_handler();
+    } else if (overlay_active && (flags & V5_MAIN_PAGE_REFRESH_ESTOP) != 0U) {
+        /* The emergency button lives above the modal mask and remains live at 10 Hz. */
+        lv_timer_handler();
+    }
+    if (!overlay_active && shell_sync_current_page_cache_if_dirty() < 0) {
+        fprintf(stderr, "V5_UI_CACHE_SYNC_FAIL page=%u\n", (unsigned int)g_v5_shell_current_page);
+        return 0;
     }
     return 1;
 }

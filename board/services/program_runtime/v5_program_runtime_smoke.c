@@ -53,6 +53,23 @@ static int v5_program_runtime_write_long_input(const char *path)
     return 1;
 }
 
+static int v5_program_runtime_write_modal_arc_bc_input(const char *path)
+{
+    FILE *fp = fopen(path, "wb");
+    if (!fp) return 0;
+    fputs(
+        "G21G90G17\n"
+        "G0X0Y0Z0\n"
+        "G1X5Y0\n"
+        "G3X10Y5I0J5\n"
+        "G91G1X1B30C45\n"
+        "G55\n"
+        "G1X1\n",
+        fp);
+    fclose(fp);
+    return 1;
+}
+
 static int v5_program_runtime_write_oversize_input(const char *path)
 {
     FILE *fp = fopen(path, "wb");
@@ -73,6 +90,7 @@ int main(void)
     const char *path = "v5_program_runtime_smoke.ngc";
     V5ProgramRuntime runtime;
     V5ProgramOpenResult open_result;
+    V5ProgramDeleteResult delete_result;
     V5CommandRequest start_request;
     V5CommandPrepared prepared;
     unsigned int program_preview_count;
@@ -162,7 +180,7 @@ int main(void)
     if (!ok || !open_result.ok ||
         runtime.preview_segment_count != 2U ||
         runtime.preview_trajectory_count != 6U ||
-        strcmp(runtime.preview_strategy, "multi_segment_g1_no_g53") != 0 ||
+        strcmp(runtime.preview_strategy, "modal_g123") != 0 ||
         runtime.preview_trajectory[0].axis[0] != 0.0 ||
         runtime.preview_trajectory[0].axis[1] != 0.0 ||
         runtime.preview_trajectory[2].axis[0] != 1.0 ||
@@ -170,7 +188,10 @@ int main(void)
         runtime.preview_trajectory[3].axis[0] != 5.0 ||
         runtime.preview_trajectory[3].axis[1] != 5.0 ||
         runtime.preview_trajectory[5].axis[0] != 6.0 ||
-        runtime.preview_trajectory[5].axis[1] != 6.0) {
+        runtime.preview_trajectory[5].axis[1] != 6.0 ||
+        !v5_program_runtime_preview_break_before(&runtime, 0U) ||
+        !v5_program_runtime_preview_break_before(&runtime, 3U) ||
+        v5_program_runtime_preview_break_before(&runtime, 1U)) {
         v5_program_runtime_destroy(&runtime);
         return 19;
     }
@@ -182,13 +203,30 @@ int main(void)
     ok = v5_program_runtime_open_file(&runtime, path, &open_result);
     remove(path);
     if (!ok || !open_result.ok ||
-        !runtime.preview_decimated || !runtime.preview_truncated ||
+        !runtime.preview_decimated || runtime.preview_truncated ||
         runtime.preview_candidate_count <= runtime.preview_kept_count ||
         runtime.preview_segment_count != 1U ||
-        strcmp(runtime.preview_strategy, "multi_segment_g1_no_g53_truncated") != 0 ||
+        runtime.preview_trajectory_count != V5_PROGRAM_PREVIEW_POINT_COUNT ||
+        strcmp(runtime.preview_strategy, "lod_modal_g123_decimated") != 0 ||
         open_result.preview_truncated != runtime.preview_truncated) {
         v5_program_runtime_destroy(&runtime);
         return 13;
+    }
+
+    if (!v5_program_runtime_write_modal_arc_bc_input(path)) {
+        v5_program_runtime_destroy(&runtime);
+        return 21;
+    }
+    ok = v5_program_runtime_open_file(&runtime, path, &open_result);
+    remove(path);
+    if (!ok || !open_result.ok || runtime.preview_trajectory_count < 20U ||
+        runtime.preview_wcs_mask != 3U || !runtime.preview_wcs_mixed ||
+        runtime.preview_trajectory[runtime.preview_trajectory_count - 1U].axis[0] != 12.0 ||
+        runtime.preview_trajectory[runtime.preview_trajectory_count - 1U].axis[3] != 30.0 ||
+        runtime.preview_trajectory[runtime.preview_trajectory_count - 1U].axis[4] != 45.0 ||
+        runtime.preview_segment_count != 2U) {
+        v5_program_runtime_destroy(&runtime);
+        return 22;
     }
 
     if (!v5_program_runtime_write_oversize_input(path)) {
@@ -220,6 +258,39 @@ int main(void)
     if (!v5_command_gate_prepare(&start_request, &prepared) || strcmp(prepared.name, "mdi_run") != 0) {
         v5_program_runtime_destroy(&runtime);
         return 9;
+    }
+
+    if (!v5_program_runtime_write_input(path) ||
+        !v5_program_runtime_open_file(&runtime, path, &open_result)) {
+        v5_program_runtime_destroy(&runtime);
+        return 23;
+    }
+    {
+        unsigned int generation_before_delete = runtime.generation;
+        FILE *deleted_file;
+        if (!v5_program_runtime_delete_file(&runtime, path, &delete_result) ||
+            !delete_result.ok || !delete_result.removed ||
+            !delete_result.cleared_loaded_program ||
+            strcmp(delete_result.code, "OK") != 0 ||
+            delete_result.generation != generation_before_delete + 1U ||
+            v5_program_runtime_has_open_program(&runtime)) {
+            remove(path);
+            v5_program_runtime_destroy(&runtime);
+            return 24;
+        }
+        deleted_file = fopen(path, "rb");
+        if (deleted_file) {
+            fclose(deleted_file);
+            remove(path);
+            v5_program_runtime_destroy(&runtime);
+            return 25;
+        }
+        if (v5_program_runtime_delete_file(&runtime, path, &delete_result) ||
+            delete_result.ok || delete_result.removed ||
+            strcmp(delete_result.code, "PROGRAM_DELETE_NOT_REGULAR") != 0) {
+            v5_program_runtime_destroy(&runtime);
+            return 26;
+        }
     }
 
     printf(

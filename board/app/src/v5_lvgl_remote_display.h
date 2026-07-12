@@ -1,6 +1,8 @@
 #ifndef V5_LVGL_REMOTE_DISPLAY_H
 #define V5_LVGL_REMOTE_DISPLAY_H
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -23,15 +25,33 @@ typedef struct V5RemoteFrameSnapshot {
 enum {
     V5_REMOTE_DISPLAY_CACHE_MAIN = 0,
     V5_REMOTE_DISPLAY_CACHE_SETTINGS = 1,
-    V5_REMOTE_DISPLAY_CACHE_KEYBOARD = 2,
-    V5_REMOTE_DISPLAY_CACHE_POPUP = 3,
-    V5_REMOTE_DISPLAY_CACHE_COUNT = 4
+    V5_REMOTE_DISPLAY_CACHE_TOOL = 2,
+    V5_REMOTE_DISPLAY_CACHE_PROBE = 3,
+    V5_REMOTE_DISPLAY_CACHE_OFFSET = 4,
+    V5_REMOTE_DISPLAY_CACHE_IO = 5,
+    V5_REMOTE_DISPLAY_CACHE_NETWORK = 6,
+    V5_REMOTE_DISPLAY_CACHE_PROGRAM = 7,
+    V5_REMOTE_DISPLAY_CACHE_MDI = 8,
+    V5_REMOTE_DISPLAY_CACHE_PAGE_COUNT = 9,
+    V5_REMOTE_DISPLAY_CACHE_OVERLAY_0 = 9,
+    V5_REMOTE_DISPLAY_CACHE_OVERLAY_1 = 10,
+    V5_REMOTE_DISPLAY_CACHE_OVERLAY_2 = 11,
+    V5_REMOTE_DISPLAY_CACHE_OVERLAY_3 = 12,
+    V5_REMOTE_DISPLAY_CACHE_OVERLAY_BASE = V5_REMOTE_DISPLAY_CACHE_OVERLAY_0,
+    V5_REMOTE_DISPLAY_CACHE_OVERLAY_COUNT = 4,
+    V5_REMOTE_DISPLAY_CACHE_COUNT = 13
 };
 
 int v5_lvgl_remote_display_setup(unsigned int width, unsigned int height);
 void v5_lvgl_remote_display_render_now(void);
 int v5_lvgl_remote_display_cache_capture(unsigned int slot);
 int v5_lvgl_remote_display_cache_blit(unsigned int slot);
+int v5_lvgl_remote_display_publish_current_frame(void);
+int v5_lvgl_remote_display_cache_valid(unsigned int slot);
+void v5_lvgl_remote_display_cache_invalidate(unsigned int slot);
+size_t v5_lvgl_remote_display_cache_budget_bytes(void);
+int v5_lvgl_remote_display_set_output_suppressed(int suppressed);
+int v5_lvgl_remote_display_output_suppressed(void);
 int v5_remote_frame_snapshot(V5RemoteFrameSnapshot *snapshot);
 int v5_remote_frame_ipc_pump(void);
 

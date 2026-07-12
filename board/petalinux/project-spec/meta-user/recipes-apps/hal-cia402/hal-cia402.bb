@@ -38,15 +38,10 @@ do_install() {
     install -d ${D}/usr/lib/linuxcnc/modules
     install -m 0644 ${B}/cia402.so ${D}/usr/lib/linuxcnc/modules/cia402.so
     chmod 0644 ${D}/usr/lib/linuxcnc/modules/cia402.so
-
-    install -d ${D}/usr/src/hal-cia402
-    install -m 0644 ${S}/cia402.comp ${D}/usr/src/hal-cia402/cia402.comp
-    install -m 0644 ${S}/cia402.c ${D}/usr/src/hal-cia402/cia402.c
 }
 
 FILES_${PN} += " \
     /usr/lib/linuxcnc/modules/cia402.so \
-    /usr/src/hal-cia402 \
 "
 
 RDEPENDS_${PN} += "linuxcnc-prebuilt"

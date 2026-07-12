@@ -33,6 +33,7 @@
 #include "homing.h"
 #include "axis.h"
 #include "kinematics.h"  //for kinematicsSwitchable()
+#include "v5_wcheckpoint.h"
 
 // Mark strings for translation, but defer translation to userspace
 #define _(s) (s)
@@ -247,6 +248,7 @@ void emcmotController(void *arg, long period)
 
     read_homing_in_pins(ALL_JOINTS);
     handle_kinematicsSwitch();
+    v5_wcheckpoint_update_before_inputs();
     process_inputs();
     do_forward_kins();
     process_probe_inputs();
@@ -261,6 +263,7 @@ void emcmotController(void *arg, long period)
     if (   (emcmotStatus->motion_state == EMCMOT_MOTION_FREE)
         && do_homing()) {
         v5_reset_wrapped_rotary_turn_offsets();
+        v5_wcheckpoint_reset();
         switch_to_teleop_mode();
     }
 
@@ -270,6 +273,7 @@ void emcmotController(void *arg, long period)
     output_to_hal();
     write_homing_out_pins(ALL_JOINTS);
     update_status();
+    v5_wcheckpoint_publish();
     /* here ends the core of the controller */
     emcmotStatus->heartbeat++;
     /* set tail to head, to indicate work complete */
@@ -331,7 +335,7 @@ static void handle_kinematicsSwitch(void) {
         beforePose[anum] = *pcmd_p[anum];
     }
 #endif
-    kinematicsForward(joint_posKinsSwitch,
+    v5_wcheckpoint_forward(joint_posKinsSwitch,
                       &emcmotStatus->carte_pos_cmd,
                       &tmpFFlags, &tmpIFlags);
 #ifdef SWITCHKINS_DEBUG
@@ -626,7 +630,7 @@ static void do_forward_kins(void)
     switch (emcmotConfig->kinType) {
 
     case KINEMATICS_IDENTITY:
-	kinematicsForward(joint_pos, &emcmotStatus->carte_pos_fb, &fflags,
+	v5_wcheckpoint_forward(joint_pos, &emcmotStatus->carte_pos_fb, &fflags,
 	    &iflags);
 	if (get_allhomed()) {
 	    emcmotStatus->carte_pos_fb_ok = 1;
@@ -644,7 +648,7 @@ static void do_forward_kins(void)
 	    }
 	    /* calculate Cartesean position feedback from joint pos fb */
 	    result =
-		kinematicsForward(joint_pos, &emcmotStatus->carte_pos_fb,
+		v5_wcheckpoint_forward(joint_pos, &emcmotStatus->carte_pos_fb,
 		&fflags, &iflags);
 	    /* check to make sure kinematics converged */
 	    if (result < 0) {
@@ -951,7 +955,7 @@ static void set_operating_mode(void)
 	    SET_MOTION_COORD_FLAG(0);
 	    SET_MOTION_ERROR_FLAG(0);
 
-            kinematicsForward(positions, &emcmotStatus->carte_pos_cmd, &fflags, &iflags);
+            v5_wcheckpoint_forward(positions, &emcmotStatus->carte_pos_cmd, &fflags, &iflags);
             // entering teleop (INPOS), remove ext offsets
             axis_sync_teleop_tp_to_carte_pos(-1, pcmd_p);
 	} else {
@@ -1286,7 +1290,7 @@ static void get_pos_cmds(long period)
 	switch (emcmotConfig->kinType) {
 
 	case KINEMATICS_IDENTITY:
-	    kinematicsForward(positions, &emcmotStatus->carte_pos_cmd, &fflags, &iflags);
+	    v5_wcheckpoint_forward(positions, &emcmotStatus->carte_pos_cmd, &fflags, &iflags);
 	    if (get_allhomed()) {
 		emcmotStatus->carte_pos_cmd_ok = 1;
 	    } else {
@@ -1303,7 +1307,7 @@ static void get_pos_cmds(long period)
 		}
 		/* calculate Cartesean position command from joint coarse pos cmd */
 		result =
-		    kinematicsForward(positions, &emcmotStatus->carte_pos_cmd, &fflags, &iflags);
+		    v5_wcheckpoint_forward(positions, &emcmotStatus->carte_pos_cmd, &fflags, &iflags);
 		/* check to make sure kinematics converged */
 		if (result < 0) {
 		    /* error during kinematics calculations */
@@ -1348,7 +1352,7 @@ static void get_pos_cmds(long period)
             }
 
 	    /* OUTPUT KINEMATICS - convert to joints in local array */
-	    result = kinematicsInverse(&emcmotStatus->carte_pos_cmd, positions,
+	    result = v5_wcheckpoint_inverse(&emcmotStatus->carte_pos_cmd, positions,
 		&iflags, &fflags);
 	    if(result == 0)
 	    {
@@ -1415,7 +1419,7 @@ static void get_pos_cmds(long period)
 	    to compute the next positions of the joints */
 
 	/* OUTPUT KINEMATICS - convert to joints in local array */
-	result = kinematicsInverse(&emcmotStatus->carte_pos_cmd, positions, &iflags, &fflags);
+	result = v5_wcheckpoint_inverse(&emcmotStatus->carte_pos_cmd, positions, &iflags, &fflags);
 
 	/* copy to joint structures and spline them up */
 	if(result == 0)

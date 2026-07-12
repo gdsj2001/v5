@@ -119,6 +119,17 @@ typedef struct {
     hal_float_t *posthome_cmd; //  IN pin extrajoint
 } extrajoint_hal_t;
 
+typedef struct {
+    hal_float_t *logical_abs_counts;
+    hal_float_t *base_counts;
+    hal_float_t *runtime_window_counts;
+    hal_u32_t *generation;
+    hal_u32_t *raw_count_bits;
+    hal_u32_t *logical_storage_bits;
+    hal_s32_t *invalid_reason;
+    hal_bit_t *valid;
+} v5_wcheckpoint_hal_t;
+
 /* machine data */
 
 typedef struct {
@@ -187,6 +198,7 @@ typedef struct {
     spindle_hal_t spindle[EMCMOT_MAX_SPINDLES];     /*spindle data */
     joint_hal_t joint[EMCMOT_MAX_JOINTS];	/* data for each joint */
     extrajoint_hal_t ejoint[EMCMOT_MAX_EXTRAJOINTS]; /* data for each extrajoint */
+    v5_wcheckpoint_hal_t v5_wcheckpoint[3];
 
     hal_bit_t   *eoffset_active; /* ext offsets active */
     hal_bit_t   *eoffset_limited; /* ext offsets exceed limit */

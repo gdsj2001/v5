@@ -28,7 +28,7 @@ OPTIONAL_READ_COMMANDS = (
     "drive.read_actual_velocity",
     "drive.read_abs_multi_turn",
     "drive.read_abs_single_turn",
-    "drive.read_abs_position64",
+    "drive.read_abs_position",
     "drive.read_torque",
     "drive.read_current",
     "drive.read_temperature",

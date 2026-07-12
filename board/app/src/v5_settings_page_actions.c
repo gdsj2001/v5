@@ -56,7 +56,7 @@ void v5_settings_page_axis_zero_requested_cb(const char *axis,
     snprintf(title, sizeof(title), "%s%s", axis && axis[0] ? axis : "轴", pulse ? " 设零" : " 设0");
     if (v5_settings_axis_zero_start(axis, driver_mode, target_scope, apply_mode, slave_index, home_offset, &action_result)) {
         snprintf(body, sizeof(body),
-                 "提示: 已启动\n原因: 后端将读取%s轴编码器当前位置，先写成本次硬盘新零位，再按%s差值 <= 0.1 读回校验；本动作不打开键盘、不写驱动 preset。\n下一步: 等待成功/失败结果弹窗",
+                 "提示: 正在处理\n原因: 后端正在读取%s轴编码器当前位置，先写成本次硬盘新零位，再按%s差值 <= 0.1 读回校验；本动作不打开键盘、不写驱动 preset。\n下一步: 正在读取成功或失败状态",
                  axis && axis[0] ? axis : "",
                  pulse ? "deg" : "mm");
         v5_settings_page_set_status_text(page, 88, 204, 255, "%s: 后端校验已启动", title);

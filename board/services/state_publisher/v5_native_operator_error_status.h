@@ -15,9 +15,16 @@ extern "C" {
 #define V5_NATIVE_OPERATOR_ERROR_REASON_CAP 384U
 #define V5_NATIVE_OPERATOR_ERROR_NEXT_CAP 256U
 
+typedef enum V5NativeOperatorErrorDisplayMode {
+    V5_NATIVE_OPERATOR_ERROR_DISPLAY_LOG_ONLY = 1,
+    V5_NATIVE_OPERATOR_ERROR_DISPLAY_TOP_STATUS = 2,
+    V5_NATIVE_OPERATOR_ERROR_DISPLAY_POPUP = 3
+} V5NativeOperatorErrorDisplayMode;
+
 typedef struct V5NativeOperatorErrorStatus {
     uint64_t generation;
     uint32_t kind;
+    uint32_t display_mode;
     char source_id[V5_NATIVE_OPERATOR_ERROR_SOURCE_ID_CAP];
     char fingerprint[V5_NATIVE_OPERATOR_ERROR_FINGERPRINT_CAP];
     char title_cn[V5_NATIVE_OPERATOR_ERROR_TITLE_CAP];
@@ -34,6 +41,7 @@ int v5_native_operator_error_status_write(
     const char *path,
     int valid,
     uint32_t kind,
+    uint32_t display_mode,
     uint64_t generation,
     const char *source_id,
     const char *fingerprint,

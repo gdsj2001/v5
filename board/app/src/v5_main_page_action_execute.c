@@ -61,10 +61,10 @@ static int main_page_confirm_wcs_readback_once(
     before_epoch = report->wcs_offsets_epoch;
     if (expected_wcs < 0 || expected_wcs >= (int)V5_NATIVE_READBACK_WCS_COUNT ||
         readback.wcs_index != expected_wcs ||
-        !v5_native_readback_wcs_table_known(&readback)) {
+        !v5_native_readback_wcs_table_known(&readback) ||
+        before_epoch == 0U || readback.wcs_offsets_epoch == before_epoch) {
         return 0;
     }
-    (void)before_epoch;
     *confirmed = readback;
     return 1;
 }

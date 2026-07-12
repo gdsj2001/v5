@@ -12,6 +12,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include "v5_settings_page_internal.h"
+#include "v5_popup_layout.h"
 
 void v5_settings_page_set_status_text(V5SettingsPage *page, uint8_t r, uint8_t g, uint8_t b, const char *fmt, ...)
 {
@@ -71,8 +72,7 @@ static int settings_action_requires_countdown(const char *action)
            strcmp(action, "drive_factory_reset") == 0 ||
            strcmp(action, "drive_parameter_read") == 0 ||
            strcmp(action, "drive_fault_reset") == 0 ||
-           strcmp(action, "drive_set_parameters") == 0 ||
-           strcmp(action, "settings_axis_zero") == 0;
+           strcmp(action, "drive_set_parameters") == 0;
 }
 
 static void settings_status_popup_title(const V5SettingsActionStatus *status, char *out, size_t out_size)
@@ -98,7 +98,6 @@ static int settings_action_eta_seconds(const char *action)
     if (strcmp(action, "drive_parameter_read") == 0) return 45;
     if (strcmp(action, "drive_fault_reset") == 0) return 45;
     if (strcmp(action, "drive_set_parameters") == 0) return 180;
-    if (strcmp(action, "settings_axis_zero") == 0) return 20;
     return 0;
 }
 
@@ -128,25 +127,39 @@ static void settings_refresh_axis_table_once(V5SettingsPage *page, const V5Setti
     v5_settings_axis_table_reload_current_readback();
 }
 
+static void settings_popup_set_close_enabled(V5SettingsPage *page, int enabled)
+{
+    if (!page || !page->popup_close) {
+        return;
+    }
+    (void)v5_ui_first_frame_guard_set_disabled(
+        &page->popup_frame_guard,
+        page->popup_close,
+        enabled ? 0 : 1);
+}
+
 static void settings_popup_set_eta(V5SettingsPage *page, int seconds_left)
 {
     char text[32];
     if (!page || !page->popup_eta) return;
     if (seconds_left <= 0) {
-        lv_label_set_text(page->popup_eta, "");
+        (void)v5_ui_first_frame_guard_set_label_text(&page->popup_frame_guard, page->popup_eta, "");
         return;
     }
     snprintf(text, sizeof(text), "预计: %02d:%02d", seconds_left / 60, seconds_left % 60);
-    lv_label_set_text(page->popup_eta, text);
+    (void)v5_ui_first_frame_guard_set_label_text(&page->popup_frame_guard, page->popup_eta, text);
 }
 
 void v5_settings_page_popup_show(V5SettingsPage *page, const char *action, const char *title, const char *message, int final, int ok)
 {
     int was_active;
+    lv_color_t message_color;
     if (!page || !page->popup_overlay) return;
     was_active = page->popup_active;
     if (!was_active) {
-        v5_ui_first_frame_guard_begin(&page->popup_frame_guard, V5_REMOTE_DISPLAY_CACHE_POPUP);
+        if (!v5_ui_first_frame_guard_begin_overlay(&page->popup_frame_guard)) {
+            return;
+        }
         page->popup_run_id[0] = '\0';
         page->popup_cancel_pending = 0;
     }
@@ -155,12 +168,32 @@ void v5_settings_page_popup_show(V5SettingsPage *page, const char *action, const
     page->popup_final = final ? 1 : 0;
     page->popup_started_s = v5_settings_page_monotonic_seconds();
     page->popup_eta_seconds = (!final && settings_action_requires_countdown(action)) ? settings_action_eta_seconds(action) : 0;
-    lv_label_set_text(page->popup_title, title && title[0] ? title : v5_settings_page_status_action_label(action));
-    lv_label_set_text(page->popup_message, message && message[0] ? message : (final ? "动作结束" : "动作已启动"));
-    lv_obj_set_style_text_color(page->popup_message, final ? (ok ? v5_settings_page_rgb(42, 221, 128) : v5_settings_page_rgb(255, 96, 104)) : v5_settings_page_rgb(226, 238, 246), 0);
+    (void)v5_ui_first_frame_guard_set_label_text(
+        &page->popup_frame_guard,
+        page->popup_title,
+        title && title[0] ? title : v5_settings_page_status_action_label(action));
+    (void)v5_ui_first_frame_guard_set_label_text(
+        &page->popup_frame_guard,
+        page->popup_message,
+        message && message[0] ? message : (final ? "动作结束" : "正在处理"));
+    message_color = final ?
+        (ok ? v5_settings_page_rgb(42, 221, 128) : v5_settings_page_rgb(255, 96, 104)) :
+        v5_settings_page_rgb(226, 238, 246);
+    (void)v5_ui_first_frame_guard_set_text_color(
+        &page->popup_frame_guard,
+        page->popup_message,
+        message_color);
     settings_popup_set_eta(page, page->popup_eta_seconds);
-    lv_obj_clear_flag(page->popup_overlay, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_move_foreground(page->popup_overlay);
+    settings_popup_set_close_enabled(page, final ? 1 : 0);
+    if (!was_active &&
+        !v5_ui_first_frame_guard_present_overlay(&page->popup_frame_guard, page->popup_overlay)) {
+        page->popup_active = 0;
+        page->popup_final = 0;
+        page->popup_action[0] = '\0';
+        page->popup_run_id[0] = '\0';
+        page->popup_cancel_pending = 0;
+        page->popup_eta_seconds = 0;
+    }
 }
 
 void v5_settings_page_action_visual_clear(V5SettingsPage *page, int clear_binding)
@@ -220,8 +253,9 @@ static void settings_popup_hide(V5SettingsPage *page)
     if (!page) {
         return;
     }
-    if (page->popup_overlay) {
-        lv_obj_add_flag(page->popup_overlay, LV_OBJ_FLAG_HIDDEN);
+    if (page->popup_overlay &&
+        !v5_ui_first_frame_guard_dismiss_overlay(&page->popup_frame_guard, page->popup_overlay)) {
+        return;
     }
     if (page->popup_close) {
         v5_button_visual_set_transaction_active(page->popup_close, 0);
@@ -233,7 +267,6 @@ static void settings_popup_hide(V5SettingsPage *page)
     page->popup_run_id[0] = '\0';
     page->popup_cancel_pending = 0;
     page->popup_eta_seconds = 0;
-    v5_ui_first_frame_guard_restore(&page->popup_frame_guard);
     if (page->status_label) {
         lv_obj_invalidate(page->status_label);
     }
@@ -246,8 +279,12 @@ static void settings_popup_update_running(V5SettingsPage *page, const char *titl
 {
     int left;
     if (!page || !page->popup_active || page->popup_final) return;
-    if (title && title[0]) lv_label_set_text(page->popup_title, title);
-    if (message && message[0]) lv_label_set_text(page->popup_message, message);
+    if (title && title[0]) {
+        (void)v5_ui_first_frame_guard_set_label_text(&page->popup_frame_guard, page->popup_title, title);
+    }
+    if (message && message[0]) {
+        (void)v5_ui_first_frame_guard_set_label_text(&page->popup_frame_guard, page->popup_message, message);
+    }
     if (page->popup_eta_seconds > 0) {
         left = page->popup_eta_seconds - (int)(v5_settings_page_monotonic_seconds() - page->popup_started_s);
         settings_popup_set_eta(page, left > 0 ? left : 1);
@@ -270,6 +307,9 @@ static void settings_popup_close_cb(lv_event_t *event)
     V5SettingsActionStatus status;
     if (!page || lv_event_get_code(event) != LV_EVENT_RELEASED) return;
     v5_button_visual_release_now(lv_event_get_target(event));
+    if (lv_indev_get_act()) {
+        lv_indev_wait_release(lv_indev_get_act());
+    }
     if (page->popup_final) {
         settings_popup_hide(page);
         return;
@@ -284,46 +324,37 @@ static void settings_popup_close_cb(lv_event_t *event)
         page->popup_cancel_pending = 1;
         v5_button_visual_set_transaction_active(page->popup_close, 1);
         if (page->popup_close) {
-            lv_obj_add_state(page->popup_close, LV_STATE_DISABLED);
+            settings_popup_set_close_enabled(page, 0);
         }
-        settings_popup_update_running(page, 0, "提示: CANCELLING\n原因: 正在终止本次后台进程及进程组\n下一步: 等待 cancelled 终态");
+        settings_popup_update_running(page, 0, "提示: 正在取消\n原因: 正在终止本次后台进程及进程组\n下一步: 等待取消完成");
     } else if (!page->popup_cancel_pending) {
-        settings_popup_update_running(page, 0, "提示: CANCEL_NOT_ACCEPTED\n原因: 未取得本次 run_id 或后台未接受取消\n下一步: 保持窗口并重新确认后台状态");
+        settings_popup_update_running(page, 0, "提示: 取消未受理\n原因: 尚未取得本次任务标识或后台未接受取消\n下一步: 保持窗口并重新读取后台状态");
     }
 }
 
 void v5_settings_page_popup_create(V5SettingsPage *page)
 {
-    lv_obj_t *box;
-    lv_obj_t *close_label;
+    V5PopupLayoutConfig config = {0};
+    V5PopupLayoutObjects popup = {0};
     if (!page || !page->root) return;
-    page->popup_overlay = v5_settings_page_make_panel(page->root, 0, 0, 1024, 600, 3, 16, 26);
-    lv_obj_set_style_bg_opa(page->popup_overlay, LV_OPA_80, 0);
-    lv_obj_add_flag(page->popup_overlay, LV_OBJ_FLAG_CLICKABLE);
-    box = v5_settings_page_make_panel(page->popup_overlay, 218, 92, 588, 420, 7, 31, 48);
-    lv_obj_set_style_border_width(box, 1, 0);
-    lv_obj_set_style_border_color(box, v5_settings_page_rgb(76, 119, 146), 0);
-    page->popup_title = v5_settings_page_make_label(box, "设置页动作", 22, 18, 544, 32, 88, 204, 255);
-    lv_obj_set_style_text_align(page->popup_title, LV_TEXT_ALIGN_CENTER, 0);
-    page->popup_message = v5_settings_page_make_label(box, "", 34, 62, 520, 250, 226, 238, 246);
-    lv_label_set_long_mode(page->popup_message, LV_LABEL_LONG_WRAP);
-    page->popup_eta = v5_settings_page_make_label(box, "", 34, 328, 160, 24, 245, 214, 82);
-    page->popup_close = lv_btn_create(box);
-    v5_settings_page_clear_obj_style(page->popup_close);
-    lv_obj_set_pos(page->popup_close, 434, 348);
-    lv_obj_set_size(page->popup_close, 118, 44);
-    lv_obj_set_style_bg_color(page->popup_close, v5_settings_page_rgb(42, 86, 116), 0);
-    lv_obj_set_style_border_width(page->popup_close, 1, 0);
-    lv_obj_set_style_border_color(page->popup_close, v5_settings_page_rgb(76, 119, 146), 0);
-    v5_button_visual_bind(page->popup_close);
-    lv_obj_add_event_cb(page->popup_close, settings_popup_close_cb, LV_EVENT_RELEASED, page);
-    close_label = lv_label_create(page->popup_close);
-    lv_label_set_text(close_label, "关闭");
-    lv_obj_set_pos(close_label, 0, 10);
-    lv_obj_set_size(close_label, 118, 26);
-    lv_obj_set_style_text_align(close_label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_color(close_label, v5_settings_page_rgb(238, 245, 248), 0);
-    lv_obj_add_flag(page->popup_overlay, LV_OBJ_FLAG_HIDDEN);
+    config.title = "设置页动作";
+    config.message = "";
+    config.status = "";
+    config.confirm_text = "确认继续";
+    config.confirm_enabled = 0;
+    config.close_text = "关闭";
+    config.close_enabled = 1;
+    config.close_cb = settings_popup_close_cb;
+    config.close_user_data = page;
+    if (!v5_popup_layout_create(lv_obj_get_screen(page->root), &config, &popup)) {
+        return;
+    }
+    page->popup_overlay = popup.overlay;
+    page->popup_title = popup.title;
+    page->popup_message = popup.message;
+    page->popup_eta = popup.status;
+    page->popup_confirm = popup.confirm;
+    page->popup_close = popup.close;
 }
 
 void v5_settings_page_status_timer_cb(lv_timer_t *timer)
@@ -333,20 +364,26 @@ void v5_settings_page_status_timer_cb(lv_timer_t *timer)
     char label[96];
     const char *detail;
     char running[256];
+    int modal_active;
     if (!page || !page->root || !page->status_label) {
         return;
     }
     if (lv_obj_has_flag(page->root, LV_OBJ_FLAG_HIDDEN)) {
         return;
     }
+    modal_active = v5_ui_first_frame_guard_overlay_active();
     if (!v5_settings_action_poll_status(&status) || !status.available) {
-        v5_settings_page_action_visual_clear(page, 1);
+        if (!modal_active) {
+            v5_settings_page_action_visual_clear(page, 1);
+        }
         if (page->popup_active && !page->popup_final) {
-            settings_popup_update_running(page, 0, "等待后台状态...");
+            settings_popup_update_running(page, 0, "提示: 正在读取状态\n原因: 暂未取得后台回读\n下一步: 保持窗口并等待状态更新");
         }
         return;
     }
-    settings_action_visual_apply_status(page, &status);
+    if (!modal_active) {
+        settings_action_visual_apply_status(page, &status);
+    }
     settings_status_popup_title(&status, label, sizeof(label));
     detail = status.message[0] ? status.message : status.code;
     if (status.busy) {
@@ -356,25 +393,32 @@ void v5_settings_page_status_timer_cb(lv_timer_t *timer)
                 snprintf(page->popup_run_id, sizeof(page->popup_run_id), "%s", status.run_id);
             }
             if (strcmp(page->popup_run_id, status.run_id) == 0) {
+                settings_popup_set_close_enabled(
+                    page,
+                    status.cancel_allowed && !page->popup_cancel_pending);
                 snprintf(running, sizeof(running), "提示: %s\n原因: %s\n下一步: %s",
-                         page->popup_cancel_pending ? "CANCELLING" : "RUNNING",
+                         page->popup_cancel_pending ? "正在取消" : "正在处理",
                          detail[0] ? detail : "执行中",
-                         page->popup_cancel_pending ? "等待 cancelled 终态" : "等待后台完成");
+                         page->popup_cancel_pending ? "等待取消完成" : "等待后台完成");
                 settings_popup_update_running(page, label, running);
             }
         }
-        v5_settings_page_set_status_text(page, 88, 204, 255, "%s: 执行中", label);
+        if (!modal_active) {
+            v5_settings_page_set_status_text(page, 88, 204, 255, "%s: 执行中", label);
+        }
     } else if (status.ok) {
         if (page->popup_active && !page->popup_final &&
             (!page->popup_action[0] || strcmp(page->popup_action, status.action) == 0) &&
             (!page->popup_run_id[0] || strcmp(page->popup_run_id, status.run_id) == 0)) {
             settings_popup_update_final(page, label, 1, status.code, detail);
         }
-        settings_refresh_axis_table_once(page, &status);
-        if (strcmp(status.action, "device_dna_register") == 0) {
-            v5_settings_page_refresh_machine_code_label(page);
+        if (!modal_active) {
+            settings_refresh_axis_table_once(page, &status);
+            if (strcmp(status.action, "device_dna_register") == 0) {
+                v5_settings_page_refresh_machine_code_label(page);
+            }
+            v5_settings_page_set_status_text(page, 42, 221, 128, "%s: 完成 %s", label, status.code[0] ? status.code : detail);
         }
-        v5_settings_page_set_status_text(page, 42, 221, 128, "%s: 完成 %s", label, status.code[0] ? status.code : detail);
     } else {
         if (page->popup_active && !page->popup_final &&
             (!page->popup_action[0] || strcmp(page->popup_action, status.action) == 0) &&
@@ -385,6 +429,8 @@ void v5_settings_page_status_timer_cb(lv_timer_t *timer)
                 settings_popup_update_final(page, label, 0, status.code, detail);
             }
         }
-        v5_settings_page_set_status_text(page, 245, 214, 82, "%s: %s", label, detail[0] ? detail : "未完成");
+        if (!modal_active) {
+            v5_settings_page_set_status_text(page, 245, 214, 82, "%s: %s", label, detail[0] ? detail : "未完成");
+        }
     }
 }

@@ -21,6 +21,7 @@
 #include "rtapi_math.h"
 #include "homing.h"
 #include "axis.h"
+#include "v5_wcheckpoint.h"
 
 // Mark strings for translation, but defer translation to userspace
 #define _(s) (s)
@@ -82,6 +83,42 @@ static int unlock_joints_mask = 0;/* mask to select joints for unlock pins */
 RTAPI_MP_INT(unlock_joints_mask, "mask to select joints for unlock pins");
 int v5_wrapped_rotary_mask = 0;/* EmcPose mask for V5 nearest-equivalent targets */
 RTAPI_MP_INT(v5_wrapped_rotary_mask, "V5 wrapped rotary target mask with resident turn offset");
+int v5_wcheckpoint_command_raw_bits[V5_WCHECKPOINT_ROTARY_AXES] = {0,};
+RTAPI_MP_ARRAY_INT(v5_wcheckpoint_command_raw_bits, V5_WCHECKPOINT_ROTARY_AXES,
+                   "V5 mapped command raw count widths for A,B,C");
+int v5_wcheckpoint_feedback_raw_bits[V5_WCHECKPOINT_ROTARY_AXES] = {0,};
+RTAPI_MP_ARRAY_INT(v5_wcheckpoint_feedback_raw_bits, V5_WCHECKPOINT_ROTARY_AXES,
+                   "V5 mapped feedback raw count widths for A,B,C");
+int v5_wcheckpoint_command_raw_signed[V5_WCHECKPOINT_ROTARY_AXES] = {0,};
+RTAPI_MP_ARRAY_INT(v5_wcheckpoint_command_raw_signed, V5_WCHECKPOINT_ROTARY_AXES,
+                   "V5 mapped command signedness for A,B,C");
+int v5_wcheckpoint_feedback_raw_signed[V5_WCHECKPOINT_ROTARY_AXES] = {0,};
+RTAPI_MP_ARRAY_INT(v5_wcheckpoint_feedback_raw_signed, V5_WCHECKPOINT_ROTARY_AXES,
+                   "V5 mapped feedback signedness for A,B,C");
+int v5_wcheckpoint_command_modulus_hi[V5_WCHECKPOINT_ROTARY_AXES] = {0,};
+RTAPI_MP_ARRAY_INT(v5_wcheckpoint_command_modulus_hi, V5_WCHECKPOINT_ROTARY_AXES,
+                   "V5 mapped command raw modulus high words for A,B,C");
+int v5_wcheckpoint_command_modulus_lo[V5_WCHECKPOINT_ROTARY_AXES] = {0,};
+RTAPI_MP_ARRAY_INT(v5_wcheckpoint_command_modulus_lo, V5_WCHECKPOINT_ROTARY_AXES,
+                   "V5 mapped command raw modulus low words for A,B,C");
+int v5_wcheckpoint_feedback_modulus_hi[V5_WCHECKPOINT_ROTARY_AXES] = {0,};
+RTAPI_MP_ARRAY_INT(v5_wcheckpoint_feedback_modulus_hi, V5_WCHECKPOINT_ROTARY_AXES,
+                   "V5 mapped feedback raw modulus high words for A,B,C");
+int v5_wcheckpoint_feedback_modulus_lo[V5_WCHECKPOINT_ROTARY_AXES] = {0,};
+RTAPI_MP_ARRAY_INT(v5_wcheckpoint_feedback_modulus_lo, V5_WCHECKPOINT_ROTARY_AXES,
+                   "V5 mapped feedback raw modulus low words for A,B,C");
+long v5_wcheckpoint_counts_per_rev[V5_WCHECKPOINT_ROTARY_AXES] = {0,};
+RTAPI_MP_ARRAY_LONG(v5_wcheckpoint_counts_per_rev, V5_WCHECKPOINT_ROTARY_AXES,
+                    "V5 mapped output-axis counts per revolution for A,B,C");
+long v5_wcheckpoint_reducer_num[V5_WCHECKPOINT_ROTARY_AXES] = {0,};
+RTAPI_MP_ARRAY_LONG(v5_wcheckpoint_reducer_num, V5_WCHECKPOINT_ROTARY_AXES,
+                    "V5 reducer numerators for A,B,C");
+long v5_wcheckpoint_reducer_den[V5_WCHECKPOINT_ROTARY_AXES] = {0,};
+RTAPI_MP_ARRAY_LONG(v5_wcheckpoint_reducer_den, V5_WCHECKPOINT_ROTARY_AXES,
+                    "V5 reducer denominators for A,B,C");
+int v5_wcheckpoint_drive_periodic[V5_WCHECKPOINT_ROTARY_AXES] = {0,};
+RTAPI_MP_ARRAY_INT(v5_wcheckpoint_drive_periodic, V5_WCHECKPOINT_ROTARY_AXES,
+                   "V5 profile proof of periodic command and feedback windows for A,B,C");
 /***********************************************************************
 *                  GLOBAL VARIABLE DEFINITIONS                         *
 ************************************************************************/
@@ -691,6 +728,7 @@ static int init_hal_io(void)
     }
 
     CALL_CHECK(axis_init_hal_io(mot_comp_id));
+    CALL_CHECK(v5_wcheckpoint_export_hal(mot_comp_id));
 
     CALL_CHECK(hal_pin_bit_newf(HAL_OUT, &(emcmot_hal_data->eoffset_limited), mot_comp_id, "motion.eoffset-limited"));
     CALL_CHECK(hal_pin_bit_newf(HAL_OUT, &(emcmot_hal_data->eoffset_active), mot_comp_id, "motion.eoffset-active"));

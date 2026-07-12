@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #ifndef MAP_ANONYMOUS
@@ -46,6 +47,7 @@ static void v5_program_runtime_clear(V5ProgramRuntime *runtime)
     runtime->line_count = 0U;
     runtime->preview_trajectory_count = 0U;
     memset(runtime->preview_wcs_indices, 0, sizeof(runtime->preview_wcs_indices));
+    memset(runtime->preview_break_before, 0, sizeof(runtime->preview_break_before));
     runtime->preview_wcs_mask = 0U;
     runtime->preview_program_wcs_index = 0;
     runtime->preview_wcs_mixed = 0;
@@ -214,6 +216,57 @@ int v5_program_runtime_open_file(
     return 1;
 }
 
+static void v5_program_runtime_set_delete_result(
+    const V5ProgramRuntime *runtime,
+    V5ProgramDeleteResult *result,
+    int ok,
+    const char *code,
+    int removed,
+    int cleared_loaded_program)
+{
+    if (!result) {
+        return;
+    }
+    result->ok = ok;
+    result->code = code ? code : (ok ? "OK" : "PROGRAM_DELETE_FAILED");
+    result->removed = removed;
+    result->cleared_loaded_program = cleared_loaded_program;
+    result->generation = runtime ? runtime->generation : 0U;
+}
+
+int v5_program_runtime_delete_file(
+    V5ProgramRuntime *runtime,
+    const char *path,
+    V5ProgramDeleteResult *result)
+{
+    struct stat st;
+    int clears_loaded_program;
+    if (!runtime || !path || !path[0]) {
+        v5_program_runtime_set_delete_result(
+            runtime, result, 0, "PROGRAM_DELETE_PATH_INVALID", 0, 0);
+        return 0;
+    }
+    if (stat(path, &st) != 0 || !S_ISREG(st.st_mode)) {
+        v5_program_runtime_set_delete_result(
+            runtime, result, 0, "PROGRAM_DELETE_NOT_REGULAR", 0, 0);
+        return 0;
+    }
+    clears_loaded_program = v5_program_runtime_has_open_program(runtime) &&
+        strcmp(runtime->source_path, path) == 0;
+    if (remove(path) != 0) {
+        v5_program_runtime_set_delete_result(
+            runtime, result, 0, "PROGRAM_DELETE_FAILED", 0, 0);
+        return 0;
+    }
+    if (clears_loaded_program) {
+        v5_program_runtime_clear(runtime);
+        ++runtime->generation;
+    }
+    v5_program_runtime_set_delete_result(
+        runtime, result, 1, "OK", 1, clears_loaded_program);
+    return 1;
+}
+
 int v5_program_runtime_has_open_program(const V5ProgramRuntime *runtime)
 {
     return runtime && runtime->loaded && runtime->mode == V5_PROGRAM_RUNTIME_PROGRAM && runtime->gcode_text && runtime->gcode_size > 0U;
@@ -334,6 +387,18 @@ int v5_program_runtime_preview_wcs_index(
         *wcs_index_out = runtime->preview_wcs_indices[point_index];
     }
     return 1;
+}
+
+int v5_program_runtime_preview_break_before(
+    const V5ProgramRuntime *runtime,
+    unsigned int point_index)
+{
+    if (!v5_program_runtime_has_open_program(runtime) ||
+        point_index >= runtime->preview_trajectory_count ||
+        point_index >= V5_PROGRAM_PREVIEW_POINT_COUNT) {
+        return 0;
+    }
+    return runtime->preview_break_before[point_index] ? 1 : 0;
 }
 
 int v5_program_runtime_preview_program_wcs_index(const V5ProgramRuntime *runtime)

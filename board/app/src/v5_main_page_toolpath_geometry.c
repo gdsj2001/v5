@@ -107,75 +107,25 @@ static void set_toolpath_active_model_geometry_from_basis(
     }
 }
 
-void v5_main_page_internal_draw_toolpath_boot_scaffold(V5MainPage *page)
+void v5_main_page_internal_hide_toolpath_unproven_geometry(V5MainPage *page)
 {
-    const double wcs_origin_x = 248.0;
-    const double wcs_origin_y = 318.0;
-    const double mcs_origin_x = 244.0;
-    const double mcs_origin_y = 315.0;
-    const double scaffold_axis_scale = 40.0;
-    const double basis_right_x = 0.7071067811865476;
-    const double basis_right_y = 0.7071067811865476;
-    const double basis_right_z = 0.0;
-    const double basis_up_x = -0.4082482904638631;
-    const double basis_up_y = 0.4082482904638631;
-    const double basis_up_z = 0.8164965809277261;
-    const double mcs_axis_x[3] = {
-        mcs_origin_x + (basis_right_x * scaffold_axis_scale),
-        mcs_origin_x + (basis_right_y * scaffold_axis_scale),
-        mcs_origin_x + (basis_right_z * scaffold_axis_scale)};
-    const double mcs_axis_y[3] = {
-        mcs_origin_y - (basis_up_x * scaffold_axis_scale),
-        mcs_origin_y - (basis_up_y * scaffold_axis_scale),
-        mcs_origin_y - (basis_up_z * scaffold_axis_scale)};
-    V5ToolpathScreenPoint wcs_origin;
-    V5ToolpathScreenPoint mcs_origin;
-    V5ToolpathScreenPoint wcs_axis[3];
-    V5ToolpathScreenPoint mcs_axis[3];
     unsigned int i;
 
     if (!page) {
         return;
     }
-
-    wcs_origin = v5_main_page_internal_apply_toolpath_view_transform(page, v5_main_page_internal_toolpath_scaffold_point(wcs_origin_x, wcs_origin_y));
-    mcs_origin = v5_main_page_internal_apply_toolpath_view_transform(page, v5_main_page_internal_toolpath_scaffold_point(mcs_origin_x, mcs_origin_y));
+    v5_main_page_internal_hide_toolpath_line(page->toolpath_wcs_origin_line);
+    v5_main_page_internal_hide_toolpath_line(page->toolpath_mcs_origin_line);
     for (i = 0U; i < 3U; ++i) {
-        const double axis_dx = mcs_axis_x[i] - mcs_origin_x;
-        const double axis_dy = mcs_axis_y[i] - mcs_origin_y;
-        wcs_axis[i] = v5_main_page_internal_apply_toolpath_view_transform(page, v5_main_page_internal_toolpath_scaffold_point(wcs_origin_x + axis_dx, wcs_origin_y + axis_dy));
-        mcs_axis[i] = v5_main_page_internal_apply_toolpath_view_transform(page, v5_main_page_internal_toolpath_scaffold_point(mcs_axis_x[i], mcs_axis_y[i]));
+        v5_main_page_internal_hide_toolpath_line(page->toolpath_wcs_axis_lines[i]);
+        v5_main_page_internal_hide_toolpath_line(page->toolpath_mcs_axis_lines[i]);
     }
-
-    v5_main_page_internal_set_toolpath_origin_cross(page->toolpath_wcs_origin_line, page->toolpath_wcs_origin_points, &wcs_origin, 1);
-    v5_main_page_internal_set_toolpath_origin_cross(page->toolpath_mcs_origin_line, page->toolpath_mcs_origin_points, &mcs_origin, 1);
-    for (i = 0U; i < 3U; ++i) {
-        v5_main_page_internal_set_toolpath_axis_line(page->toolpath_wcs_axis_lines[i], page->toolpath_wcs_axis_points[i], &wcs_origin, &wcs_axis[i], 1);
-        v5_main_page_internal_set_toolpath_axis_line(page->toolpath_mcs_axis_lines[i], page->toolpath_mcs_axis_points[i], &mcs_origin, &mcs_axis[i], 1);
-    }
-
     v5_main_page_internal_hide_toolpath_program_wcs_objects(page);
-
     v5_main_page_internal_hide_toolpath_ac_geometry(page);
-
-    v5_main_page_internal_set_toolpath_v3_dot_center(page->toolpath_microkernel_marker_dot, &wcs_origin, 1);
-    v5_main_page_internal_set_toolpath_v3_dot_center(page->toolpath_holder_marker_line, &mcs_origin, 1);
-
-    if (page->toolpath_mcs_label) {
-        v5_main_page_internal_set_label_text_if_changed(page->toolpath_mcs_label, "MCS");
-        v5_main_page_internal_clear_hidden_flag_if_hidden(page->toolpath_mcs_label);
-    }
-    if (page->toolpath_wcs_label) {
-        v5_main_page_internal_set_label_text_if_changed(page->toolpath_wcs_label, "WCS");
-        v5_main_page_internal_set_obj_pos_if_changed(page->toolpath_wcs_label, 18, 326);
-        v5_main_page_internal_clear_hidden_flag_if_hidden(page->toolpath_wcs_label);
-    }
-    for (i = 0U; i < 3U; ++i) {
-        if (page->toolpath_mcs_axis_labels[i]) {
-            v5_main_page_internal_set_label_text_if_changed(page->toolpath_mcs_axis_labels[i], "");
-            v5_main_page_internal_clear_hidden_flag_if_hidden(page->toolpath_mcs_axis_labels[i]);
-        }
-    }
+    v5_main_page_internal_add_hidden_flag_if_visible(page->toolpath_microkernel_marker_dot);
+    v5_main_page_internal_add_hidden_flag_if_visible(page->toolpath_holder_marker_line);
+    v5_main_page_internal_add_hidden_flag_if_visible(page->toolpath_mcs_label);
+    v5_main_page_internal_add_hidden_flag_if_visible(page->toolpath_wcs_label);
 }
 
 void v5_main_page_internal_update_toolpath_state_lines(V5MainPage *page, const V5UiStatusView *status)
@@ -210,7 +160,7 @@ void v5_main_page_internal_update_toolpath_state_lines(V5MainPage *page, const V
     mcs_valid = status && (status->valid_mask & V5_STATUS_VALID_MCS) != 0u && page->toolpath_fit.valid;
     if (!mcs_valid ||
         !v5_toolpath_display_project_world_point(origin, &page->toolpath_fit, (double)V5_TOOLPATH_W, (double)V5_TOOLPATH_H, &origin_point)) {
-        v5_main_page_internal_draw_toolpath_boot_scaffold(page);
+        v5_main_page_internal_hide_toolpath_unproven_geometry(page);
         return;
     } else {
         origin_point = v5_main_page_internal_apply_toolpath_view_transform(page, origin_point);

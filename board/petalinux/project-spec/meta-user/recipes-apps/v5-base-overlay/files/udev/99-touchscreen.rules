@@ -1,1 +1,1 @@
-SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="FocalTech FT5426 TouchScreen", SYMLINK+="input/by-path/v5-touchscreen", MODE="0660", GROUP="input"
+SUBSYSTEM=="input", KERNEL=="event*", DRIVERS=="edt_ft5x06", SYMLINK+="input/by-path/z20-touchscreen", MODE="0660", GROUP="input"

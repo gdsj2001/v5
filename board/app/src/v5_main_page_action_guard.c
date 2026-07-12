@@ -19,6 +19,7 @@
 #include <time.h>
 
 #include "v5_main_page_internal.h"
+#include "v5_popup_layout.h"
 
 void v5_main_page_internal_show_power_on_home_popup(V5MainPage *page, int status_known);
 
@@ -139,8 +140,10 @@ void v5_main_page_internal_make_button_rgb(V5MainPage *page, int x, int y, int w
     v5_button_visual_bind(button);
     if (action == V5_MAIN_PAGE_ACTION_JOG_PLUS || action == V5_MAIN_PAGE_ACTION_JOG_MINUS) {
         lv_obj_add_event_cb(button, v5_main_page_internal_jog_button_event_cb, LV_EVENT_PRESSED, page);
+        lv_obj_add_event_cb(button, v5_main_page_internal_jog_button_event_cb, LV_EVENT_PRESSING, page);
         lv_obj_add_event_cb(button, v5_main_page_internal_jog_button_event_cb, LV_EVENT_RELEASED, page);
         lv_obj_add_event_cb(button, v5_main_page_internal_jog_button_event_cb, LV_EVENT_PRESS_LOST, page);
+        lv_obj_add_event_cb(button, v5_main_page_internal_jog_button_event_cb, LV_EVENT_CANCEL, page);
     } else {
         lv_obj_add_event_cb(button, button_event_cb, LV_EVENT_CLICKED, page);
     }
@@ -169,6 +172,9 @@ void v5_main_page_internal_make_button_rgb(V5MainPage *page, int x, int y, int w
     page->buttons[page->button_count] = button;
     page->button_labels[page->button_count] = label;
     page->button_actions[page->button_count] = action;
+    if (action == V5_MAIN_PAGE_ACTION_ESTOP_FORCE) {
+        v5_ui_first_frame_guard_register_safety_button(button);
+    }
     page->button_count += 1u;
 }
 
@@ -177,14 +183,14 @@ static void power_on_home_popup_hide(V5MainPage *page)
     if (!page || !page->power_on_home_popup) {
         return;
     }
-    lv_obj_add_flag(page->power_on_home_popup, LV_OBJ_FLAG_HIDDEN);
-    v5_ui_first_frame_guard_restore_dirty(
-        &page->power_on_home_popup_frame_guard,
-        page->root);
+    if (!v5_ui_first_frame_guard_dismiss_overlay(
+            &page->power_on_home_popup_frame_guard,
+            page->power_on_home_popup)) {
+        return;
+    }
     if (!page->selection.all_axes) {
         v5_main_page_internal_reset_selection_idle_timer(page);
     }
-    lv_refr_now(NULL);
 }
 
 static void power_on_home_popup_close_cb(lv_event_t *event)
@@ -204,42 +210,27 @@ static void power_on_home_popup_close_cb(lv_event_t *event)
 
 void v5_main_page_internal_create_power_on_home_popup(V5MainPage *page)
 {
-    lv_obj_t *box;
-    lv_obj_t *close_label;
+    V5PopupLayoutConfig config = {0};
+    V5PopupLayoutObjects popup = {0};
     if (!page || !page->root) {
         return;
     }
-    page->power_on_home_popup = v5_main_page_internal_make_panel(page->root, 0, 0, 1024, 600, 3, 16, 26);
-    lv_obj_set_style_bg_opa(page->power_on_home_popup, LV_OPA_80, 0);
-    lv_obj_add_flag(page->power_on_home_popup, LV_OBJ_FLAG_CLICKABLE);
-    box = v5_main_page_internal_make_panel(page->power_on_home_popup, 170, 88, 684, 424, 7, 31, 48);
-    lv_obj_set_style_border_width(box, 1, 0);
-    lv_obj_set_style_border_color(box, v5_main_page_internal_rgb(76, 119, 146), 0);
-    v5_main_page_internal_make_label_ex(box, 24, 22, 636, 36, "开机回零前置条件", 88, 204, 255, LV_TEXT_ALIGN_CENTER);
-    page->power_on_home_popup_message = v5_main_page_internal_make_label_ex(
-        box, 46, 86, 592, 222, "", 255, 96, 104, LV_TEXT_ALIGN_LEFT);
-    lv_label_set_long_mode(page->power_on_home_popup_message, LV_LABEL_LONG_WRAP);
-    page->power_on_home_popup_close = lv_btn_create(box);
-    v5_main_page_internal_clear_obj_style(page->power_on_home_popup_close);
-    lv_obj_set_pos(page->power_on_home_popup_close, 500, 346);
-    lv_obj_set_size(page->power_on_home_popup_close, 132, 48);
-    lv_obj_set_style_bg_color(page->power_on_home_popup_close, v5_main_page_internal_rgb(42, 86, 116), 0);
-    lv_obj_set_style_bg_opa(page->power_on_home_popup_close, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(page->power_on_home_popup_close, 1, 0);
-    lv_obj_set_style_border_color(page->power_on_home_popup_close, v5_main_page_internal_rgb(76, 119, 146), 0);
-    v5_button_visual_bind(page->power_on_home_popup_close);
-    lv_obj_add_event_cb(
-        page->power_on_home_popup_close,
-        power_on_home_popup_close_cb,
-        LV_EVENT_RELEASED,
-        page);
-    close_label = lv_label_create(page->power_on_home_popup_close);
-    lv_label_set_text(close_label, "关闭");
-    lv_obj_set_pos(close_label, 0, 11);
-    lv_obj_set_size(close_label, 132, 26);
-    lv_obj_set_style_text_align(close_label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_color(close_label, v5_main_page_internal_rgb(238, 245, 248), 0);
-    lv_obj_add_flag(page->power_on_home_popup, LV_OBJ_FLAG_HIDDEN);
+    config.title = "开机回零前置条件";
+    config.message = "";
+    config.message_color_rgb = 0xFF6068U;
+    config.confirm_text = "确认继续";
+    config.confirm_enabled = 0;
+    config.close_text = "关闭";
+    config.close_enabled = 1;
+    config.close_cb = power_on_home_popup_close_cb;
+    config.close_user_data = page;
+    if (!v5_popup_layout_create(lv_obj_get_screen(page->root), &config, &popup)) {
+        return;
+    }
+    page->power_on_home_popup = popup.overlay;
+    page->power_on_home_popup_message = popup.message;
+    page->power_on_home_popup_confirm = popup.confirm;
+    page->power_on_home_popup_close = popup.close;
 }
 
 void v5_main_page_internal_show_power_on_home_popup(V5MainPage *page, int status_known)
@@ -248,15 +239,20 @@ void v5_main_page_internal_show_power_on_home_popup(V5MainPage *page, int status
     const char *alias_code = status_known ?
         "POWER_ON_HOME_REQUIRED" : "POWER_ON_HOME_STATUS_UNAVAILABLE";
     char message[384];
+    int opening;
     if (!page || !page->power_on_home_popup || !page->power_on_home_popup_message) {
         return;
     }
-    if (lv_obj_has_flag(page->power_on_home_popup, LV_OBJ_FLAG_HIDDEN)) {
-        v5_ui_first_frame_guard_begin(
-            &page->power_on_home_popup_frame_guard,
-            V5_REMOTE_DISPLAY_CACHE_POPUP);
+    opening = lv_obj_has_flag(page->power_on_home_popup, LV_OBJ_FLAG_HIDDEN);
+    if (opening) {
+        if (!v5_ui_first_frame_guard_begin_overlay(&page->power_on_home_popup_frame_guard)) {
+            return;
+        }
     }
     if (!v5_native_operator_error_status_from_alias(alias_code, &operator_message)) {
+        if (opening) {
+            v5_ui_first_frame_guard_restore(&page->power_on_home_popup_frame_guard);
+        }
         return;
     }
     snprintf(
@@ -266,11 +262,15 @@ void v5_main_page_internal_show_power_on_home_popup(V5MainPage *page, int status
         operator_message.title_cn,
         operator_message.reason_cn,
         operator_message.next_cn);
-    lv_label_set_text(page->power_on_home_popup_message, message);
-    lv_obj_clear_flag(page->power_on_home_popup, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_move_foreground(page->power_on_home_popup);
-    lv_obj_invalidate(page->power_on_home_popup);
-    lv_refr_now(NULL);
+    (void)v5_ui_first_frame_guard_set_label_text(
+        &page->power_on_home_popup_frame_guard,
+        page->power_on_home_popup_message,
+        message);
+    if (opening) {
+        (void)v5_ui_first_frame_guard_present_overlay(
+            &page->power_on_home_popup_frame_guard,
+            page->power_on_home_popup);
+    }
 }
 
 int v5_main_page_internal_view_action_matches_plane(V5MainPageActionKind action, V5ToolpathDisplayPlane plane)

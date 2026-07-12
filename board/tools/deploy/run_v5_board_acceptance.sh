@@ -15,17 +15,20 @@ linuxcncrsh_port="${V5_LINUXCNCRSH_PORT:-5007}"
 home_dir="${HOME:?HOME is required}"
 build_root="${V5_BUILD_ROOT:-$home_dir/v5-build}"
 board_build_dir="${V5_BOARD_BUILD_DIR:-$build_root/board}"
-board_build_targets="${V5_BOARD_BUILD_TARGETS:-v5_lvgl_shell v5_state_publisher v5_touch_diagnostics v5_linuxcncrsh_probe v5_linuxcncrsh_golden_run}"
+board_build_targets="${V5_BOARD_BUILD_TARGETS:-v5_product_runtime}"
+product_closure_verify="$repo_root/tools/deploy/verify_v5_product_source_closure.py"
 apply=0
 motion=0
+ui_first_frame=0
 
 for arg in "$@"; do
   case "$arg" in
     --apply) apply=1 ;;
     --motion) motion=1 ;;
+    --ui-first-frame) ui_first_frame=1 ;;
     --help)
-      echo "usage: run_v5_board_acceptance.sh [--apply] [--motion]"
-      echo "dry-run by default; --apply requires V5_BOARD_SSH; --motion also requires V5_ALLOW_MOTION=1"
+      echo "usage: run_v5_board_acceptance.sh [--apply] [--ui-first-frame] [--motion]"
+      echo "dry-run by default; --apply requires V5_BOARD_SSH; --ui-first-frame runs 10 UI/cache cycles; --motion also requires V5_ALLOW_MOTION=1"
       exit 0
       ;;
     *) echo "unknown argument: $arg" >&2; exit 2 ;;
@@ -41,6 +44,7 @@ done
 
 if [ "$apply" -eq 0 ]; then
   echo "dry-run board acceptance:"
+  echo "  closure: python3 $product_closure_verify --board-root $repo_root --build-dir $board_build_dir --validate-shell"
   echo "  build:    cmake --build $board_build_dir --target $board_build_targets"
   echo "  precheck: $repo_root/tools/deploy/precheck_v5_board.sh"
   echo "  deploy:   $repo_root/tools/deploy/push_v5_runtime_to_board.sh --apply"
@@ -48,11 +52,13 @@ if [ "$apply" -eq 0 ]; then
   echo "  capture:  $repo_root/tools/deploy/capture_v5_board_ui.sh --apply"
   echo "  touch:    $repo_root/tools/deploy/collect_v5_board_touch_evidence.sh --apply --screenshot <captured-png>"
   echo "  ui-action: $repo_root/tools/deploy/collect_v5_board_ui_action_evidence.sh --apply --screenshot <captured-png>"
+  echo "  first-frame: $repo_root/tools/deploy/verify_v5_ui_first_frame_acceptance.py --apply --cycles 10"
   echo "  golden:   native XYZAC_TRT -> $golden_ac_local; native XYZBC_TRT -> $golden_bc_local"
   echo "  remote:   ${board_ssh:-<set V5_BOARD_SSH>}:$golden_remote_dir/<model-matched-program> port=$board_ssh_port"
   echo "  command:  V5_BOARD_SSH=<board> V5_BOARD_SSH_PORT=$board_ssh_port $0 --apply"
   echo "  touch:    V5_BOARD_SSH=<board> V5_BOARD_SSH_PORT=$board_ssh_port V5_UI_SCREENSHOT_EVIDENCE=<captured-png> $repo_root/tools/deploy/collect_v5_board_touch_evidence.sh --apply"
   echo "  ui-action: V5_BOARD_SSH=<board> V5_BOARD_SSH_PORT=$board_ssh_port V5_UI_SCREENSHOT_EVIDENCE=<captured-png> $repo_root/tools/deploy/collect_v5_board_ui_action_evidence.sh --apply"
+  echo "  first-frame: V5_BOARD_SSH=<board> V5_BOARD_SSH_PORT=$board_ssh_port $0 --apply --ui-first-frame"
   echo "  motion:   V5_BOARD_SSH=<board> V5_BOARD_SSH_PORT=$board_ssh_port V5_ALLOW_MOTION=1 $0 --apply --motion"
   exit 0
 fi
@@ -67,11 +73,25 @@ if [ ! -d "$board_build_dir" ]; then
   exit 6
 fi
 
+python3 "$product_closure_verify" \
+  --board-root "$repo_root" \
+  --build-dir "$board_build_dir" \
+  --prepare-cmake-query
+cmake -S "$repo_root" -B "$board_build_dir"
+python3 "$product_closure_verify" \
+  --board-root "$repo_root" \
+  --build-dir "$board_build_dir" \
+  --validate-shell
 cmake --build "$board_build_dir" --target $board_build_targets
 V5_REPO_ROOT="$repo_root" V5_BOARD_BUILD_DIR="$board_build_dir" V5_BOARD_SSH="$board_ssh" V5_BOARD_SSH_PORT="$board_ssh_port" "$repo_root/tools/deploy/precheck_v5_board.sh"
 V5_REPO_ROOT="$repo_root" V5_BOARD_BUILD_DIR="$board_build_dir" V5_BOARD_SSH="$board_ssh" V5_BOARD_SSH_PORT="$board_ssh_port" "$repo_root/tools/deploy/push_v5_runtime_to_board.sh" --apply
 V5_REPO_ROOT="$repo_root" V5_BOARD_SSH="$board_ssh" V5_BOARD_SSH_PORT="$board_ssh_port" "$repo_root/tools/deploy/verify_v5_board_runtime.sh"
 V5_REPO_ROOT="$repo_root" V5_BOARD_SSH="$board_ssh" V5_BOARD_SSH_PORT="$board_ssh_port" "$repo_root/tools/deploy/capture_v5_board_ui.sh" --apply
+
+if [ "$ui_first_frame" -eq 1 ]; then
+  V5_BOARD_SSH="$board_ssh" V5_BOARD_SSH_PORT="$board_ssh_port" \
+    python3 "$repo_root/tools/deploy/verify_v5_ui_first_frame_acceptance.py" --apply --cycles 10
+fi
 
 if [ "$motion" -eq 0 ]; then
   echo "acceptance source/deploy/verify/ui-capture complete; collect real-finger touch and UI action evidence before operator-path claims; golden motion not requested"

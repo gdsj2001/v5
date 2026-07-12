@@ -336,7 +336,7 @@ int v5_main_page_internal_main_page_rtcp_wcs_follow_active_model_available(
     return 1;
 }
 
-void v5_main_page_internal_main_page_update_program_project_points(
+int v5_main_page_internal_main_page_update_program_project_points(
     V5MainPage *page,
     const V5UiStatusView *status,
     unsigned int count)
@@ -350,7 +350,7 @@ void v5_main_page_internal_main_page_update_program_project_points(
     unsigned int i;
 
     if (!page) {
-        return;
+        return 0;
     }
     if (count > V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT) {
         count = V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT;
@@ -366,7 +366,7 @@ void v5_main_page_internal_main_page_update_program_project_points(
     page->toolpath_program_ac_a_deg = model_valid ? first_deg : 0.0;
     page->toolpath_program_ac_c_deg = model_valid ? second_deg : 0.0;
     if (!model_valid) {
-        return;
+        return 0;
     }
     for (i = 0U; i < count; ++i) {
         v5_main_page_internal_main_page_apply_active_model_pose_to_world_point(
@@ -377,4 +377,5 @@ void v5_main_page_internal_main_page_update_program_project_points(
             first_deg,
             second_deg);
     }
+    return 1;
 }

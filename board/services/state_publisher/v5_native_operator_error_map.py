@@ -17,11 +17,16 @@ from typing import Iterable, List, Pattern, Tuple
 EXPECTED_SOURCE_COUNT = 555
 EXPECTED_INVENTORY_SHA256 = "10ea2746943af0d98cf709cfe1f550006440169637322e6f639cfc32be517962"
 OPERATOR_ERROR_MAGIC = 0x564F4552
-OPERATOR_ERROR_VERSION = 1
+OPERATOR_ERROR_VERSION = 2
 OPERATOR_ERROR_PREFIX_STRUCT = struct.Struct('<IIIIIIQQ64s24s96s384s256s')
 OPERATOR_ERROR_BLOCK_STRUCT = struct.Struct('<IIIIIIQQ64s24s96s384s256sII')
 DEFAULT_OPERATOR_ERROR_PATH = '/dev/shm/v5_native_operator_error_status.bin'
 DEFAULT_OPERATOR_ERROR_MAP = '/opt/8ax/v5/config/ui/v5_native_operator_error_map.tsv'
+
+DISPLAY_LOG_ONLY = 1
+DISPLAY_TOP_STATUS = 2
+DISPLAY_POPUP = 3
+VALID_DISPLAY_MODES = {DISPLAY_LOG_ONLY, DISPLAY_TOP_STATUS, DISPLAY_POPUP}
 
 GROUP_PRESENTATION = {
     "PROGRAM_SYNTAX": ("程序格式错误", "检查当前高亮程序行的指令、参数和值，修正后重新打开并运行程序"),
@@ -43,6 +48,13 @@ GROUP_PRESENTATION = {
     "INTERNAL": ("控制系统内部错误", "停止当前运行并保留程序名和行号，联系维护人员处理"),
     "USER_PROGRAM": ("用户程序报告错误", "按用户程序给出的原因修改程序或现场条件后重新运行"),
     "PASSTHROUGH": ("控制系统报告错误", "停止当前动作并重新执行一次；若再次出现，联系维护人员"),
+}
+
+GROUP_DISPLAY_MODE = {group: DISPLAY_POPUP for group in GROUP_PRESENTATION}
+GROUP_DISPLAY_MODE["MOTION_JOG"] = DISPLAY_TOP_STATUS
+SOURCE_DISPLAY_MODE = {
+    "MOTION_FMT_73BD5ADAF3CF": DISPLAY_LOG_ONLY,
+    "MOTION_FMT_B1C1DF723CAD": DISPLAY_LOG_ONLY,
 }
 
 ALIAS_PRESENTATION = {
@@ -108,6 +120,7 @@ class NativeOperatorMessage:
     title_cn: str
     reason_cn: str
     next_cn: str
+    display_mode: int
     fingerprint: str
     matched: bool
 
@@ -205,6 +218,7 @@ def _render_template(template: str, captures: Iterable[str]) -> str:
 
 def _sanitize_operator_text(text: str) -> str:
     value = _BRAND_WORDS.sub("控制系统", text or "")
+    value = value.replace("底层控制", "系统")
     value = _ABSOLUTE_PATH.sub("目标文件", value)
     return _normalize(value)
 
@@ -233,7 +247,9 @@ def write_operator_error_status(path: str, valid: int, kind: int, generation: in
     title_cn = _fixed_utf8(message.title_cn if message else '', 96)
     reason_cn = _fixed_utf8(message.reason_cn if message else '', 384)
     next_cn = _fixed_utf8(message.next_cn if message else '', 256)
-    valid_value = 1 if valid and message and message.reason_cn else 0
+    valid_value = 1 if (
+        valid and message and message.reason_cn and message.display_mode in VALID_DISPLAY_MODES
+    ) else 0
     monotonic_ns = time.monotonic_ns()
     fields = (
         OPERATOR_ERROR_MAGIC,
@@ -241,7 +257,7 @@ def write_operator_error_status(path: str, valid: int, kind: int, generation: in
         OPERATOR_ERROR_BLOCK_STRUCT.size,
         valid_value,
         int(kind) if valid_value else 0,
-        0,
+        int(message.display_mode) if valid_value else 0,
         int(generation) if valid_value else 0,
         monotonic_ns,
         source_id,
@@ -334,6 +350,7 @@ class NativeOperatorErrorMap:
                     "控制系统错误",
                     "控制系统返回未识别错误",
                     "停止当前操作并联系维护人员",
+                    DISPLAY_POPUP,
                     fingerprint,
                     False,
                 )
@@ -344,6 +361,10 @@ class NativeOperatorErrorMap:
                 _sanitize_operator_text(title_cn),
                 _sanitize_operator_text(reason_cn),
                 _sanitize_operator_text(next_cn),
+                SOURCE_DISPLAY_MODE.get(
+                    entry.source_id,
+                    GROUP_DISPLAY_MODE[entry.handling_group],
+                ),
                 fingerprint,
                 True,
             )
@@ -352,6 +373,7 @@ class NativeOperatorErrorMap:
             "控制系统错误",
             "控制系统返回未识别错误",
             "停止当前操作并联系维护人员",
+            DISPLAY_POPUP,
             fingerprint,
             False,
         )
@@ -377,7 +399,8 @@ def poll_operator_error_events(channel, error_types, error_map, path: str, gener
         write_operator_error_status(path, 1, kind, generation, message)
         print(
             f'v5_native_operator_error generation={generation} source_id={message.source_id} '
-            f'fingerprint={message.fingerprint} matched={1 if message.matched else 0}',
+            f'display_mode={message.display_mode} fingerprint={message.fingerprint} '
+            f'matched={1 if message.matched else 0}',
             flush=True)
         published += 1
     return generation, published
@@ -392,6 +415,7 @@ def translate_internal_alias(code: str) -> NativeOperatorMessage:
             "操作未完成",
             "当前操作返回未识别状态",
             "保持当前状态并联系维护人员",
+            DISPLAY_POPUP,
             fingerprint,
             False,
         )
@@ -401,6 +425,7 @@ def translate_internal_alias(code: str) -> NativeOperatorMessage:
         title_cn,
         reason_cn,
         next_cn,
+        DISPLAY_POPUP,
         fingerprint,
         True,
     )

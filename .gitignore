@@ -64,6 +64,7 @@ compile_commands.json
 *.runs/
 new-vivado/**/NA/
 vivado_hw_project/**/NA/
+/vivado_hw_project/board_inputs/
 *.jou
 *.str
 *.log

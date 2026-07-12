@@ -358,6 +358,17 @@ void v5_main_page_set_native_readback(V5MainPage *page, const V5NativeReadback *
     }
 }
 
+void v5_main_page_store_native_readback_during_modal(
+    V5MainPage *page,
+    const V5NativeReadback *readback)
+{
+    if (!page || !readback) {
+        return;
+    }
+    page->native_readback = *readback;
+    v5_main_page_internal_update_estop_button_text(page);
+}
+
 void v5_main_page_set_navigation_callback(V5MainPage *page, V5UiNavigationCallback cb, void *user_data)
 {
     if (!page) {

@@ -235,6 +235,7 @@ void v5_settings_axis_table_create(lv_obj_t *root)
         }
     }
     lv_obj_scroll_to_x(scroll, 0, LV_ANIM_OFF);
+    v5_settings_axis_create_keyboard_overlay();
 }
 
 const char *v5_settings_axis_table_g53_value(unsigned int row, unsigned int col)

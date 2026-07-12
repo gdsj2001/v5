@@ -13,6 +13,8 @@ binary	build/board/app/v5_linuxcncrsh_probe	/usr/libexec/8ax/v5_linuxcncrsh_prob
 binary	build/board/app/v5_command_gate_server	/usr/libexec/8ax/v5_command_gate_server	0755
 binary	build/board/app/v5_linuxcncrsh_golden_run	/usr/libexec/8ax/v5_linuxcncrsh_golden_run	0755
 script	services/ui/v5_remote_ui_relay.py	/usr/libexec/8ax/v5_remote_ui_relay.py	0755
+script	services/ui/v5_ui_boot_ready.py	/usr/libexec/8ax/v5_ui_boot_ready.py	0755
+module	services/ui/v5_ui_cache_queue_contract.py	/usr/libexec/8ax/v5_ui_cache_queue_contract.py	0644
 module	services/ui/v5_remote_ui_contract.py	/usr/libexec/8ax/v5_remote_ui_contract.py	0644
 module	services/ui/v5_remote_ui_protocol.py	/usr/libexec/8ax/v5_remote_ui_protocol.py	0644
 module	services/ui/v5_remote_ui_state.py	/usr/libexec/8ax/v5_remote_ui_state.py	0644
@@ -79,10 +81,6 @@ config	config/drive-profiles/private/535e661e9ea313143fed0d86e9d982368ca9a70c706
 script	tools/v5_touch_calibration/v5_touch_calibration.py	/opt/8ax/tools/v5_touch_calibration/v5_touch_calibration.py	0755
 module	tools/v5_touch_calibration/v5_touch_core.py	/opt/8ax/tools/v5_touch_calibration/v5_touch_core.py	0644
 module	tools/v5_touch_calibration/v5_touch_evdev.py	/opt/8ax/tools/v5_touch_calibration/v5_touch_evdev.py	0644
-module	tools/v5_touch_calibration/v5_touch_window.py	/opt/8ax/tools/v5_touch_calibration/v5_touch_window.py	0644
-module	tools/v5_touch_calibration/v5_touch_window_calibration.py	/opt/8ax/tools/v5_touch_calibration/v5_touch_window_calibration.py	0644
-module	tools/v5_touch_calibration/v5_touch_window_restart.py	/opt/8ax/tools/v5_touch_calibration/v5_touch_window_restart.py	0644
-module	tools/v5_touch_calibration/v5_touch_window_runtime.py	/opt/8ax/tools/v5_touch_calibration/v5_touch_window_runtime.py	0644
 script	tools/v5_touch_calibration/v5_apply_touch_calibration.py	/opt/8ax/tools/v5_touch_calibration/v5_apply_touch_calibration.py	0755
 script	tools/v5_touch_calibration/v5_run_touch_calibration.sh	/opt/8ax/tools/v5_touch_calibration/v5_run_touch_calibration.sh	0755
 script	tools/v5_touch_calibration/v5_restart_after_touch_calibration.sh	/opt/8ax/tools/v5_touch_calibration/v5_restart_after_touch_calibration.sh	0755

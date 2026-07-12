@@ -189,6 +189,10 @@ cleanup_retired_runtime_files() {
   rm -f /opt/8ax/v5/config/settings/microkernel_parameter_table.tsv
   rm -f /opt/8ax/v5/gcode/golden/cc.ngc
   rm -f /tmp/v5_golden/cc.ngc
+  rm -f /opt/8ax/tools/v5_touch_calibration/v5_touch_window.py
+  rm -f /opt/8ax/tools/v5_touch_calibration/v5_touch_window_calibration.py
+  rm -f /opt/8ax/tools/v5_touch_calibration/v5_touch_window_restart.py
+  rm -f /opt/8ax/tools/v5_touch_calibration/v5_touch_window_runtime.py
 }
 
 install_runtime_drive_profiles() {

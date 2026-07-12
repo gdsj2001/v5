@@ -8,7 +8,35 @@
     "commit": "93b1325e4b9bff0d1ce7a2dd85aed0b26e3e76d7",
     "tree": "d61839ef0a2bbe7191d66fc92ca0f28c2cafbbd9"
   },
-  "content_sha256": "23db1002b92f25020c77878677f43fca467420feb04b69c60749898537c4727b",
+  "xilinx_5_4_adaptation": {
+    "target_kernel_commit": "62ea514294a0c9a80455e51f1f4de36e66e8c546",
+    "rt_scc_sha256": "0a4cec0a4f913a991753b21887b2266708b169646605b45b4eb2383a03c6d557",
+    "patches": [
+      {
+        "path": "features/rt/Use-CONFIG_PREEMPTION.patch",
+        "sha256": "c5ce4d0c5389f48fc556783f145de3686462e2f14d4dcde6e48b6fe3caf3c352"
+      },
+      {
+        "path": "features/rt/workqueue-Convert-the-locks-to-raw-type.patch",
+        "sha256": "7612280cb546f0045e9dda28ef064e760dd83f1facc8e69d09d6e3b1723eb40f"
+      },
+      {
+        "path": "features/rt/mm-page_alloc-rt-friendly-per-cpu-pages.patch",
+        "sha256": "866827f54f61eff720849064405d67e42d35a40b4ef33ca17701401f28cc4636"
+      }
+    ],
+    "inactive_upstream_entries": [
+      "arm-remove-printk_nmi_.patch",
+      "Split-IRQ-off-and-zone-lock-while-freeing-pages-from.patch"
+    ]
+  },
+  "working_tree_overrides": [
+    "features/rt/Use-CONFIG_PREEMPTION.patch",
+    "features/rt/mm-page_alloc-rt-friendly-per-cpu-pages.patch",
+    "features/rt/rt.scc",
+    "features/rt/workqueue-Convert-the-locks-to-raw-type.patch"
+  ],
+  "content_sha256": "899ee32b9e78dc8bcd6a71890cd98a3d1c73ae36576268c0404aa005bfca2393",
   "file_count": 1632,
   "symlink_count": 0
 }

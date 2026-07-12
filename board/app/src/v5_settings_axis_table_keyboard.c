@@ -6,6 +6,7 @@
 #include "v5_ui_first_frame_guard.h"
 #include "v5_lvgl_remote_display.h"
 #include "v5_motion_model_registry.h"
+#include "v5_popup_layout.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -17,18 +18,62 @@
 #include <time.h>
 #include "v5_settings_axis_table_internal.h"
 
+static const char *g_keyboard_keys[] = {
+    "/", "x", "-", "+",
+    "7", "8", "9", "BKSP",
+    "4", "5", "6", "C",
+    "1", "2", "3", "OK",
+    "0", ".", "+/-", "ESC",
+};
+
+enum {
+    V5_KEYBOARD_HIT_X = 352,
+    V5_KEYBOARD_HIT_Y = 76,
+    V5_KEYBOARD_HIT_W = 320,
+    V5_KEYBOARD_HIT_H = 419,
+    V5_KEYBOARD_TITLE_X = 10,
+    V5_KEYBOARD_TITLE_Y = 6,
+    V5_KEYBOARD_PANEL_X = 0,
+    V5_KEYBOARD_PANEL_Y = 29,
+    V5_KEYBOARD_VALUE_X = 6,
+    V5_KEYBOARD_VALUE_Y = 35,
+    V5_KEYBOARD_VALUE_W = 308,
+    V5_KEYBOARD_VALUE_H = 54,
+    V5_KEYBOARD_MATRIX_X = 6,
+    V5_KEYBOARD_MATRIX_Y = 95,
+    V5_KEYBOARD_KEY_W = 75,
+    V5_KEYBOARD_KEY_H = 61,
+    V5_KEYBOARD_GAP = 2
+};
+
+static void keyboard_absorb_release(void)
+{
+    lv_indev_t *indev = lv_indev_get_act();
+    if (indev) {
+        lv_indev_wait_release(indev);
+    }
+}
+
 static void close_keyboard_overlay_with_refresh(V5AxisCellRef *refresh_ref)
 {
     lv_obj_t *refresh_obj = refresh_ref ? refresh_ref->obj : 0;
 
-    if (g_v5_axis_table_keyboard_overlay) {
-        lv_obj_del(g_v5_axis_table_keyboard_overlay);
+    if (g_v5_axis_table_keyboard_overlay &&
+        !lv_obj_has_flag(g_v5_axis_table_keyboard_overlay, LV_OBJ_FLAG_HIDDEN)) {
+        if (!v5_ui_first_frame_guard_dismiss_overlay(
+                &g_v5_axis_table_keyboard_frame_guard,
+                g_v5_axis_table_keyboard_overlay)) {
+            return;
+        }
     }
-    g_v5_axis_table_keyboard_overlay = 0;
-    g_v5_axis_table_keyboard_value_label = 0;
     g_v5_axis_table_keyboard_ref = 0;
     g_v5_axis_table_keyboard_value[0] = '\0';
-    v5_ui_first_frame_guard_restore_dirty(&g_v5_axis_table_keyboard_frame_guard, refresh_obj);
+    if (g_v5_axis_table_keyboard_value_label) {
+        lv_label_set_text(g_v5_axis_table_keyboard_value_label, " ");
+    }
+    if (refresh_obj) {
+        lv_obj_invalidate(refresh_obj);
+    }
 }
 
 void v5_settings_axis_close_keyboard_overlay(void)
@@ -38,7 +83,8 @@ void v5_settings_axis_close_keyboard_overlay(void)
 
 static void keyboard_overlay_clicked_cb(lv_event_t *event)
 {
-    if (lv_event_get_code(event) == LV_EVENT_CLICKED) {
+    if (lv_event_get_code(event) == LV_EVENT_RELEASED) {
+        keyboard_absorb_release();
         v5_settings_axis_close_keyboard_overlay();
     }
 }
@@ -126,9 +172,10 @@ static void keyboard_commit_value(void)
 static void keyboard_key_event_cb(lv_event_t *event)
 {
     const char *key = (const char *)lv_event_get_user_data(event);
-    if (lv_event_get_code(event) != LV_EVENT_CLICKED || !key) {
+    if (lv_event_get_code(event) != LV_EVENT_RELEASED || !key) {
         return;
     }
+    keyboard_absorb_release();
     if (strcmp(key, "OK") == 0) {
         keyboard_commit_value();
     } else if (strcmp(key, "ESC") == 0) {
@@ -179,87 +226,103 @@ static void make_keyboard_key(lv_obj_t *parent, const char *text, int x, int y, 
     lv_obj_clear_flag(key, LV_OBJ_FLAG_SCROLLABLE);
     text_label = v5_settings_axis_label(key, text, 0, (h - 22) / 2, w, 24, text_r, text_g, text_b);
     lv_obj_set_style_text_align(text_label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_add_event_cb(key, keyboard_key_event_cb, LV_EVENT_CLICKED, (void *)text);
+    lv_obj_add_event_cb(key, keyboard_key_event_cb, LV_EVENT_RELEASED, (void *)text);
 }
 
-void v5_settings_axis_open_keyboard_for_ref(V5AxisCellRef *ref)
+void v5_settings_axis_create_keyboard_overlay(void)
 {
-    static const char *keys[] = {
-        "/", "x", "-", "+",
-        "7", "8", "9", "BKSP",
-        "4", "5", "6", "C",
-        "1", "2", "3", "OK",
-        "0", ".", "+/-", "ESC",
-    };
-    enum {
-        hit_x = 352,
-        hit_y = 76,
-        hit_w = 320,
-        hit_h = 419,
-        title_x = 10,
-        title_y = 6,
-        panel_x = 0,
-        panel_y = 29,
-        value_x = 6,
-        value_y = 35,
-        value_w = 308,
-        value_h = 54,
-        matrix_x = 6,
-        matrix_y = 95,
-        key_w = 75,
-        key_h = 61,
-        gap = 2
-    };
     lv_obj_t *keyboard_hit_area;
     lv_obj_t *keyboard_panel;
     lv_obj_t *value_box;
     lv_obj_t *title;
     unsigned int i;
 
-    if (!ref) return;
+    if (g_v5_axis_table_keyboard_overlay) {
+        return;
+    }
+    v5_ui_first_frame_guard_clear(&g_v5_axis_table_keyboard_frame_guard);
+    g_v5_axis_table_keyboard_overlay = v5_popup_layout_create_overlay(lv_scr_act());
+    lv_obj_set_style_bg_opa(g_v5_axis_table_keyboard_overlay, LV_OPA_COVER, 0);
+    lv_obj_add_event_cb(
+        g_v5_axis_table_keyboard_overlay,
+        keyboard_overlay_clicked_cb,
+        LV_EVENT_RELEASED,
+        0);
+
+    keyboard_hit_area = v5_settings_axis_panel(
+        g_v5_axis_table_keyboard_overlay,
+        V5_KEYBOARD_HIT_X, V5_KEYBOARD_HIT_Y,
+        V5_KEYBOARD_HIT_W, V5_KEYBOARD_HIT_H,
+        3, 12, 20);
+    lv_obj_set_style_bg_opa(keyboard_hit_area, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(keyboard_hit_area, 0, 0);
+    lv_obj_add_flag(keyboard_hit_area, LV_OBJ_FLAG_CLICKABLE);
+
+    title = v5_settings_axis_label(
+        keyboard_hit_area, "设置参数",
+        V5_KEYBOARD_TITLE_X, V5_KEYBOARD_TITLE_Y, 300, 24, 226, 238, 246);
+    lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_LEFT, 0);
+    keyboard_panel = v5_settings_axis_panel(
+        keyboard_hit_area,
+        V5_KEYBOARD_PANEL_X, V5_KEYBOARD_PANEL_Y, 320, 390, 12, 39, 58);
+    lv_obj_set_style_border_width(keyboard_panel, 1, 0);
+    lv_obj_set_style_border_color(keyboard_panel, v5_settings_axis_rgb(33, 72, 98), 0);
+    lv_obj_add_flag(keyboard_panel, LV_OBJ_FLAG_CLICKABLE);
+
+    value_box = v5_settings_axis_panel(
+        keyboard_hit_area,
+        V5_KEYBOARD_VALUE_X, V5_KEYBOARD_VALUE_Y,
+        V5_KEYBOARD_VALUE_W, V5_KEYBOARD_VALUE_H,
+        5, 27, 43);
+    lv_obj_set_style_border_width(value_box, 1, 0);
+    lv_obj_set_style_border_color(value_box, v5_settings_axis_rgb(54, 86, 113), 0);
+    lv_obj_add_flag(value_box, LV_OBJ_FLAG_CLICKABLE);
+    g_v5_axis_table_keyboard_value_label = v5_settings_axis_label(
+        value_box, " ", 10, 12, V5_KEYBOARD_VALUE_W - 20, 30, 226, 238, 246);
+    lv_obj_set_style_text_align(g_v5_axis_table_keyboard_value_label, LV_TEXT_ALIGN_CENTER, 0);
+
+    for (i = 0U; i < sizeof(g_keyboard_keys) / sizeof(g_keyboard_keys[0]); ++i) {
+        int col = (int)(i % 4U);
+        int row = (int)(i / 4U);
+        make_keyboard_key(keyboard_hit_area,
+                          g_keyboard_keys[i],
+                          V5_KEYBOARD_MATRIX_X + col * (V5_KEYBOARD_KEY_W + V5_KEYBOARD_GAP),
+                          V5_KEYBOARD_MATRIX_Y + row * (V5_KEYBOARD_KEY_H + V5_KEYBOARD_GAP),
+                          V5_KEYBOARD_KEY_W,
+                          V5_KEYBOARD_KEY_H);
+    }
+    lv_obj_add_flag(g_v5_axis_table_keyboard_overlay, LV_OBJ_FLAG_HIDDEN);
+}
+
+void v5_settings_axis_open_keyboard_for_ref(V5AxisCellRef *ref)
+{
+    if (!ref || !g_v5_axis_table_keyboard_overlay) {
+        return;
+    }
     if (ref->kind == V5_CELL_KIND_AXIS &&
         v5_settings_axis_table_cell_is_disabled(ref->row, ref->col)) {
         return;
     }
     v5_settings_axis_close_keyboard_overlay();
+    if (!v5_ui_first_frame_guard_begin_overlay(&g_v5_axis_table_keyboard_frame_guard)) {
+        return;
+    }
     g_v5_axis_table_keyboard_ref = ref;
-    snprintf(g_v5_axis_table_keyboard_value, sizeof(g_v5_axis_table_keyboard_value), "%s", ref->kind == V5_CELL_KIND_G53 ? v5_settings_axis_table_g53_value(ref->row, ref->col) : v5_settings_axis_table_value(ref->row, ref->col));
-    v5_ui_first_frame_guard_begin(&g_v5_axis_table_keyboard_frame_guard, V5_REMOTE_DISPLAY_CACHE_KEYBOARD);
-
-    g_v5_axis_table_keyboard_overlay = v5_settings_axis_panel(lv_scr_act(), 0, 0, 1024, 600, 3, 12, 20);
-    lv_obj_set_style_bg_opa(g_v5_axis_table_keyboard_overlay, LV_OPA_COVER, 0);
-    lv_obj_add_flag(g_v5_axis_table_keyboard_overlay, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(g_v5_axis_table_keyboard_overlay, keyboard_overlay_clicked_cb, LV_EVENT_CLICKED, 0);
-    lv_obj_move_foreground(g_v5_axis_table_keyboard_overlay);
-
-    keyboard_hit_area = v5_settings_axis_panel(g_v5_axis_table_keyboard_overlay, hit_x, hit_y, hit_w, hit_h, 3, 12, 20);
-    lv_obj_set_style_bg_opa(keyboard_hit_area, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(keyboard_hit_area, 0, 0);
-    lv_obj_add_flag(keyboard_hit_area, LV_OBJ_FLAG_CLICKABLE);
-
-    title = v5_settings_axis_label(keyboard_hit_area, "设置参数", title_x, title_y, 300, 24, 226, 238, 246);
-    lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_LEFT, 0);
-    keyboard_panel = v5_settings_axis_panel(keyboard_hit_area, panel_x, panel_y, 320, 390, 12, 39, 58);
-    lv_obj_set_style_border_width(keyboard_panel, 1, 0);
-    lv_obj_set_style_border_color(keyboard_panel, v5_settings_axis_rgb(33, 72, 98), 0);
-    lv_obj_add_flag(keyboard_panel, LV_OBJ_FLAG_CLICKABLE);
-
-    value_box = v5_settings_axis_panel(keyboard_hit_area, value_x, value_y, value_w, value_h, 5, 27, 43);
-    lv_obj_set_style_border_width(value_box, 1, 0);
-    lv_obj_set_style_border_color(value_box, v5_settings_axis_rgb(54, 86, 113), 0);
-    lv_obj_add_flag(value_box, LV_OBJ_FLAG_CLICKABLE);
-    g_v5_axis_table_keyboard_value_label = v5_settings_axis_label(value_box, g_v5_axis_table_keyboard_value[0] ? g_v5_axis_table_keyboard_value : " ", 10, 12, value_w - 20, 30, 226, 238, 246);
-    lv_obj_set_style_text_align(g_v5_axis_table_keyboard_value_label, LV_TEXT_ALIGN_CENTER, 0);
-
-    for (i = 0U; i < sizeof(keys) / sizeof(keys[0]); ++i) {
-        int col = (int)(i % 4U);
-        int row = (int)(i / 4U);
-        make_keyboard_key(keyboard_hit_area,
-                          keys[i],
-                          matrix_x + col * (key_w + gap),
-                          matrix_y + row * (key_h + gap),
-                          key_w,
-                          key_h);
+    snprintf(
+        g_v5_axis_table_keyboard_value,
+        sizeof(g_v5_axis_table_keyboard_value),
+        "%s",
+        ref->kind == V5_CELL_KIND_G53 ?
+            v5_settings_axis_table_g53_value(ref->row, ref->col) :
+            v5_settings_axis_table_value(ref->row, ref->col));
+    refresh_keyboard_value_label();
+    if (!v5_ui_first_frame_guard_present_overlay(
+            &g_v5_axis_table_keyboard_frame_guard,
+            g_v5_axis_table_keyboard_overlay)) {
+        (void)v5_ui_first_frame_guard_dismiss_overlay(
+            &g_v5_axis_table_keyboard_frame_guard,
+            g_v5_axis_table_keyboard_overlay);
+        g_v5_axis_table_keyboard_ref = 0;
     }
 }
 

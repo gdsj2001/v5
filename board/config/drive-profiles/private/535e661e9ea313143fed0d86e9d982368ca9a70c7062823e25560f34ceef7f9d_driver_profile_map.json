@@ -1,5 +1,5 @@
 {
-  "description": "Source-side editable private driver command map for one device DNA hash. Upload to the matching VPS private DNA directory before board download; this file is not a product runtime fallback. SV630N default encoder_bits is 18 and runtime derives count fields from the final bit; drive-owner fields may include absolute multi-turn/single-turn/position64 read commands, raw multi-turn counter modulus metadata, private static Crev trust for the current SV630N machine where no 0x608F object exists, and explicit drive count-domain command declarations.",
+  "description": "Source-side editable private driver command map for one device DNA hash. Upload to the matching VPS private DNA directory before board download; this file is not a product runtime fallback. SV630N default encoder_bits is 18 and runtime derives count fields from the final bit; drive-owner fields may include absolute multi-turn/single-turn/absolute-position read commands, raw multi-turn counter modulus metadata, private static Crev trust for the current SV630N machine where no 0x608F object exists, and explicit drive count-domain command declarations.",
   "generated_at": "2026-06-21T00:00:00Z",
   "generated_by": "A1-Codex",
   "integrity_policy": {
@@ -448,26 +448,28 @@
           "verify_tolerance": null,
           "write_value": null
         },
-        "drive.read_abs_position64": {
+        "drive.read_abs_position": {
           "access": "derived",
           "byte_order": "little",
-          "compose_formula": "without zero basis: raw_turn * encoder_single_turn_counts + raw_single_turn; with zero basis: zero_abs_counts64 + delta_turns(raw_turn, zero_abs_turns, raw_modulus) * encoder_single_turn_counts + (raw_single_turn - zero_abs_single_turn_counts), delta_turns=((raw_turn-zero_abs_turns+raw_modulus/2) mod raw_modulus)-raw_modulus/2",
+          "compose_formula": "without zero basis: raw_turn * encoder_single_turn_counts + raw_single_turn; with zero basis: zero_abs_counts + delta_turns(raw_turn, zero_abs_turns, raw_modulus) * encoder_single_turn_counts + (raw_single_turn - zero_abs_single_turn_counts), delta_turns=((raw_turn-zero_abs_turns+raw_modulus/2) mod raw_modulus)-raw_modulus/2",
           "compose_from": [
             "drive.read_abs_multi_turn",
             "drive.read_abs_single_turn"
           ],
-          "compose_reference": "zero_model.zero_abs_turns/zero_abs_single_turn_counts/zero_abs_counts64 when available; raw composition only before zero basis exists",
-          "data_type": "int64",
+          "compose_reference": "zero_model.zero_abs_turns/zero_abs_single_turn_counts/zero_abs_counts when available; raw composition only before zero basis exists",
+          "data_type": "profile_integer",
+          "result_bits_source": "encoder_multiturn_raw_bits + encoder_bits + sign_bit",
+          "result_value_type": "signed_arbitrary_precision",
           "failure_code": "",
           "failure_message_cn": "",
           "notes": [
-            "SV630N private map exposes position64 as an Adapter-derived absolute multi-turn value from 0x200B:71 and 0x200B:72.",
+            "SV630N private map exposes absolute-position as an Adapter-derived absolute multi-turn value from 0x200B:71 and 0x200B:72.",
             "0x200B:71 BitSize=16 only defines a 65536-turn raw counter wrap period; it is not the hardware physical safety/alarm limit.",
-            "If a future drive provides a direct 64-bit absolute object, map this standard command to that object instead of composing it."
+            "If a future drive provides a direct absolute object, the mapping must declare its actual result width and value type instead of composing it."
           ],
           "object": {
             "index": null,
-            "name": "adapter_derived_abs_position64",
+            "name": "adapter_derived_abs_position",
             "subindex": null
           },
           "priority": "P0",
@@ -482,7 +484,7 @@
           "scale": null,
           "slave_index": null,
           "source": "private",
-          "standard_command": "drive.read_abs_position64",
+          "standard_command": "drive.read_abs_position",
           "supported": true,
           "timeout_ms": 500,
           "unit": "counts",
@@ -1735,6 +1737,15 @@
         }
       },
       "drive_wrapped_rotary_support": false,
+      "drive_wrapped_rotary_support_semantics": "command_and_feedback_same_cycle_output_turn_periodic_window_proven",
+      "position_command_raw_bits": 32,
+      "position_command_raw_modulus": 4294967296,
+      "position_command_raw_value_type": "int32",
+      "position_command_raw_source": "profile_pdo_mapping_0x607A",
+      "position_feedback_raw_bits": 32,
+      "position_feedback_raw_modulus": 4294967296,
+      "position_feedback_raw_value_type": "int32",
+      "position_feedback_raw_source": "drive.read_actual_position_0x6064",
       "encoder_bits": 18.0,
       "encoder_multiturn_limit": 65536,
       "encoder_multiturn_limit_semantics": "counter_modulus_not_physical_alarm_limit",
@@ -2228,26 +2239,28 @@
           "verify_tolerance": null,
           "write_value": null
         },
-        "drive.read_abs_position64": {
+        "drive.read_abs_position": {
           "access": "derived",
           "byte_order": "little",
-          "compose_formula": "without zero basis: raw_turn * encoder_single_turn_counts + raw_single_turn; with zero basis: zero_abs_counts64 + delta_turns(raw_turn, zero_abs_turns, raw_modulus) * encoder_single_turn_counts + (raw_single_turn - zero_abs_single_turn_counts), delta_turns=((raw_turn-zero_abs_turns+raw_modulus/2) mod raw_modulus)-raw_modulus/2",
+          "compose_formula": "without zero basis: raw_turn * encoder_single_turn_counts + raw_single_turn; with zero basis: zero_abs_counts + delta_turns(raw_turn, zero_abs_turns, raw_modulus) * encoder_single_turn_counts + (raw_single_turn - zero_abs_single_turn_counts), delta_turns=((raw_turn-zero_abs_turns+raw_modulus/2) mod raw_modulus)-raw_modulus/2",
           "compose_from": [
             "drive.read_abs_multi_turn",
             "drive.read_abs_single_turn"
           ],
-          "compose_reference": "zero_model.zero_abs_turns/zero_abs_single_turn_counts/zero_abs_counts64 when available; raw composition only before zero basis exists",
-          "data_type": "int64",
+          "compose_reference": "zero_model.zero_abs_turns/zero_abs_single_turn_counts/zero_abs_counts when available; raw composition only before zero basis exists",
+          "data_type": "profile_integer",
+          "result_bits_source": "encoder_multiturn_raw_bits + encoder_bits + sign_bit",
+          "result_value_type": "signed_arbitrary_precision",
           "failure_code": "",
           "failure_message_cn": "",
           "notes": [
-            "SV630N private map exposes position64 as an Adapter-derived absolute multi-turn value from 0x200B:71 and 0x200B:72.",
+            "SV630N private map exposes absolute-position as an Adapter-derived absolute multi-turn value from 0x200B:71 and 0x200B:72.",
             "0x200B:71 BitSize=16 only defines a 65536-turn raw counter wrap period; it is not the hardware physical safety/alarm limit.",
-            "If a future drive provides a direct 64-bit absolute object, map this standard command to that object instead of composing it."
+            "If a future drive provides a direct absolute object, the mapping must declare its actual result width and value type instead of composing it."
           ],
           "object": {
             "index": null,
-            "name": "adapter_derived_abs_position64",
+            "name": "adapter_derived_abs_position",
             "subindex": null
           },
           "priority": "P0",
@@ -2262,7 +2275,7 @@
           "scale": null,
           "slave_index": null,
           "source": "private",
-          "standard_command": "drive.read_abs_position64",
+          "standard_command": "drive.read_abs_position",
           "supported": true,
           "timeout_ms": 500,
           "unit": "counts",
@@ -3515,6 +3528,15 @@
         }
       },
       "drive_wrapped_rotary_support": false,
+      "drive_wrapped_rotary_support_semantics": "command_and_feedback_same_cycle_output_turn_periodic_window_proven",
+      "position_command_raw_bits": 32,
+      "position_command_raw_modulus": 4294967296,
+      "position_command_raw_value_type": "int32",
+      "position_command_raw_source": "profile_pdo_mapping_0x607A",
+      "position_feedback_raw_bits": 32,
+      "position_feedback_raw_modulus": 4294967296,
+      "position_feedback_raw_value_type": "int32",
+      "position_feedback_raw_source": "drive.read_actual_position_0x6064",
       "encoder_bits": 18.0,
       "encoder_multiturn_limit": 65536,
       "encoder_multiturn_limit_semantics": "counter_modulus_not_physical_alarm_limit",
@@ -3668,7 +3690,7 @@
     {
       "priority": "P0",
       "required_for_motion_gate": true,
-      "standard_command": "drive.read_abs_position64"
+      "standard_command": "drive.read_abs_position"
     },
     {
       "priority": "P0",

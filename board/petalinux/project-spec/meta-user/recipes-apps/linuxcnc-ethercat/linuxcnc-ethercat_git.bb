@@ -213,18 +213,11 @@ do_install() {
 
     install -d ${D}${bindir}
     install -m 0755 ${B}/src/lcec_conf ${D}${bindir}/lcec_conf
-    install -m 0755 ${B}/src/lcec_configgen ${D}${bindir}/lcec_configgen
-    install -d ${D}/usr/src/linuxcnc-ethercat
-    cp -a ${S}/src ${D}/usr/src/linuxcnc-ethercat/
-    install -m 0644 ${B}/src/lcec_main.c ${D}/usr/src/linuxcnc-ethercat/src/lcec_main.c
-    chown -R root:root ${D}/usr/src/linuxcnc-ethercat
 }
 
 FILES_${PN} += " \
     /usr/lib/linuxcnc/modules/lcec.so \
     ${bindir}/lcec_conf \
-    ${bindir}/lcec_configgen \
-    /usr/src/linuxcnc-ethercat \
 "
 
 RDEPENDS_${PN} += "ethercat-master linuxcnc-prebuilt"

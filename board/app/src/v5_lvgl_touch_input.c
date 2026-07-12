@@ -1,4 +1,5 @@
 #include "v5_lvgl_touch_input.h"
+#include "v5_ui_first_frame_guard.h"
 
 #include "lvgl.h"
 
@@ -55,6 +56,8 @@ typedef struct V5TouchSlot {
 static V5TouchSlot g_slots[V5_TOUCH_MAX_SLOTS];
 static int g_mt_slot;
 static int g_lvgl_suppressed;
+static int g_touch_contact_active;
+static V5UiOperatorInputSequence g_post_modal_sequence;
 static V5LvglTouchPointsCallback g_points_callback;
 static void *g_points_callback_user_data;
 
@@ -203,12 +206,54 @@ static int collect_touch_points(lv_point_t *points, int cap)
     return count;
 }
 
+typedef enum V5TouchDispatchMode {
+    V5_TOUCH_DISPATCH_NORMAL = 0,
+    V5_TOUCH_DISPATCH_DISCARD,
+    V5_TOUCH_DISPATCH_SAFETY
+} V5TouchDispatchMode;
+
+static V5TouchDispatchMode post_modal_touch_dispatch_mode(const lv_point_t *points, int count)
+{
+    int new_contact = count > 0 && !g_touch_contact_active;
+    int was_blocked = g_post_modal_sequence.blocked;
+    int was_safety = g_post_modal_sequence.safety;
+    int allowed;
+    if (count <= 0) {
+        allowed = v5_ui_first_frame_guard_input_sequence_end(&g_post_modal_sequence);
+        g_touch_contact_active = 0;
+        if (!allowed) {
+            return V5_TOUCH_DISPATCH_DISCARD;
+        }
+        return was_safety ? V5_TOUCH_DISPATCH_SAFETY : V5_TOUCH_DISPATCH_NORMAL;
+    }
+    g_touch_contact_active = 1;
+    if (new_contact) {
+        allowed = v5_ui_first_frame_guard_input_sequence_begin(
+            &g_post_modal_sequence,
+            count == 1 && points ? points[0].x : (lv_coord_t)-1,
+            count == 1 && points ? points[0].y : (lv_coord_t)-1);
+    } else {
+        allowed = v5_ui_first_frame_guard_input_sequence_continue(&g_post_modal_sequence);
+    }
+    if (!allowed) {
+        if (g_touch_indev && (!was_blocked || new_contact)) {
+            lv_indev_reset(g_touch_indev, NULL);
+        }
+        return V5_TOUCH_DISPATCH_DISCARD;
+    }
+    if (g_post_modal_sequence.safety) {
+        return V5_TOUCH_DISPATCH_SAFETY;
+    }
+    return V5_TOUCH_DISPATCH_NORMAL;
+}
+
 static void publish_touch_points(void)
 {
     lv_point_t points[2];
     int changed = 0;
     int consumed = 0;
     int count = collect_touch_points(points, 2);
+    V5TouchDispatchMode dispatch_mode;
     if (count >= 2) {
         g_screen_x = ((int)points[0].x + (int)points[1].x) / 2;
         g_screen_y = ((int)points[0].y + (int)points[1].y) / 2;
@@ -220,6 +265,15 @@ static void publish_touch_points(void)
     } else {
         g_touching = 0;
         update_screen_point();
+    }
+    dispatch_mode = post_modal_touch_dispatch_mode(count > 0 ? points : NULL, count);
+    if (dispatch_mode == V5_TOUCH_DISPATCH_DISCARD) {
+        g_lvgl_suppressed = 1;
+        return;
+    }
+    if (dispatch_mode == V5_TOUCH_DISPATCH_SAFETY) {
+        g_lvgl_suppressed = 0;
+        return;
     }
     if (g_points_callback) {
         consumed = g_points_callback(count > 0 ? points : 0, count, count > 0 ? 1 : 0, &changed, g_points_callback_user_data);
@@ -333,6 +387,8 @@ int v5_lvgl_touch_input_setup(void)
         return 0;
     }
     clear_touch_slots();
+    v5_ui_first_frame_guard_input_sequence_reset(&g_post_modal_sequence);
+    g_touch_contact_active = 0;
     update_screen_point();
     lv_indev_drv_init(&g_touch_driver);
     g_touch_driver.type = LV_INDEV_TYPE_POINTER;

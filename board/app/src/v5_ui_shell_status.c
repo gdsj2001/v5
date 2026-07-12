@@ -81,17 +81,19 @@ void shell_create_top_status_layer(lv_obj_t *screen)
     lv_label_set_text(g_v5_shell_top_status_label, "未回零: 开机后需回零一次");
 }
 
-static void shell_set_label_text_if_changed(lv_obj_t *label, const char *text)
+static int shell_set_label_text_if_changed(lv_obj_t *label, const char *text)
 {
     const char *safe = text ? text : "";
     const char *current;
     if (!label) {
-        return;
+        return 0;
     }
     current = lv_label_get_text(label);
     if (!current || strcmp(current, safe) != 0) {
         lv_label_set_text(label, safe);
+        return 1;
     }
+    return 0;
 }
 
 static void shell_set_text_color_if_changed(lv_obj_t *obj, lv_color_t color, uint32_t selector)
@@ -104,25 +106,33 @@ static void shell_set_text_color_if_changed(lv_obj_t *obj, lv_color_t color, uin
 void shell_update_top_status_label(void)
 {
     unsigned long long now;
+    int changed = 0;
     if (!g_v5_shell_top_status_label) {
         return;
     }
     shell_set_text_color_if_changed(g_v5_shell_top_status_label, lv_color_make(255, 86, 86), 0);
     now = shell_monotonic_ns();
-    if (g_v5_shell_operator_error_show_until_ns != 0ULL && now < g_v5_shell_operator_error_show_until_ns &&
+    if (g_v5_shell_operator_error_status.display_mode ==
+            V5_NATIVE_OPERATOR_ERROR_DISPLAY_TOP_STATUS &&
+        g_v5_shell_operator_error_show_until_ns != 0ULL &&
+        now < g_v5_shell_operator_error_show_until_ns &&
         g_v5_shell_operator_error_status.reason_cn[0]) {
-        shell_set_label_text_if_changed(g_v5_shell_top_status_label, g_v5_shell_operator_error_status.reason_cn);
+        changed = shell_set_label_text_if_changed(g_v5_shell_top_status_label, g_v5_shell_operator_error_status.reason_cn);
+        if (changed) shell_mark_all_page_caches_dirty();
         return;
     }
     if (!v5_native_readback_all_homed_known(&g_v5_shell_main_page.native_readback)) {
-        shell_set_label_text_if_changed(g_v5_shell_top_status_label, "回零状态未知");
+        changed = shell_set_label_text_if_changed(g_v5_shell_top_status_label, "回零状态未知");
+        if (changed) shell_mark_all_page_caches_dirty();
         return;
     }
     if (g_v5_shell_main_page.native_readback.all_homed) {
-        shell_set_label_text_if_changed(g_v5_shell_top_status_label, "");
+        changed = shell_set_label_text_if_changed(g_v5_shell_top_status_label, "");
+        if (changed) shell_mark_all_page_caches_dirty();
         return;
     }
-    shell_set_label_text_if_changed(g_v5_shell_top_status_label, "未回零: 开机后需回零一次");
+    changed = shell_set_label_text_if_changed(g_v5_shell_top_status_label, "未回零: 开机后需回零一次");
+    if (changed) shell_mark_all_page_caches_dirty();
 }
 
 void shell_return_button_cb(lv_event_t *event)
@@ -260,7 +270,7 @@ void shell_mdi_load_cb(lv_event_t *event)
     shell_log_mdi_event("load", g_v5_shell_mdi_line, ok);
     if (ok) {
         shell_clear_mdi_edit_metadata();
-        g_v5_shell_main_cache_dirty = 1;
+        shell_mark_page_cache_dirty(V5_SHELL_PAGE_MAIN);
         shell_navigate(0, V5_MAIN_PAGE_ACTION_NAV_MAIN);
     } else if (g_v5_shell_mdi_status_label) {
         lv_label_set_text(g_v5_shell_mdi_status_label, "载入失败");

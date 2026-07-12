@@ -199,11 +199,6 @@ static double proof_delta(const V5NativeMotionAxisParameters *axis, double curre
     return current + delta > axis->min_limit && current + delta < axis->max_limit ? delta : 0.0;
 }
 
-static double nearest_zero_target(char axis, double current)
-{
-    return rotary_axis(axis) ? current - remainder(current, 360.0) : 0.0;
-}
-
 static int wait_all_homed(
     const V5LinuxcncrshConfig *config,
     unsigned int expected_joint_count,
@@ -322,6 +317,17 @@ static V5LinuxcncrshSendStatus send_bus_home(
     double current[V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT];
     int moved[V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT] = {0, 0, 0, 0, 0, 0};
     unsigned int slot;
+    if (!parameters->runtime_owner_loaded) {
+        result_code(result, "BUS_HOME_RUNTIME_OWNER_NOT_LOADED");
+        return V5_LINUXCNCRSH_SEND_INVALID;
+    }
+    for (slot = 0U; slot < parameters->active_axis_count; ++slot) {
+        const V5NativeMotionAxisParameters *axis = axis_for_slot(parameters, slot);
+        if (!axis || !axis->bus_zero_evidence_known) {
+            result_code(result, "BUS_HOME_ZERO_EVIDENCE_MISSING");
+            return V5_LINUXCNCRSH_SEND_INVALID;
+        }
+    }
     if (v5_linuxcncrsh_send_line(config, "Set Mode Manual") != V5_LINUXCNCRSH_SEND_SENT ||
         v5_linuxcncrsh_send_line(config, "Set Teleop_Enable Off") != V5_LINUXCNCRSH_SEND_SENT ||
         !wait_teleop_enabled(config, 0)) {
@@ -348,7 +354,7 @@ static V5LinuxcncrshSendStatus send_bus_home(
     }
     for (slot = 0U; slot < parameters->active_axis_count; ++slot) {
         const V5NativeMotionAxisParameters *axis = axis_for_slot(parameters, slot);
-        double target = axis ? nearest_zero_target(axis->axis, current[slot]) : 0.0;
+        double target = axis ? axis->bus_home_reference : 0.0;
         if (!axis ||
             !send_increment(config, axis, target - current[slot]) ||
             !wait_axis_target(config, axis, current[slot], target, &moved[slot])) {
@@ -361,7 +367,7 @@ static V5LinuxcncrshSendStatus send_bus_home(
         double position;
         if (!axis || !moved[slot] ||
             !v5_linuxcncrsh_get_joint_position(config, axis->status_slot, &position) ||
-            target_error(axis->axis, position, 0.0) > V5_HOME_TARGET_TOLERANCE) {
+            fabs(position - axis->bus_home_reference) > V5_HOME_TARGET_TOLERANCE) {
             result_code(result, "BUS_HOME_REAL_MOVE_READBACK_FAILED");
             return V5_LINUXCNCRSH_SEND_IO_ERROR;
         }
@@ -410,6 +416,10 @@ static V5LinuxcncrshSendStatus send_pulse_home(
     int moved[V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT] = {0, 0, 0, 0, 0, 0};
     unsigned int attempt;
     unsigned int slot;
+    if (!parameters->runtime_owner_loaded || !parameters->pulse_runtime_selectable) {
+        result_code(result, "PULSE_HOME_NOT_RUNTIME_SELECTABLE");
+        return V5_LINUXCNCRSH_SEND_INVALID;
+    }
     if (!read_all_positions(config, parameters, start) ||
         v5_linuxcncrsh_send_line(config, "Set Mode Manual") != V5_LINUXCNCRSH_SEND_SENT ||
         v5_linuxcncrsh_send_line(config, "Set Teleop_Enable Off") != V5_LINUXCNCRSH_SEND_SENT ||

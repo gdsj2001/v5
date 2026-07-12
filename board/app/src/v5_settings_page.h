@@ -31,6 +31,7 @@ typedef struct V5SettingsPage {
     lv_obj_t *popup_title;
     lv_obj_t *popup_message;
     lv_obj_t *popup_eta;
+    lv_obj_t *popup_confirm;
     lv_obj_t *popup_close;
     V5UiFirstFrameGuard popup_frame_guard;
     int popup_active;

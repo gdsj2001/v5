@@ -187,6 +187,7 @@ it.cjwsjzyy.xyz
 板端设置页 `登记本机码` 链路：
 
 - 点击 `登记本机码` 后，板端必须读取本机 PL DNA，同时提交设备公钥（至少包含 `device_public_key_pem` 和 `device_public_key_sha256`）到 VPS 登记接口；VPS 是 `vpsDistributionId` 的唯一生成和保存 owner。
+- PL DNA 的板端真源是当前位流中 DNA reader 的 live UIO 寄存器，只允许动作 owner 在内存中读取并做多次一致性校验。U-Boot 只校验 DNA reader 的 magic/version/status/bit-count ABI 已就绪，不得在 `boot.scr`、设备树、源码、参数文件或状态文件中保存、比较或注入某一块板的 raw DNA 常量；Linux 侧不得从 `/chosen`、旧状态、授权文件或磁盘缓存回退推断 live DNA。默认设备节点为外部 OS 设备事实 `/dev/v5-dna-uio`，节点缺失、ABI 不符、读回为零或多次读回不一致时必须 fail-closed。
 - VPS 必须先验证本次提交的设备公钥：公钥必须可解析、hash 必须与 `device_public_key_sha256` 一致，且满足 VPS 设备登记策略；公钥验证不通过时不得登记 DNA、不得生成或返回新 ID、不得创建 private folder。
 - 公钥验证通过后，VPS 才允许规范化 PL DNA、计算/冻结 6 位 `vpsDistributionId`、记录数据库并创建 private folder。若同一 PL DNA 已经登记，VPS 不得重新生成 ID，不得覆盖既有绑定，必须直接返回已保存的 6 位 `vpsDistributionId` 给板端；必要时只按 VPS 公钥策略更新或确认该设备公钥记录。
 - VPS 必须在数据库中记录 6 位分发 ID、PL DNA hash、公钥 hash/公钥记录之间的绑定关系，并创建 `/opt/8ax-auth/storage/private/<vpsDistributionId>-<pl_dna_hash>/`。VPS 返回给板端的登记结果只需要暴露 canonical `vpsDistributionId` 和校验状态；不得要求板端保存或使用 id-dna folder 作为下载 URL。
@@ -228,10 +229,12 @@ OTA package 规则：
 | 范围 | owner |
 | --- | --- |
 | remote relay | UI 本地投影 owner 为 `board/app/src/v5_lvgl_remote_display.*`、`v5_lvgl_remote_input.*`；网络 owner 为 `board/services/ui/v5_remote_ui_relay.py` 及同目录 `v5_remote_ui_contract.py`、`v5_remote_ui_protocol.py`、`v5_remote_ui_state.py`、`v5_remote_ui_support.py`；历史 v3 relay 只作参考，不是产品 owner |
-| remote input | `board/services/ui/v5_remote_ui_relay.py` 把换行 JSON 写入 `/run/8ax_v5_product_ui/remote_input` FIFO，由 `board/app/src/v5_lvgl_remote_input.c` 消费 |
+| remote input | `board/services/ui/v5_remote_ui_relay.py` 把换行 JSON 写入 `/run/8ax_v5_product_ui/remote_input` FIFO；`board/app/src/v5_remote_input_ipc.*` 负责 FIFO 解析，再调用 `v5_lvgl_remote_input.*` 的 LVGL 指针设备 |
 | 驱动 profile 下载/上传 | 当前板端下载真源为 `board/services/auth_download/v5_drive_profile_download.py`、`board/services/drive_profile/v5_settings_actiond.py`、`v5_drive_bus_action.py` 及同目录拆分模块；发布输入以当前 Factory Client/VPS admin API 和 `board/config/drive-profiles/*` 的 intended remote path 为准 |
-| Factory Client 管理界面 | `8ax-factory-client-source/8ax.FactoryClient`；界面字段和窗口/DPI 细则见 `8ax-factory-client-source/README.md` |
-| 板端 OTA relay/action/client | 按当前 v5 代码现状和 `待做工作/板端升级.md` 推进；未实现前必须 fail-closed，不再把旧 v3 relay 写成当前 owner |
+| Windows Remote 客户端 | `8ax-win/src/8ax.WinRemote/MainWindow.xaml` 是布局；relay 会话、frame、指针、程序和 OTA 分别在 `MainWindow.RelaySession.cs`、`MainWindow.RelayFrame.cs`、`MainWindow.Pointer.cs`、`MainWindow.Programs.cs`、`MainWindow.OtaUpgrade.cs`，`MainWindow.xaml.cs` 只保留窗口总入口 |
+| Factory Client 管理界面 | `8ax-factory-client-source/8ax.FactoryClient/MainForm.cs` 是总入口；布局、设备、经销商和升级已拆到 `MainForm.Layout.cs`、`MainForm.Devices.cs`、`MainForm.Dealers.cs`、`MainForm.Upgrades.cs`；OTA 发布面板在 `OtaPublishPanel.cs`，VPS API 在 `8ax-factory-client-source/vps-admin-api/` |
+| Dealer Client 管理界面 | `8ax-dealer-client-source/8ax.DealerClient/MainForm.cs` 是总入口，操作实现已拆到 `MainForm.Actions.cs` |
+| 板端 OTA relay/action/client | Windows 操作入口当前在 `8ax-win/src/8ax.WinRemote/MainWindow.OtaUpgrade.cs`，VPS 发布端在 `8ax-factory-client-source/vps-admin-api/vps_ota_admin_api.py`；板端实现仍按当前 v5 代码和 `待做工作/板端升级.md` 推进，未实现前必须 fail-closed，不得把 Windows/VPS 文件写成板端 owner |
 
 
 ## 9. 核对项

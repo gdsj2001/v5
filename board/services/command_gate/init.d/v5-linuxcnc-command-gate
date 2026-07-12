@@ -7,6 +7,8 @@ ulimit -l unlimited 2>/dev/null || true
 
 RUN_DIR=/run/8ax
 LINUXCNC_INI=/opt/8ax/v5/linuxcnc/ini/v5_bus.ini
+SETTINGS_RUNTIME=/opt/8ax/phase0_bus5/settings_runtime.json
+PULSE_CONTRACT=/opt/8ax/v5/linuxcnc/components/step_ip_v1_5.contract.json
 LINUXCNC_LOG=$RUN_DIR/v5_linuxcnc.log
 LINUXCNC_PID=$RUN_DIR/v5_linuxcnc.pid
 LINUXCNCRSH_LOG=$RUN_DIR/v5_linuxcncrsh.log
@@ -244,6 +246,7 @@ stop_backend() {
 }
 
 start_backend() {
+  runtime_prepare
   if backend_running; then
     echo "LinuxCNC backend already running"
     return 0
@@ -252,7 +255,6 @@ start_backend() {
   if backend_residue_running; then
     stop_backend
   fi
-  runtime_prepare
   : >"$LINUXCNC_LOG"
   chown petalinux:petalinux "$LINUXCNC_LOG" 2>/dev/null || true
   su petalinux -c "cd /opt/8ax/v5/linuxcnc/ini && TCLLIBPATH=/usr/lib/tcltk /usr/bin/linuxcnc -r '$LINUXCNC_INI' >>'$LINUXCNC_LOG' 2>&1" &
@@ -279,7 +281,7 @@ start_backend() {
 start_native_gate() {
   stop_native_gate
   : >"$COMMAND_GATE_LOG"
-  setsid /usr/libexec/8ax/v5_command_gate_server --socket "$COMMAND_GATE_SOCKET" --host 127.0.0.1 --port "$LINUXCNCRSH_PORT" --password "$LINUXCNCRSH_CONNECTPW" --timeout-ms 1000 --ini "$LINUXCNC_INI" >>"$COMMAND_GATE_LOG" 2>&1 &
+  setsid /usr/libexec/8ax/v5_command_gate_server --socket "$COMMAND_GATE_SOCKET" --host 127.0.0.1 --port "$LINUXCNCRSH_PORT" --password "$LINUXCNCRSH_CONNECTPW" --timeout-ms 1000 --ini "$LINUXCNC_INI" --settings-runtime "$SETTINGS_RUNTIME" --pulse-contract "$PULSE_CONTRACT" >>"$COMMAND_GATE_LOG" 2>&1 &
   echo "$!" >"$COMMAND_GATE_PID"
   i=0
   while [ "$i" -lt 40 ]; do

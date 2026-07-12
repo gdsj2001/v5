@@ -48,30 +48,28 @@ int v5_main_page_internal_main_page_apply_program_preview_wcs_offset(
             point_wcs_index < 0 || point_wcs_index >= (int)V5_NATIVE_READBACK_WCS_COUNT) {
             return 0;
         }
-        if (resolved_wcs_index < 0) {
+        if (resolved_wcs_index == -1) {
             resolved_wcs_index = point_wcs_index;
         } else if (resolved_wcs_index != point_wcs_index) {
+            resolved_wcs_index = -2;
+        }
+        offset[0] = page->native_readback.wcs_offsets[point_wcs_index][0];
+        offset[1] = page->native_readback.wcs_offsets[point_wcs_index][1];
+        offset[2] = page->native_readback.wcs_offsets[point_wcs_index][2];
+        if (!isfinite(offset[0]) || !isfinite(offset[1]) || !isfinite(offset[2])) {
             return 0;
         }
-    }
-    if (resolved_wcs_index < 0) {
-        return 0;
-    }
-    for (i = 0U; i < 3U; ++i) {
-        if (!isfinite(page->native_readback.wcs_offsets[resolved_wcs_index][i])) {
-            return 0;
-        }
-        offset[i] = page->native_readback.wcs_offsets[resolved_wcs_index][i];
-    }
-    for (i = 0U; i < count; ++i) {
         points[i].axis[0] += offset[0];
         points[i].axis[1] += offset[1];
         points[i].axis[2] += offset[2];
     }
     if (wcs_index_out) {
-        *wcs_index_out = resolved_wcs_index;
+        *wcs_index_out = resolved_wcs_index >= 0 ? resolved_wcs_index : -1;
     }
-    if (wcs_offset_out) {
+    if (wcs_offset_out && resolved_wcs_index >= 0) {
+        offset[0] = page->native_readback.wcs_offsets[resolved_wcs_index][0];
+        offset[1] = page->native_readback.wcs_offsets[resolved_wcs_index][1];
+        offset[2] = page->native_readback.wcs_offsets[resolved_wcs_index][2];
         wcs_offset_out[0] = offset[0];
         wcs_offset_out[1] = offset[1];
         wcs_offset_out[2] = offset[2];
@@ -87,6 +85,7 @@ void v5_main_page_internal_hide_toolpath_program_line(V5MainPage *page)
     }
     page->toolpath_program_wcs_valid = 0;
     page->toolpath_program_wcs_index = -1;
+    page->toolpath_program_wcs_epoch = 0U;
     memset(page->toolpath_program_wcs_offset, 0, sizeof(page->toolpath_program_wcs_offset));
     page->toolpath_program_point_count = 0U;
     page->toolpath_program_ac_valid = 0;
@@ -112,6 +111,7 @@ void v5_main_page_internal_mark_toolpath_static_dirty(V5MainPage *page)
     page->toolpath_program_view_generation = 0U;
     page->toolpath_program_wcs_valid = 0;
     page->toolpath_program_wcs_index = -1;
+    page->toolpath_program_wcs_epoch = 0U;
     memset(page->toolpath_program_wcs_offset, 0, sizeof(page->toolpath_program_wcs_offset));
     page->toolpath_program_visible = 0;
     page->toolpath_program_point_count = 0U;
@@ -150,13 +150,14 @@ static void set_toolpath_program_line(
         page->trajectory_point_count = V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT;
     }
     for (i = 0U; i < page->trajectory_point_count; ++i) {
-        page->trajectory_points[i].x = v5_main_page_internal_clamp_coord(screen_points[i].x, 0, V5_TOOLPATH_W);
-        page->trajectory_points[i].y = v5_main_page_internal_clamp_coord(screen_points[i].y, 0, V5_TOOLPATH_H);
+        page->trajectory_points[i].x = v5_main_page_internal_clamp_coord(screen_points[i].x, -32760, 32760);
+        page->trajectory_points[i].y = v5_main_page_internal_clamp_coord(screen_points[i].y, -32760, 32760);
     }
     while (start < page->trajectory_point_count && segment < V5_MAIN_PAGE_TOOLPATH_DRAW_SEGMENTS) {
         unsigned int local_count = 0U;
         unsigned int limit = V5_MAIN_PAGE_TOOLPATH_SEGMENT_POINT_COUNT;
-        while (start + local_count < page->trajectory_point_count && local_count < limit) {
+        while (start + local_count < page->trajectory_point_count && local_count < limit &&
+               (local_count == 0U || !page->toolpath_program_break_before[start + local_count])) {
             page->toolpath_segment_points[segment][local_count] = page->trajectory_points[start + local_count];
             ++local_count;
         }
@@ -174,7 +175,12 @@ static void set_toolpath_program_line(
             ++segment;
             break;
         }
-        start += local_count > 1U ? local_count - 1U : local_count;
+        if (start + local_count < page->trajectory_point_count &&
+            page->toolpath_program_break_before[start + local_count]) {
+            start += local_count;
+        } else {
+            start += local_count > 1U ? local_count - 1U : local_count;
+        }
         ++segment;
     }
     for (; segment < V5_MAIN_PAGE_TOOLPATH_DRAW_SEGMENTS; ++segment) {

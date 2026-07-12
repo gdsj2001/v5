@@ -44,7 +44,8 @@ patch printk-remove-unused-code.patch
 patch printk-set-deferred-to-default-loglevel-enforce-mask.patch
 patch serial-8250-remove-that-trylock-in-serial8250_consol.patch
 patch serial-8250-export-symbols-which-are-used-by-symbols.patch
-patch arm-remove-printk_nmi_.patch
+# Xilinx 62ea514 already has the ARM printk_nmi removal represented by this
+# upstream patch, so there is no source delta to apply on the registered tree.
 patch printk-only-allow-kernel-to-emergency-message.patch
 patch printk-devkmsg-llseek-reset-clear-if-it-is-lost.patch
 patch printk-print-rate-limitted-message-as-info.patch
@@ -98,8 +99,8 @@ patch x86-Disable-HAVE_ARCH_JUMP_LABEL.patch
 patch rt-Add-local-irq-locks.patch
 patch softirq-Add-preemptible-softirq.patch
 patch signal-x86-Delay-calling-signals-in-atomic.patch
-patch Split-IRQ-off-and-zone-lock-while-freeing-pages-from.patch
-patch Split-IRQ-off-and-zone-lock-while-freeing-pages-from.patch
+# Xilinx 62ea514 retains the older PCP API.  The following page_alloc patch is
+# adapted to that API and carries the required RT local-lock semantics directly.
 patch mm-SLxB-change-list_lock-to-raw_spinlock_t.patch
 patch mm-SLUB-delay-giving-back-empty-slubs-to-IRQ-enabled.patch
 patch mm-page_alloc-rt-friendly-per-cpu-pages.patch

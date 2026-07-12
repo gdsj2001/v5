@@ -114,10 +114,14 @@ add_executable(v5_lvgl_shell
     src/v5_ui_model.c
     src/v5_ui_shell.c
     src/v5_ui_shell_status.c
+    src/v5_ui_shell_operator_error.c
     src/v5_ui_shell_program_scan.c
     src/v5_ui_shell_program_actions.c
+    src/v5_ui_shell_program_delete.c
     src/v5_ui_shell_pages.c
     src/v5_ui_shell_navigation.c
+    src/v5_ui_shell_boot_cache.c
+    src/v5_ui_shell_bootstrap.c
     src/v5_ui_shell_refresh.c
     src/v5_v3_page_widgets.c
     src/v5_v3_tool_page.c
@@ -179,10 +183,14 @@ add_executable(v5_program_page_double_click_smoke
     src/v5_ui_model.c
     src/v5_ui_shell.c
     src/v5_ui_shell_status.c
+    src/v5_ui_shell_operator_error.c
     src/v5_ui_shell_program_scan.c
     src/v5_ui_shell_program_actions.c
+    src/v5_ui_shell_program_delete.c
     src/v5_ui_shell_pages.c
     src/v5_ui_shell_navigation.c
+    src/v5_ui_shell_boot_cache.c
+    src/v5_ui_shell_bootstrap.c
     src/v5_ui_shell_refresh.c
     src/v5_v3_page_widgets.c
     src/v5_v3_tool_page.c
@@ -196,6 +204,92 @@ add_library(v5_operator_error_status STATIC
 
 target_include_directories(v5_operator_error_status PUBLIC
     "${V5_ROOT_DIR}/services/state_publisher"
+)
+
+add_executable(v5_ui_shell_operator_error_smoke
+    src/lv_font_zh_16.c
+    src/v5_ui_shell_operator_error_smoke.c
+    src/v5_ui_shell_operator_error.c
+    src/v5_lvgl_headless.c
+)
+
+target_include_directories(v5_ui_shell_operator_error_smoke PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${V5_ROOT_DIR}/services/command_gate"
+    "${V5_ROOT_DIR}/services/program_runtime"
+    "${V5_ROOT_DIR}/services/drive_profile"
+    "${V5_ROOT_DIR}/services/microkernel"
+    "${V5_ROOT_DIR}/services/state_publisher"
+)
+
+target_compile_definitions(v5_ui_shell_operator_error_smoke PRIVATE
+    LV_CONF_INCLUDE_SIMPLE
+    LV_LVGL_H_INCLUDE_SIMPLE
+    _CRT_SECURE_NO_WARNINGS
+)
+
+target_link_libraries(v5_ui_shell_operator_error_smoke PRIVATE
+    lvgl
+    v5_button_visuals
+    v5_operator_error_status
+)
+
+add_executable(v5_ui_shell_program_delete_smoke
+    src/lv_font_zh_16.c
+    src/v5_ui_shell_program_delete_smoke.c
+    src/v5_ui_shell_program_delete.c
+    src/v5_lvgl_headless.c
+)
+
+target_include_directories(v5_ui_shell_program_delete_smoke PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${V5_ROOT_DIR}/services/command_gate"
+    "${V5_ROOT_DIR}/services/program_runtime"
+    "${V5_ROOT_DIR}/services/drive_profile"
+    "${V5_ROOT_DIR}/services/microkernel"
+    "${V5_ROOT_DIR}/services/state_publisher"
+)
+
+target_compile_definitions(v5_ui_shell_program_delete_smoke PRIVATE
+    LV_CONF_INCLUDE_SIMPLE
+    LV_LVGL_H_INCLUDE_SIMPLE
+    _CRT_SECURE_NO_WARNINGS
+)
+
+target_link_libraries(v5_ui_shell_program_delete_smoke PRIVATE
+    lvgl
+    v5_button_visuals
+)
+
+add_executable(v5_ui_first_frame_guard_smoke
+    src/lv_font_zh_16.c
+    src/v5_ui_first_frame_guard_smoke.c
+    src/v5_ui_first_frame_guard.c
+    src/v5_lvgl_headless.c
+)
+
+target_include_directories(v5_ui_first_frame_guard_smoke PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+
+target_compile_definitions(v5_ui_first_frame_guard_smoke PRIVATE
+    LV_CONF_INCLUDE_SIMPLE
+    LV_LVGL_H_INCLUDE_SIMPLE
+)
+
+target_link_libraries(v5_ui_first_frame_guard_smoke PRIVATE lvgl)
+
+add_executable(v5_ui_page_cache_registry_smoke
+    src/v5_ui_page_cache_registry_smoke.c
+)
+
+target_include_directories(v5_ui_page_cache_registry_smoke PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 
 add_library(v5_status_shm_projection STATIC
@@ -356,6 +450,7 @@ add_executable(v5_main_page_actions_smoke
     src/v5_main_page_actions_smoke.c
     src/v5_lvgl_headless.c
     src/v5_ui_first_frame_guard.c
+    src/v5_ui_first_frame_guard_test_remote.c
     src/v5_main_page.c
     src/v5_main_page_model_projection.c
     src/v5_main_page_fit.c
@@ -423,6 +518,7 @@ add_executable(v5_main_page_smoke
     src/v5_main_page_smoke.c
     src/v5_lvgl_headless.c
     src/v5_ui_first_frame_guard.c
+    src/v5_ui_first_frame_guard_test_remote.c
     src/v5_main_page.c
     src/v5_main_page_model_projection.c
     src/v5_main_page_fit.c
@@ -595,6 +691,12 @@ add_executable(v5_native_modal_tool_status_smoke
 
 target_link_libraries(v5_native_modal_tool_status_smoke PRIVATE v5_command_gate_core m)
 
+add_executable(v5_native_work_zero_smoke
+    ../services/command_gate/v5_native_work_zero_smoke.c
+)
+
+target_link_libraries(v5_native_work_zero_smoke PRIVATE v5_command_gate_core m)
+
 add_executable(v5_native_operator_error_status_smoke
     ../services/state_publisher/v5_native_operator_error_status_smoke.c
 )
@@ -618,6 +720,7 @@ add_executable(v5_settings_axis_table_smoke
     src/lv_font_zh_16.c
     src/v5_settings_axis_table_smoke.c
     src/v5_ui_first_frame_guard.c
+    src/v5_ui_first_frame_guard_test_remote.c
     src/v5_boot_closure.c
     src/v5_runtime_registry.c
     src/v5_settings_axis_table.c
@@ -690,3 +793,46 @@ target_compile_definitions(v5_lvgl_shell PRIVATE
 )
 
 target_link_libraries(v5_lvgl_shell PRIVATE lvgl v5_button_visuals v5_lvgl_clock v5_status_shm_projection v5_microkernel_contract v5_program_commands v5_command_gate_client m)
+
+# The deploy manifest is the single product-runtime inventory.  Derive the
+# aggregate ARM build target from every binary row so build, deploy and SD-card
+# assembly cannot maintain separate executable lists.
+set(V5_RUNTIME_DEPLOY_MANIFEST
+    "${CMAKE_CURRENT_SOURCE_DIR}/../config/deploy/v5_runtime_deploy_manifest.tsv"
+)
+if(NOT EXISTS "${V5_RUNTIME_DEPLOY_MANIFEST}")
+    message(FATAL_ERROR "V5 runtime deploy manifest is missing: ${V5_RUNTIME_DEPLOY_MANIFEST}")
+endif()
+
+file(STRINGS "${V5_RUNTIME_DEPLOY_MANIFEST}" V5_RUNTIME_DEPLOY_ROWS)
+set(V5_PRODUCT_RUNTIME_TARGETS)
+foreach(V5_RUNTIME_DEPLOY_ROW IN LISTS V5_RUNTIME_DEPLOY_ROWS)
+    string(STRIP "${V5_RUNTIME_DEPLOY_ROW}" V5_RUNTIME_DEPLOY_ROW_STRIPPED)
+    if(V5_RUNTIME_DEPLOY_ROW_STRIPPED STREQUAL "" OR
+       V5_RUNTIME_DEPLOY_ROW_STRIPPED MATCHES "^#")
+        continue()
+    endif()
+    string(REPLACE "\t" ";" V5_RUNTIME_DEPLOY_FIELDS "${V5_RUNTIME_DEPLOY_ROW}")
+    list(LENGTH V5_RUNTIME_DEPLOY_FIELDS V5_RUNTIME_DEPLOY_FIELD_COUNT)
+    if(NOT V5_RUNTIME_DEPLOY_FIELD_COUNT EQUAL 4)
+        message(FATAL_ERROR "Invalid V5 runtime deploy row: ${V5_RUNTIME_DEPLOY_ROW}")
+    endif()
+    list(GET V5_RUNTIME_DEPLOY_FIELDS 0 V5_RUNTIME_DEPLOY_KIND)
+    if(V5_RUNTIME_DEPLOY_KIND STREQUAL "binary")
+        list(GET V5_RUNTIME_DEPLOY_FIELDS 1 V5_RUNTIME_DEPLOY_SOURCE)
+        get_filename_component(V5_RUNTIME_DEPLOY_TARGET "${V5_RUNTIME_DEPLOY_SOURCE}" NAME)
+        if(NOT TARGET "${V5_RUNTIME_DEPLOY_TARGET}")
+            message(FATAL_ERROR
+                "Deploy manifest binary has no CMake target: ${V5_RUNTIME_DEPLOY_TARGET}"
+            )
+        endif()
+        list(APPEND V5_PRODUCT_RUNTIME_TARGETS "${V5_RUNTIME_DEPLOY_TARGET}")
+    endif()
+endforeach()
+
+list(REMOVE_DUPLICATES V5_PRODUCT_RUNTIME_TARGETS)
+if(NOT V5_PRODUCT_RUNTIME_TARGETS)
+    message(FATAL_ERROR "V5 runtime deploy manifest has no binary targets")
+endif()
+
+add_custom_target(v5_product_runtime DEPENDS ${V5_PRODUCT_RUNTIME_TARGETS})

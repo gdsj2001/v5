@@ -66,6 +66,76 @@ static int compute_scale_from_chain(
     return isfinite(*scale_out) && *scale_out > 0.0;
 }
 
+static int commit_wcheckpoint_profile(
+    const char *ini_path,
+    const char *axis_section,
+    const char *axis_obj_start,
+    const char *axis_obj_end)
+{
+    static const char *const json_keys[] = {
+        "position_command_raw_bits",
+        "position_feedback_raw_bits",
+        "position_command_raw_signed",
+        "position_feedback_raw_signed",
+        "position_command_raw_modulus",
+        "position_feedback_raw_modulus",
+        "rotary_load_counts_per_rev",
+        "drive_wrapped_rotary_support_flag",
+    };
+    static const char *const ini_keys[] = {
+        "WCHECKPOINT_COMMAND_RAW_BITS",
+        "WCHECKPOINT_FEEDBACK_RAW_BITS",
+        "WCHECKPOINT_COMMAND_RAW_SIGNED",
+        "WCHECKPOINT_FEEDBACK_RAW_SIGNED",
+        "WCHECKPOINT_COMMAND_MODULUS_HI",
+        "WCHECKPOINT_COMMAND_MODULUS_LO",
+        "WCHECKPOINT_FEEDBACK_MODULUS_HI",
+        "WCHECKPOINT_FEEDBACK_MODULUS_LO",
+        "WCHECKPOINT_COUNTS_PER_REV",
+        "WCHECKPOINT_DRIVE_PERIODIC",
+    };
+    V5IniTextUpdate updates[10];
+    char values[10][32];
+    double mapped[8];
+    double command_hi;
+    double feedback_hi;
+    size_t i;
+
+    for (i = 0U; i < 8U; ++i) {
+        if (!v5_settings_apply_json_number_value(
+                axis_obj_start, axis_obj_end, json_keys[i], &mapped[i]) ||
+            !isfinite(mapped[i]) || mapped[i] < 0.0) {
+            return 0;
+        }
+    }
+    if (mapped[0] < 2.0 || mapped[1] < 2.0 ||
+        mapped[2] > 1.0 || mapped[3] > 1.0 ||
+        mapped[4] <= 0.0 || mapped[5] <= 0.0 || mapped[6] <= 0.0 ||
+        mapped[7] > 1.0) {
+        return 0;
+    }
+    command_hi = floor(mapped[4] / 4294967296.0);
+    feedback_hi = floor(mapped[5] / 4294967296.0);
+    snprintf(values[0], sizeof(values[0]), "%.0f", mapped[0]);
+    snprintf(values[1], sizeof(values[1]), "%.0f", mapped[1]);
+    snprintf(values[2], sizeof(values[2]), "%.0f", mapped[2]);
+    snprintf(values[3], sizeof(values[3]), "%.0f", mapped[3]);
+    snprintf(values[4], sizeof(values[4]), "%.0f", command_hi);
+    snprintf(values[5], sizeof(values[5]), "%.0f", mapped[4] - command_hi * 4294967296.0);
+    snprintf(values[6], sizeof(values[6]), "%.0f", feedback_hi);
+    snprintf(values[7], sizeof(values[7]), "%.0f", mapped[5] - feedback_hi * 4294967296.0);
+    snprintf(values[8], sizeof(values[8]), "%.0f", mapped[6]);
+    snprintf(values[9], sizeof(values[9]), "%.0f", mapped[7]);
+    memset(updates, 0, sizeof(updates));
+    for (i = 0U; i < 10U; ++i) {
+        updates[i].section = axis_section;
+        updates[i].key = ini_keys[i];
+        updates[i].value = values[i];
+    }
+    return v5_settings_apply_ini_write_text_updates(ini_path, updates, 10U) &&
+        v5_settings_apply_ini_updates_readback_match(ini_path, updates, 10U);
+}
+
 int v5_settings_apply_scale_chain_commit(
     const char *project_root,
     const char *settings_runtime_json_path,
@@ -95,6 +165,7 @@ int v5_settings_apply_scale_chain_commit(
     double new_zero;
     double new_min;
     double new_max;
+    char *original_ini = 0;
     int precision_field;
     int write_scale = 0;
 
@@ -202,11 +273,23 @@ int v5_settings_apply_scale_chain_commit(
         v5_settings_apply_scale_chain_result_code(result, "RAW_LIMIT_RECOMPUTE_INVALID");
         return 0;
     }
-    if (!v5_settings_apply_ini_write_scale_and_limits(ini_path, axis_section, joint_section, write_scale, effective_scale, new_min, new_max)) {
+    original_ini = v5_settings_apply_read_text_file_limited(ini_path);
+    if (!original_ini ||
+        !v5_settings_apply_ini_write_scale_and_limits(ini_path, axis_section, joint_section, write_scale, effective_scale, new_min, new_max)) {
+        free(original_ini);
         free(json);
         v5_settings_apply_scale_chain_result_code(result, "RAW_LIMIT_WRITE_FAILED");
         return 0;
     }
+    if (axis_is_rotary(axis) &&
+        !commit_wcheckpoint_profile(ini_path, axis_section, axis_obj_start, axis_obj_end)) {
+        (void)v5_settings_apply_write_text_file_atomic(ini_path, original_ini);
+        free(original_ini);
+        free(json);
+        v5_settings_apply_scale_chain_result_code(result, "WCHECKPOINT_PROFILE_WRITE_FAILED");
+        return 0;
+    }
+    free(original_ini);
     free(json);
     if (result) {
         result->scale_recomputed = write_scale ? 1 : 0;

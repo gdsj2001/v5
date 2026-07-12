@@ -5,8 +5,12 @@
 #include <string.h>
 #include <time.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 #define V5_OPERATOR_ERROR_MAGIC 0x564F4552u
-#define V5_OPERATOR_ERROR_VERSION 1u
+#define V5_OPERATOR_ERROR_VERSION 2u
 
 typedef struct V5NativeOperatorErrorStatusBlock {
     uint32_t magic;
@@ -14,7 +18,7 @@ typedef struct V5NativeOperatorErrorStatusBlock {
     uint32_t size;
     uint32_t valid;
     uint32_t kind;
-    uint32_t reserved0;
+    uint32_t display_mode;
     uint64_t generation;
     uint64_t monotonic_ns;
     char source_id[V5_NATIVE_OPERATOR_ERROR_SOURCE_ID_CAP];
@@ -28,11 +32,15 @@ typedef struct V5NativeOperatorErrorStatusBlock {
 
 static uint64_t monotonic_ns(void)
 {
+#ifdef _WIN32
+    return (uint64_t)GetTickCount64() * 1000000ULL;
+#else
     struct timespec ts;
     if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
         return 0ULL;
     }
     return ((uint64_t)ts.tv_sec * 1000000000ULL) + (uint64_t)ts.tv_nsec;
+#endif
 }
 
 static uint32_t block_crc32_like(const V5NativeOperatorErrorStatusBlock *block)
@@ -73,7 +81,10 @@ static int block_is_fresh(const V5NativeOperatorErrorStatusBlock *block, unsigne
     if (!block || block->magic != V5_OPERATOR_ERROR_MAGIC ||
         block->version != V5_OPERATOR_ERROR_VERSION ||
         block->size != (uint32_t)sizeof(*block) || !block->valid ||
-        block->generation == 0ULL || block->crc32 != block_crc32_like(block)) {
+        block->generation == 0ULL ||
+        block->display_mode < V5_NATIVE_OPERATOR_ERROR_DISPLAY_LOG_ONLY ||
+        block->display_mode > V5_NATIVE_OPERATOR_ERROR_DISPLAY_POPUP ||
+        block->crc32 != block_crc32_like(block)) {
         return 0;
     }
     now = monotonic_ns();
@@ -127,6 +138,7 @@ int v5_native_operator_error_status_read(
     }
     status->generation = block.generation;
     status->kind = block.kind;
+    status->display_mode = block.display_mode;
     copy_text(status->source_id, sizeof(status->source_id), block.source_id);
     copy_text(status->fingerprint, sizeof(status->fingerprint), block.fingerprint);
     copy_text(status->title_cn, sizeof(status->title_cn), block.title_cn);
@@ -139,6 +151,7 @@ int v5_native_operator_error_status_write(
     const char *path,
     int valid,
     uint32_t kind,
+    uint32_t display_mode,
     uint64_t generation,
     const char *source_id,
     const char *fingerprint,
@@ -154,9 +167,12 @@ int v5_native_operator_error_status_write(
     block.magic = V5_OPERATOR_ERROR_MAGIC;
     block.version = V5_OPERATOR_ERROR_VERSION;
     block.size = (uint32_t)sizeof(block);
-    block.valid = valid ? 1U : 0U;
-    block.kind = valid ? kind : 0U;
-    block.generation = valid ? generation : 0ULL;
+    block.valid = valid &&
+        display_mode >= V5_NATIVE_OPERATOR_ERROR_DISPLAY_LOG_ONLY &&
+        display_mode <= V5_NATIVE_OPERATOR_ERROR_DISPLAY_POPUP ? 1U : 0U;
+    block.kind = block.valid ? kind : 0U;
+    block.display_mode = block.valid ? display_mode : 0U;
+    block.generation = block.valid ? generation : 0ULL;
     block.monotonic_ns = monotonic_ns();
     copy_text(block.source_id, sizeof(block.source_id), source_id);
     copy_text(block.fingerprint, sizeof(block.fingerprint), fingerprint);
@@ -182,6 +198,7 @@ static void set_alias(
     const char *next_cn)
 {
     v5_native_operator_error_status_init(status);
+    status->display_mode = V5_NATIVE_OPERATOR_ERROR_DISPLAY_POPUP;
     copy_text(status->source_id, sizeof(status->source_id), "OWNER_ALIAS");
     copy_text(status->title_cn, sizeof(status->title_cn), title_cn);
     copy_text(status->reason_cn, sizeof(status->reason_cn), reason_cn);

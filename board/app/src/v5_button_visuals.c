@@ -12,7 +12,6 @@ void v5_button_visual_release_now(lv_obj_t *button)
     }
     lv_obj_clear_state(button, LV_STATE_PRESSED);
     lv_obj_invalidate(button);
-    lv_refr_now(NULL);
 }
 
 static void button_visual_event_cb(lv_event_t *event)
@@ -48,5 +47,4 @@ void v5_button_visual_set_transaction_active(lv_obj_t *button, int active)
         lv_obj_clear_state(button, LV_STATE_USER_1);
     }
     lv_obj_invalidate(button);
-    lv_refr_now(NULL);
 }

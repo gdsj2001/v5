@@ -50,6 +50,8 @@ check_remote_test "v5_linuxcncrsh_probe installed executable" 'test -x /usr/libe
 check_remote_test "v5_command_gate_server installed executable" 'test -x /usr/libexec/8ax/v5_command_gate_server'
 check_remote_test "v5_linuxcncrsh_golden_run installed executable" 'test -x /usr/libexec/8ax/v5_linuxcncrsh_golden_run'
 check_remote_test "v5 remote ui relay installed executable" 'test -x /usr/libexec/8ax/v5_remote_ui_relay.py'
+check_remote_test "v5 UI boot ready helper installed executable" 'test -x /usr/libexec/8ax/v5_ui_boot_ready.py'
+check_remote_test "v5 UI cache queue contract installed module" 'test -r /usr/libexec/8ax/v5_ui_cache_queue_contract.py'
 check_remote_test "state publisher init installed" 'test -x /etc/init.d/v5-state-publisher'
 check_remote_test "rtcp status publisher init installed" 'test -x /etc/init.d/v5-rtcp-status-publisher'
 check_remote_test "g53 geometry memory owner init installed" 'test -x /etc/init.d/v5-g53-geometry-memory-owner'
@@ -137,7 +139,7 @@ check_remote_test "registered native position/modal blocks in dev shm" 'test -s 
 check_remote_test "registered native operator error block in dev shm" 'test -s /dev/shm/v5_native_operator_error_status.bin'
 check_remote_test "registered native G53 geometry block in dev shm" 'test -s /dev/shm/v5_native_g53_geometry_status.bin'
 
-operator_error_block_check='import struct,sys; p="/dev/shm/v5_verify_native_operator_error.bin"; fmt=struct.Struct("<IIIIIIQQ64s24s96s384s256sII"); v=fmt.unpack(open(p,"rb").read(fmt.size)); text=b" ".join((v[10],v[11],v[12])).decode("utf-8","replace").lower(); banned=("linuxcnc","linuxcncrsh"," emc "," hal "," nml "); sys.exit(0 if v[1]==1 and v[2]==fmt.size and v[3]==1 and v[6]==1 and all(x not in text for x in banned) else 1)'
+operator_error_block_check='import struct,sys; p="/dev/shm/v5_verify_native_operator_error.bin"; fmt=struct.Struct("<IIIIIIQQ64s24s96s384s256sII"); v=fmt.unpack(open(p,"rb").read(fmt.size)); text=b" ".join((v[10],v[11],v[12])).decode("utf-8","replace").lower(); banned=("linuxcnc","linuxcncrsh"," emc "," hal "," nml "); sys.exit(0 if v[1]==2 and v[2]==fmt.size and v[3]==1 and v[5]==3 and v[6]==1 and all(x not in text for x in banned) else 1)'
 if remote "PYTHONPATH=/usr/lib/python3/dist-packages /usr/libexec/8ax/v5_wcs_status_publisher.py --operator-error-map /opt/8ax/v5/config/ui/v5_native_operator_error_map.tsv --operator-error-path /dev/shm/v5_verify_native_operator_error.bin --mock-native-error \"Can't run a program when not homed\" >/tmp/v5_operator_error_mock.out 2>&1 && /usr/bin/python3 -c '$operator_error_block_check'" >/dev/null 2>&1; then
   ok "native operator error mapper publishes Chinese resident event block"
 else
@@ -199,11 +201,11 @@ else
 fi
 rm -f /tmp/v5_ui_relay_status.out
 
-if remote 'wget -q -O /tmp/v5_remote_info_probe.json http://127.0.0.1:18080/remote/info && grep -q "\"protocol_version\"" /tmp/v5_remote_info_probe.json && grep -q "\"view_only\":false" /tmp/v5_remote_info_probe.json && grep -q "\"input_enabled\":true" /tmp/v5_remote_info_probe.json && grep -q "\"cpu0_percent\"" /tmp/v5_remote_info_probe.json && grep -q "\"cpu1_percent\"" /tmp/v5_remote_info_probe.json' >/dev/null 2>&1; then
-  ok "v5 remote relay info JSON, input enabled, and system metrics probe: 18080"
+if remote 'test -s /run/8ax_v5_product_ui/ui_ready.json && grep -q "\"schema\":\"v5.ui_ready.v1\"" /run/8ax_v5_product_ui/ui_ready.json && grep -q "\"ready\":true" /run/8ax_v5_product_ui/ui_ready.json && wget -q -O /tmp/v5_remote_info_probe.json http://127.0.0.1:18080/remote/info && grep -q "\"protocol_version\"" /tmp/v5_remote_info_probe.json && grep -q "\"ui_ready\":true" /tmp/v5_remote_info_probe.json && grep -q "\"ready_metadata\"" /tmp/v5_remote_info_probe.json && grep -q "\"view_only\":false" /tmp/v5_remote_info_probe.json && grep -q "\"input_enabled\":true" /tmp/v5_remote_info_probe.json && grep -q "\"cpu0_percent\"" /tmp/v5_remote_info_probe.json && grep -q "\"cpu1_percent\"" /tmp/v5_remote_info_probe.json' >/dev/null 2>&1; then
+  ok "v5 remote relay gated ready metadata, input enabled, and system metrics probe: 18080"
   remote "wc -c /tmp/v5_remote_info_probe.json | sed 's/^/remote_info_bytes=/'" | sed 's/^/INFO /'
 else
-  fail_msg "v5 remote relay info JSON probe: 18080"
+  fail_msg "v5 remote relay ready-gated info JSON probe: 18080"
   remote 'head -c 160 /tmp/v5_remote_info_probe.json 2>/dev/null || true' | sed 's/^/INFO remote_info_prefix: /'
 fi
 

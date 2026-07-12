@@ -10,6 +10,23 @@ THIS_SECTION_IS_INDEX_ONLY:
 - 本节是给 AI 的快读入口，不替代后文详细规则。
 - 若本节和后文 P0 细则冲突，以更具体的后文 P0 细则为准；若项目规则和系统/开发者/工具安全规则冲突，以系统/开发者/工具安全规则为准。
 
+AI_FAST_READ_PROTOCOL:
+1. 先用 `功能/需求真源索引.md` 的任务阅读包定位唯一 `REQ-*` owner；不要先全文读取所有功能文档。
+2. 打开 owner 后先读 `AI_FAST_READ_BEGIN` 到 `AI_FAST_READ_END`；只有任务命中该卡的 `detail_sections`、发生冲突或需要字段级实现时，才继续读取对应正文锚点。
+3. AI 快读卡只允许保存路由、owner、truth、forbidden、readback、impact 和 acceptance 指针，不得复制或改写完整需求正文；正文仍是唯一裁决依据。
+4. 快读卡与正文冲突时立即停止实现，以正文和最新用户反馈为准，先修正同一 owner 内的快读卡；不得新建平行摘要文件。
+5. 修改 owner 正文时，同一文件内同步检查快读卡是否需要更新；不相关字段保持不动。
+
+AI_FAST_READ_KEYS:
+- `owner_reqs`: 本文件拥有或直接裁决的 `REQ-*`。
+- `read_when`: 哪类任务必须读本文件。
+- `truth`: 唯一真值 owner、writer 和主要消费方向。
+- `forbidden`: 最容易把工程改废的禁止路径，只写关键词和正文锚点。
+- `readback`: 声称成功前必须取得的 owner 回读。
+- `impact`: 修改时必须一起核对的下游模块或文档。
+- `acceptance`: 最低验收入口和允许声明的状态。
+- `detail_sections`: 本任务需要继续读取的正文稳定章节。
+
 FIRST_90_SECONDS:
 1. 先读最新用户消息，判断任务类型：规则/文档、功能需求、代码修复、板端验证、VM/部署、纯提问。
 2. 读本节，然后只跳到匹配的详细章节，不要全文漫游后才行动。
@@ -94,6 +111,10 @@ SOURCE_TRUTH:
 - Windows local `D:\v5` is the only active V5 source tree. Linux kernel/PREEMPT_RT edits belong only in `D:\v5\linux`; LinuxCNC source/native edits belong only in `D:\v5\linuxcnc`; board HAL/INI/runtime packaging, LVGL, services and project tools belong in `D:\v5\board`; docs and Windows/Vivado owners stay under `D:\v5`. `D:\v5\board\linuxcnc` may contain only board runtime integration such as HAL, INI, runtime parameter/tool files, component contracts and image recipes; it must not contain a second LinuxCNC source tree, active source patch stack or source lock. No VM directory may contain a copied, synced, unpacked, generated, or editable V5 source tree.
 - The board SD card is not durable and is never a source repository. Treat every board filesystem path, including `/opt/8ax`, LinuxCNC runtime directories, service units, deployed scripts, binaries, HAL/INI files, and runtime state, as rebuildable output. A clean SD card must be reconstructable from the Windows source tree, documented external prerequisites, and the canonical VM build/deploy workflow.
 - The Windows Git worktree is the only source-bearing workspace. Do not create source copies in VM directories, board directories, desktop temp folders, backup folders, `bak/`, `repo_ignored/`, NAS mirrors, deploy staging folders, SD-card paths, Git worktrees, task directories, or archives. Version-control remotes and immutable disaster-recovery archives are non-active recovery artifacts only: they must not be edited, mounted as a second worktree, built from, or treated as owner truth.
+- `origin/main` plus its Git LFS objects is the mandatory off-host disaster-recovery snapshot. Every non-regenerable input required to recreate V5 after total loss of the Windows disk must be tracked and pushed: Linux/PREEMPT_RT source, complete LinuxCNC source, board runtime and integration source, PetaLinux project-spec/recipes and current hardware handoff inputs, Vivado project/IP/RTL source, Windows application source, build/deploy tools, configs, schemas and settled documentation. A successful local commit without the matching remote ref and LFS objects is not a backup.
+- `.gitignore` may exclude only reproducible build outputs, caches, logs, evidence, runtime state and scratch data. No required source, hardware handoff, recipe, patch, configuration, schema, keyless public build input or recovery instruction may exist only in an ignored directory, VM build tree, board filesystem, local archive or tool cache. Generated artifacts remain excluded when tracked sources and documented tools can regenerate them.
+- Proprietary or redistributability-restricted external toolchains are not copied into the repository. Their exact product/version, acquisition source, required license boundary, setup entry and any available checksum must be recorded in tracked source identity or build documentation; an undocumented local-only installer or dependency makes disaster recovery `blocked`.
+- Disaster-recovery closure requires `HEAD == origin/main`, no necessary untracked or ignored input, `git fsck` success, all reachable Git LFS objects uploaded, and the Linux, PREEMPT_RT, LinuxCNC, PetaLinux and product-source identity/closure gates passing. Do not claim the repository is recoverable from a blank disk until these checks are current.
 - Direct board editing is forbidden as an implementation path. Do not use SSH, SCP, `sed`, `tee`, `vi`, `nano`, inline shell redirection, or ad hoc copy commands to modify `/opt/8ax`, LinuxCNC configs, services, scripts, UI binaries, HAL/INI files, or other product/runtime files on the board. Board-side access is for inspection, logs, runtime probes, safe recovery, and deployment of artifacts built from the Windows source truth only.
 - If a temporary board-side diagnostic patch is ever required to understand a fault, it is not a source fix and cannot close the task. Reproduce the change in the owning Windows source under `D:\v5` / `D:\v5\board`, remove the temporary board mutation by redeploying from source, then verify the original operator path before claiming fixed.
 - VM Linux builds must read the Windows unique source through `VM_SOURCE_MOUNT_ROOT`; that mount must resolve to a live network/shared-filesystem mount and must be read-only from the VM. All CMake/Ninja state, generated files, objects, packages, and artifacts must be written under `VM_BUILD_ROOT`, outside the source mount.

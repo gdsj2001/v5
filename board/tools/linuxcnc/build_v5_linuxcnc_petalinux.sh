@@ -6,6 +6,8 @@ project_root=$(CDPATH= cd -- "$script_dir/../../.." && pwd)
 integration_root="$project_root/board/linuxcnc"
 source_root="$project_root/linuxcnc"
 petalinux_overlay_tool="$project_root/board/tools/petalinux/v5_petalinux_overlay.sh"
+minimal_runtime_verifier="$project_root/board/tools/linuxcnc/verify_v5_linuxcnc_minimal_runtime.py"
+runtime_allowlist="$integration_root/yocto/files/v5_linuxcnc_runtime_allowlist.tsv"
 build_root=${VM_BUILD_ROOT:-${V5_BUILD_ROOT:-$HOME/v5-build}}
 petalinux_root="$build_root/petalinux/overlay/merged"
 artifact_dir=${V5_LINUXCNC_ARTIFACT_DIR:-$build_root/board/linuxcnc-native}
@@ -17,10 +19,25 @@ overlay_work="$overlay_root/work"
 overlay_merged="$overlay_root/merged"
 recipe_target=""
 artifact_stage=""
+rootfs_audit_dir=""
 petalinux_overlay_active=0
+build_mode=focused
+clean_kernel=0
 
-if [ "$#" -ne 0 ]; then
-    echo "usage: V5_PETALINUX_BUILD_USER=<non-root-user> $0" >&2
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --focused) build_mode=focused ;;
+        --full) build_mode=full ;;
+        --clean-kernel) clean_kernel=1 ;;
+        *)
+            echo "usage: V5_PETALINUX_BUILD_USER=<non-root-user> $0 [--focused|--full] [--clean-kernel]" >&2
+            exit 2
+            ;;
+    esac
+    shift
+done
+if [ "$clean_kernel" -eq 1 ] && [ "$build_mode" != full ]; then
+    echo "--clean-kernel is only valid with the one final --full build" >&2
     exit 2
 fi
 build_root=$(mkdir -p "$build_root" && CDPATH= cd -- "$build_root" && pwd)
@@ -55,6 +72,10 @@ if [ ! -f "$source_root/v5_linuxcnc_source_identity.json" ]; then
 fi
 if [ ! -f "$petalinux_overlay_tool" ]; then
     echo "canonical PetaLinux overlay tool is missing: $petalinux_overlay_tool" >&2
+    exit 8
+fi
+if [ ! -f "$minimal_runtime_verifier" ] || [ ! -f "$runtime_allowlist" ]; then
+    echo "minimal LinuxCNC runtime verifier/allowlist is missing" >&2
     exit 8
 fi
 
@@ -131,6 +152,9 @@ cleanup() {
     if [ -n "$artifact_stage" ] && [ -e "$artifact_stage" ]; then
         case "$artifact_stage" in "$build_root"/*) rm -rf "$artifact_stage" ;; esac
     fi
+    if [ -n "$rootfs_audit_dir" ] && [ -e "$rootfs_audit_dir" ]; then
+        case "$rootfs_audit_dir" in "$build_root"/*) rm -rf "$rootfs_audit_dir" ;; esac
+    fi
     if [ "$petalinux_overlay_active" -eq 1 ]; then
         run_petalinux_overlay clean >/dev/null 2>&1 || true
         petalinux_overlay_active=0
@@ -149,7 +173,7 @@ if [ ! -f "$petalinux_root/project-spec/configs/config" ]; then
     exit 12
 fi
 recipe_target="$petalinux_root/project-spec/meta-user/recipes-apps/linuxcnc-prebuilt"
-mkdir -p "$overlay_upper" "$overlay_work" "$overlay_merged" "$recipe_target"
+mkdir -p "$overlay_upper" "$overlay_work" "$overlay_merged" "$recipe_target/files"
 chown "$build_user":"$(id -gn "$build_user")" \
     "$overlay_root" "$overlay_upper" "$overlay_work" "$overlay_merged"
 mount -t overlay overlay \
@@ -161,6 +185,7 @@ python3 "$script_dir/verify_v5_linuxcnc_source.py" \
     --allow-flattened-symlinks \
     --materialize-symlinks "$overlay_merged"
 ln -s "$integration_root/yocto/linuxcnc-prebuilt.bb" "$recipe_target/linuxcnc-prebuilt.bb"
+ln -s "$runtime_allowlist" "$recipe_target/files/v5_linuxcnc_runtime_allowlist.tsv"
 
 run_petalinux_build() {
     task_args=$1
@@ -212,11 +237,91 @@ configure_persistent_downloads() {
     echo "V5_PETALINUX_DOWNLOAD_OWNER_OK path=$downloads_root"
 }
 
-run_petalinux_build "-c kernel -x clean"
+verify_rootfs_package_selection() {
+    rootfs_config="$petalinux_root/project-spec/configs/rootfs_config"
+    custom_allowlist="$petalinux_root/project-spec/meta-user/conf/user-rootfsconfig"
+    [ -f "$rootfs_config" ] && [ -f "$custom_allowlist" ] || {
+        echo "PetaLinux rootfs package selection is incomplete" >&2
+        exit 12
+    }
+    if grep -Eq '^CONFIG_(packagegroup-petalinux-(qt|qt-extended|matchbox)|packagegroup-core-x11|gtk|gtkPLUS|qt|tk|libx11|xserver|wayland|weston).*=[ym]$' "$rootfs_config"; then
+        echo "forbidden GUI package is enabled in rootfs_config" >&2
+        exit 12
+    fi
+    if grep -Eq '^CONFIG_python3=[ym]$' "$rootfs_config"; then
+        echo "top-level python3 package expands to python3-modules and forbidden Tk/X11 runtime" >&2
+        exit 12
+    fi
+    if grep -Eq '^CONFIG_python3-(modules|tkinter)=[ym]$' "$rootfs_config"; then
+        echo "forbidden broad Python/Tk package is enabled in rootfs_config" >&2
+        exit 12
+    fi
+    grep -Fqx '# CONFIG_python3 is not set' "$rootfs_config" || {
+        echo "top-level python3 package must be explicitly disabled" >&2
+        exit 12
+    }
+    if grep -Eiq '^CONFIG_.*(pyqt|qtvcp|gmoccapy|gladevcp|pyvcp|tklinuxcnc|touchy|axis)' "$custom_allowlist"; then
+        echo "forbidden LinuxCNC GUI package is present in the custom rootfs allowlist" >&2
+        exit 12
+    fi
+    echo "V5_ROOTFS_PACKAGE_WHITELIST_OK"
+}
+
+verify_rootfs_package_selection
+run_petalinux_build "-c linuxcnc-prebuilt -x listtasks"
 configure_persistent_downloads
-run_petalinux_build "-c linuxcnc-prebuilt"
-configure_persistent_downloads
+
+audit_minimal_runtime() {
+    work_root="$build_root/petalinux/output/tmp/work"
+    package_root=$(find "$work_root" -type d -path '*/linuxcnc-prebuilt/*/packages-split/linuxcnc-prebuilt' -print | sort | tail -n 1)
+    [ -n "$package_root" ] || {
+        echo "linuxcnc-prebuilt runtime package root was not found" >&2
+        exit 12
+    }
+    image_manifest=""
+    deploy_root="$build_root/petalinux/output/tmp/deploy/images"
+    if [ -d "$deploy_root" ]; then
+        for candidate in $(find "$deploy_root" -type f -name '*.manifest' -print | sort); do
+            if grep -q '^linuxcnc-prebuilt[[:space:]]' "$candidate"; then
+                image_manifest="$candidate"
+            fi
+        done
+    fi
+    [ -n "$image_manifest" ] || {
+        echo "rootfs package manifest containing linuxcnc-prebuilt was not found" >&2
+        exit 12
+    }
+    rootfs_archive=${image_manifest%.manifest}.tar.gz
+    [ -f "$rootfs_archive" ] || {
+        echo "rootfs archive matching the package manifest was not found: $rootfs_archive" >&2
+        exit 12
+    }
+    rootfs_audit_dir="$build_root/petalinux/linuxcnc-rootfs-audit.$$"
+    rm -rf "$rootfs_audit_dir"
+    install -d "$rootfs_audit_dir"
+    tar -xzf "$rootfs_archive" -C "$rootfs_audit_dir"
+    rootfs_root="$rootfs_audit_dir"
+    python3 "$minimal_runtime_verifier" \
+        --allowlist "$runtime_allowlist" \
+        --package-root "$package_root" \
+        --rootfs "$rootfs_root" \
+        --image-manifest "$image_manifest"
+}
+
+if [ "$build_mode" = focused ]; then
+    run_petalinux_build "-c rootfs"
+    audit_minimal_runtime
+    cleanup
+    trap - EXIT HUP INT TERM
+    echo "V5_LINUXCNC_FOCUSED_OK package_root=$package_root rootfs=$rootfs_root manifest=$image_manifest"
+    exit 0
+fi
+
+if [ "$clean_kernel" -eq 1 ]; then
+    run_petalinux_build "-c kernel -x clean"
+fi
 run_petalinux_build ""
+audit_minimal_runtime
 
 work_root="$build_root/petalinux/output/tmp/work"
 motmod=$(find "$work_root" -type f -path '*/linuxcnc-prebuilt/*/image/usr/lib/linuxcnc/modules/motmod.so' -print | sort | tail -n 1)
@@ -268,10 +373,9 @@ python3 "$script_dir/verify_v5_linuxcnc_source.py" \
     --artifact-root "$image_root" \
     --write-artifact-identity "$artifact_stage/v5_linuxcnc_artifact_identity.json"
 
-run_petalinux_build "-c linuxcnc-prebuilt -x clean"
 rm -rf "$artifact_dir"
 mv "$artifact_stage" "$artifact_dir"
 artifact_stage=""
 cleanup
 trap - EXIT HUP INT TERM
-echo "V5_LINUXCNC_BUILD_OK artifact_dir=$artifact_dir petalinux_images=$image_count"
+echo "V5_LINUXCNC_BUILD_OK mode=$build_mode clean_kernel=$clean_kernel artifact_dir=$artifact_dir petalinux_images=$image_count"

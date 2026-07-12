@@ -74,8 +74,14 @@ int main(void)
     rc |= require_status("g92_offset");
     rc |= require_status("rtcp_actual");
     rc |= require_status("g53_geometry");
-    rc |= require_status("rotary_logical_abs_counts64");
+    rc |= require_status("rotary_logical_abs_counts");
+    rc |= require_status("rotary_wcheckpoint_base_counts");
     rc |= require_status("rotary_runtime_window_counts");
+    rc |= require_status("rotary_raw_count_bits");
+    rc |= require_status("rotary_logical_storage_bits");
+    rc |= require_status("rotary_generation");
+    rc |= require_status("rotary_invalid_reason");
+    rc |= require_status("rotary_wcheckpoint_valid");
     rc |= require_status("safety_estop");
     rc |= require_status("motion_owner_state");
     if (rc) {

@@ -214,7 +214,7 @@ int v5_settings_page_trigger_action(V5SettingsPage *page, V5MainPageActionKind a
         {
             const char *daemon_action = action_result.message ? action_result.message : "accepted";
             char body[256];
-            snprintf(body, sizeof(body), "提示: 已启动\n原因: %s\n下一步: 等待后台完成", daemon_action);
+            snprintf(body, sizeof(body), "提示: 正在处理\n原因: %s\n下一步: 正在读取后台状态", daemon_action);
             v5_settings_page_popup_show(page, action_result.daemon_action, v5_settings_page_status_action_label(action_result.daemon_action), body, 0, 0);
         }
         return 1;

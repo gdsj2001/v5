@@ -3,6 +3,7 @@
 #include "v5_command_gate_server_response.h"
 #include "v5_command_gate_validator.h"
 #include "v5_linuxcncrsh_client.h"
+#include "v5_jog_watchdog.h"
 #include "v5_native_axis_zero_position.h"
 #include "v5_native_first_point.h"
 #include "v5_native_home.h"
@@ -40,8 +41,11 @@ static V5LinuxcncrshConfig g_linuxcncrsh_config = {"127.0.0.1", 5007U, "EMC", "v
 static char g_host[64] = "127.0.0.1";
 static char g_password[64] = "EMC";
 static char g_ini_path[256];
+static char g_settings_runtime_path[256] = "/opt/8ax/phase0_bus5/settings_runtime.json";
+static char g_pulse_contract_path[256] = "/opt/8ax/v5/linuxcnc/components/step_ip_v1_5.contract.json";
 static char g_socket_path[sizeof(((struct sockaddr_un *)0)->sun_path)] = V5_COMMAND_GATE_SOCKET_PATH;
 static V5NativeMotionParameters g_motion_parameters;
+static V5JogWatchdog g_jog_watchdog;
 
 static void on_signal(int signo)
 {
@@ -229,12 +233,9 @@ static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5Command
             native_result.code[0] ? native_result.code : "HOME_RESULT_MISSING");
     } else {
         char jog_code[64];
-        if ((request.kind == V5_COMMAND_JOG_INCREMENT ||
-             request.kind == V5_COMMAND_JOG_CONTINUOUS ||
-             request.kind == V5_COMMAND_JOG_STOP) &&
-            (!v5_native_motion_parameters_resolve_jog(
-                 &g_motion_parameters, &request, jog_code, sizeof(jog_code)) ||
-             v5_linuxcncrsh_send_line(&g_linuxcncrsh_config, "Set Mode Manual") != V5_LINUXCNCRSH_SEND_SENT)) {
+        if (!v5_jog_watchdog_prepare_request(
+                &g_jog_watchdog, &g_motion_parameters,
+                &request, jog_code, sizeof(jog_code))) {
             response->send_status = V5_COMMAND_GATE_SEND_INVALID;
             v5_command_gate_response_copy_text(response->readback_code, sizeof(response->readback_code),
                       jog_code[0] ? jog_code : "JOG_NATIVE_PARAMETERS_REJECTED");
@@ -242,11 +243,13 @@ static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5Command
             return;
         }
         if (!v5_linuxcncrsh_format_line(&prepared, &request, response->command_line, sizeof(response->command_line))) {
+            v5_jog_watchdog_complete_request(&g_jog_watchdog, &request, V5_COMMAND_GATE_SEND_INVALID);
             response->send_status = V5_COMMAND_GATE_SEND_INVALID;
             linuxcncrsh_unlock();
             return;
         }
         status = v5_linuxcncrsh_send_line(&g_linuxcncrsh_config, response->command_line);
+        v5_jog_watchdog_complete_request(&g_jog_watchdog, &request, status);
         if (request.kind == V5_COMMAND_JOG_INCREMENT ||
             request.kind == V5_COMMAND_JOG_CONTINUOUS ||
             request.kind == V5_COMMAND_JOG_STOP) {
@@ -405,6 +408,12 @@ static void parse_args(int argc, char **argv)
             g_linuxcncrsh_config.timeout_ms = (unsigned int)atoi(argv[++i]);
         } else if (strcmp(argv[i], "--ini") == 0 && i + 1 < argc) {
             v5_command_gate_response_copy_text(g_ini_path, sizeof(g_ini_path), argv[++i]);
+        } else if (strcmp(argv[i], "--settings-runtime") == 0 && i + 1 < argc) {
+            v5_command_gate_response_copy_text(
+                g_settings_runtime_path, sizeof(g_settings_runtime_path), argv[++i]);
+        } else if (strcmp(argv[i], "--pulse-contract") == 0 && i + 1 < argc) {
+            v5_command_gate_response_copy_text(
+                g_pulse_contract_path, sizeof(g_pulse_contract_path), argv[++i]);
         }
     }
     g_linuxcncrsh_config.host = g_host;
@@ -429,10 +438,27 @@ int main(int argc, char **argv)
                 motion_code, g_ini_path);
         return 5;
     }
+    if (!v5_native_motion_parameters_load_runtime_owner(
+            g_settings_runtime_path,
+            g_pulse_contract_path,
+            &g_motion_parameters,
+            motion_code,
+            sizeof(motion_code))) {
+        fprintf(stderr,
+                "v5_command_gate_server Home runtime owner unavailable: %s; "
+                "dependent Home actions remain fail-closed\n",
+                motion_code);
+    }
     if (!v5_linuxcncrsh_gate_preconnect(&g_linuxcncrsh_config)) {
         fprintf(stderr, "v5_command_gate_server linuxcncrsh preconnect failed: %s:%u\n",
                 g_linuxcncrsh_config.host, g_linuxcncrsh_config.port);
         return 4;
+    }
+    if (!v5_jog_watchdog_start(
+            &g_jog_watchdog, &g_linuxcncrsh_config,
+            &g_linuxcncrsh_lock, &g_stop_requested)) {
+        fprintf(stderr, "v5_command_gate_server Jog watchdog failed to start\n");
+        return 7;
     }
     signal(SIGTERM, on_signal);
     signal(SIGINT, on_signal);
@@ -461,6 +487,8 @@ int main(int argc, char **argv)
         (void)pthread_detach(thread);
     }
     close(listen_fd);
+    g_stop_requested = 1;
+    v5_jog_watchdog_join(&g_jog_watchdog);
     unlink(g_socket_path);
     return 0;
 }

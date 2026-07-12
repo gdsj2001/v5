@@ -18,6 +18,10 @@ int v5_command_program_open(
     V5ProgramController *controller,
     const char *path,
     V5ProgramOpenResult *result);
+int v5_command_program_delete(
+    V5ProgramController *controller,
+    const char *path,
+    V5ProgramDeleteResult *result);
 const V5ProgramRuntime *v5_program_controller_runtime(
     const V5ProgramController *controller);
 

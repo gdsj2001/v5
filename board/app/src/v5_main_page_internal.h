@@ -21,6 +21,7 @@
 #define V5_TOOLPATH_PROGRAM_LINE_WIDTH 2
 #define V5_MAIN_PAGE_SELECTION_IDLE_MS 3000U
 #define V5_MAIN_PAGE_JOG_HOLD_MS 500U
+#define V5_MAIN_PAGE_JOG_KEEPALIVE_MS 200U
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -68,7 +69,7 @@ void v5_main_page_internal_create_main_program_edit_hit_area(V5MainPage *page);
 
 void v5_main_page_internal_create_power_on_home_popup(V5MainPage *page);
 
-void v5_main_page_internal_draw_toolpath_boot_scaffold(V5MainPage *page);
+void v5_main_page_internal_hide_toolpath_unproven_geometry(V5MainPage *page);
 
 void v5_main_page_internal_feed_override_reset_event_cb(lv_event_t *event);
 
@@ -181,7 +182,7 @@ void v5_main_page_internal_main_page_store_static_pose(V5MainPage *page, const V
 
 int v5_main_page_internal_main_page_tool_length_mm(const V5MainPage *page, double *out);
 
-void v5_main_page_internal_main_page_update_program_project_points(
+int v5_main_page_internal_main_page_update_program_project_points(
     V5MainPage *page,
     const V5UiStatusView *status,
     unsigned int count);

@@ -28,8 +28,6 @@
 static lv_color_t g_draw_buffer[V5_UI_MAX_WIDTH * 20U];
 static unsigned char g_frame[V5_UI_MAX_WIDTH * V5_UI_MAX_HEIGHT * 4U];
 static unsigned char g_cached_frame[V5_REMOTE_DISPLAY_CACHE_COUNT][V5_UI_MAX_WIDTH * V5_UI_MAX_HEIGHT * 4U];
-static unsigned char g_cached_fb[V5_REMOTE_DISPLAY_CACHE_COUNT][V5_UI_MAX_WIDTH * V5_UI_MAX_HEIGHT * 4U];
-static size_t g_cached_fb_size[V5_REMOTE_DISPLAY_CACHE_COUNT];
 static int g_cached_valid[V5_REMOTE_DISPLAY_CACHE_COUNT];
 static lv_disp_draw_buf_t g_draw;
 static lv_disp_drv_t g_driver;
@@ -48,6 +46,7 @@ static unsigned char *g_remote_fb;
 static size_t g_remote_fb_size;
 static int g_remote_dirty_fd = -1;
 static unsigned long long g_frame_id;
+static int g_output_suppressed = 1;
 
 static int read_u32_file(const char *path, unsigned int *out)
 {
@@ -174,7 +173,9 @@ static int ensure_remote_framebuffer(void)
     g_remote_fb_fd = fd;
     g_remote_fb = mapped;
     g_remote_fb_size = size;
-    memcpy(g_remote_fb, g_frame, size);
+    if (!g_output_suppressed) {
+        memcpy(g_remote_fb, g_frame, size);
+    }
     return 1;
 }
 
@@ -287,9 +288,13 @@ static void copy_area_to_outputs(const lv_area_t *area, const lv_color_t *color_
     if (x1 > x2 || y1 > y2) {
         return;
     }
-    (void)ensure_remote_framebuffer();
-    base_frame_id = g_frame_id;
-    ++g_frame_id;
+    if (!g_output_suppressed) {
+        (void)ensure_remote_framebuffer();
+        base_frame_id = g_frame_id;
+        ++g_frame_id;
+    } else {
+        base_frame_id = g_frame_id;
+    }
     for (y = y1; y <= y2; ++y) {
         const lv_color_t *src_row = color_p + (size_t)(y - area->y1) * (size_t)src_w;
         const unsigned char *src_bytes;
@@ -300,15 +305,19 @@ static void copy_area_to_outputs(const lv_area_t *area, const lv_color_t *color_
         src_bytes = (const unsigned char *)src_row;
         frame_row = &g_frame[((unsigned int)y * g_width + (unsigned int)x1) * 4U];
         memcpy(frame_row, src_bytes, (size_t)pixels * 4U);
-        if (g_remote_fb) {
+        if (!g_output_suppressed && g_remote_fb) {
             remote_row = &g_remote_fb[((unsigned int)y * g_width + (unsigned int)x1) * 4U];
             memcpy(remote_row, src_bytes, (size_t)pixels * 4U);
         }
-        copy_row_to_fb((unsigned int)x1, (unsigned int)y, src_bytes, pixels);
+        if (!g_output_suppressed) {
+            copy_row_to_fb((unsigned int)x1, (unsigned int)y, src_bytes, pixels);
+        }
     }
     visible_w = (unsigned int)(x2 - x1 + 1);
     visible_h = (unsigned int)(y2 - y1 + 1);
-    notify_remote_dirty(base_frame_id, g_frame_id, (unsigned int)x1, (unsigned int)y1, visible_w, visible_h);
+    if (!g_output_suppressed) {
+        notify_remote_dirty(base_frame_id, g_frame_id, (unsigned int)x1, (unsigned int)y1, visible_w, visible_h);
+    }
 }
 
 static void remote_flush(lv_disp_drv_t *driver, const lv_area_t *area, lv_color_t *color_p)
@@ -330,6 +339,7 @@ int v5_lvgl_remote_display_setup(unsigned int width, unsigned int height)
     g_height = height;
     memset(g_frame, 0x20, sizeof(g_frame));
     g_frame_id = 1ULL;
+    g_output_suppressed = 1;
     if (!ensure_remote_framebuffer()) {
         return 0;
     }
@@ -343,7 +353,6 @@ int v5_lvgl_remote_display_setup(unsigned int width, unsigned int height)
         return 0;
     }
     g_display_ready = 1;
-    notify_remote_dirty(0ULL, g_frame_id, 0U, 0U, g_width, g_height);
     return 1;
 }
 
@@ -360,27 +369,44 @@ int v5_lvgl_remote_display_cache_capture(unsigned int slot)
     }
     frame_size = remote_frame_size();
     memcpy(g_cached_frame[slot], g_frame, frame_size);
-    g_cached_fb_size[slot] = 0U;
-    if (g_fb && g_fb_size > 0U && g_fb_size <= sizeof(g_cached_fb[slot])) {
-        memcpy(g_cached_fb[slot], g_fb, g_fb_size);
-        g_cached_fb_size[slot] = g_fb_size;
-    }
     g_cached_valid[slot] = 1;
     return 1;
+}
+
+static void copy_full_frame_to_fb(const unsigned char *frame)
+{
+    unsigned int y;
+    if (!frame || !g_fb) {
+        return;
+    }
+    for (y = 0U; y < g_height; ++y) {
+        copy_row_to_fb(0U, y, &frame[(size_t)y * g_width * 4U], g_width);
+    }
 }
 
 int v5_lvgl_remote_display_cache_blit(unsigned int slot)
 {
     size_t frame_size;
-    unsigned long long base_frame_id;
     if (!g_display_ready || slot >= V5_REMOTE_DISPLAY_CACHE_COUNT || !g_cached_valid[slot]) {
         return 0;
     }
     frame_size = remote_frame_size();
     memcpy(g_frame, g_cached_frame[slot], frame_size);
-    if (g_fb && g_cached_fb_size[slot] > 0U && g_cached_fb_size[slot] <= g_fb_size) {
-        memcpy(g_fb, g_cached_fb[slot], g_cached_fb_size[slot]);
+    if (g_output_suppressed) {
+        return 0;
     }
+    return v5_lvgl_remote_display_publish_current_frame();
+}
+
+int v5_lvgl_remote_display_publish_current_frame(void)
+{
+    size_t frame_size;
+    unsigned long long base_frame_id;
+    if (!g_display_ready || g_output_suppressed) {
+        return 0;
+    }
+    frame_size = remote_frame_size();
+    copy_full_frame_to_fb(g_frame);
     (void)ensure_remote_framebuffer();
     if (g_remote_fb) {
         memcpy(g_remote_fb, g_frame, frame_size);
@@ -389,6 +415,35 @@ int v5_lvgl_remote_display_cache_blit(unsigned int slot)
     ++g_frame_id;
     notify_remote_dirty(base_frame_id, g_frame_id, 0U, 0U, g_width, g_height);
     return 1;
+}
+
+int v5_lvgl_remote_display_cache_valid(unsigned int slot)
+{
+    return slot < V5_REMOTE_DISPLAY_CACHE_COUNT && g_cached_valid[slot];
+}
+
+void v5_lvgl_remote_display_cache_invalidate(unsigned int slot)
+{
+    if (slot < V5_REMOTE_DISPLAY_CACHE_COUNT) {
+        g_cached_valid[slot] = 0;
+    }
+}
+
+size_t v5_lvgl_remote_display_cache_budget_bytes(void)
+{
+    return remote_frame_size() * V5_REMOTE_DISPLAY_CACHE_COUNT;
+}
+
+int v5_lvgl_remote_display_set_output_suppressed(int suppressed)
+{
+    int previous = g_output_suppressed;
+    g_output_suppressed = suppressed ? 1 : 0;
+    return previous;
+}
+
+int v5_lvgl_remote_display_output_suppressed(void)
+{
+    return g_output_suppressed;
 }
 
 int v5_remote_frame_snapshot(V5RemoteFrameSnapshot *snapshot)

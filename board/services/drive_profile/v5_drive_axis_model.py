@@ -42,6 +42,43 @@ def mark_reset_invalid(axis_cfg: Dict[str, Any], reason: str) -> None:
     mark_drive_parameters_invalid(axis_cfg, reason, "invalidated_by_factory_reset")
 
 
+def apply_wcheckpoint_profile(axis_cfg: Dict[str, Any], profile: Dict[str, Any]) -> None:
+    axis = str(axis_cfg.get("axis") or "").upper()
+    if axis_unit(axis) != "deg":
+        return
+    numeric_fields = (
+        "position_command_raw_bits",
+        "position_command_raw_modulus",
+        "position_feedback_raw_bits",
+        "position_feedback_raw_modulus",
+    )
+    values: Dict[str, int] = {}
+    for field in numeric_fields:
+        value = finite_float(profile.get(field))
+        if value is None or value <= 0.0 or abs(value - round(value)) > 1e-6:
+            raise DriveActionError(
+                "DRIVE_WCHECKPOINT_MAPPING_MISSING",
+                "驱动映射缺少 wcheckpoint 所需的位置位宽或模数。",
+                {"axis": axis, "profile_id": profile.get("profile_id", ""), "field": field},
+            )
+        values[field] = int(round(value))
+    command_type = str(profile.get("position_command_raw_value_type") or "").lower()
+    feedback_type = str(profile.get("position_feedback_raw_value_type") or "").lower()
+    if not command_type or not feedback_type:
+        raise DriveActionError(
+            "DRIVE_WCHECKPOINT_VALUE_TYPE_MISSING",
+            "驱动映射缺少 wcheckpoint 所需的位置数值类型。",
+            {"axis": axis, "profile_id": profile.get("profile_id", "")},
+        )
+    axis_cfg.update(values)
+    axis_cfg["position_command_raw_value_type"] = command_type
+    axis_cfg["position_feedback_raw_value_type"] = feedback_type
+    axis_cfg["position_command_raw_signed"] = 1 if command_type.startswith("int") else 0
+    axis_cfg["position_feedback_raw_signed"] = 1 if feedback_type.startswith("int") else 0
+    axis_cfg["drive_wrapped_rotary_support"] = bool(profile.get("drive_wrapped_rotary_support"))
+    axis_cfg["drive_wrapped_rotary_support_flag"] = 1 if profile.get("drive_wrapped_rotary_support") else 0
+
+
 def drive_parameter_axis_value(axis: str, field: str) -> str:
     target_axis = str(axis or "").upper()
     target_field = str(field or "")
@@ -342,6 +379,7 @@ def update_axis_drive_set_evidence(axis_cfg: Dict[str, Any],
     if ratio is None and motor_rev and load_rev and load_rev > 0.0:
         ratio = motor_rev / load_rev
     rotary_load_counts = feedback_counts * ratio if ratio and ratio > 0.0 else None
+    apply_wcheckpoint_profile(axis_cfg, target.get("profile") or {})
     axis_cfg["encoder_bits"] = encoder_bits
     axis_cfg["encoder_resolution_bits"] = encoder_bits
     if motor_rev is not None:

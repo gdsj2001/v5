@@ -3,57 +3,27 @@
 
 import json
 import os
-import select
-import subprocess
-import sys
-import threading
-import time
-import fcntl
-import struct
 from pathlib import Path
-
-from PyQt5 import QtCore, QtWidgets, QtGui
-
-try:
-    from evdev import InputDevice, ecodes
-    EVDEV_AVAILABLE = True
-except Exception:
-    InputDevice = None
-    EVDEV_AVAILABLE = False
-
-    class _RawEvdevCodes:
-        EV_ABS = 3
-        EV_KEY = 1
-        EV_SYN = 0
-        ABS_X = 0
-        ABS_Y = 1
-        ABS_MT_POSITION_X = 53
-        ABS_MT_POSITION_Y = 54
-        ABS_MT_TRACKING_ID = 57
-        BTN_TOUCH = 330
-        SYN_REPORT = 0
-
-    ecodes = _RawEvdevCodes()
 
 
 CAL_PATH = Path("/opt/8ax/safe_ui/re_touch_calibration.json")
+POINTERCAL_PATH = Path("/etc/pointercal")
 CAL_MODE = "raw-evdev-cal-v2"
 CAL_PROFILE = "screen-fit-topleft-1024x600-v1"
 CAL_ANCHOR = "topleft-v1"
 TOUCH_UDEV_LINK = "/dev/input/by-path/z20-touchscreen"
-RESTART_REQUEST = "/run/v5_touch_calibration/restart.request"
-BOARD_REBOOT_MARKER = "/run/v5_touch_calibration/reboot.requested"
-LINUXCNC_SERVICE = "v5-ui-relay"
 CAL_POINT_TIMEOUT_S = 30.0
 FIT_MAX_ERROR_PX = 36.0
 EDGE_MAX_ERROR_PX = 48.0
+DISPLAY_WIDTH = 1024
+DISPLAY_HEIGHT = 600
+CAL_TARGETS = ((80, 80), (944, 80), (944, 520), (80, 520), (512, 300))
 _THIS_DIR = Path(__file__).resolve().parent
-
 APPLY_HELPER = str(_THIS_DIR / "v5_apply_touch_calibration.py")
 RESTART_HELPER = str(_THIS_DIR / "v5_restart_after_touch_calibration.sh")
 
 
-def _resolve_raw_touch_device():
+def resolve_raw_touch_device():
     preferred = os.environ.get("V5_RAW_TOUCH_DEVICE", "").strip()
     if preferred and os.path.exists(preferred):
         return preferred
@@ -62,111 +32,136 @@ def _resolve_raw_touch_device():
     return ""
 
 
-def _install_runtime_font(app: QtWidgets.QApplication) -> str:
-    # On minimal rootfs builds the default font catalog can be empty, which
-    # causes widgets to render without visible glyphs. Load a known TTF first.
-    candidates = []
-    env_font = os.environ.get("V5_UI_FONT_FILE", "").strip()
-    if env_font:
-        candidates.append(env_font)
-    candidates.extend(
-        [
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
-        ]
-    )
-
-    for path in candidates:
-        if not path or (not os.path.exists(path)):
-            continue
-        try:
-            fid = QtGui.QFontDatabase.addApplicationFont(path)
-        except Exception:
-            continue
-        if fid < 0:
-            continue
-        fams = QtGui.QFontDatabase.applicationFontFamilies(fid)
-        if not fams:
-            continue
-        family = fams[0]
-        app.setFont(QtGui.QFont(family, 12))
-        return family
-
-    app.setFont(QtGui.QFont("Sans Serif", 12))
-    return "Sans Serif"
-
-
-def _write_text_atomic(path: Path, text: str) -> None:
+def write_text_atomic(path, text):
+    path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.tmp")
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, path)
+    tmp = path.with_name(".%s.tmp.%d" % (path.name, os.getpid()))
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.chmod(str(tmp), 0o644)
+        os.replace(str(tmp), str(path))
+    finally:
+        if tmp.exists():
+            tmp.unlink()
 
 
-def _solve_3x3(matrix, rhs):
+def solve_3x3(matrix, rhs):
     rows = [list(matrix[i]) + [float(rhs[i])] for i in range(3)]
     for col in range(3):
         pivot = col
         pivot_abs = abs(rows[pivot][col])
-        for r in range(col + 1, 3):
-            val = abs(rows[r][col])
-            if val > pivot_abs:
-                pivot = r
-                pivot_abs = val
+        for row_index in range(col + 1, 3):
+            value = abs(rows[row_index][col])
+            if value > pivot_abs:
+                pivot = row_index
+                pivot_abs = value
         if pivot_abs < 1e-12:
             raise ValueError("singular calibration matrix")
         if pivot != col:
             rows[col], rows[pivot] = rows[pivot], rows[col]
-        pivot_val = rows[col][col]
-        for c in range(col, 4):
-            rows[col][c] /= pivot_val
-        for r in range(3):
-            if r == col:
+        pivot_value = rows[col][col]
+        for item_index in range(col, 4):
+            rows[col][item_index] /= pivot_value
+        for row_index in range(3):
+            if row_index == col:
                 continue
-            factor = rows[r][col]
+            factor = rows[row_index][col]
             if abs(factor) < 1e-12:
                 continue
-            for c in range(col, 4):
-                rows[r][c] -= factor * rows[col][c]
+            for item_index in range(col, 4):
+                rows[row_index][item_index] -= factor * rows[col][item_index]
     return rows[0][3], rows[1][3], rows[2][3]
 
 
-def _fit_affine(samples, targets):
-    n = float(len(samples))
-    if n < 3:
-        raise ValueError("not enough calibration samples")
+def fit_affine(samples, targets=CAL_TARGETS):
+    count = float(len(samples))
+    if len(samples) != len(targets) or count < 3:
+        raise ValueError("invalid calibration sample count")
     s_xx = s_xy = s_x = 0.0
     s_yy = s_y = 0.0
     tx_x = tx_y = tx_1 = 0.0
     ty_x = ty_y = ty_1 = 0.0
     for sample, target in zip(samples, targets):
-        rx = float(sample[0])
-        ry = float(sample[1])
-        px = float(target[0])
-        py = float(target[1])
-        s_xx += rx * rx
-        s_xy += rx * ry
-        s_x += rx
-        s_yy += ry * ry
-        s_y += ry
-        tx_x += px * rx
-        tx_y += px * ry
-        tx_1 += px
-        ty_x += py * rx
-        ty_y += py * ry
-        ty_1 += py
-    mat = (
-        (s_xx, s_xy, s_x),
-        (s_xy, s_yy, s_y),
-        (s_x, s_y, n),
-    )
-    sx, sxy, ox = _solve_3x3(mat, (tx_x, tx_y, tx_1))
-    syx, sy, oy = _solve_3x3(mat, (ty_x, ty_y, ty_1))
-    det = (sx * sy) - (sxy * syx)
-    if abs(det) < 1e-9:
+        raw_x, raw_y = float(sample[0]), float(sample[1])
+        target_x, target_y = float(target[0]), float(target[1])
+        s_xx += raw_x * raw_x
+        s_xy += raw_x * raw_y
+        s_x += raw_x
+        s_yy += raw_y * raw_y
+        s_y += raw_y
+        tx_x += target_x * raw_x
+        tx_y += target_x * raw_y
+        tx_1 += target_x
+        ty_x += target_y * raw_x
+        ty_y += target_y * raw_y
+        ty_1 += target_y
+    matrix = ((s_xx, s_xy, s_x), (s_xy, s_yy, s_y), (s_x, s_y, count))
+    sx, sxy, ox = solve_3x3(matrix, (tx_x, tx_y, tx_1))
+    syx, sy, oy = solve_3x3(matrix, (ty_x, ty_y, ty_1))
+    if abs((sx * sy) - (sxy * syx)) < 1e-9:
         raise ValueError("degenerate affine fit")
     return sx, sxy, ox, syx, sy, oy
 
+
+def map_point(coefficients, raw_point):
+    sx, sxy, ox, syx, sy, oy = coefficients
+    raw_x, raw_y = float(raw_point[0]), float(raw_point[1])
+    return (raw_x * sx) + (raw_y * sxy) + ox, (raw_x * syx) + (raw_y * sy) + oy
+
+
+def validate_fit(samples, coefficients, targets=CAL_TARGETS):
+    fit_errors = []
+    for sample, target in zip(samples, targets):
+        pixel_x, pixel_y = map_point(coefficients, sample)
+        dx = pixel_x - float(target[0])
+        dy = pixel_y - float(target[1])
+        fit_errors.append((dx * dx + dy * dy) ** 0.5)
+
+    raw_min_x = min(float(point[0]) for point in samples)
+    raw_max_x = max(float(point[0]) for point in samples)
+    raw_min_y = min(float(point[1]) for point in samples)
+    raw_max_y = max(float(point[1]) for point in samples)
+    target_min_x = min(float(point[0]) for point in targets)
+    target_max_x = max(float(point[0]) for point in targets)
+    target_min_y = min(float(point[1]) for point in targets)
+    target_max_y = max(float(point[1]) for point in targets)
+    edge_samples = (
+        ((raw_min_x, raw_min_y), (target_min_x, target_min_y)),
+        ((raw_max_x, raw_min_y), (target_max_x, target_min_y)),
+        ((raw_max_x, raw_max_y), (target_max_x, target_max_y)),
+        ((raw_min_x, raw_max_y), (target_min_x, target_max_y)),
+    )
+    edge_errors = []
+    for raw_point, target in edge_samples:
+        pixel_x, pixel_y = map_point(coefficients, raw_point)
+        dx = pixel_x - target[0]
+        dy = pixel_y - target[1]
+        edge_errors.append((dx * dx + dy * dy) ** 0.5)
+    average_error = sum(fit_errors) / float(len(fit_errors))
+    return average_error, max(fit_errors), max(edge_errors)
+
+
+def calibration_payload(coefficients):
+    sx, sxy, ox, syx, sy, oy = coefficients
+    return {
+        "mode": CAL_MODE,
+        "profile": CAL_PROFILE,
+        "anchor": CAL_ANCHOR,
+        "display": [DISPLAY_WIDTH, DISPLAY_HEIGHT],
+        "sx": sx,
+        "sxy": sxy,
+        "syx": syx,
+        "sy": sy,
+        "ox": ox,
+        "oy": oy,
+    }
+
+
+def save_calibration(coefficients):
+    payload = json.dumps(calibration_payload(coefficients), ensure_ascii=False, indent=2) + "\n"
+    write_text_atomic(CAL_PATH, payload)
+    if CAL_PATH.read_text(encoding="utf-8") != payload:
+        raise RuntimeError("calibration source-position readback mismatch")
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]

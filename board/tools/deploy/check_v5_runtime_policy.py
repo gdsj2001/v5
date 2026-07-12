@@ -461,14 +461,38 @@ def check_linuxcnc_source_rebuild_policy() -> int:
     source_root = project_root / "linuxcnc"
     identity_path = source_root / "v5_linuxcnc_source_identity.json"
     recipe_path = ROOT / "linuxcnc" / "yocto" / "linuxcnc-prebuilt.bb"
+    allowlist_path = (
+        ROOT / "linuxcnc" / "yocto" / "files" / "v5_linuxcnc_runtime_allowlist.tsv"
+    )
     verifier_path = ROOT / "tools" / "linuxcnc" / "verify_v5_linuxcnc_source.py"
+    minimal_verifier_path = (
+        ROOT / "tools" / "linuxcnc" / "verify_v5_linuxcnc_minimal_runtime.py"
+    )
     build_path = ROOT / "tools" / "linuxcnc" / "build_v5_linuxcnc_petalinux.sh"
+    rootfs_config_path = ROOT / "petalinux" / "project-spec" / "configs" / "rootfs_config"
+    custom_rootfs_allowlist_path = (
+        ROOT
+        / "petalinux"
+        / "project-spec"
+        / "meta-user"
+        / "conf"
+        / "user-rootfsconfig"
+    )
     sync_path = ROOT / "linuxcnc" / "tools" / "sync_v5_linuxcnc_recipe_to_petalinux.sh"
     retired_paths = (
         ROOT / "linuxcnc" / "v5_linuxcnc_source.lock.json",
         ROOT / "linuxcnc" / "patches" / "0001-v5-native-rotary-nearest-target.patch",
     )
-    required_paths = (identity_path, recipe_path, verifier_path, build_path)
+    required_paths = (
+        identity_path,
+        recipe_path,
+        allowlist_path,
+        verifier_path,
+        minimal_verifier_path,
+        build_path,
+        rootfs_config_path,
+        custom_rootfs_allowlist_path,
+    )
     for path in required_paths:
         if not path.is_file():
             print(f"LINUXCNC_REBUILD_OWNER_MISSING: {path}", file=sys.stderr)
@@ -493,6 +517,19 @@ def check_linuxcnc_source_rebuild_policy() -> int:
     for required in (
         'V5_LINUXCNC_EXTERNAL_SOURCE ?= ""',
         'EXTERNALSRC = "${V5_LINUXCNC_EXTERNAL_SOURCE}"',
+        'do_configure[file-checksums] = "',
+        'do_configure[nostamp] = "1"',
+        '${S}/v5_linuxcnc_source_identity.json:True',
+        '${WORKDIR}/v5_linuxcnc_runtime_allowlist.tsv:True',
+        'SRC_URI += "file://v5_linuxcnc_runtime_allowlist.tsv"',
+        'runtime_count=$(expr "$runtime_count" + 1)',
+        "oe_runmake V5_HEADLESS_RUNTIME=1",
+        "V5 headless Python native status binding owner missing",
+        'PACKAGEFUNCS_prepend = "v5_refresh_runtime_hashes "',
+        'package_root="${PKGDEST}/${PN}"',
+        'FILES_${PN}-dev += "',
+        'RDEPENDS_${PN}-dev += "python3-core"',
+        "linuxcnc-runtime-files.sha256",
         "v5_linuxcnc_source_identity.json",
     ):
         if required not in recipe:
@@ -502,13 +539,151 @@ def check_linuxcnc_source_rebuild_policy() -> int:
         if forbidden in recipe:
             print(f"LINUXCNC_REBUILD_RETIRED_PATH: {forbidden}", file=sys.stderr)
             return 1
+    allowlist_rows = {}
+    for line_number, raw in enumerate(
+        allowlist_path.read_text(encoding="utf-8", errors="strict").splitlines(), 1
+    ):
+        if not raw or raw.startswith("#"):
+            continue
+        fields = raw.split("\t")
+        if len(fields) != 2 or not fields[0].startswith("/") or not fields[1].strip():
+            print(f"LINUXCNC_MINIMAL_ALLOWLIST_INVALID: line={line_number}", file=sys.stderr)
+            return 1
+        if fields[0] in allowlist_rows:
+            print(f"LINUXCNC_MINIMAL_ALLOWLIST_DUPLICATE: {fields[0]}", file=sys.stderr)
+            return 1
+        allowlist_rows[fields[0]] = fields[1]
+    if len(allowlist_rows) != 32:
+        print(
+            f"LINUXCNC_MINIMAL_ALLOWLIST_COUNT_INVALID: {len(allowlist_rows)}",
+            file=sys.stderr,
+        )
+        return 1
+    files_match = re.search(r'FILES_\$\{PN\}\s*=\s*"(.*?)"', recipe, re.DOTALL)
+    rdepends_match = re.search(r'RDEPENDS_\$\{PN\}\s*\+=\s*"(.*?)"', recipe, re.DOTALL)
+    depends_match = re.search(r'DEPENDS\s*\+=\s*"(.*?)"', recipe, re.DOTALL)
+    if files_match is None or rdepends_match is None or depends_match is None:
+        print("LINUXCNC_MINIMAL_PACKAGE_BLOCK_MISSING", file=sys.stderr)
+        return 1
+    if re.search(r"(^|\s)libepoxy($|\s)", depends_match.group(1)):
+        print("LINUXCNC_MINIMAL_HEADLESS_BUILD_DEPENDENCY_PRESENT: libepoxy", file=sys.stderr)
+        return 1
+    runtime_entries = set()
+    substitutions = {
+        "${sysconfdir}": "/etc",
+        "${bindir}": "/usr/bin",
+        "${libdir}": "/usr/lib",
+        "${datadir}": "/usr/share",
+    }
+    for raw in files_match.group(1).splitlines():
+        entry = raw.strip().removesuffix("\\").strip()
+        for token, value in substitutions.items():
+            entry = entry.replace(token, value)
+        if entry:
+            runtime_entries.add(entry)
+    missing_entries = sorted(set(allowlist_rows) - runtime_entries)
+    if missing_entries:
+        print(f"LINUXCNC_MINIMAL_FILES_BLOCK_INCOMPLETE: {missing_entries}", file=sys.stderr)
+        return 1
+    for broad_entry in ("/usr/bin", "/usr/lib", "/usr/share", "/usr/include/linuxcnc"):
+        if broad_entry in runtime_entries:
+            print(f"LINUXCNC_MINIMAL_BROAD_PACKAGE_ENTRY: {broad_entry}", file=sys.stderr)
+            return 1
+    for forbidden_runtime_dependency in (
+        "python3-modules",
+        "python3-pyqt5",
+        "libepoxy",
+        "gtk",
+        "qt",
+        "tcl",
+        "tk",
+    ):
+        if re.search(
+            rf"(^|\s){re.escape(forbidden_runtime_dependency)}($|\s)",
+            rdepends_match.group(1),
+        ):
+            print(
+                "LINUXCNC_MINIMAL_FORBIDDEN_RDEPEND: "
+                f"{forbidden_runtime_dependency}",
+                file=sys.stderr,
+            )
+            return 1
+    compile(
+        minimal_verifier_path.read_text(encoding="utf-8", errors="strict"),
+        str(minimal_verifier_path),
+        "exec",
+    )
+    rootfs_config = rootfs_config_path.read_text(encoding="utf-8", errors="strict")
+    forbidden_enabled_rootfs = re.findall(
+        r"^CONFIG_(?:packagegroup-petalinux-(?:qt|qt-extended|matchbox)|"
+        r"packagegroup-core-x11|gtk|gtkPLUS|qt|tk|libx11|xserver|wayland|weston)"
+        r"[^=]*=[ym]$",
+        rootfs_config,
+        re.MULTILINE | re.IGNORECASE,
+    )
+    if forbidden_enabled_rootfs:
+        print(
+            f"LINUXCNC_MINIMAL_ROOTFS_GUI_SELECTED: {forbidden_enabled_rootfs}",
+            file=sys.stderr,
+        )
+        return 1
+    forbidden_python_rootfs = re.findall(
+        r"^CONFIG_python3(?:-(?:modules|tkinter))?=[ym]$",
+        rootfs_config,
+        re.MULTILINE,
+    )
+    if forbidden_python_rootfs:
+        print(
+            "LINUXCNC_MINIMAL_ROOTFS_BROAD_PYTHON_SELECTED: "
+            f"{forbidden_python_rootfs}",
+            file=sys.stderr,
+        )
+        return 1
+    if "# CONFIG_python3 is not set" not in rootfs_config:
+        print("LINUXCNC_MINIMAL_ROOTFS_BROAD_PYTHON_NOT_DISABLED", file=sys.stderr)
+        return 1
+    expected_custom_rootfs_packages = {
+        "CONFIG_v5-base-overlay",
+        "CONFIG_v5-stepgen-module",
+        "CONFIG_linuxcnc-prebuilt",
+        "CONFIG_ethercat-master",
+        "CONFIG_linuxcnc-ethercat",
+        "CONFIG_hal-cia402",
+        "CONFIG_wpa-supplicant",
+        "CONFIG_wpa-supplicant-cli",
+        "CONFIG_wpa-supplicant-passphrase",
+    }
+    actual_custom_rootfs_packages = {
+        line.strip()
+        for line in custom_rootfs_allowlist_path.read_text(
+            encoding="utf-8", errors="strict"
+        ).splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    if actual_custom_rootfs_packages != expected_custom_rootfs_packages:
+        print(
+            "LINUXCNC_MINIMAL_ROOTFS_CUSTOM_WHITELIST_MISMATCH: "
+            f"actual={sorted(actual_custom_rootfs_packages)}",
+            file=sys.stderr,
+        )
+        return 1
     build_script = build_path.read_text(encoding="utf-8", errors="strict")
     for token in (
         "findmnt -n -o FSTYPE,OPTIONS -T",
         "mount -t overlay overlay",
         'lowerdir=$source_root,upperdir=$overlay_upper,workdir=$overlay_work',
         'ln -s "$integration_root/yocto/linuxcnc-prebuilt.bb"',
+        'ln -s "$runtime_allowlist"',
         'V5_LINUXCNC_EXTERNAL_SOURCE="$overlay_merged"',
+        "build_mode=focused",
+        'run_petalinux_build "-c linuxcnc-prebuilt -x listtasks"',
+        'run_petalinux_build "-c rootfs"',
+        "verify_rootfs_package_selection",
+        "V5_ROOTFS_PACKAGE_WHITELIST_OK",
+        'rootfs_archive=${image_manifest%.manifest}.tar.gz',
+        'tar -xzf "$rootfs_archive" -C "$rootfs_audit_dir"',
+        "audit_minimal_runtime",
+        "V5_LINUXCNC_FOCUSED_OK",
     ):
         if token not in build_script:
             print(f"LINUXCNC_REBUILD_READONLY_OWNER_GATE_MISSING: {token}", file=sys.stderr)
@@ -516,6 +691,56 @@ def check_linuxcnc_source_rebuild_policy() -> int:
     if "sync_v5_linuxcnc_recipe_to_petalinux" in build_script:
         print("LINUXCNC_REBUILD_RETIRED_SYNC_CALL_PRESENT", file=sys.stderr)
         return 1
+    if '-c linuxcnc-prebuilt -x clean' in build_script:
+        print("LINUXCNC_MINIMAL_FOCUSED_OUTPUT_CLEAN_PRESENT", file=sys.stderr)
+        return 1
+    if "rootfs/usr/bin/linuxcnc" in build_script:
+        print("LINUXCNC_MINIMAL_EPHEMERAL_ROOTFS_AUDIT_PRESENT", file=sys.stderr)
+        return 1
+    if 'run_petalinux_build "-c linuxcnc-prebuilt"' in build_script:
+        print("LINUXCNC_MINIMAL_DUPLICATE_FOCUSED_PACKAGE_BUILD", file=sys.stderr)
+        return 1
+    kernel_clean_gate = re.search(
+        r'if \[ "\$clean_kernel" -eq 1 \].*?'
+        r'run_petalinux_build "-c kernel -x clean".*?fi',
+        build_script,
+        re.DOTALL,
+    )
+    if kernel_clean_gate is None or build_script.count('-c kernel -x clean') != 1:
+        print("LINUXCNC_MINIMAL_KERNEL_CLEAN_NOT_EXPLICIT_FINAL_ONLY", file=sys.stderr)
+        return 1
+    external_runtime_recipes = (
+        ROOT
+        / "petalinux"
+        / "project-spec"
+        / "meta-user"
+        / "recipes-apps"
+        / "hal-cia402"
+        / "hal-cia402.bb",
+        ROOT
+        / "petalinux"
+        / "project-spec"
+        / "meta-user"
+        / "recipes-apps"
+        / "v5-stepgen-module"
+        / "v5-stepgen-module.bb",
+        ROOT
+        / "petalinux"
+        / "project-spec"
+        / "meta-user"
+        / "recipes-apps"
+        / "linuxcnc-ethercat"
+        / "linuxcnc-ethercat_git.bb",
+    )
+    for external_recipe in external_runtime_recipes:
+        external_text = external_recipe.read_text(encoding="utf-8", errors="strict")
+        for forbidden in ("/usr/src/", "lcec_configgen"):
+            if forbidden in external_text:
+                print(
+                    f"LINUXCNC_MINIMAL_EXTERNAL_DEV_PATH: {external_recipe}:{forbidden}",
+                    file=sys.stderr,
+                )
+                return 1
     result = subprocess.run(
         [sys.executable, str(verifier_path), "--project-root", str(project_root)],
         cwd=project_root,
@@ -913,6 +1138,96 @@ def check_unique_windows_source_delivery() -> int:
     return 0
 
 
+def check_product_runtime_closure_policy() -> int:
+    manifest_path = ROOT / "config" / "deploy" / "v5_runtime_deploy_manifest.tsv"
+    cmake_path = ROOT / "app" / "CMakeLists.txt"
+    closure_path = ROOT / "tools" / "deploy" / "verify_v5_product_source_closure.py"
+    file_manifest_path = ROOT / "tools" / "deploy" / "v5_product_file_manifest.py"
+    write_sd_path = ROOT / "tools" / "petalinux" / "write_v5_sd_card.sh"
+    acceptance_path = ROOT / "tools" / "deploy" / "run_v5_board_acceptance.sh"
+    required_paths = (
+        manifest_path,
+        cmake_path,
+        closure_path,
+        file_manifest_path,
+        write_sd_path,
+        acceptance_path,
+    )
+    for path in required_paths:
+        if not path.is_file():
+            print(f"PRODUCT_RUNTIME_CLOSURE_OWNER_MISSING: {path}", file=sys.stderr)
+            return 1
+
+    binary_targets = []
+    destinations = set()
+    for line_number, raw in enumerate(
+        manifest_path.read_text(encoding="utf-8", errors="strict").splitlines(), 1
+    ):
+        if not raw or raw.startswith("#"):
+            continue
+        fields = raw.split("\t")
+        if len(fields) != 4:
+            print(f"PRODUCT_RUNTIME_MANIFEST_INVALID: line={line_number}", file=sys.stderr)
+            return 1
+        kind, source, destination, _mode = fields
+        if destination in destinations:
+            print(f"PRODUCT_RUNTIME_DESTINATION_DUPLICATE: {destination}", file=sys.stderr)
+            return 1
+        destinations.add(destination)
+        if kind == "binary":
+            binary_targets.append(Path(source).name)
+    if not binary_targets or len(binary_targets) != len(set(binary_targets)):
+        print("PRODUCT_RUNTIME_BINARY_TARGETS_INVALID", file=sys.stderr)
+        return 1
+
+    cmake_text = cmake_path.read_text(encoding="utf-8", errors="strict")
+    for token in (
+        "V5_RUNTIME_DEPLOY_MANIFEST",
+        "list(APPEND V5_PRODUCT_RUNTIME_TARGETS",
+        "add_custom_target(v5_product_runtime DEPENDS ${V5_PRODUCT_RUNTIME_TARGETS})",
+    ):
+        if token not in cmake_text:
+            print(f"PRODUCT_RUNTIME_CMAKE_GATE_MISSING: {token}", file=sys.stderr)
+            return 1
+    for target in binary_targets:
+        if re.search(rf"add_executable\(\s*{re.escape(target)}(?:\s|\))", cmake_text) is None:
+            print(f"PRODUCT_RUNTIME_CMAKE_TARGET_MISSING: {target}", file=sys.stderr)
+            return 1
+
+    write_sd = write_sd_path.read_text(encoding="utf-8", errors="strict")
+    for token in (
+        "verify_v5_product_source_closure.py",
+        "v5_product_file_manifest.py",
+        "--prepare-cmake-query",
+        "--validate-shell",
+        "--target v5_product_runtime",
+        "v5-rootfs-file-manifest.tsv",
+        '"$product_file_manifest_tool" create',
+        '"$product_file_manifest_tool" verify',
+        "schema=v5-sd-card-build-v2",
+    ):
+        if token not in write_sd:
+            print(f"PRODUCT_RUNTIME_SD_GATE_MISSING: {token}", file=sys.stderr)
+            return 1
+    acceptance = acceptance_path.read_text(encoding="utf-8", errors="strict")
+    for token in (
+        'V5_BOARD_BUILD_TARGETS:-v5_product_runtime',
+        "verify_v5_product_source_closure.py",
+        "--prepare-cmake-query",
+        "--validate-shell",
+    ):
+        if token not in acceptance:
+            print(f"PRODUCT_RUNTIME_ACCEPTANCE_GATE_MISSING: {token}", file=sys.stderr)
+            return 1
+    for script in (closure_path, file_manifest_path):
+        compile(
+            script.read_text(encoding="utf-8", errors="strict"),
+            str(script),
+            "exec",
+        )
+    return 0
+
+
 def main() -> int:
     return (
         check_shm_consumers() |
@@ -926,7 +1241,8 @@ def main() -> int:
         check_linuxcnc_source_rebuild_policy() |
         check_settings_parameter_table_deploy_kind() |
         check_settings_parameter_table_backup_before_merge() |
-        check_unique_windows_source_delivery()
+        check_unique_windows_source_delivery() |
+        check_product_runtime_closure_policy()
     )
 
 

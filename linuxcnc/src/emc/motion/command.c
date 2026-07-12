@@ -67,6 +67,7 @@
 #include "motion_types.h"
 #include "homing.h"
 #include "axis.h"
+#include "v5_wcheckpoint.h"
 
 #include "tp_debug.h"
 
@@ -395,7 +396,8 @@ static double v5_nearest_wrapped_equiv_deg(double target, double reference)
     return candidate;
 }
 
-static int v5_prepare_wrapped_rotary_axis(double logical_target,
+static int v5_prepare_wrapped_rotary_axis(unsigned int rotary_index,
+                                          double logical_target,
                                           double reference,
                                           double current_offset,
                                           int phase_nearest,
@@ -423,6 +425,9 @@ static int v5_prepare_wrapped_rotary_axis(double logical_target,
         prepared_target = nearest_target;
     }
     if (!v5_valid_turn_offset_deg(prepared_offset)) {
+        return -1;
+    }
+    if (!v5_wcheckpoint_target_allowed(rotary_index, prepared_target)) {
         return -1;
     }
     *motion_target = prepared_target;
@@ -466,7 +471,7 @@ static int v5_prepare_wrapped_rotary_target(const EmcPose *logical_target,
         if (!isfinite(reference.a)) {
             reference.a = emcmotStatus->carte_pos_cmd.a;
         }
-        if (v5_prepare_wrapped_rotary_axis(
+        if (v5_prepare_wrapped_rotary_axis(0U,
                 logical_target->a, reference.a,
                 v5_wrapped_rotary_turn_offset_deg.a, phase_nearest,
                 &motion_target->a, &candidate_offset->a) < 0) {
@@ -477,7 +482,7 @@ static int v5_prepare_wrapped_rotary_target(const EmcPose *logical_target,
         if (!isfinite(reference.b)) {
             reference.b = emcmotStatus->carte_pos_cmd.b;
         }
-        if (v5_prepare_wrapped_rotary_axis(
+        if (v5_prepare_wrapped_rotary_axis(1U,
                 logical_target->b, reference.b,
                 v5_wrapped_rotary_turn_offset_deg.b, phase_nearest,
                 &motion_target->b, &candidate_offset->b) < 0) {
@@ -488,7 +493,7 @@ static int v5_prepare_wrapped_rotary_target(const EmcPose *logical_target,
         if (!isfinite(reference.c)) {
             reference.c = emcmotStatus->carte_pos_cmd.c;
         }
-        if (v5_prepare_wrapped_rotary_axis(
+        if (v5_prepare_wrapped_rotary_axis(2U,
                 logical_target->c, reference.c,
                 v5_wrapped_rotary_turn_offset_deg.c, phase_nearest,
                 &motion_target->c, &candidate_offset->c) < 0) {

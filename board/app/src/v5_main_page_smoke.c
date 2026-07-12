@@ -1,6 +1,7 @@
 #include "v5_main_page.h"
 #include "v5_lvgl_headless.h"
 #include "v5_settings_page.h"
+#include "v5_settings_page_internal.h"
 #include "v5_ui_status_view.h"
 #include "v5_settings_axis_table.h"
 
@@ -188,16 +189,16 @@ int main(void)
     }
     if (page.trajectory_point_count != 0u ||
         !lv_obj_has_flag(page.trajectory_line, LV_OBJ_FLAG_HIDDEN) ||
-        lv_obj_has_flag(page.toolpath_holder_marker_line, LV_OBJ_FLAG_HIDDEN) ||
-        lv_obj_has_flag(page.toolpath_microkernel_marker_dot, LV_OBJ_FLAG_HIDDEN) ||
-        lv_obj_has_flag(page.toolpath_mcs_origin_line, LV_OBJ_FLAG_HIDDEN) ||
-        lv_obj_has_flag(page.toolpath_wcs_origin_line, LV_OBJ_FLAG_HIDDEN) ||
-        lv_obj_has_flag(page.toolpath_mcs_axis_lines[0], LV_OBJ_FLAG_HIDDEN) ||
-        lv_obj_has_flag(page.toolpath_mcs_axis_lines[1], LV_OBJ_FLAG_HIDDEN) ||
-        lv_obj_has_flag(page.toolpath_mcs_axis_lines[2], LV_OBJ_FLAG_HIDDEN) ||
-        lv_obj_has_flag(page.toolpath_wcs_axis_lines[0], LV_OBJ_FLAG_HIDDEN) ||
-        lv_obj_has_flag(page.toolpath_wcs_axis_lines[1], LV_OBJ_FLAG_HIDDEN) ||
-        lv_obj_has_flag(page.toolpath_wcs_axis_lines[2], LV_OBJ_FLAG_HIDDEN) ||
+        !lv_obj_has_flag(page.toolpath_holder_marker_line, LV_OBJ_FLAG_HIDDEN) ||
+        !lv_obj_has_flag(page.toolpath_microkernel_marker_dot, LV_OBJ_FLAG_HIDDEN) ||
+        !lv_obj_has_flag(page.toolpath_mcs_origin_line, LV_OBJ_FLAG_HIDDEN) ||
+        !lv_obj_has_flag(page.toolpath_wcs_origin_line, LV_OBJ_FLAG_HIDDEN) ||
+        !lv_obj_has_flag(page.toolpath_mcs_axis_lines[0], LV_OBJ_FLAG_HIDDEN) ||
+        !lv_obj_has_flag(page.toolpath_mcs_axis_lines[1], LV_OBJ_FLAG_HIDDEN) ||
+        !lv_obj_has_flag(page.toolpath_mcs_axis_lines[2], LV_OBJ_FLAG_HIDDEN) ||
+        !lv_obj_has_flag(page.toolpath_wcs_axis_lines[0], LV_OBJ_FLAG_HIDDEN) ||
+        !lv_obj_has_flag(page.toolpath_wcs_axis_lines[1], LV_OBJ_FLAG_HIDDEN) ||
+        !lv_obj_has_flag(page.toolpath_wcs_axis_lines[2], LV_OBJ_FLAG_HIDDEN) ||
         !lv_obj_has_flag(page.toolpath_program_wcs_origin_lines[0], LV_OBJ_FLAG_HIDDEN) ||
         !lv_obj_has_flag(page.toolpath_program_wcs_axis_lines[8][2], LV_OBJ_FLAG_HIDDEN) ||
         !lv_obj_has_flag(page.toolpath_program_wcs_labels[8], LV_OBJ_FLAG_HIDDEN) ||
@@ -215,28 +216,15 @@ int main(void)
         strcmp(lv_label_get_text(page.toolpath_detail_label), "") != 0) {
         return 35;
     }
-    if (line_cross_abs(page.toolpath_wcs_axis_points[0], page.toolpath_mcs_axis_points[0]) > 250L ||
-        line_cross_abs(page.toolpath_wcs_axis_points[1], page.toolpath_mcs_axis_points[1]) > 250L ||
-        line_cross_abs(page.toolpath_wcs_axis_points[2], page.toolpath_mcs_axis_points[2]) > 250L ||
-        page.toolpath_mcs_axis_points[0][1].x <= page.toolpath_mcs_axis_points[0][0].x ||
-        page.toolpath_mcs_axis_points[0][1].y <= page.toolpath_mcs_axis_points[0][0].y ||
-        page.toolpath_mcs_axis_points[1][1].x <= page.toolpath_mcs_axis_points[1][0].x ||
-        page.toolpath_mcs_axis_points[1][1].y >= page.toolpath_mcs_axis_points[1][0].y ||
-        page.toolpath_mcs_axis_points[2][1].y >= page.toolpath_mcs_axis_points[2][0].y ||
-        line_length_sq(page.toolpath_mcs_axis_points[0]) > 2200L ||
-        line_length_sq(page.toolpath_mcs_axis_points[1]) > 2200L ||
-        line_length_sq(page.toolpath_mcs_axis_points[2]) > 2200L) {
-        return 21;
-    }
     memset(&unavailable_status, 0, sizeof(unavailable_status));
     if (!v5_main_page_apply_status(&page, &unavailable_status) ||
         !lv_obj_has_flag(page.trajectory_line, LV_OBJ_FLAG_HIDDEN) ||
-        lv_obj_has_flag(page.toolpath_holder_marker_line, LV_OBJ_FLAG_HIDDEN) ||
-        lv_obj_has_flag(page.toolpath_microkernel_marker_dot, LV_OBJ_FLAG_HIDDEN) ||
-        lv_obj_has_flag(page.toolpath_mcs_origin_line, LV_OBJ_FLAG_HIDDEN) ||
-        lv_obj_has_flag(page.toolpath_wcs_origin_line, LV_OBJ_FLAG_HIDDEN) ||
-        lv_obj_has_flag(page.toolpath_mcs_axis_lines[0], LV_OBJ_FLAG_HIDDEN) ||
-        lv_obj_has_flag(page.toolpath_wcs_axis_lines[0], LV_OBJ_FLAG_HIDDEN) ||
+        !lv_obj_has_flag(page.toolpath_holder_marker_line, LV_OBJ_FLAG_HIDDEN) ||
+        !lv_obj_has_flag(page.toolpath_microkernel_marker_dot, LV_OBJ_FLAG_HIDDEN) ||
+        !lv_obj_has_flag(page.toolpath_mcs_origin_line, LV_OBJ_FLAG_HIDDEN) ||
+        !lv_obj_has_flag(page.toolpath_wcs_origin_line, LV_OBJ_FLAG_HIDDEN) ||
+        !lv_obj_has_flag(page.toolpath_mcs_axis_lines[0], LV_OBJ_FLAG_HIDDEN) ||
+        !lv_obj_has_flag(page.toolpath_wcs_axis_lines[0], LV_OBJ_FLAG_HIDDEN) ||
         !lv_obj_has_flag(page.toolpath_program_wcs_origin_lines[0], LV_OBJ_FLAG_HIDDEN) ||
         !lv_obj_has_flag(page.toolpath_program_wcs_axis_lines[8][2], LV_OBJ_FLAG_HIDDEN) ||
         !lv_obj_has_flag(page.toolpath_a_axis_line, LV_OBJ_FLAG_HIDDEN) ||
@@ -263,6 +251,37 @@ int main(void)
     }
     if (!v5_settings_page_create(&settings_page, screen)) {
         return 60;
+    }
+    v5_settings_page_popup_show(
+        &settings_page,
+        "smoke_action",
+        "smoke running",
+        "正在处理",
+        0,
+        0);
+    if (!settings_page.popup_active ||
+        lv_obj_has_flag(settings_page.popup_overlay, LV_OBJ_FLAG_HIDDEN) ||
+        !settings_page.popup_confirm ||
+        !lv_obj_has_state(settings_page.popup_confirm, LV_STATE_DISABLED) ||
+        !lv_obj_has_state(settings_page.popup_close, LV_STATE_DISABLED)) {
+        return 70;
+    }
+    v5_settings_page_popup_show(
+        &settings_page,
+        "smoke_action",
+        "smoke final",
+        "动作完成",
+        1,
+        1);
+    if (!settings_page.popup_final ||
+        !lv_obj_has_state(settings_page.popup_confirm, LV_STATE_DISABLED) ||
+        lv_obj_has_state(settings_page.popup_close, LV_STATE_DISABLED)) {
+        return 71;
+    }
+    lv_event_send(settings_page.popup_close, LV_EVENT_RELEASED, 0);
+    if (settings_page.popup_active ||
+        !lv_obj_has_flag(settings_page.popup_overlay, LV_OBJ_FLAG_HIDDEN)) {
+        return 72;
     }
     v5_native_readback_init(&settings_readback);
     v5_native_readback_set_motion_model(&settings_readback, "XYZBC_TRT");

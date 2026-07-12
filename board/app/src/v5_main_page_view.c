@@ -128,7 +128,7 @@ int v5_main_page_create(V5MainPage *page, lv_obj_t *parent)
     page->toolpath_holder_marker_line = v5_main_page_internal_make_toolpath_v3_dot(page->root, 68, 221, 144, 220, 255, 235);
     page->toolpath_a_center_line = v5_main_page_internal_make_toolpath_v3_center_dot(page->root, 255, 113, 118);
     page->toolpath_c_center_line = v5_main_page_internal_make_toolpath_v3_center_dot(page->root, 120, 240, 255);
-    v5_main_page_internal_draw_toolpath_boot_scaffold(page);
+    v5_main_page_internal_hide_toolpath_unproven_geometry(page);
 
     v5_main_page_internal_make_panel(page->root, 397, 55, 348, 230, 6, 26, 39);
     v5_main_page_internal_make_label_ex(page->root, 410, 79, 32, 24, "轴", 156, 178, 202, LV_TEXT_ALIGN_CENTER);
@@ -329,6 +329,10 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
                     runtime,
                     page->toolpath_program_points,
                     V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT);
+                for (i = 0U; i < preview_count; ++i) {
+                    page->toolpath_program_break_before[i] =
+                        v5_program_runtime_preview_break_before(runtime, i) ? 1U : 0U;
+                }
                 if (preview_count > 0U &&
                     !v5_main_page_internal_main_page_apply_program_preview_wcs_offset(
                         page, runtime, page->toolpath_program_points, preview_count, &program_wcs_index, program_wcs_offset)) {
@@ -344,9 +348,14 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
                 program_wcs_offset[2] = page->toolpath_program_wcs_offset[2];
             }
             if (preview_count > 0U) {
-                v5_main_page_internal_main_page_update_program_project_points(page, status, preview_count);
+                if (!v5_main_page_internal_main_page_update_program_project_points(page, status, preview_count)) {
+                    preview_count = 0U;
+                }
+            }
+            if (preview_count > 0U) {
                 program_wcs_changed =
                     !page->toolpath_program_wcs_valid ||
+                    page->toolpath_program_wcs_epoch != page->native_readback.wcs_offsets_epoch ||
                     page->toolpath_program_wcs_index != program_wcs_index ||
                     fabs(page->toolpath_program_wcs_offset[0] - program_wcs_offset[0]) > 0.0005 ||
                     fabs(page->toolpath_program_wcs_offset[1] - program_wcs_offset[1]) > 0.0005 ||
@@ -390,6 +399,7 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
                     page->toolpath_program_plane = page->view_plane;
                     page->toolpath_program_wcs_valid = 1;
                     page->toolpath_program_wcs_index = program_wcs_index;
+                    page->toolpath_program_wcs_epoch = page->native_readback.wcs_offsets_epoch;
                     page->toolpath_program_wcs_offset[0] = program_wcs_offset[0];
                     page->toolpath_program_wcs_offset[1] = program_wcs_offset[1];
                     page->toolpath_program_wcs_offset[2] = program_wcs_offset[2];
@@ -410,6 +420,7 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
         page->toolpath_program_view_generation = 0U;
         page->toolpath_program_wcs_valid = 0;
         page->toolpath_program_wcs_index = -1;
+        page->toolpath_program_wcs_epoch = 0U;
         memset(page->toolpath_program_wcs_offset, 0, sizeof(page->toolpath_program_wcs_offset));
         page->toolpath_program_point_count = 0U;
         page->toolpath_program_ac_valid = 0;
@@ -449,7 +460,7 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
     v5_main_page_internal_set_toolpath_v3_dot_center(page->toolpath_holder_marker_line, &dynamic_display.mcs_point, dynamic_display.mcs_valid);
     v5_main_page_internal_update_toolpath_holder_line(page, status, dynamic_display.mcs_valid ? &dynamic_display.mcs_point : 0);
     if (!dynamic_display.mcs_valid) {
-        v5_main_page_internal_draw_toolpath_boot_scaffold(page);
+        v5_main_page_internal_hide_toolpath_unproven_geometry(page);
     }
     }
 

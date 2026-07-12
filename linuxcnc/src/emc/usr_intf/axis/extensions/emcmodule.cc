@@ -41,8 +41,10 @@
 
 #include <cmath>
 
+#ifndef V5_HEADLESS_RUNTIME
 #include <epoxy/gl.h>
 #include <epoxy/glx.h>
+#endif
 
 #define LOCAL_SPINDLE_FORWARD (1)
 #define LOCAL_SPINDLE_REVERSE (-1)
@@ -293,12 +295,9 @@ static PyObject *poll(pyStatChannel *s, PyObject *o) {
       initialized=1;
     }
 #else //}{
-    static bool mmap_available = 1;
-    if (!mmap_available) return NULL;
     if (!initialized) {
         initialized=1;
         if (tool_mmap_user()) {
-          mmap_available = 0;
           fprintf(stderr,"poll(): continuing without tool mmap data\n");
         }
     }
@@ -1748,6 +1747,7 @@ static void vertex9(const double pt[9], double p[3], const char *geometry) {
     }
 }
 
+#ifndef V5_HEADLESS_RUNTIME
 static void glvertex9(const double pt[9], const char *geometry) {
     double p[3];
     vertex9(pt, p, geometry);
@@ -1820,6 +1820,7 @@ static PyObject *pyline9(PyObject *s, PyObject *o) {
 
     Py_RETURN_NONE;
 }
+#endif
 
 static PyObject *pyvertex9(PyObject *s, PyObject *o) {
     double pt1[9], pt[3];
@@ -1860,6 +1861,7 @@ static PyObject *pygui_rot_offsets(PyObject *s, PyObject *o) {
     return Py_None;
 }
 
+#ifndef V5_HEADLESS_RUNTIME
 static PyObject *pydraw_lines(PyObject *s, PyObject *o) {
     PyListObject *li;
     int for_selection = 0;
@@ -1978,7 +1980,9 @@ static PyObject *pydraw_dwells(PyObject *s, PyObject *o) {
     Py_INCREF(Py_None);
     return Py_None;
 }
+#endif
 
+#ifndef V5_HEADLESS_RUNTIME
 struct color {
     unsigned char r, g, b, a;
     bool operator==(const color &o) const {
@@ -2373,12 +2377,15 @@ static PyTypeObject PositionLoggerType = {
     0,                      /*tp_free*/
     0,                      /*tp_is_gc*/
 };
+#endif
 
 static PyMethodDef emc_methods[] = {
 #define METH(name, doc) { #name, (PyCFunction) py##name, METH_VARARGS, doc }
+#ifndef V5_HEADLESS_RUNTIME
 METH(draw_lines, "Draw a bunch of lines in the 'rs274.glcanon' format"),
 METH(draw_dwells, "Draw a bunch of dwell positions in the 'rs274.glcanon' format"),
 METH(line9, "Draw a single line in the 'rs274.glcanon' format; assumes glBegin(GL_LINES)"),
+#endif
 METH(vertex9, "Get the 3d location for a 9d point"),
 METH(gui_rot_offsets, "Set x,y,z offsets for A,B,C rotations"),
 METH(gui_respect_offsets, "Enable rotations about g5x,g92 offsets"),
@@ -2422,9 +2429,11 @@ PyMODINIT_FUNC PyInit_linuxcnc(void)
     PyModule_AddObject(m, "ini", (PyObject*)&Ini_Type);
     PyModule_AddObject(m, "error", error);
 
+#ifndef V5_HEADLESS_RUNTIME
     PyType_Ready(&PositionLoggerType);
     PyModule_AddObject(m, "positionlogger", (PyObject*)&PositionLoggerType);
     pthread_mutex_init(&mutex, NULL);
+#endif
 
     PyModule_AddStringConstant(m, "PREFIX", EMC2_HOME);
     PyModule_AddStringConstant(m, "SHARE", EMC2_HOME "/share");

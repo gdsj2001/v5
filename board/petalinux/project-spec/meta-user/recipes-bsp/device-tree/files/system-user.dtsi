@@ -15,6 +15,13 @@
 	vbus-supply = <&usb0_vbus>;
 };
 
+&{/amba/i2c@e0005000/edt-ft5x06@38} {
+	compatible = "focaltech,ft5426", "edt,edt-ft5406";
+	/delete-property/ reset-gpio;
+	/delete-property/ interrupt-gpio;
+	reset-gpios = <&{/amba/gpio@e000a000} 59 1>;
+};
+
 &amba_pl {
 	atk_lcd_drm {
 		/* timing2 => 1024x600 */

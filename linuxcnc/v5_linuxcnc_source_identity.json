@@ -10,13 +10,18 @@
     "tree": "cbadbb8d029aefe7a8d0e3218885aaa59798337b"
   },
   "v5_source_tree": "c1f4c53315c8e614fafbe48992afa91e8aef8014",
-  "content_sha256": "517b5777e1511ab99650e248f2ed9850828d262f41efb9f62872ce59cac3ea96",
+  "content_sha256": "8381ef0bf1aab0411337a7b9525a6164ccb954d0a521002c500959cf943bf60b",
   "implementation": "in_tree",
   "changed_files": [
+    "src/Makefile",
     "src/emc/motion/command.c",
     "src/emc/motion/control.c",
     "src/emc/motion/mot_priv.h",
-    "src/emc/motion/motion.c"
+    "src/emc/motion/motion.c",
+    "src/emc/motion/v5_wcheckpoint.c",
+    "src/emc/motion/v5_wcheckpoint.h",
+    "src/emc/usr_intf/axis/Submakefile",
+    "src/emc/usr_intf/axis/extensions/emcmodule.cc"
   ],
   "migration_provenance": {
     "retired_patch": "board/linuxcnc/patches/0001-v5-native-rotary-nearest-target.patch",
@@ -29,7 +34,23 @@
       "v5_reset_wrapped_rotary_turn_offsets"
     ],
     "src/emc/motion/motion.c": [
-      "v5_wrapped_rotary_mask"
+      "v5_wrapped_rotary_mask",
+      "v5_wcheckpoint_command_raw_bits",
+      "v5_wcheckpoint_feedback_raw_bits",
+      "v5_wcheckpoint_counts_per_rev"
+    ],
+    "src/emc/motion/v5_wcheckpoint.c": [
+      "v5_wcheckpoint_update_before_inputs",
+      "v5_wcheckpoint_target_allowed",
+      "V5_WCHECKPOINT_DRIVE_WINDOW_UNPROVEN",
+      "motion.v5-wcheckpoint-%c-raw-count-bits"
+    ],
+    "src/emc/usr_intf/axis/Submakefile": [
+      "V5_HEADLESS_RUNTIME",
+      "EMCMODULE_LDLIBS := -lm"
+    ],
+    "src/emc/usr_intf/axis/extensions/emcmodule.cc": [
+      "#ifndef V5_HEADLESS_RUNTIME"
     ]
   },
   "forbidden_tokens": {
@@ -48,6 +69,8 @@
       "path": "usr/lib/linuxcnc/modules/motmod.so",
       "required_ascii": [
         "v5_wrapped_rotary_mask",
+        "v5_wcheckpoint_command_raw_bits",
+        "motion.v5-wcheckpoint-%c-valid",
         "invalid V5 wrapped rotary target state"
       ],
       "forbidden_ascii": [

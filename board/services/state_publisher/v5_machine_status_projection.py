@@ -14,8 +14,6 @@ from v5_wcs_status_codec import (
     POSITION_BLOCK_STRUCT,
     POSITION_MAGIC,
     POSITION_STATUS_VERSION,
-    ROTARY_AXIS_INDICES,
-    ROTARY_FULL_TURN_DEG,
     V5_STATUS_VALID_CMD_MCS,
     V5_STATUS_VALID_FEED_OVERRIDE,
     V5_STATUS_VALID_LINEAR_VELOCITY,
@@ -64,24 +62,10 @@ def normalized_joint_output_with_presence(joints):
     return out, present
 
 
-def rotary_display_phase_deg(value: float) -> float:
-    value = float(value)
-    if not math.isfinite(value):
-        return value
-    phase = math.fmod(value, ROTARY_FULL_TURN_DEG)
-    if phase < 0.0:
-        phase += ROTARY_FULL_TURN_DEG
-    if phase < 0.0005 or (ROTARY_FULL_TURN_DEG - phase) < 0.0005:
-        return 0.0
-    return phase
-
-
 def display_position_projection(values):
     projected = list(values)
     if len(projected) < POSITION_AXIS_COUNT:
         projected += [0.0] * (POSITION_AXIS_COUNT - len(projected))
-    for axis_i in ROTARY_AXIS_INDICES:
-        projected[axis_i] = rotary_display_phase_deg(projected[axis_i])
     return projected[:POSITION_AXIS_COUNT]
 
 

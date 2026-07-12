@@ -27,6 +27,8 @@ REQUIRED_PATHS = (
     "project-spec/meta-user/recipes-python/pyqt5/python3-pyqt5_5.12.1.bbappend",
     "project-spec/meta-user/recipes-kernel/ethercat-master/ethercat-master_git.bb",
     "project-spec/meta-user/recipes-kernel/linux/linux-xlnx_%.bbappend",
+    "project-spec/meta-user/recipes-kernel/linux/linux-xlnx/v5-linux-source.marker",
+    "project-spec/meta-user/recipes-kernel/linux/linux-xlnx/v5-realtime-source.marker",
 )
 RETIRED_PATHS = (
     "project-spec/meta-user/recipes-apps/gpio-demo",
@@ -41,6 +43,7 @@ ARCHIVE_SUFFIXES = (".7z", ".rar", ".tar", ".tar.gz", ".tgz", ".zip")
 LOCAL_FILE_RE = re.compile(r"file://([^\s\\\"']+)")
 Z20_EXTERNAL_FACT_PATHS = {
     "project-spec/configs/config",
+    "project-spec/meta-user/recipes-apps/v5-base-overlay/files/udev/99-touchscreen.rules",
     "project-spec/meta-user/recipes-bsp/device-tree/files/system-top.dts",
 }
 
@@ -232,26 +235,63 @@ def validate_contract(source_root):
     )
     require_tokens(
         source_root,
+        "project-spec/meta-user/recipes-kernel/linux/linux-xlnx_%.bbappend",
+        (
+            'V5_PROJECT_SOURCE_ROOT ?= ""',
+            'KERNELURI = "file://v5-linux-source.marker;name=machine"',
+            'YOCTO_META = "file://v5-realtime-source.marker;type=kmeta;name=meta;',
+            'S = "${WORKDIR}/v5-owner-projection/linux/kernel"',
+            'SRCREV_machine = "AUTOINC"',
+            "file://0002-pwm-add-dglnt-hook.patch",
+            "do_v5_linux_projection()",
+            'do_v5_linux_projection[file-checksums] = "',
+            "linux/kernel/v5_linux_source_identity.json:True",
+            "linux/realtime/v5_realtime_source_identity.json:True",
+            "board/tools/petalinux/project_v5_linux_source.py:True",
+            "board/tools/petalinux/verify_v5_linux_source.py:True",
+            "addtask v5_linux_projection after do_unpack before do_symlink_kernsrc",
+            "project_v5_linux_source.py",
+        ),
+        (
+            "do_kernel_metadata_append",
+            "Split-IRQ-off-and-zone-lock-while-freeing-pages-from.patch",
+            "mm-page_alloc-rt-friendly-per-cpu-pages.patch#d",
+            "do_v5_linux_projection[nostamp]",
+            "do_symlink_kernsrc[nostamp]",
+            "sed -i",
+            "awk '",
+        ),
+    )
+    require_tokens(
+        source_root,
         "project-spec/meta-user/recipes-bsp/u-boot/u-boot-zynq-scr/boot.cmd.default.ext4",
         (
             "root=/dev/mmcblk0p2 rw rootwait",
-            "8ax,pl-dna-source",
-            "8ax,pl-dna-value",
-            "refusing unverified FIT boot",
+            "uio_pdrv_genirq.of_id=generic-uio",
+            "v5_dna_check",
+            "V5 PL DNA reader verified, booting FIT",
+            "V5 PL DNA reader unavailable, refusing FIT boot",
         ),
         (
             "root=/dev/ram0",
             "bootm ramdisk",
+            "8ax,pl-dna-source",
+            "8ax,pl-dna-value",
             "z20,pl-dna",
             "v5,pl-dna",
+            "injecting live FDT chosen fields",
             "falling back to normal FIT boot",
         ),
     )
     require_tokens(
         source_root,
         "project-spec/meta-user/recipes-kernel/ethercat-master/ethercat-master_git.bb",
-        ('MASTER0_DEVICE="eth1"',),
-        ('MASTER0_DEVICE="eth0"',),
+        (
+            "inherit autotools pkgconfig update-rc.d module",
+            "rm -f ${D}${sysconfdir}/ethercat.conf",
+            'MASTER0_DEVICE="eth1"',
+        ),
+        ('MASTER0_DEVICE="eth0"', "/lib/modules"),
     )
     require_tokens(
         source_root,
@@ -300,6 +340,21 @@ def validate_identity(source_root, identity, entries, print_hash):
     return actual_hash
 
 
+def validate_linux_owner_links(project_root, identity):
+    links = identity.get("linux_owner", {})
+    owners = (
+        ("kernel_content_sha256", project_root / "linux/kernel/v5_linux_source_identity.json"),
+        ("realtime_content_sha256", project_root / "linux/realtime/v5_realtime_source_identity.json"),
+    )
+    for field, path in owners:
+        try:
+            source_identity = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            fail("invalid linked Linux source identity %s: %s" % (path, exc))
+        if links.get(field) != source_identity.get("content_sha256"):
+            fail("PetaLinux identity does not link current Linux owner: %s" % field)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--project-root", type=Path, default=Path(__file__).resolve().parents[3])
@@ -310,6 +365,7 @@ def main():
     project_root = args.project_root.resolve()
     source_root = (args.source_root or project_root / "board/petalinux").resolve()
     identity = load_identity(source_root)
+    validate_linux_owner_links(project_root, identity)
     entries = source_entries(source_root)
     validate_layout(source_root, entries)
     validate_text_boundaries(source_root, entries)

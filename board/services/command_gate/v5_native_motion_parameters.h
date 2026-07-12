@@ -25,13 +25,20 @@ typedef struct V5NativeMotionAxisParameters {
     double max_acceleration;
     double min_limit;
     double max_limit;
+    double bus_zero_counts;
+    double bus_counts_per_unit;
+    double bus_home_reference;
     int home_sequence;
+    int bus_zero_evidence_known;
     unsigned int valid_mask;
 } V5NativeMotionAxisParameters;
 
 typedef struct V5NativeMotionParameters {
     int loaded;
     V5NativeDriverMode driver_mode;
+    int runtime_owner_loaded;
+    int pulse_runtime_selectable;
+    char pulse_contract_status[64];
     unsigned int active_axis_count;
     V5NativeMotionAxisParameters axes[V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT];
 } V5NativeMotionParameters;
@@ -39,6 +46,12 @@ typedef struct V5NativeMotionParameters {
 void v5_native_motion_parameters_init(V5NativeMotionParameters *parameters);
 int v5_native_motion_parameters_load(
     const char *ini_path,
+    V5NativeMotionParameters *parameters,
+    char *code,
+    size_t code_cap);
+int v5_native_motion_parameters_load_runtime_owner(
+    const char *settings_runtime_json_path,
+    const char *pulse_contract_path,
     V5NativeMotionParameters *parameters,
     char *code,
     size_t code_cap);

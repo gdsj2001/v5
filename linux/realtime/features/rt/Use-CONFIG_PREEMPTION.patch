@@ -6,6 +6,10 @@ Subject: [PATCH 060/251] Use CONFIG_PREEMPTION
 Thisi is an all-in-one patch of the current `PREEMPTION' branch.
 
 Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
+
+V5-Xilinx-Adaptation: Xilinx commit 62ea514294a0 has a different
+arch/powerpc/kernel/traps.c oops banner.  That non-Zynq display-only hunk is
+omitted; all generic and ARM CONFIG_PREEMPTION changes remain unchanged.
 ---
  .../Expedited-Grace-Periods.html              |  8 +--
  .../RCU/Design/Requirements/Requirements.html | 24 ++++-----
@@ -44,7 +48,6 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  arch/powerpc/Kconfig                          |  2 +-
  arch/powerpc/kernel/entry_32.S                |  4 +-
  arch/powerpc/kernel/entry_64.S                |  4 +-
- arch/powerpc/kernel/traps.c                   |  7 ++-
  arch/riscv/kernel/entry.S                     |  4 +-
  arch/s390/Kconfig                             |  2 +-
  arch/s390/include/asm/preempt.h               |  4 +-
@@ -80,7 +83,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  mm/memory.c                                   |  2 +-
  mm/slub.c                                     | 12 ++---
  net/core/dev.c                                |  2 +-
- 73 files changed, 191 insertions(+), 173 deletions(-)
+ 72 files changed, 186 insertions(+), 172 deletions(-)
 
 diff --git a/Documentation/RCU/Design/Expedited-Grace-Periods/Expedited-Grace-Periods.html b/Documentation/RCU/Design/Expedited-Grace-Periods/Expedited-Grace-Periods.html
 index 57300db4b5ff..31c99382994e 100644
@@ -969,29 +972,6 @@ index 3fd3ef352e3f..a9a1d3cdb523 100644
  
  	.globl	fast_exc_return_irq
  fast_exc_return_irq:
-diff --git a/arch/powerpc/kernel/traps.c b/arch/powerpc/kernel/traps.c
-index f77c75081bac..b98d5bc68a88 100644
---- a/arch/powerpc/kernel/traps.c
-+++ b/arch/powerpc/kernel/traps.c
-@@ -260,12 +260,17 @@ static char *get_mmu_str(void)
- 
- static int __die(const char *str, struct pt_regs *regs, long err)
- {
-+	const char *pr = "";
-+
- 	printk("Oops: %s, sig: %ld [#%d]\n", str, err, ++die_counter);
- 
-+	if (IS_ENABLED(CONFIG_PREEMPTION))
-+		pr = IS_ENABLED(CONFIG_PREEMPT_RT) ? " PREEMPT_RT" : " PREEMPT";
-+
- 	printk("%s PAGE_SIZE=%luK%s%s%s%s%s%s %s\n",
- 	       IS_ENABLED(CONFIG_CPU_LITTLE_ENDIAN) ? "LE" : "BE",
- 	       PAGE_SIZE / 1024, get_mmu_str(),
--	       IS_ENABLED(CONFIG_PREEMPT) ? " PREEMPT" : "",
-+	       pr,
- 	       IS_ENABLED(CONFIG_SMP) ? " SMP" : "",
- 	       IS_ENABLED(CONFIG_SMP) ? (" NR_CPUS=" __stringify(NR_CPUS)) : "",
- 	       debug_pagealloc_enabled() ? " DEBUG_PAGEALLOC" : "",
 diff --git a/arch/riscv/kernel/entry.S b/arch/riscv/kernel/entry.S
 index 8ca479831142..8f482313e560 100644
 --- a/arch/riscv/kernel/entry.S
@@ -1668,4 +1648,3 @@ index 3e11c6bb4dd6..caf2ce198b75 100644
  {
 -- 
 2.19.1
-

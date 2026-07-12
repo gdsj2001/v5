@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import mmap
 import os
+import select
 import threading
 import time
 from collections import deque
@@ -21,12 +23,13 @@ from v5_remote_ui_contract import (
 )
 
 class FrameState:
-    def __init__(self, run_dir: Path, width: int, height: int):
+    def __init__(self, run_dir: Path, width: int, height: int, ready_path: Path | None = None):
         self.run_dir = run_dir
         self.width = width
         self.height = height
         self.stride = width * 4
         self.frame_id = 1
+        self.first_event: dict | None = None
         self.latest_event: dict | None = None
         self.dirty_events = deque(maxlen=DIRTY_EVENT_HISTORY_LIMIT)
         self.condition = threading.Condition()
@@ -65,6 +68,9 @@ class FrameState:
         }
         self._framebuffer_mmap: mmap.mmap | None = None
         self._framebuffer_key: tuple[int, int, int] | None = None
+        self._ready_path = ready_path or (run_dir / "ui_ready.json")
+        self._ready_lock = threading.Lock()
+        self._ready_metadata: dict | None = None
 
     @property
     def framebuffer_path(self) -> Path:
@@ -77,6 +83,45 @@ class FrameState:
     @property
     def input_fifo_path(self) -> Path:
         return self.run_dir / INPUT_FIFO_NAME
+
+    @property
+    def ready_path(self) -> Path:
+        return self._ready_path
+
+    def ready_metadata(self) -> dict | None:
+        with self._ready_lock:
+            if self._ready_metadata is not None:
+                return dict(self._ready_metadata)
+        try:
+            payload = json.loads(self.ready_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            return None
+        if not isinstance(payload, dict) or payload.get("schema") != "v5.ui_ready.v1" or payload.get("ready") is not True:
+            return None
+        try:
+            metadata_frame_id = int(payload.get("current_frame_id") or 0)
+        except (TypeError, ValueError):
+            return None
+        with self.condition:
+            current_frame_id = int(self.frame_id)
+        if metadata_frame_id <= 0 or current_frame_id < metadata_frame_id:
+            return None
+        with self._ready_lock:
+            if self._ready_metadata is None:
+                self._ready_metadata = dict(payload)
+            return dict(self._ready_metadata)
+
+    def ui_ready(self) -> bool:
+        return self.ready_metadata() is not None
+
+    def first_dirty_event(self) -> dict | None:
+        with self.condition:
+            return dict(self.first_event) if self.first_event is not None else None
+
+    def recent_dirty_events(self, limit: int = 32) -> list[dict]:
+        with self.condition:
+            events = list(self.dirty_events)[-max(0, int(limit)):]
+        return [dict(event) for event in events]
 
     @property
     def frame_size(self) -> int:
@@ -263,6 +308,8 @@ class FrameState:
             if int(event["frame_id"]) >= self.frame_id:
                 self.frame_id = int(event["frame_id"])
             stored = dict(event)
+            if self.first_event is None:
+                self.first_event = dict(stored)
             self.latest_event = stored
             self.dirty_events.append(stored)
             self.condition.notify_all()

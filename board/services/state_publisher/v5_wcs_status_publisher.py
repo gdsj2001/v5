@@ -52,7 +52,6 @@ from v5_machine_status_projection import (
     normalized_axis,
     normalized_axis_with_presence,
     normalized_joint_output_with_presence,
-    rotary_display_phase_deg,
     tool_entry_value,
     write_mock_position_status,
     write_modal_tool_status,
@@ -235,15 +234,11 @@ class ResidentWcsParameterOwner:
         if self.table is None or wcs_index < 0 or wcs_index >= WCS_COUNT or offsets is None:
             return False
         row = normalized_offsets(offsets)
-        changed = False
         for axis in range(WCS_AXIS_COUNT):
             if not math.isfinite(row[axis]):
                 return False
-            if self.table[wcs_index][axis] != row[axis]:
-                changed = True
             self.table[wcs_index][axis] = row[axis]
-        if changed or self.epoch == 0:
-            self.epoch = wcs_table_epoch(self.table)
+        self.epoch = ((int(self.epoch) + 1) & 0xFFFFFFFF) or 1
         return True
 
 

@@ -17,6 +17,7 @@
 #include "v5_settings_page.h"
 #include "v5_settings_axis_table.h"
 #include "v5_status_shm.h"
+#include "v5_ui_page_cache_registry.h"
 #include "v5_ui_model.h"
 #include "v5_v3_local_pages.h"
 
@@ -32,10 +33,86 @@
 #include <unistd.h>
 #include "v5_ui_shell_internal.h"
 
+static int g_v5_shell_program_list_loaded = -1;
+static lv_obj_t *g_v5_shell_program_projection_owner;
+
+static int shell_program_row_equal(const V5ProgramRow *left, const V5ProgramRow *right)
+{
+    return left && right &&
+        left->exists == right->exists &&
+        strcmp(left->name, right->name) == 0 &&
+        strcmp(left->size, right->size) == 0 &&
+        strcmp(left->created, right->created) == 0 &&
+        strcmp(left->modified, right->modified) == 0 &&
+        strcmp(left->path, right->path) == 0;
+}
+
+static int shell_program_rows_equal(
+    const V5ProgramRow before[V5_PROGRAM_ROWS_MAX],
+    unsigned int before_count,
+    int before_selected)
+{
+    unsigned int i;
+    if (before_count != g_v5_shell_program_row_count ||
+        before_selected != g_v5_shell_program_selected_index) {
+        return 0;
+    }
+    for (i = 0U; i < g_v5_shell_program_row_count; ++i) {
+        if (!shell_program_row_equal(&before[i], &g_v5_shell_program_rows[i])) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int shell_set_program_source_text(const char *text)
+{
+    const char *before;
+    if (!g_v5_shell_program_source_label || !text) {
+        return 0;
+    }
+    before = lv_label_get_text(g_v5_shell_program_source_label);
+    if (before && strcmp(before, text) == 0) {
+        return 0;
+    }
+    lv_label_set_text(g_v5_shell_program_source_label, text);
+    return 1;
+}
+
+static void shell_update_program_source_label(int loaded)
+{
+    if (!loaded) {
+        (void)shell_set_program_source_text("来源: 本机 目录不可读");
+    } else if (g_v5_shell_program_selected_index >= 0 &&
+               (unsigned int)g_v5_shell_program_selected_index < g_v5_shell_program_row_count) {
+        char text[220];
+        snprintf(text, sizeof(text), "已选择: %s  双击打开运行，或点打开修改",
+                 g_v5_shell_program_rows[g_v5_shell_program_selected_index].name);
+        (void)shell_set_program_source_text(text);
+    } else {
+        (void)shell_set_program_source_text("来源: 本机");
+    }
+}
+
+static void shell_update_program_row_selection_visual(unsigned int idx)
+{
+    int selected;
+    lv_obj_t *layer;
+    if (idx >= V5_PROGRAM_ROWS_MAX || idx >= g_v5_shell_program_row_count ||
+        !g_v5_shell_program_rows[idx].exists || !g_v5_shell_program_row_layers[idx]) {
+        return;
+    }
+    layer = g_v5_shell_program_row_layers[idx];
+    selected = ((int)idx == g_v5_shell_program_selected_index);
+    lv_obj_set_style_bg_color(
+        layer,
+        shell_rgb(selected ? 43 : 17, selected ? 133 : 40, selected ? 83 : 58),
+        0);
+}
+
 static void shell_update_program_row_visual(unsigned int idx)
 {
     V5ProgramRow *row;
-    int selected;
     lv_obj_t *layer;
     if (idx >= V5_PROGRAM_ROWS_MAX || !g_v5_shell_program_row_layers[idx]) {
         return;
@@ -46,9 +123,8 @@ static void shell_update_program_row_visual(unsigned int idx)
         return;
     }
     row = &g_v5_shell_program_rows[idx];
-    selected = ((int)idx == g_v5_shell_program_selected_index);
     lv_obj_clear_flag(layer, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_set_style_bg_color(layer, shell_rgb(selected ? 43 : 17, selected ? 133 : 40, selected ? 83 : 58), 0);
+    shell_update_program_row_selection_visual(idx);
     if (g_v5_shell_program_row_name_labels[idx]) {
         lv_label_set_text(g_v5_shell_program_row_name_labels[idx], row->name);
     }
@@ -65,9 +141,27 @@ static void shell_update_program_row_visual(unsigned int idx)
 
 void shell_update_program_row(void)
 {
+    V5ProgramRow before[V5_PROGRAM_ROWS_MAX];
+    unsigned int before_count = g_v5_shell_program_row_count;
+    int before_selected = g_v5_shell_program_selected_index;
     unsigned int i;
     char count_text[32];
-    int loaded = shell_load_program_rows();
+    int loaded;
+    int projection_changed;
+
+    memcpy(before, g_v5_shell_program_rows, sizeof(before));
+    loaded = shell_load_program_rows();
+    projection_changed = v5_ui_page_cache_projection_required(
+        g_v5_shell_program_projection_owner != NULL && g_v5_shell_program_list_loaded >= 0,
+        g_v5_shell_program_projection_owner == g_v5_shell_program_count_label,
+        g_v5_shell_program_list_loaded == loaded &&
+            shell_program_rows_equal(before, before_count, before_selected));
+    g_v5_shell_program_projection_owner = g_v5_shell_program_count_label;
+    g_v5_shell_program_list_loaded = loaded;
+    if (!projection_changed) {
+        return;
+    }
+
     snprintf(count_text, sizeof(count_text), "共 %u", g_v5_shell_program_row_count);
     if (g_v5_shell_program_count_label) {
         lv_label_set_text(g_v5_shell_program_count_label, count_text);
@@ -83,17 +177,8 @@ void shell_update_program_row(void)
     for (i = 0U; i < V5_PROGRAM_ROWS_MAX; ++i) {
         shell_update_program_row_visual(i);
     }
-    if (g_v5_shell_program_source_label) {
-        if (!loaded) {
-            lv_label_set_text(g_v5_shell_program_source_label, "来源: 本机 目录不可读");
-        } else if (g_v5_shell_program_selected_index >= 0 && (unsigned int)g_v5_shell_program_selected_index < g_v5_shell_program_row_count) {
-            char text[220];
-            snprintf(text, sizeof(text), "已选择: %s  双击打开运行，或点打开修改", g_v5_shell_program_rows[g_v5_shell_program_selected_index].name);
-            lv_label_set_text(g_v5_shell_program_source_label, text);
-        } else {
-            lv_label_set_text(g_v5_shell_program_source_label, "来源: 本机");
-        }
-    }
+    shell_update_program_source_label(loaded);
+    shell_mark_page_cache_dirty(V5_SHELL_PAGE_PROGRAM);
 }
 
 static void shell_clear_program_selection_confirm(void)
@@ -116,13 +201,21 @@ static int shell_program_row_matches_explicit_selection(int idx)
 
 static void shell_select_program_row(int idx)
 {
+    int previous_selected = g_v5_shell_program_selected_index;
     g_v5_shell_program_selected_index = idx;
     g_v5_shell_program_confirm_selected_index = idx;
     snprintf(g_v5_shell_program_confirm_selected_path, sizeof(g_v5_shell_program_confirm_selected_path), "%s", g_v5_shell_program_rows[idx].path);
     g_v5_shell_program_last_click_index = idx;
     g_v5_shell_program_last_click_ns = shell_monotonic_ns();
     snprintf(g_v5_shell_program_last_click_path, sizeof(g_v5_shell_program_last_click_path), "%s", g_v5_shell_program_rows[idx].path);
-    shell_update_program_row();
+    if (previous_selected != idx) {
+        if (previous_selected >= 0) {
+            shell_update_program_row_selection_visual((unsigned int)previous_selected);
+        }
+        shell_update_program_row_selection_visual((unsigned int)idx);
+        shell_update_program_source_label(g_v5_shell_program_list_loaded > 0);
+        shell_mark_page_cache_dirty(V5_SHELL_PAGE_PROGRAM);
+    }
     shell_log_program_event("program_file_select", g_v5_shell_program_rows[idx].path, 1, 0);
 }
 
@@ -136,12 +229,12 @@ static void shell_open_program_row_for_run(int idx)
         (void)v5_main_page_apply_status(&g_v5_shell_main_page, &g_v5_shell_model.status_view);
         shell_log_program_event("program_file_double_click_applied", g_v5_shell_program_rows[idx].path, 1, &result);
         (void)v5_settings_page_apply_status(&g_v5_shell_settings_page, &g_v5_shell_model.status_view);
-        g_v5_shell_main_cache_dirty = 1;
+        shell_mark_page_cache_dirty(V5_SHELL_PAGE_MAIN);
         shell_navigate(0, V5_MAIN_PAGE_ACTION_NAV_MAIN);
     } else {
         shell_log_program_event("program_file_double_click", g_v5_shell_program_rows[idx].path, 0, &result);
-        if (g_v5_shell_program_source_label) {
-            lv_label_set_text(g_v5_shell_program_source_label, "打开失败");
+        if (shell_set_program_source_text("打开失败")) {
+            shell_mark_page_cache_dirty(V5_SHELL_PAGE_PROGRAM);
         }
     }
 }
@@ -197,8 +290,8 @@ static void shell_open_program_row_for_edit(int idx)
         shell_navigate(0, V5_MAIN_PAGE_ACTION_NAV_MDI_EDIT);
         return;
     }
-    if (g_v5_shell_program_source_label) {
-        lv_label_set_text(g_v5_shell_program_source_label, "打开修改失败");
+    if (shell_set_program_source_text("打开修改失败")) {
+        shell_mark_page_cache_dirty(V5_SHELL_PAGE_PROGRAM);
     }
 }
 
@@ -209,8 +302,8 @@ void shell_program_edit_cb(lv_event_t *event)
     }
     if (g_v5_shell_program_selected_index < 0 || (unsigned int)g_v5_shell_program_selected_index >= g_v5_shell_program_row_count) {
         shell_log_mdi_event("program_edit_rejected", "no selected program", 0);
-        if (g_v5_shell_program_source_label) {
-            lv_label_set_text(g_v5_shell_program_source_label, "未选择G代码文件");
+        if (shell_set_program_source_text("未选择G代码文件")) {
+            shell_mark_page_cache_dirty(V5_SHELL_PAGE_PROGRAM);
         }
         return;
     }

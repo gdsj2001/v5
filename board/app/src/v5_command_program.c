@@ -43,6 +43,26 @@ int v5_command_program_open(
     return ok;
 }
 
+int v5_command_program_delete(
+    V5ProgramController *controller,
+    const char *path,
+    V5ProgramDeleteResult *result)
+{
+    int ok;
+    if (!controller) {
+        if (result) {
+            memset(result, 0, sizeof(*result));
+            result->code = "PROGRAM_DELETE_OWNER_UNAVAILABLE";
+        }
+        return 0;
+    }
+    ok = v5_program_runtime_delete_file(&controller->runtime, path, result);
+    if (ok && result && result->cleared_loaded_program) {
+        memset(&controller->last_open, 0, sizeof(controller->last_open));
+    }
+    return ok;
+}
+
 const V5ProgramRuntime *v5_program_controller_runtime(
     const V5ProgramController *controller)
 {

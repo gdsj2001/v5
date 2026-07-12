@@ -1,5 +1,5 @@
-#Note: Mention Each package in individual line
-#These packages will get added into rootfs menu entry
+# V5 custom rootfs package whitelist. Keep one approved package per line.
+# Transitive runtime packages are audited from the generated image manifest.
 
 CONFIG_v5-base-overlay
 CONFIG_v5-stepgen-module

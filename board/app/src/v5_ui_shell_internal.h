@@ -16,6 +16,7 @@
 #define V5_PROGRAM_ROW_HIT_H 32
 #define V5_PROGRAM_DOUBLE_CLICK_NS 800000000ULL
 #define V5_MDI_TEXT_CAP 8192U
+#define V5_UI_CACHE_BOOT_WORKER_ID 0U
 
 typedef enum V5ShellPageKind {
     V5_SHELL_PAGE_MAIN = 0,
@@ -29,6 +30,8 @@ typedef enum V5ShellPageKind {
     V5_SHELL_PAGE_MDI,
     V5_SHELL_PAGE_COUNT
 } V5ShellPageKind;
+
+struct V5UiPageCacheQueueEvidence;
 
 typedef struct V5ProgramRow {
     char name[168];
@@ -82,7 +85,8 @@ extern char g_v5_shell_mdi_edit_program_name[168];
 extern char g_v5_shell_mdi_edit_program_path[384];
 extern int g_v5_shell_mdi_edit_prepared;
 extern int g_v5_shell_ui_ready;
-extern int g_v5_shell_main_cache_dirty;
+extern int g_v5_shell_page_cache_dirty[V5_SHELL_PAGE_COUNT];
+extern int g_v5_shell_remote_display_active;
 extern V5ShellPageKind g_v5_shell_current_page;
 extern lv_obj_t *g_v5_shell_top_status_layer;
 extern lv_obj_t *g_v5_shell_top_status_label;
@@ -99,6 +103,21 @@ extern unsigned long long g_v5_shell_ui_estop_last_refresh_ns;
 extern unsigned long long g_v5_shell_ui_slow_last_refresh_ns;
 
 void shell_navigate(void *user_data, V5MainPageActionKind action);
+const char *shell_page_name(V5ShellPageKind page);
+unsigned int shell_page_cache_slot(V5ShellPageKind page);
+void shell_show_page_objects(V5ShellPageKind page);
+int shell_show_page_objects_for_cache_blit(V5ShellPageKind page);
+int shell_apply_page_resident_model(V5ShellPageKind page);
+int shell_prepare_page_cache(V5ShellPageKind page);
+int shell_boot_page_cache_registry_validate(void);
+int shell_run_boot_page_cache_queue(
+    lv_obj_t *screen,
+    int remote_display,
+    struct V5UiPageCacheQueueEvidence *evidence,
+    unsigned long long *peak_cpu_pct_x100);
+void shell_mark_page_cache_dirty(V5ShellPageKind page);
+void shell_mark_all_page_caches_dirty(void);
+int shell_sync_current_page_cache_if_dirty(void);
 
 void shell_clear_style(lv_obj_t *obj);
 
@@ -133,6 +152,20 @@ void shell_refresh_native_readback_for_action(void *user_data, V5MainPageActionK
 void shell_log_navigation_perf(const char *target, int cache_ok, unsigned long long elapsed_ns);
 
 void shell_create_top_status_layer(lv_obj_t *screen);
+
+void shell_create_operator_error_popup(lv_obj_t *screen);
+
+void shell_show_operator_error_popup(const V5NativeOperatorErrorStatus *status);
+
+void shell_hide_operator_error_popup(void);
+
+int shell_operator_error_popup_visible(void);
+
+void shell_raise_operator_error_popup(void);
+
+const char *shell_operator_error_popup_text(void);
+
+lv_obj_t *shell_operator_error_popup_confirm_button(void);
 
 void shell_return_button_cb(lv_event_t *event);
 

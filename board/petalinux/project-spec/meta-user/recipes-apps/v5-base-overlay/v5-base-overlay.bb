@@ -31,8 +31,8 @@ do_install() {
     install -d ${D}/lib/firmware/rtlwifi
     install -m 0644 ${WORKDIR}/network/rtl8188eufw.bin ${D}/lib/firmware/rtlwifi/rtl8188eufw.bin
 
-    install -d ${D}/root/.ssh
-    install -m 0600 ${WORKDIR}/network/authorized_keys ${D}/root/.ssh/authorized_keys
+    install -d -m 0700 ${D}/home/root/.ssh
+    install -m 0600 ${WORKDIR}/network/authorized_keys ${D}/home/root/.ssh/authorized_keys
 
     install -d ${D}${sysconfdir}/udev/rules.d
     install -m 0644 ${WORKDIR}/udev/99-uio.rules ${D}${sysconfdir}/udev/rules.d/99-uio.rules
@@ -49,7 +49,7 @@ FILES_${PN} += " \
     /usr/local/sbin/v5_wifi_core.sh \
     /usr/local/sbin/v5_usb_wifi_apply.sh \
     /lib/firmware/rtlwifi/rtl8188eufw.bin \
-    /root/.ssh/authorized_keys \
+    /home/root/.ssh/authorized_keys \
     ${sysconfdir}/udev/rules.d/99-uio.rules \
     ${sysconfdir}/udev/rules.d/99-touchscreen.rules \
     ${sysconfdir}/6x-cnc/vps_endpoints.json \

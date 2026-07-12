@@ -22,7 +22,7 @@ PV = "1.6.9+git${SRCPV}"
 S = "${WORKDIR}/git"
 B = "${S}"
 
-inherit autotools pkgconfig update-rc.d
+inherit autotools pkgconfig update-rc.d module
 
 DEPENDS += "virtual/kernel autoconf-native automake-native libtool-native pkgconfig-native bison-native flex-native bc-native"
 
@@ -72,6 +72,7 @@ do_install() {
 }
 
 do_install_append() {
+    rm -f ${D}${sysconfdir}/ethercat.conf
     if [ -f ${D}${sysconfdir}/sysconfig/ethercat ]; then
         sed -i -E 's@^MASTER0_DEVICE=.*@MASTER0_DEVICE="eth1"@' ${D}${sysconfdir}/sysconfig/ethercat
         sed -i -E 's@^DEVICE_MODULES=.*@DEVICE_MODULES="generic"@' ${D}${sysconfdir}/sysconfig/ethercat
@@ -91,7 +92,6 @@ FILES_${PN} += " \
     ${datadir}/bash-completion \
     ${datadir}/bash-completion/completions \
     ${datadir}/bash-completion/completions/ethercat \
-    /lib/modules \
 "
 
 RDEPENDS_${PN} += "bash kmod"

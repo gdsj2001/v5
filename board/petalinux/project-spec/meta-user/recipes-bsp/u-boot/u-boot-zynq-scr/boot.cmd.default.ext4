@@ -5,8 +5,7 @@
 ################
 @@PRE_BOOTENV@@
 setenv bootargs console=ttyPS0,115200 cma=50M earlycon root=/dev/mmcblk0p2 rw rootwait uio_pdrv_genirq.of_id=generic-uio
-setenv v5_dna_check 'itest.l *0x41250000 == 0x444e4130 && itest.l *0x41250004 == 0x00010000 && itest.l *0x41250008 == 0x00000007 && itest.l *0x4125000c == 0x00000039 && itest.l *0x41250010 == 0x26a3985c && itest.l *0x41250014 == 0x0004d528'
-setenv v5_fdt_dna 'fdt resize 2048; fdt set /chosen 8ax,pl-dna-source uboot_dt_pl_dna; fdt set /chosen 8ax,pl-dna-value 0004D52826A3985C; fdt set /chosen 8ax,pl-dna-len <0x00000039>; fdt set /chosen 8ax,pl-dna-crc32 <0xEAC4391C>; fdt set /chosen 8ax,pl-dna-magic <0x444E4130>; fdt set /chosen 8ax,pl-dna-version <0x00010000>; fdt set /chosen 8ax,pl-dna-status <0x00000007>; fdt set /chosen 8ax,pl-dna-lo <0x26A3985C>; fdt set /chosen 8ax,pl-dna-hi <0x0004D528>; fdt print /chosen'
+setenv v5_dna_check 'itest.l *0x41250000 == 0x444e4130 && itest.l *0x41250004 == 0x00010000 && itest.l *0x41250008 == 0x00000007 && itest.l *0x4125000c == 0x00000039'
 
 for boot_target in ${boot_targets};
 do
@@ -17,17 +16,11 @@ do
 	if test "${boot_target}" = "mmc0" || test "${boot_target}" = "mmc1" ; then
 		if test -e ${devtype} ${devnum}:${distro_bootpart} /@@FIT_IMAGE@@; then
 			fatload ${devtype} ${devnum}:${distro_bootpart} @@FIT_IMAGE_LOAD_ADDRESS@@ @@FIT_IMAGE@@;
-			md.l 0x41250000 8;
 			if run v5_dna_check; then
-				echo V5 PL DNA verified, injecting live FDT chosen fields;
-				bootm start @@FIT_IMAGE_LOAD_ADDRESS@@;
-				bootm loados;
-				bootm fdt;
-				bootm prep;
-				run v5_fdt_dna;
-				bootm go;
+				echo V5 PL DNA reader verified, booting FIT;
+				bootm @@FIT_IMAGE_LOAD_ADDRESS@@;
 			else
-				echo V5 PL DNA verification failed, refusing unverified FIT boot;
+				echo V5 PL DNA reader unavailable, refusing FIT boot;
 				sleep 5;
 				reset;
 			fi

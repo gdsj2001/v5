@@ -1,4 +1,6 @@
 #include "v5_native_motion_parameters.h"
+#include "v5_parameter_owner_map.h"
+#include "v5_settings_apply_internal.h"
 
 #include <ctype.h>
 #include <limits.h>
@@ -225,6 +227,158 @@ static int parameters_complete(const V5NativeMotionParameters *parameters)
         }
     }
     return 1;
+}
+
+static int load_bus_zero_evidence(
+    const char *settings_runtime_json_path,
+    V5NativeMotionParameters *parameters,
+    char *code,
+    size_t code_cap)
+{
+    char *json;
+    unsigned int i;
+    if (!settings_runtime_json_path || !settings_runtime_json_path[0]) {
+        set_code(code, code_cap, "BUS_HOME_SETTINGS_RUNTIME_REQUIRED");
+        return 0;
+    }
+    json = v5_settings_apply_read_text_file_limited(settings_runtime_json_path);
+    if (!json) {
+        set_code(code, code_cap, "BUS_HOME_SETTINGS_RUNTIME_UNAVAILABLE");
+        return 0;
+    }
+    for (i = 0U; i < V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT; ++i) {
+        V5NativeMotionAxisParameters *axis = &parameters->axes[i];
+        const char *axis_start;
+        const char *axis_end;
+        const char *zero_start;
+        const char *zero_end;
+        char axis_name[2] = {axis->axis, '\0'};
+        double expected;
+        double tolerance;
+        if (!axis->active) {
+            continue;
+        }
+        if (!v5_settings_apply_runtime_axis_object(json, axis_name, &axis_start, &axis_end) ||
+            !v5_settings_apply_json_object_for_key(
+                axis_start, axis_end, "zero_model", &zero_start, &zero_end) ||
+            !v5_settings_apply_json_number_value(
+                zero_start, zero_end, "zero_counts", &axis->bus_zero_counts) ||
+            !v5_settings_apply_json_number_value(
+                zero_start, zero_end, "counts_per_unit", &axis->bus_counts_per_unit) ||
+            !v5_settings_apply_json_number_value(
+                zero_start, zero_end, "raw_zero_position", &axis->bus_home_reference) ||
+            !isfinite(axis->bus_zero_counts) ||
+            !isfinite(axis->bus_counts_per_unit) || axis->bus_counts_per_unit == 0.0 ||
+            !isfinite(axis->bus_home_reference)) {
+            free(json);
+            set_code(code, code_cap, "BUS_HOME_ZERO_EVIDENCE_MISSING");
+            return 0;
+        }
+        expected = axis->bus_zero_counts / axis->bus_counts_per_unit;
+        tolerance = fmax(1.0, fabs(expected)) * 1.0e-9;
+        if (fabs(expected - axis->bus_home_reference) > tolerance) {
+            free(json);
+            set_code(code, code_cap, "BUS_HOME_ZERO_EVIDENCE_MISMATCH");
+            return 0;
+        }
+        axis->bus_zero_evidence_known = 1;
+    }
+    free(json);
+    snprintf(parameters->pulse_contract_status, sizeof(parameters->pulse_contract_status), "%s", "not_applicable");
+    parameters->runtime_owner_loaded = 1;
+    set_code(code, code_cap, "BUS_HOME_RUNTIME_OWNER_LOADED");
+    return 1;
+}
+
+static int pulse_contract_status(
+    const char *json,
+    char *status,
+    size_t status_cap)
+{
+    const char *key;
+    const char *p;
+    const char *end;
+    size_t length;
+    if (!json || !status || status_cap == 0U) {
+        return 0;
+    }
+    key = strstr(json, "\"status\"");
+    if (!key || !(p = strchr(key + 8, ':'))) {
+        return 0;
+    }
+    ++p;
+    while (*p && isspace((unsigned char)*p)) {
+        ++p;
+    }
+    if (*p++ != '\"') {
+        return 0;
+    }
+    end = strchr(p, '\"');
+    if (!end || end == p) {
+        return 0;
+    }
+    length = (size_t)(end - p);
+    if (length >= status_cap) {
+        return 0;
+    }
+    memcpy(status, p, length);
+    status[length] = '\0';
+    return 1;
+}
+
+static int load_pulse_contract(
+    const char *pulse_contract_path,
+    V5NativeMotionParameters *parameters,
+    char *code,
+    size_t code_cap)
+{
+    char *json;
+    if (!pulse_contract_path || !pulse_contract_path[0]) {
+        set_code(code, code_cap, "PULSE_HOME_CONTRACT_REQUIRED");
+        return 0;
+    }
+    json = v5_settings_apply_read_text_file_limited(pulse_contract_path);
+    if (!json || !pulse_contract_status(
+            json, parameters->pulse_contract_status,
+            sizeof(parameters->pulse_contract_status))) {
+        free(json);
+        set_code(code, code_cap, "PULSE_HOME_CONTRACT_UNAVAILABLE");
+        return 0;
+    }
+    free(json);
+    parameters->pulse_runtime_selectable =
+        strcmp(parameters->pulse_contract_status, "runtime_selectable") == 0;
+    parameters->runtime_owner_loaded = 1;
+    set_code(
+        code,
+        code_cap,
+        parameters->pulse_runtime_selectable
+            ? "PULSE_HOME_RUNTIME_OWNER_LOADED"
+            : "PULSE_HOME_NOT_RUNTIME_SELECTABLE");
+    return 1;
+}
+
+int v5_native_motion_parameters_load_runtime_owner(
+    const char *settings_runtime_json_path,
+    const char *pulse_contract_path,
+    V5NativeMotionParameters *parameters,
+    char *code,
+    size_t code_cap)
+{
+    if (!parameters || !parameters->loaded) {
+        set_code(code, code_cap, "HOME_RUNTIME_OWNER_PARAMETERS_REQUIRED");
+        return 0;
+    }
+    if (parameters->driver_mode == V5_NATIVE_DRIVER_MODE_BUS) {
+        return load_bus_zero_evidence(
+            settings_runtime_json_path, parameters, code, code_cap);
+    }
+    if (parameters->driver_mode == V5_NATIVE_DRIVER_MODE_PULSE) {
+        return load_pulse_contract(
+            pulse_contract_path, parameters, code, code_cap);
+    }
+    set_code(code, code_cap, "HOME_RUNTIME_OWNER_MODE_UNKNOWN");
+    return 0;
 }
 
 int v5_native_motion_parameters_load(

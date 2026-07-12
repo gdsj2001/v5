@@ -272,9 +272,23 @@ static int exercise_jog_press_timing(V5MainPage *page)
         !page->jog_long_press_elapsed) {
         return 0;
     }
+    lv_tick_inc(V5_MAIN_PAGE_JOG_KEEPALIVE_MS);
+    lv_event_send(button, LV_EVENT_PRESSING, 0);
+    if (page->last_action.request.kind != V5_COMMAND_JOG_CONTINUOUS ||
+        page->jog_keepalive_last_tick == 0U) {
+        return 0;
+    }
     lv_event_send(button, LV_EVENT_PRESS_LOST, 0);
+    if (page->jog_pressed_button || page->jog_long_press_elapsed ||
+        page->last_action.request.kind != V5_COMMAND_JOG_STOP) {
+        return 0;
+    }
+    lv_event_send(button, LV_EVENT_PRESSED, 0);
+    lv_tick_inc(V5_MAIN_PAGE_JOG_HOLD_MS);
+    (void)lv_timer_handler();
+    lv_event_send(button, LV_EVENT_CANCEL, 0);
     return !page->jog_pressed_button && !page->jog_long_press_elapsed &&
-           page->last_action.request.kind == V5_COMMAND_JOG_CONTINUOUS;
+           page->last_action.request.kind == V5_COMMAND_JOG_STOP;
 }
 
 static int exercise_axis_selection_timeout(V5MainPage *page)
@@ -359,6 +373,8 @@ static int expect_power_on_home_block(
         return 0;
     }
     if (!page->power_on_home_popup || !page->power_on_home_popup_message ||
+        !page->power_on_home_popup_confirm ||
+        !lv_obj_has_state(page->power_on_home_popup_confirm, LV_STATE_DISABLED) ||
         !page->power_on_home_popup_close ||
         lv_obj_has_flag(page->power_on_home_popup, LV_OBJ_FLAG_HIDDEN)) {
         return 0;

@@ -115,10 +115,14 @@ boot_template=$peta_root/project-spec/meta-user/recipes-bsp/u-boot/u-boot-zynq-s
 bitstream=$peta_root/project-spec/hw-description/system.bit
 peta_verify=$board_root/tools/petalinux/verify_v5_petalinux_source.py
 linuxcnc_verify=$board_root/tools/linuxcnc/verify_v5_linuxcnc_source.py
+product_closure_verify=$board_root/tools/deploy/verify_v5_product_source_closure.py
+product_file_manifest_tool=$board_root/tools/deploy/v5_product_file_manifest.py
 
 [ -r "$deploy_manifest" ] || fail "deploy manifest is missing"
 [ -r "$boot_template" ] || fail "ext4 boot owner is missing"
 [ -r "$bitstream" ] || fail "hardware bitstream is missing"
+[ -r "$product_closure_verify" ] || fail "product source closure verifier is missing"
+[ -r "$product_file_manifest_tool" ] || fail "product file manifest tool is missing"
 python3 "$peta_verify" --project-root "$project_root" --source-root "$peta_root"
 python3 "$linuxcnc_verify" \
     --project-root "$project_root" \
@@ -178,35 +182,34 @@ set(CMAKE_CXX_FLAGS_INIT "-mcpu=cortex-a9 -mfpu=neon -mfloat-abi=hard -mthumb")
 EOF
 
 rm -rf "$arm_build"
+python3 "$product_closure_verify" \
+    --board-root "$board_root" \
+    --build-dir "$arm_build" \
+    --prepare-cmake-query
 cmake -S "$board_root" -B "$arm_build" \
     -DCMAKE_TOOLCHAIN_FILE="$toolchain" \
     -DCMAKE_BUILD_TYPE=Release
-cmake --build "$arm_build" --target \
-    v5_lvgl_shell \
-    v5_state_publisher \
-    v5_touch_diagnostics \
-    v5_linuxcncrsh_probe \
-    v5_command_gate_server \
-    v5_linuxcncrsh_golden_run \
-    -- -j2
+python3 "$product_closure_verify" \
+    --board-root "$board_root" \
+    --build-dir "$arm_build" \
+    --validate-shell
+cmake --build "$arm_build" --target v5_product_runtime -- -j2
 
-for binary in \
-    v5_lvgl_shell \
-    v5_state_publisher \
-    v5_touch_diagnostics \
-    v5_linuxcncrsh_probe \
-    v5_command_gate_server \
-    v5_linuxcncrsh_golden_run
-do
+binary_count=0
+tab=$(printf '\t')
+while IFS="$tab" read -r kind source destination mode extra; do
+    [ "$kind" = "binary" ] || continue
+    binary=$(basename "$source")
     path=$arm_build/app/$binary
     [ -x "$path" ] || fail "ARM build output is missing: $path"
     file "$path" | grep -q 'ELF 32-bit.*ARM' || fail "non-ARM product binary: $path"
     readelf -h "$path" | grep -q 'hard-float ABI' || fail "non-hard-float product binary: $path"
-done
+    binary_count=$(expr "$binary_count" + 1)
+done <"$deploy_manifest"
+[ "$binary_count" -gt 0 ] || fail "deploy manifest has no ARM product binaries"
 
 tar -xpf "$rootfs_tar" -C "$rootfs_stage"
 
-tab=$(printf '\t')
 while IFS="$tab" read -r kind source destination mode extra; do
     case "$kind" in
         ''|'#'*) continue ;;
@@ -384,12 +387,19 @@ EOF
     -o "$boot_stage/BOOT.BIN" -w on
 [ -s "$boot_stage/BOOT.BIN" ] || fail "BOOT.BIN generation failed"
 
+rootfs_file_manifest=$boot_stage/v5-rootfs-file-manifest.tsv
+python3 "$product_file_manifest_tool" create \
+    --root "$rootfs_stage" \
+    --manifest "$rootfs_file_manifest"
+rootfs_manifest_entries=$(grep -vc '^#' "$rootfs_file_manifest")
+rootfs_manifest_sha256=$(sha256sum "$rootfs_file_manifest" | awk '{print $1}')
+
 source_commit=$(git -C "$project_root" rev-parse HEAD)
 peta_identity=$(sha256sum "$peta_root/v5_petalinux_source_identity.json" | awk '{print $1}')
 linuxcnc_identity=$(sha256sum "$project_root/linuxcnc/v5_linuxcnc_source_identity.json" | awk '{print $1}')
 rootfs_files=$(find "$rootfs_stage" -xdev -type f | wc -l)
 cat >"$boot_stage/v5-sd-manifest.txt" <<EOF
-schema=v5-sd-card-build-v1
+schema=v5-sd-card-build-v2
 source_commit=$source_commit
 target_device=$device
 target_bytes=$device_bytes
@@ -399,10 +409,12 @@ target_model=$device_model
 peta_identity_sha256=$peta_identity
 linuxcnc_identity_sha256=$linuxcnc_identity
 rootfs_file_count=$rootfs_files
+rootfs_manifest_entries=$rootfs_manifest_entries
+rootfs_manifest_sha256=$rootfs_manifest_sha256
 EOF
 (
     cd "$boot_stage"
-    sha256sum BOOT.BIN boot.scr image.ub system.dtb >>v5-sd-manifest.txt
+    sha256sum BOOT.BIN boot.scr image.ub system.dtb v5-rootfs-file-manifest.tsv >>v5-sd-manifest.txt
 )
 
 if [ "$apply" -ne 1 ]; then
@@ -458,16 +470,20 @@ install -m 0644 \
     "$boot_stage/boot.scr" \
     "$boot_stage/image.ub" \
     "$boot_stage/system.dtb" \
+    "$boot_stage/v5-rootfs-file-manifest.tsv" \
     "$boot_stage/v5-sd-manifest.txt" \
     "$boot_mount/"
 tar -C "$rootfs_stage" -cpf - . | tar -C "$root_mount" -xpf -
 sync
 
-for name in BOOT.BIN boot.scr image.ub system.dtb v5-sd-manifest.txt; do
+for name in BOOT.BIN boot.scr image.ub system.dtb v5-rootfs-file-manifest.tsv v5-sd-manifest.txt; do
     expected=$(sha256sum "$boot_stage/$name" | awk '{print $1}')
     actual=$(sha256sum "$boot_mount/$name" | awk '{print $1}')
     [ "$actual" = "$expected" ] || fail "boot readback mismatch: $name"
 done
+python3 "$product_file_manifest_tool" verify \
+    --root "$root_mount" \
+    --manifest "$boot_mount/v5-rootfs-file-manifest.tsv"
 for required in \
     usr/bin/milltask \
     usr/lib/linuxcnc/modules/motmod.so \

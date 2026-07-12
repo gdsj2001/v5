@@ -125,7 +125,7 @@ rm -f "$archive"
 rm -rf "$bundle_dir"
 install -d "$bundle_dir/tools/deploy" "$bundle_dir/config/deploy"
 cp -p "$repo_root/tools/deploy/install_v5_runtime.sh" "$bundle_dir/tools/deploy/install_v5_runtime.sh"
-cp -p "$repo_root/config/deploy/v5_runtime_deploy_manifest.tsv" "$bundle_dir/config/deploy/v5_runtime_deploy_manifest.tsv"
+cp -p "$manifest" "$bundle_dir/config/deploy/v5_runtime_deploy_manifest.tsv"
 tab=$(printf '\t')
 while IFS="$tab" read -r kind source destination mode extra; do
   case "$kind" in

@@ -63,6 +63,13 @@ class RemoteRelayHandler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path.startswith("/remote/") and not self.check_peer():
             return
+        if parsed.path.startswith("/remote/") and parsed.path != "/remote/diagnostics" and not self.state.ui_ready():
+            self.write_json(503, {
+                "ok": False,
+                "error": "ui_not_ready",
+                "ready_path": str(self.state.ready_path),
+            })
+            return
         if parsed.path == "/remote/info":
             self.handle_info()
         elif parsed.path == "/remote/frame/full":
@@ -72,13 +79,18 @@ class RemoteRelayHandler(BaseHTTPRequestHandler):
         elif parsed.path == "/remote/input" and self.is_ws_request():
             self.handle_input()
         elif parsed.path == "/remote/diagnostics":
+            ready_metadata = self.state.ready_metadata()
             self.write_json(200, {
                 "schema": "re.v5.remote_diagnostics.v1",
                 "protocol_version": PROTOCOL_VERSION,
+                "ui_ready": ready_metadata is not None,
+                "ready_metadata": ready_metadata,
                 "framebuffer": str(self.state.framebuffer_path),
                 "dirty_fifo": str(self.state.dirty_fifo_path),
                 "input_fifo": str(self.state.input_fifo_path),
                 "frame_id": self.state.frame_id,
+                "first_dirty_event": self.state.first_dirty_event(),
+                "recent_dirty_events": self.state.recent_dirty_events(),
                 "metrics": self.state.metrics_snapshot(),
                 "cpu_samples": cpu_samples_snapshot(),
                 "process": process_diagnostics(),
@@ -90,6 +102,8 @@ class RemoteRelayHandler(BaseHTTPRequestHandler):
         input_enabled = os.environ.get("V5_UI_REMOTE_INPUT", "off") == "layout_only"
         self.write_json(200, {
             "protocol_version": PROTOCOL_VERSION,
+            "ui_ready": True,
+            "ready_metadata": self.state.ready_metadata(),
             "width": self.state.width,
             "height": self.state.height,
             "pixel_format": PIXEL_FORMAT,
@@ -301,14 +315,15 @@ def main() -> int:
     parser.add_argument("--run-dir", default=str(RUN_DIR))
     parser.add_argument("--width", type=int, default=int(os.environ.get("V5_UI_REMOTE_WIDTH", "1024")))
     parser.add_argument("--height", type=int, default=int(os.environ.get("V5_UI_REMOTE_HEIGHT", "600")))
+    parser.add_argument("--ready-path", default=os.environ.get("V5_UI_READY_PATH", str(RUN_DIR / "ui_ready.json")))
     args = parser.parse_args()
 
-    state = FrameState(Path(args.run_dir), args.width, args.height)
+    state = FrameState(Path(args.run_dir), args.width, args.height, Path(args.ready_path))
     dirty_reader = DirtyReader(state)
     dirty_reader.start()
     allow_networks = parse_allow_cidrs(args.allow_cidrs)
     with RemoteRelayServer((args.host, args.port), RemoteRelayHandler, state, allow_networks) as server:
-        print(f"v5_remote_ui_relay listening host={args.host} port={args.port} run_dir={state.run_dir} allow_cidrs={args.allow_cidrs}", flush=True)
+        print(f"v5_remote_ui_relay listening host={args.host} port={args.port} run_dir={state.run_dir} ready_path={state.ready_path} allow_cidrs={args.allow_cidrs}", flush=True)
         try:
             server.serve_forever()
         except KeyboardInterrupt:

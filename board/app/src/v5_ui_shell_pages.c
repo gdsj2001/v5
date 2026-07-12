@@ -31,6 +31,7 @@
 #include <time.h>
 #include <unistd.h>
 #include "v5_ui_shell_internal.h"
+#include "v5_ui_shell_program_delete.h"
 
 void shell_clear_style(lv_obj_t *obj)
 {
@@ -394,10 +395,11 @@ lv_obj_t *shell_create_program_page(lv_obj_t *screen)
     shell_create_cnc_keyboard_panel(root, 536, 26, 0);
     shell_text_button(root, "刷新", 392, 37, 118, 40, 20, 62, 91, shell_refresh_program_cb);
     shell_text_button(root, "本机", 18, 517, 110, 54, 43, 133, 83, shell_refresh_program_cb);
-    shell_text_button(root, "删除", 136, 517, 110, 54, 199, 70, 46, 0);
+    shell_text_button(root, "删除", 136, 517, 110, 54, 199, 70, 46, shell_program_delete_cb);
     g_v5_shell_program_edit_button = shell_text_button(root, "打开修改", 254, 517, 128, 54, 74, 91, 111, shell_program_edit_cb);
     shell_text_button(root, "返回", 390, 517, 128, 54, 20, 62, 91, shell_return_button_cb);
 
+    shell_create_program_delete_popup(lv_obj_get_screen(root));
     shell_update_program_row();
     return root;
 }
@@ -466,17 +468,17 @@ lv_obj_t *shell_create_network_page(lv_obj_t *screen)
     shell_make_label(root, 52, 132, 390, 24, "PS eth0 IP: --", shell_rgb(245, 214, 82), LV_TEXT_ALIGN_LEFT);
     shell_make_label(root, 52, 168, 390, 24, "调试软件: http://--:8091", shell_rgb(245, 214, 82), LV_TEXT_ALIGN_LEFT);
     shell_make_label(root, 52, 204, 390, 24, "PL eth1: EtherCAT 专用，不 DHCP，不维护 IP", shell_rgb(226, 238, 246), LV_TEXT_ALIGN_LEFT);
-    shell_make_label(root, 52, 240, 300, 24, "EtherCAT master: OP", shell_rgb(90, 230, 170), LV_TEXT_ALIGN_LEFT);
-    shell_make_label(root, 52, 276, 260, 24, "Domain0: 10/10", shell_rgb(90, 230, 170), LV_TEXT_ALIGN_LEFT);
-    shell_make_label(root, 52, 312, 390, 24, "5 drives: OP  0x603F=0  0x6041=0x1650/0x1637", shell_rgb(90, 230, 170), LV_TEXT_ALIGN_LEFT);
+    shell_make_label(root, 52, 240, 300, 24, "EtherCAT master: --", shell_rgb(155, 177, 198), LV_TEXT_ALIGN_LEFT);
+    shell_make_label(root, 52, 276, 260, 24, "Domain0: --/--", shell_rgb(155, 177, 198), LV_TEXT_ALIGN_LEFT);
+    shell_make_label(root, 52, 312, 390, 24, "驱动状态: --（等待 native owner 回读）", shell_rgb(155, 177, 198), LV_TEXT_ALIGN_LEFT);
     shell_make_panel(root, 506, 72, 440, 360, 7, 31, 48);
     for (i = 0; i < 8; ++i) {
         int y = 98 + i * 38;
         shell_make_panel(root, 532, y, 364, 30, (i < 5) ? 8 : 38, (i < 5) ? 36 : 54, (i < 5) ? 55 : 65);
         if (i < 5) {
             char row[128];
-            snprintf(row, sizeof(row), "%s轴  OP  fault=0  statusword=ready", axes[i]);
-            shell_make_label(root, 548, y + 5, 320, 20, row, shell_rgb(226, 238, 246), LV_TEXT_ALIGN_LEFT);
+            snprintf(row, sizeof(row), "%s轴  OP--  fault=--  statusword=--", axes[i]);
+            shell_make_label(root, 548, y + 5, 320, 20, row, shell_rgb(155, 177, 198), LV_TEXT_ALIGN_LEFT);
         } else {
             shell_make_label(root, 548, y + 5, 320, 20, axes[i], shell_rgb(150, 170, 190), LV_TEXT_ALIGN_LEFT);
         }

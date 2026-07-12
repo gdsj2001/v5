@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import json
 import tempfile
 from pathlib import Path
 
@@ -118,6 +119,26 @@ def main() -> int:
         if not gap or not gap.get("needs_full"):
             print("missing full repair signal", gap)
             return 4
+        ready_state = relay.FrameState(Path(tmp) / "ready", 4, 4)
+        if ready_state.ui_ready():
+            print("ready gate opened without metadata")
+            return 14
+        ready_state.publish_dirty({"frame_id": 2, "base_frame_id": 1, "x": 0, "y": 0, "w": 4, "h": 4})
+        ready_state.ready_path.parent.mkdir(parents=True, exist_ok=True)
+        ready_state.ready_path.write_text(
+            json.dumps({"schema": "v5.ui_ready.v1", "ready": True, "current_frame_id": 2}),
+            encoding="utf-8",
+        )
+        if not ready_state.ui_ready() or ready_state.first_dirty_event() != {
+            "frame_id": 2,
+            "base_frame_id": 1,
+            "x": 0,
+            "y": 0,
+            "w": 4,
+            "h": 4,
+        }:
+            print("ready gate did not bind to the formal first frame")
+            return 15
         del union_payload
         del prepared_union
         del payload

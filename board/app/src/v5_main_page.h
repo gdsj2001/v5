@@ -22,7 +22,7 @@ extern "C" {
 #define V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT V5_PROGRAM_PREVIEW_POINT_COUNT
 #define V5_MAIN_PAGE_BUTTON_COUNT 35u
 #define V5_MAIN_PAGE_TOOLPATH_WCS_COUNT 9u
-#define V5_MAIN_PAGE_TOOLPATH_DRAW_SEGMENTS 16u
+#define V5_MAIN_PAGE_TOOLPATH_DRAW_SEGMENTS 64u
 #define V5_MAIN_PAGE_TOOLPATH_SEGMENT_POINT_COUNT 64u
 
 enum {
@@ -94,6 +94,7 @@ typedef struct V5MainPage {
     lv_obj_t *program_edit_hit_area;
     lv_obj_t *power_on_home_popup;
     lv_obj_t *power_on_home_popup_message;
+    lv_obj_t *power_on_home_popup_confirm;
     lv_obj_t *power_on_home_popup_close;
     V5UiFirstFrameGuard power_on_home_popup_frame_guard;
     lv_obj_t *buttons[V5_MAIN_PAGE_BUTTON_COUNT];
@@ -113,6 +114,7 @@ typedef struct V5MainPage {
     int jog_pressed_positive;
     int jog_long_press_elapsed;
     int jog_continuous_active;
+    uint32_t jog_keepalive_last_tick;
     uint32_t program_edit_last_click_tick;
     unsigned int program_preview_scroll_start_line;
     int program_preview_highlight_line;
@@ -160,6 +162,7 @@ typedef struct V5MainPage {
     V5ToolpathDisplayPlane toolpath_program_plane;
     int toolpath_program_wcs_valid;
     int toolpath_program_wcs_index;
+    unsigned int toolpath_program_wcs_epoch;
     double toolpath_program_wcs_offset[3];
     int toolpath_program_visible;
     unsigned int toolpath_program_point_count;
@@ -173,6 +176,7 @@ typedef struct V5MainPage {
     double toolpath_static_pose_c_deg;
     V5StatusPoint toolpath_program_points[V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT];
     V5StatusPoint toolpath_program_project_points[V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT];
+    unsigned char toolpath_program_break_before[V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT];
     V5ToolpathScreenPoint toolpath_program_screen_points[V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT];
     unsigned int toolpath_static_cache_hits;
     unsigned int toolpath_static_cache_misses;
@@ -187,6 +191,9 @@ int v5_main_page_handle_touch_points(V5MainPage *page, const lv_point_t *points,
 void v5_main_page_bind_program_controller(V5MainPage *page, V5ProgramController *controller);
 void v5_main_page_set_command_execution_enabled(V5MainPage *page, int enabled);
 void v5_main_page_set_native_readback(V5MainPage *page, const V5NativeReadback *readback);
+void v5_main_page_store_native_readback_during_modal(
+    V5MainPage *page,
+    const V5NativeReadback *readback);
 void v5_main_page_set_navigation_callback(V5MainPage *page, V5UiNavigationCallback cb, void *user_data);
 void v5_main_page_set_native_readback_refresh_callback(
     V5MainPage *page,

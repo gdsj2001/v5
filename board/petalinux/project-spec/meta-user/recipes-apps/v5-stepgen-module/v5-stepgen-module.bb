@@ -34,17 +34,12 @@ EOF
 do_install() {
     install -d ${D}/usr/lib/linuxcnc/modules
     install -m 0644 ${B}/zynq_stepgen_hw.so ${D}/usr/lib/linuxcnc/modules/zynq_stepgen_hw.so
-
-    install -d ${D}/usr/src/v5-stepgen
-    install -m 0644 ${S}/zynq_stepgen_hw.c ${D}/usr/src/v5-stepgen/zynq_stepgen_hw.c
 }
 
 FILES_${PN} += " \
     /usr/lib/linuxcnc/modules/zynq_stepgen_hw.so \
-    /usr/src/v5-stepgen/zynq_stepgen_hw.c \
 "
 
 RDEPENDS_${PN} += "linuxcnc-prebuilt"
 
 INSANE_SKIP_${PN} += "already-stripped ldflags"
-

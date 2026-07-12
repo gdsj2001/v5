@@ -2,13 +2,24 @@
   "schema": "v5-petalinux-project-source-v1",
   "source_owner": "board/petalinux",
   "petalinux_version": "2020.2",
-  "content_sha256": "03c49f14840b136016b6375170960b686d8aa0d59317549c49841edc16094dd8",
-  "file_count": 73,
+  "toolchain": {
+    "petalinux_version": "2020.2",
+    "vivado_version": "2020.2",
+    "installation_guide": "https://docs.amd.com/r/2020.2-English/ug1144-petalinux-tools-reference-guide/Installing-the-PetaLinux-Tool",
+    "environment_setup": "source <petalinux-install-root>/settings.sh",
+    "license_boundary": "AMD/Xilinx EULA; installer is an external prerequisite and is not redistributed"
+  },
+  "content_sha256": "d3258f80e51370f532a1778d2ef1076bd2b0b3ad829ce185257073ef5ebdcab3",
+  "file_count": 76,
+  "linux_owner": {
+    "kernel_content_sha256": "d6e723bf1e8b9481094b9f9d241bd84c3ac8842afbf0da378a1b5ca873cbb96a",
+    "realtime_content_sha256": "899ee32b9e78dc8bcd6a71890cd98a3d1c73ae36576268c0404aa005bfca2393"
+  },
   "hardware": {
     "xsa_path": "project-spec/hw-description/system.xsa",
-    "xsa_sha256": "e18be2cda814c20d34a6ffab9eb0c4c5752a9253338dd97efd7a07124448818e",
+    "xsa_sha256": "7d6bfbe6ada95043b5a9ba0d7082592a2a3f11c018d4a0d20c64aa9af2e2d8b8",
     "bit_path": "project-spec/hw-description/system.bit",
-    "bit_sha256": "c0ee18f9eb1a2ff94cb65805e8772322f7285fd962e14fe2e573d2979bd407fb"
+    "bit_sha256": "d87d65ca3d3c9bf21565e6d252b76e174be1198b9b6d994cc59c461c56af30cf"
   },
   "external_sources": [
     {
@@ -37,6 +48,7 @@
   "allowed_external_facts": [
     "CONFIG_SUBSYSTEM_HOSTNAME=\"z20_plnx\"",
     "CONFIG_SUBSYSTEM_PRODUCT=\"z20_plnx\"",
-    "generated hardware node z20_dna_reader"
+    "generated hardware node z20_dna_reader",
+    "udev symlink /dev/input/by-path/z20-touchscreen"
   ]
 }

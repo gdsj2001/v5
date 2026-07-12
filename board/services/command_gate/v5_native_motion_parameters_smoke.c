@@ -23,10 +23,23 @@ int main(void)
         printf("bus preload failed: %s\n", code);
         return 1;
     }
+    if (!v5_native_motion_parameters_load_runtime_owner(
+            "board/services/command_gate/testdata/v5_home_settings_runtime.json",
+            "board/linuxcnc/components/step_ip_v1_5.contract.json",
+            &parameters,
+            code,
+            sizeof(code)) ||
+        !parameters.runtime_owner_loaded) {
+        printf("bus Home runtime owner preload failed: %s\n", code);
+        return 7;
+    }
     axis = v5_native_motion_parameters_axis(&parameters, 'X');
     if (!axis || !close_enough(axis->max_velocity, 166.666666667) ||
         !close_enough(axis->max_acceleration, 500.0) || axis->status_slot != 0U ||
-        axis->home_sequence != 1) {
+        axis->home_sequence != 1 || !axis->bus_zero_evidence_known ||
+        !close_enough(axis->bus_zero_counts, 1000.0) ||
+        !close_enough(axis->bus_counts_per_unit, 100.0) ||
+        !close_enough(axis->bus_home_reference, 10.0)) {
         return 2;
     }
     axis = v5_native_motion_parameters_axis(&parameters, 'A');
@@ -56,6 +69,19 @@ int main(void)
         !v5_native_motion_parameters_axis(&parameters, 'B')) {
         printf("pulse preload failed: %s\n", code);
         return 6;
+    }
+    if (!v5_native_motion_parameters_load_runtime_owner(
+            "board/services/command_gate/testdata/v5_home_settings_runtime.json",
+            "board/linuxcnc/components/step_ip_v1_5.contract.json",
+            &parameters,
+            code,
+            sizeof(code)) ||
+        !parameters.runtime_owner_loaded || parameters.pulse_runtime_selectable ||
+        strcmp(parameters.pulse_contract_status, "cold_staged_not_runtime_selectable") != 0 ||
+        strcmp(code, "PULSE_HOME_NOT_RUNTIME_SELECTABLE") != 0) {
+        printf("pulse contract fail-closed preload failed: %s status=%s\n",
+               code, parameters.pulse_contract_status);
+        return 8;
     }
     printf("v5 native motion parameters smoke passed\n");
     return 0;

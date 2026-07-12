@@ -1,0 +1,171 @@
+#!/usr/bin/env python3
+import argparse
+import os
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
+
+import verify_v5_linux_source as contract
+
+
+def fail(message):
+    raise ValueError(message)
+
+
+def is_within(path, root):
+    try:
+        return os.path.commonpath((str(path), str(root))) == str(root)
+    except ValueError:
+        return False
+
+
+def validate_paths(project_root, build_root, output_root):
+    if output_root.is_symlink():
+        fail("projection output must not be a symlink: %s" % output_root)
+    project_root = project_root.resolve()
+    build_root = build_root.resolve()
+    output_root = output_root.resolve()
+    if not (project_root / ".git/index").is_file():
+        fail("project Git index is unavailable: %s" % project_root)
+    if output_root == build_root or not is_within(output_root, build_root):
+        fail("projection output must stay below the build root: %s" % output_root)
+    if is_within(output_root, project_root) or is_within(project_root, output_root):
+        fail("projection output overlaps the Windows source owner")
+    return project_root, build_root, output_root
+
+
+def git_command(project_root, index_path, arguments, input_data=None):
+    environment = os.environ.copy()
+    environment["GIT_INDEX_FILE"] = str(index_path)
+    environment["GIT_OPTIONAL_LOCKS"] = "0"
+    command = ["git", "-c", "core.fsmonitor=false", "-C", str(project_root)] + arguments
+    try:
+        return subprocess.run(
+            command,
+            input=input_data,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=environment,
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        detail = exc.stderr.decode("utf-8", errors="replace").strip()
+        fail("Git projection command failed: %s" % detail)
+
+
+def copy_override(source, destination):
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.is_symlink() or destination.exists():
+        if destination.is_dir() and not destination.is_symlink():
+            shutil.rmtree(destination)
+        else:
+            destination.unlink()
+    if source.is_symlink():
+        destination.symlink_to(os.readlink(source))
+    elif source.is_file():
+        shutil.copy2(source, destination)
+    else:
+        fail("registered source override is unavailable: %s" % source)
+
+
+def owner_overrides(project_root, output_root, owner):
+    source_root = project_root / owner["relative"]
+    identity = contract.load_identity(source_root, owner)
+    overrides = identity.get("working_tree_overrides")
+    if not isinstance(overrides, list) or len(overrides) != len(set(overrides)):
+        fail("invalid working_tree_overrides: %s" % owner["relative"])
+    for relative in overrides:
+        path = Path(relative)
+        if path.is_absolute() or ".." in path.parts:
+            fail("source override escaped its owner: %s" % relative)
+        copy_override(source_root / path, output_root / owner["relative"] / path)
+    copy_override(
+        source_root / owner["identity"],
+        output_root / owner["relative"] / owner["identity"],
+    )
+
+
+def verify_projection(output_root, print_hashes=False):
+    hashes = {}
+    for owner in contract.OWNERS:
+        hashes[owner["relative"]] = contract.verify_owner(output_root, owner, print_hashes)
+    contract.validate_rt_contract(output_root / "linux/realtime")
+    print(
+        "V5_LINUX_PROJECTION_OK kernel=%s realtime=%s"
+        % (hashes["linux/kernel"], hashes["linux/realtime"])
+    )
+    return hashes
+
+
+def project_and_verify(
+    project_root, build_root, output_root, clean_after=False, print_hashes=False
+):
+    project_root, build_root, output_root = validate_paths(project_root, build_root, output_root)
+    output_root.parent.mkdir(parents=True, exist_ok=True)
+    if output_root.exists():
+        shutil.rmtree(output_root)
+    output_root.mkdir(parents=True)
+
+    index_file = tempfile.NamedTemporaryFile(
+        prefix="v5-linux-index-", dir=build_root, delete=False
+    )
+    index_path = Path(index_file.name)
+    index_file.close()
+    try:
+        shutil.copyfile(project_root / ".git/index", index_path)
+        git_command(project_root, index_path, ["update-index", "--no-fsmonitor"])
+        listing = git_command(
+            project_root,
+            index_path,
+            ["ls-files", "-z", "--", "linux/kernel", "linux/realtime"],
+        ).stdout
+        if not listing:
+            fail("Git index contains no canonical Linux owner files")
+        prefix = output_root.as_posix().rstrip("/") + "/"
+        git_command(
+            project_root,
+            index_path,
+            ["checkout-index", "--stdin", "-z", "--force", "--prefix=" + prefix],
+            input_data=listing,
+        )
+        for owner in contract.OWNERS:
+            owner_overrides(project_root, output_root, owner)
+        hashes = verify_projection(output_root, print_hashes=print_hashes)
+    except Exception:
+        shutil.rmtree(output_root, ignore_errors=True)
+        raise
+    finally:
+        try:
+            index_path.unlink()
+        except FileNotFoundError:
+            pass
+    if clean_after:
+        shutil.rmtree(output_root)
+        print("V5_LINUX_PROJECTION_CLEAN output=%s" % output_root)
+    return hashes
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--project-root", type=Path, required=True)
+    parser.add_argument("--build-root", type=Path, required=True)
+    parser.add_argument("--output-root", type=Path, required=True)
+    parser.add_argument("--clean-after", action="store_true")
+    parser.add_argument("--print-source-hashes", action="store_true")
+    args = parser.parse_args()
+    try:
+        project_and_verify(
+            args.project_root,
+            args.build_root,
+            args.output_root,
+            clean_after=args.clean_after,
+            print_hashes=args.print_source_hashes,
+        )
+    except (OSError, ValueError) as exc:
+        raise SystemExit("V5 Linux source projection failed: %s" % exc)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
