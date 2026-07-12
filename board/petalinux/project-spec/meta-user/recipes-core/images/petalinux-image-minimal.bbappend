@@ -3,6 +3,7 @@ ROOTFS_POSTPROCESS_COMMAND += " v5_sd_rootfs_fixups; "
 v5_sd_rootfs_fixups () {
     if [ -f ${IMAGE_ROOTFS}/etc/inittab ]; then
         sed -i 's#^PS0:.*#PS0:12345:respawn:/bin/start_getty 115200 ttyPS0 vt102#' ${IMAGE_ROOTFS}/etc/inittab || true
+        sed -i '/^[1-6]:.*tty[1-6]/d' ${IMAGE_ROOTFS}/etc/inittab
     fi
 
     rm -f ${IMAGE_ROOTFS}/etc/rpm-postinsts/100-sysvinit-inittab || true

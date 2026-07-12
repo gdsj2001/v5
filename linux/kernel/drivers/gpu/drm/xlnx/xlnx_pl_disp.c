@@ -65,6 +65,7 @@ struct xlnx_dma_chan {
  * @vtc_bridge: vtc_bridge structure
  * @fid: field id
  * @prev_fid: previous field id
+ * @no_vblank_irq: complete atomic flip events without a DMA callback
  */
 struct xlnx_pl_disp {
 	struct device *dev;
@@ -80,6 +81,7 @@ struct xlnx_pl_disp {
 	struct xlnx_bridge *vtc_bridge;
 	u32 fid;
 	u32 prev_fid;
+	bool no_vblank_irq;
 };
 
 /*
@@ -362,23 +364,34 @@ static inline struct xlnx_pl_disp *drm_crtc_to_dma(struct drm_crtc *crtc)
 static void xlnx_pl_disp_crtc_atomic_begin(struct drm_crtc *crtc,
 					   struct drm_crtc_state *old_state)
 {
+	struct xlnx_pl_disp *xlnx_pl_disp = drm_crtc_to_dma(crtc);
+	struct drm_pending_vblank_event *event = crtc->state->event;
+
 	drm_crtc_vblank_on(crtc);
-	spin_lock_irq(&crtc->dev->event_lock);
-	if (crtc->state->event) {
-		/* Consume the flip_done event from atomic helper */
-		crtc->state->event->pipe = drm_crtc_index(crtc);
-		WARN_ON(drm_crtc_vblank_get(crtc) != 0);
-		drm_crtc_arm_vblank_event(crtc, crtc->state->event);
+	if (event) {
 		crtc->state->event = NULL;
+		spin_lock_irq(&crtc->dev->event_lock);
+		if (xlnx_pl_disp->no_vblank_irq) {
+			drm_crtc_send_vblank_event(crtc, event);
+		} else {
+			/* Consume the flip_done event from atomic helper */
+			event->pipe = drm_crtc_index(crtc);
+			WARN_ON(drm_crtc_vblank_get(crtc) != 0);
+			drm_crtc_arm_vblank_event(crtc, event);
+		}
+		spin_unlock_irq(&crtc->dev->event_lock);
 	}
-	spin_unlock_irq(&crtc->dev->event_lock);
 }
 
 static void xlnx_pl_disp_clear_event(struct drm_crtc *crtc)
 {
-	if (crtc->state->event) {
-		complete_all(crtc->state->event->base.completion);
+	struct drm_pending_vblank_event *event = crtc->state->event;
+
+	if (event) {
 		crtc->state->event = NULL;
+		spin_lock_irq(&crtc->dev->event_lock);
+		drm_crtc_send_vblank_event(crtc, event);
+		spin_unlock_irq(&crtc->dev->event_lock);
 	}
 }
 
@@ -580,6 +593,10 @@ static int xlnx_pl_disp_probe(struct platform_device *pdev)
 	}
 
 	xlnx_pl_disp->dev = dev;
+	xlnx_pl_disp->no_vblank_irq =
+		of_property_read_bool(dev->of_node, "xlnx,no-vblank-irq");
+	if (xlnx_pl_disp->no_vblank_irq)
+		dev_info(dev, "atomic flip completion uses the no-vblank-irq contract\n");
 	platform_set_drvdata(pdev, xlnx_pl_disp);
 
 	ret = component_add(dev, &xlnx_pl_disp_component_ops);

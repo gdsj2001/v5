@@ -202,7 +202,7 @@ def require_tokens(source_root, relative, required, forbidden=()):
             fail("PetaLinux source contains retired token %r: %s" % (token, relative))
 
 
-def validate_contract(source_root):
+def validate_contract(project_root, source_root):
     require_tokens(
         source_root,
         "project-spec/configs/config",
@@ -249,7 +249,7 @@ def validate_contract(source_root):
             "linux/realtime/v5_realtime_source_identity.json:True",
             "board/tools/petalinux/project_v5_linux_source.py:True",
             "board/tools/petalinux/verify_v5_linux_source.py:True",
-            "addtask v5_linux_projection after do_unpack before do_symlink_kernsrc",
+            "addtask v5_linux_projection after do_kernel_checkout before do_kernel_metadata do_symlink_kernsrc",
             "project_v5_linux_source.py",
         ),
         (
@@ -263,14 +263,29 @@ def validate_contract(source_root):
         ),
     )
     require_tokens(
+        project_root,
+        "board/tools/petalinux/project_v5_linux_source.py",
+        (
+            "def initialize_kernel_git(output_root):",
+            'environment.pop(name, None)',
+            '["git", "init", "-q"]',
+            'if not clean_after:',
+            'initialize_kernel_git(output_root)',
+            'V5_LINUX_KERNEL_BUILD_GIT_OK',
+        ),
+    )
+    require_tokens(
         source_root,
         "project-spec/meta-user/recipes-bsp/u-boot/u-boot-zynq-scr/boot.cmd.default.ext4",
         (
             "root=/dev/mmcblk0p2 rw rootwait",
+            "root=/dev/mmcblk1p1 rw rootwait",
+            "v5.recovery=qspi",
             "uio_pdrv_genirq.of_id=generic-uio",
             "v5_dna_check",
-            "V5 PL DNA reader verified, booting FIT",
-            "V5 PL DNA reader unavailable, refusing FIT boot",
+            'test "${modeboot}" = "qspiboot"',
+            "V5 QSPI recovery FIT verified, booting eMMC recovery rootfs",
+            "V5 SD FIT verified, booting product rootfs",
         ),
         (
             "root=/dev/ram0",
@@ -281,6 +296,23 @@ def validate_contract(source_root):
             "v5,pl-dna",
             "injecting live FDT chosen fields",
             "falling back to normal FIT boot",
+        ),
+    )
+    require_tokens(
+        source_root,
+        "project-spec/meta-user/recipes-bsp/device-tree/files/system-top.dts",
+        (
+            "partition@0xFC0000",
+            'label = "boot.scr"',
+            "reg = <0xfc0000 0x40000>",
+            "partition@0x1000000",
+            'label = "image.ub"',
+            "reg = <0x1000000 0xf00000>",
+            "xlnx,no-vblank-irq",
+        ),
+        (
+            "partition@0xD20000",
+            "reg = <0x620000 0x700000>",
         ),
     )
     require_tokens(
@@ -370,7 +402,7 @@ def main():
     validate_layout(source_root, entries)
     validate_text_boundaries(source_root, entries)
     validate_recipe_inputs(source_root)
-    validate_contract(source_root)
+    validate_contract(project_root, source_root)
     actual_hash = validate_identity(source_root, identity, entries, args.print_source_hash)
     if not args.print_source_hash:
         print(

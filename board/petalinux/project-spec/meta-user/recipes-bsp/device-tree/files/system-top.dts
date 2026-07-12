@@ -207,13 +207,12 @@
 			phandle = <0x2c>;
 
 			edt-ft5x06@38 {
-				compatible = "edt,edt-ft5426";
+				compatible = "focaltech,ft5426", "edt,edt-ft5406";
 				status = "okay";
 				reg = <0x38>;
 				interrupt-parent = <0x9>;
 				interrupts = <0x3a 0x2>;
-				reset-gpio = <0x9 0x3b 0x1>;
-				interrupt-gpio = <0x9 0x3a 0x1>;
+				reset-gpios = <0x9 0x3b 0x1>;
 				touchscreen-size-x = <0x400>;
 				touchscreen-size-y = <0x258>;
 			};
@@ -347,18 +346,24 @@
 				};
 
 				partition@0x620000 {
-					label = "image.ub";
-					reg = <0x620000 0x700000>;
+					label = "reserved";
+					reg = <0x620000 0x9a0000>;
+					read-only;
 				};
 
-				partition@0xD20000 {
+				partition@0xFC0000 {
 					label = "boot.scr";
-					reg = <0xd20000 0x20000>;
+					reg = <0xfc0000 0x40000>;
 				};
 
-				partition@0xD40000 {
+				partition@0x1000000 {
+					label = "image.ub";
+					reg = <0x1000000 0xf00000>;
+				};
+
+				partition@0x1F00000 {
 					label = "space";
-					reg = <0xd40000 0x0>;
+					reg = <0x1f00000 0x100000>;
 				};
 			};
 		};
@@ -1053,6 +1058,7 @@
 			compatible = "xlnx,pl-disp";
 			dmas = <0x21 0x0>;
 			dma-names = "dma0";
+			xlnx,no-vblank-irq;
 			xlnx,vformat = "BG24";
 			xlnx,bridge = <0x22>;
 

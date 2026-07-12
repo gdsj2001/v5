@@ -43,6 +43,7 @@ enum {
 };
 
 int v5_lvgl_remote_display_setup(unsigned int width, unsigned int height);
+int v5_lvgl_remote_display_claim_physical_framebuffer(void);
 void v5_lvgl_remote_display_render_now(void);
 int v5_lvgl_remote_display_cache_capture(unsigned int slot);
 int v5_lvgl_remote_display_cache_blit(unsigned int slot);

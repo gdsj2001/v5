@@ -37,6 +37,7 @@ runtime_seed	linuxcnc/runtime/var/tool.tbl	/opt/8ax/v5/linuxcnc/var/tool.tbl	064
 runtime_seed	linuxcnc/runtime/var/linuxcnc.var	/opt/8ax/v5/linuxcnc/var/linuxcnc.var	0644
 config	config/hardware/hardware_profile.json	/opt/8ax/v5/config/hardware_profile.json	0644
 config	config/ui/v5_native_operator_error_map.tsv	/opt/8ax/v5/config/ui/v5_native_operator_error_map.tsv	0644
+config	config/safe_ui/re_touch_calibration.json	/opt/8ax/safe_ui/re_touch_calibration.json	0644
 config	config/auth/device_auth_public.pem	/etc/6x-cnc/device_auth_public.pem	0644
 runtime_seed_merge	config/settings/self_parameter_table.tsv	/opt/8ax/v5/config/settings/self_parameter_table.tsv	0644
 runtime_seed	config/settings/drive_parameter_table.tsv	/opt/8ax/v5/config/settings/drive_parameter_table.tsv	0644

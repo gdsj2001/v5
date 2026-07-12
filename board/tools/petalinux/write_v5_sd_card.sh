@@ -5,6 +5,7 @@ source_mount=${VM_SOURCE_MOUNT_ROOT:-/mnt/v5-source}
 build_root=${VM_BUILD_ROOT:-$HOME/v5-build}
 device=
 apply=0
+stage_only=0
 boot_mount=
 root_mount=
 
@@ -14,7 +15,7 @@ fail() {
 }
 
 usage() {
-    echo "usage: $0 --device /dev/<removable-disk> [--apply]" >&2
+    echo "usage: $0 (--device /dev/<removable-disk> [--apply] | --stage-only)" >&2
     exit 2
 }
 
@@ -41,13 +42,21 @@ while [ "$#" -gt 0 ]; do
             apply=1
             shift
             ;;
+        --stage-only)
+            stage_only=1
+            shift
+            ;;
         *)
             usage
             ;;
     esac
 done
 
-[ -n "$device" ] || usage
+if [ "$stage_only" -eq 1 ]; then
+    [ -z "$device" ] && [ "$apply" -eq 0 ] || usage
+else
+    [ -n "$device" ] || usage
+fi
 [ "$(id -u)" -eq 0 ] || fail "root is required"
 
 for command_name in \
@@ -86,26 +95,34 @@ case ",$mount_options," in
     *) fail "source mount is not read-only: $mount_options" ;;
 esac
 
-device=$(readlink -f "$device")
-[ -b "$device" ] || fail "target is not a block device: $device"
-device_name=$(basename "$device")
-[ "$(lsblk -dn -o TYPE "$device" | tr -d ' ')" = "disk" ] || \
-    fail "target must be a whole disk: $device"
-[ -r "/sys/class/block/$device_name/removable" ] || \
-    fail "target has no removable identity: $device"
-[ "$(cat "/sys/class/block/$device_name/removable")" = "1" ] || \
-    fail "target is not removable: $device"
+if [ "$stage_only" -eq 1 ]; then
+    device=stage-only
+    device_bytes=0
+    removable=not-applicable
+    device_model=staged-payload
+    device_vendor=not-applicable
+else
+    device=$(readlink -f "$device")
+    [ -b "$device" ] || fail "target is not a block device: $device"
+    device_name=$(basename "$device")
+    [ "$(lsblk -dn -o TYPE "$device" | tr -d ' ')" = "disk" ] || \
+        fail "target must be a whole disk: $device"
+    [ -r "/sys/class/block/$device_name/removable" ] || \
+        fail "target has no removable identity: $device"
+    [ "$(cat "/sys/class/block/$device_name/removable")" = "1" ] || \
+        fail "target is not removable: $device"
 
-root_source=$(findmnt -n -o SOURCE /)
-root_parent=$(lsblk -no PKNAME "$root_source" 2>/dev/null | head -n 1)
-[ -n "$root_parent" ] || root_parent=$(basename "$root_source")
-[ "$device_name" != "$root_parent" ] || fail "target is the VM system disk: $device"
+    root_source=$(findmnt -n -o SOURCE /)
+    root_parent=$(lsblk -no PKNAME "$root_source" 2>/dev/null | head -n 1)
+    [ -n "$root_parent" ] || root_parent=$(basename "$root_source")
+    [ "$device_name" != "$root_parent" ] || fail "target is the VM system disk: $device"
 
-device_bytes=$(blockdev --getsize64 "$device")
-[ "$device_bytes" -ge 8589934592 ] || fail "target is smaller than 8 GiB: $device_bytes"
-removable=$(cat "/sys/class/block/$device_name/removable")
-device_model=$(tr -d '\n' <"/sys/class/block/$device_name/device/model" 2>/dev/null || true)
-device_vendor=$(tr -d '\n' <"/sys/class/block/$device_name/device/vendor" 2>/dev/null || true)
+    device_bytes=$(blockdev --getsize64 "$device")
+    [ "$device_bytes" -ge 8589934592 ] || fail "target is smaller than 8 GiB: $device_bytes"
+    removable=$(cat "/sys/class/block/$device_name/removable")
+    device_model=$(tr -d '\n' <"/sys/class/block/$device_name/device/model" 2>/dev/null || true)
+    device_vendor=$(tr -d '\n' <"/sys/class/block/$device_name/device/vendor" 2>/dev/null || true)
+fi
 
 project_root=$source_mount
 board_root=$project_root/board
@@ -416,6 +433,11 @@ EOF
     cd "$boot_stage"
     sha256sum BOOT.BIN boot.scr image.ub system.dtb v5-rootfs-file-manifest.tsv >>v5-sd-manifest.txt
 )
+
+if [ "$stage_only" -eq 1 ]; then
+    echo "V5_SD_PAYLOAD_STAGE_OK boot=$boot_stage rootfs=$rootfs_stage"
+    exit 0
+fi
 
 if [ "$apply" -ne 1 ]; then
     echo "V5_SD_CARD_DRY_RUN_OK device=$device bytes=$device_bytes model=$device_model"

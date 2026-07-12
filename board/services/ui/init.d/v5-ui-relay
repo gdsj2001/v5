@@ -24,6 +24,11 @@ PROFILE_SNAPSHOT=/usr/libexec/8ax/drive_profile/v5_drive_profile_resident_snapsh
 LINUXCNCRSH_PORT=${V5_LINUXCNCRSH_PORT:-5007}
 LINUXCNCRSH_CONNECTPW=${V5_LINUXCNCRSH_CONNECTPW:-EMC}
 
+boot_stage() {
+  stage="$1"
+  awk -v stage="$stage" '{printf "V5_BOOT_STAGE stage=%s uptime_ms=%.0f\n", stage, $1 * 1000}' /proc/uptime >>"$LOGFILE"
+}
+
 read_pidfile() {
   file="$1"
   [ -r "$file" ] || return 1
@@ -289,12 +294,15 @@ start_service() {
   stop_stale_processes
   : >"$LOGFILE"
   : >"$UI_BOOT_LOG"
+  boot_stage ui_service_start
   rm -f "$UI_READY_PATH" \
     /run/8ax_v5_product_ui/remote_framebuffer.bgra \
     /run/8ax_v5_product_ui/remote_dirty \
     /run/8ax_v5_product_ui/remote_input
   build_profile_snapshot
+  boot_stage profile_snapshot_ready
   wait_boot_inputs_ready
+  boot_stage boot_inputs_ready
   set_non_microkernel_irq_affinity
 
   V5_UI_READY_PATH="$UI_READY_PATH" V5_UI_REMOTE_INPUT="$REMOTE_INPUT" \
@@ -319,10 +327,12 @@ start_service() {
     stop_service >/dev/null 2>&1 || true
     return 1
   fi
+  boot_stage remote_relay_ready
 
   V5_PROJECT_ROOT="$PROJECT_ROOT" V5_UI_REMOTE_INPUT="$REMOTE_INPUT" \
     setsid taskset -c 1 "$UI_DAEMON" --serve >>"$UI_BOOT_LOG" 2>&1 &
   echo "$!" >"$UI_PIDFILE"
+  boot_stage ui_process_spawned
   sleep 0.1
   if ! is_ui_running; then
     echo "v5_ui_shell failed to start" >&2
@@ -349,10 +359,12 @@ start_service() {
     stop_service >/dev/null 2>&1 || true
     return 1
   fi
+  boot_stage ui_ready
   set_non_microkernel_affinity "$(cat "$UI_PIDFILE")"
   set_non_microkernel_affinity "$(cat "$PIDFILE")"
   set_non_microkernel_irq_affinity
   ensure_machine_on_after_microkernel_ready
+  boot_stage machine_on_ready
   echo "v5_ui_relay started relay_pid=$(cat "$PIDFILE") ui_pid=$(cat "$UI_PIDFILE") port=$PORT bind=$REMOTE_BIND allow_cidrs=$REMOTE_ALLOW_CIDRS remote_input=$REMOTE_INPUT project_root=$PROJECT_ROOT ready=$UI_READY_PATH"
   return 0
 }

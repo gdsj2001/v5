@@ -55,4 +55,4 @@ FILES_${PN} += " \
     ${sysconfdir}/6x-cnc/vps_endpoints.json \
 "
 
-RDEPENDS_${PN} += "dropbear wpa-supplicant wpa-supplicant-cli"
+RDEPENDS_${PN} += "dropbear wpa-supplicant wpa-supplicant-cli python3-typing e2fsprogs-resize2fs"

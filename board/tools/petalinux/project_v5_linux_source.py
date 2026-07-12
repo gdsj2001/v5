@@ -98,6 +98,52 @@ def verify_projection(output_root, print_hashes=False):
     return hashes
 
 
+def initialize_kernel_git(output_root):
+    kernel_root = output_root / "linux/kernel"
+    environment = os.environ.copy()
+    for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+        environment.pop(name, None)
+    environment["GIT_OPTIONAL_LOCKS"] = "0"
+    commands = (
+        ["git", "init", "-q"],
+        ["git", "symbolic-ref", "HEAD", "refs/heads/master"],
+        ["git", "add", "-A"],
+        [
+            "git",
+            "-c",
+            "user.name=V5 Build Projection",
+            "-c",
+            "user.email=v5-build-projection@invalid",
+            "commit",
+            "-q",
+            "-m",
+            "V5 canonical kernel projection",
+        ],
+    )
+    for command in commands:
+        try:
+            subprocess.run(
+                command,
+                cwd=str(kernel_root),
+                env=environment,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            detail = exc.stderr.decode("utf-8", errors="replace").strip()
+            fail("failed to initialize projected kernel Git metadata: %s" % detail)
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=str(kernel_root),
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    ).stdout.decode("ascii").strip()
+    print("V5_LINUX_KERNEL_BUILD_GIT_OK head=%s" % head)
+
+
 def project_and_verify(
     project_root, build_root, output_root, clean_after=False, print_hashes=False
 ):
@@ -132,6 +178,8 @@ def project_and_verify(
         for owner in contract.OWNERS:
             owner_overrides(project_root, output_root, owner)
         hashes = verify_projection(output_root, print_hashes=print_hashes)
+        if not clean_after:
+            initialize_kernel_git(output_root)
     except Exception:
         shutil.rmtree(output_root, ignore_errors=True)
         raise

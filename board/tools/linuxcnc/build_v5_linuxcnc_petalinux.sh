@@ -179,6 +179,7 @@ chown "$build_user":"$(id -gn "$build_user")" \
 mount -t overlay overlay \
     -o "lowerdir=$source_root,upperdir=$overlay_upper,workdir=$overlay_work" \
     "$overlay_merged"
+chown "$build_user":"$(id -gn "$build_user")" "$overlay_merged"
 python3 "$script_dir/verify_v5_linuxcnc_source.py" \
     --project-root "$project_root" \
     --source-root "$source_root" \

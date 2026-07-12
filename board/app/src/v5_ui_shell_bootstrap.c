@@ -118,6 +118,10 @@ static int v5_ui_shell_bootstrap_common(
                     V5_UI_CACHE_BOOT_WORKER_ID);
             return 1;
         }
+        if (!v5_lvgl_remote_display_claim_physical_framebuffer()) {
+            fprintf(stderr, "V5_UI_BOOT event=fail stage=physical_framebuffer_claim\n");
+            return 1;
+        }
         (void)v5_lvgl_remote_display_set_output_suppressed(0);
         if (!v5_lvgl_remote_display_cache_blit(V5_REMOTE_DISPLAY_CACHE_MAIN)) {
             return 1;
@@ -129,7 +133,10 @@ static int v5_ui_shell_bootstrap_common(
             return 1;
         }
         (void)v5_lvgl_remote_input_setup();
-        (void)v5_lvgl_touch_input_setup();
+        if (!v5_lvgl_touch_input_setup()) {
+            fprintf(stderr, "V5_UI_BOOT event=fail stage=touch_input_registration\n");
+            return 1;
+        }
     } else {
         shell_show_page_objects(V5_SHELL_PAGE_MAIN);
         main_page_applied = main_page_created

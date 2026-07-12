@@ -4,10 +4,12 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <linux/kd.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -47,6 +49,7 @@ static size_t g_remote_fb_size;
 static int g_remote_dirty_fd = -1;
 static unsigned long long g_frame_id;
 static int g_output_suppressed = 1;
+static int g_physical_framebuffer_claimed;
 
 static int read_u32_file(const char *path, unsigned int *out)
 {
@@ -353,6 +356,31 @@ int v5_lvgl_remote_display_setup(unsigned int width, unsigned int height)
         return 0;
     }
     g_display_ready = 1;
+    return 1;
+}
+
+int v5_lvgl_remote_display_claim_physical_framebuffer(void)
+{
+    int tty_fd;
+    if (!g_fb || g_fb_fd < 0) {
+        return 1;
+    }
+    if (g_physical_framebuffer_claimed) {
+        return 1;
+    }
+    tty_fd = open("/dev/tty0", O_RDWR | O_CLOEXEC);
+    if (tty_fd < 0) {
+        fprintf(stderr, "v5 physical framebuffer claim failed: open /dev/tty0\n");
+        return 0;
+    }
+    if (ioctl(tty_fd, KDSETMODE, KD_GRAPHICS) != 0) {
+        fprintf(stderr, "v5 physical framebuffer claim failed: KDSETMODE KD_GRAPHICS\n");
+        close(tty_fd);
+        return 0;
+    }
+    close(tty_fd);
+    g_physical_framebuffer_claimed = 1;
+    fprintf(stderr, "v5 physical framebuffer claimed at formal first-frame boundary\n");
     return 1;
 }
 

@@ -1,0 +1,62 @@
+105:	struct drm_device *drm = xlnx_pl_disp->drm;
+122:	return xlnx_pl_disp->fmt;
+137:	return 1 << xlnx_pl_disp->chan->dma_chan->device->copy_align;
+157:	struct xlnx_dma_chan *xlnx_dma_chan = xlnx_pl_disp->chan;
+173:	struct xlnx_dma_chan *xlnx_dma_chan = xlnx_pl_disp->chan;
+180:		dev_err(xlnx_pl_disp->dev,
+184:	desc->callback = xlnx_pl_disp->callback;
+185:	desc->callback_param = xlnx_pl_disp->callback_param;
+196:			xlnx_pl_disp->fid = 0;
+199:			xlnx_pl_disp->fid = 1;
+206:			xlnx_pl_disp->fid = !xlnx_pl_disp->prev_fid;
+209:		if (xlnx_pl_disp->fid == xlnx_pl_disp->prev_fid) {
+215:				    xlnx_pl_disp->fid);
+216:		xlnx_pl_disp->prev_fid = xlnx_pl_disp->fid;
+240:	struct xlnx_dma_chan *xlnx_dma_chan = xlnx_pl_disp->chan;
+243:		dev_err(xlnx_pl_disp->dev, "Color format not supported\n");
+248:		dev_err(xlnx_pl_disp->dev, "failed to get luma paddr\n");
+252:	dev_dbg(xlnx_pl_disp->dev, "num planes = %d\n", info->num_planes);
+270:			dev_err(xlnx_pl_disp->dev,
+301:		dev_err(xlnx_pl_disp->dev, "failed to mode set a plane\n");
+305:	xilinx_xdma_drm_config(xlnx_pl_disp->chan->dma_chan,
+306:			       xlnx_pl_disp->plane.state->fb->format->format);
+372:		if (xlnx_pl_disp->no_vblank_irq) {
+402:	if (xlnx_pl_disp->vtc_bridge) {
+405:		xlnx_bridge_set_timing(xlnx_pl_disp->vtc_bridge, &vm);
+406:		xlnx_bridge_enable(xlnx_pl_disp->vtc_bridge);
+426:	xlnx_bridge_disable(xlnx_pl_disp->vtc_bridge);
+429:	xlnx_pl_disp->prev_fid = 1;
+461:	xlnx_pl_disp->callback = xlnx_pl_disp_complete;
+462:	xlnx_pl_disp->callback_param = xlnx_pl_disp;
+472:	xlnx_pl_disp->callback = NULL;
+473:	xlnx_pl_disp->callback_param = NULL;
+497:	xilinx_xdma_get_drm_vid_fmts(xlnx_pl_disp->chan->dma_chan,
+499:	ret = drm_universal_plane_init(drm, &xlnx_pl_disp->plane, 0,
+501:				       fmts ? fmts : &xlnx_pl_disp->fmt,
+507:	drm_plane_helper_add(&xlnx_pl_disp->plane,
+510:	ret = drm_crtc_init_with_planes(drm, &xlnx_pl_disp->xlnx_crtc.crtc,
+511:					&xlnx_pl_disp->plane, NULL,
+514:		drm_plane_cleanup(&xlnx_pl_disp->plane);
+518:	drm_crtc_helper_add(&xlnx_pl_disp->xlnx_crtc.crtc,
+520:	xlnx_pl_disp->xlnx_crtc.get_format = &xlnx_pl_disp_get_format;
+521:	xlnx_pl_disp->xlnx_crtc.get_align = &xlnx_pl_disp_get_align;
+522:	xlnx_pl_disp->drm = drm;
+523:	xlnx_crtc_register(xlnx_pl_disp->drm, &xlnx_pl_disp->xlnx_crtc);
+533:	xlnx_crtc_unregister(xlnx_pl_disp->drm, &xlnx_pl_disp->xlnx_crtc);
+534:	drm_plane_cleanup(&xlnx_pl_disp->plane);
+535:	drm_crtc_cleanup(&xlnx_pl_disp->xlnx_crtc.crtc);
+568:	xlnx_pl_disp->chan = xlnx_dma_chan;
+575:	strcpy((char *)&xlnx_pl_disp->fmt, vformat);
+580:		xlnx_pl_disp->vtc_bridge = of_xlnx_bridge_get(vtc_node);
+581:		if (!xlnx_pl_disp->vtc_bridge) {
+590:	xlnx_pl_disp->dev = dev;
+591:	xlnx_pl_disp->no_vblank_irq =
+593:	if (xlnx_pl_disp->no_vblank_irq)
+601:	xlnx_pl_disp->master = xlnx_drm_pipeline_init(pdev);
+602:	if (IS_ERR(xlnx_pl_disp->master)) {
+603:		ret = PTR_ERR(xlnx_pl_disp->master);
+609:	xlnx_pl_disp->prev_fid = 1;
+618:	dma_release_channel(xlnx_pl_disp->chan->dma_chan);
+626:	struct xlnx_dma_chan *xlnx_dma_chan = xlnx_pl_disp->chan;
+628:	of_xlnx_bridge_put(xlnx_pl_disp->vtc_bridge);
+629:	xlnx_drm_pipeline_exit(xlnx_pl_disp->master);
