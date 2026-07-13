@@ -1,9 +1,14 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
 
 V5_PROJECT_SOURCE_ROOT ?= ""
+V5_VM_BUILD_ROOT ?= "${@os.path.normpath(os.path.join(d.getVar('TMPDIR'), '..', '..', '..'))}"
+V5_SOURCE_PROJECTION_ROOT ?= "${V5_VM_BUILD_ROOT}/temp_source/current"
+V5_LINUX_BUILD_DIR ?= "${V5_VM_BUILD_ROOT}/linux"
+PARALLEL_MAKE = "-j ${@oe.utils.cpu_count()}"
 KERNELURI = "file://v5-linux-source.marker;name=machine"
 YOCTO_META = "file://v5-realtime-source.marker;type=kmeta;name=meta;destsuffix=v5-owner-projection/linux/realtime"
 S = "${WORKDIR}/v5-owner-projection/linux/kernel"
+B = "${V5_LINUX_BUILD_DIR}"
 KBRANCH = "master"
 SRCREV_machine = "AUTOINC"
 SRCREV_meta = "AUTOINC"
@@ -32,8 +37,12 @@ do_v5_linux_projection() {
         bbfatal "canonical realtime metadata owner is unavailable"
     python3 ${V5_PROJECT_SOURCE_ROOT}/board/tools/petalinux/project_v5_linux_source.py \
         --project-root ${V5_PROJECT_SOURCE_ROOT} \
-        --build-root ${WORKDIR} \
-        --output-root ${WORKDIR}/v5-owner-projection
+        --build-root ${V5_VM_BUILD_ROOT} \
+        --output-root ${V5_SOURCE_PROJECTION_ROOT}
+    [ ! -e "${WORKDIR}/v5-owner-projection" ] || \
+        bbfatal "BitBake work projection was not cleared by do_unpack"
+    cp -a --reflink=auto ${V5_SOURCE_PROJECTION_ROOT}/. \
+        ${WORKDIR}/v5-owner-projection/
 }
 do_v5_linux_projection[dirs] = "${WORKDIR}"
 do_v5_linux_projection[file-checksums] = " \

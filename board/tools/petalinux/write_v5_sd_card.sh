@@ -198,7 +198,7 @@ set(CMAKE_C_FLAGS_INIT "-mcpu=cortex-a9 -mfpu=neon -mfloat-abi=hard -mthumb")
 set(CMAKE_CXX_FLAGS_INIT "-mcpu=cortex-a9 -mfpu=neon -mfloat-abi=hard -mthumb")
 EOF
 
-rm -rf "$arm_build"
+install -d "$arm_build"
 python3 "$product_closure_verify" \
     --board-root "$board_root" \
     --build-dir "$arm_build" \

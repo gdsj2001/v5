@@ -34,7 +34,7 @@ def fail(message):
     raise SystemExit(message)
 
 
-def source_entries(source_root, identity_name):
+def source_entries(source_root, identity_name, allow_build_git=False):
     entries = []
     for current, dirs, files in os.walk(source_root, followlinks=False):
         current_path = Path(current)
@@ -47,7 +47,10 @@ def source_entries(source_root, identity_name):
                 dirs.remove(name)
                 entries.append(path)
             elif name == ".git":
-                fail("nested Git owner is forbidden: %s" % path)
+                if allow_build_git:
+                    dirs.remove(name)
+                else:
+                    fail("nested Git owner is forbidden: %s" % path)
         for name in files:
             path = current_path / name
             if name == identity_name or ".git" in path.parts:
@@ -126,7 +129,7 @@ def validate_rt_contract(source_root):
             fail("missing registered Xilinx RT adaptation: %s" % relative)
 
 
-def verify_owner(project_root, owner, print_hashes):
+def verify_owner(project_root, owner, print_hashes, allow_build_git=False):
     source_root = project_root / owner["relative"]
     if not source_root.is_dir():
         fail("missing Linux source owner: %s" % source_root)
@@ -134,7 +137,9 @@ def verify_owner(project_root, owner, print_hashes):
     for relative in owner["required"]:
         if not (source_root / relative).is_file():
             fail("missing Linux source input: %s/%s" % (owner["relative"], relative))
-    entries = source_entries(source_root, owner["identity"])
+    entries = source_entries(
+        source_root, owner["identity"], allow_build_git=allow_build_git
+    )
     actual_hash, symlink_count = source_content_hash(source_root, entries)
     if not print_hashes:
         expected = (

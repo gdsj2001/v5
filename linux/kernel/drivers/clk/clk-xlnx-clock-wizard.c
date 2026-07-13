@@ -250,7 +250,7 @@ static unsigned long clk_wzrd_recalc_ratef(struct clk_hw *hw,
 					   unsigned long parent_rate)
 {
 	unsigned int val;
-	u32 div, frac;
+	u32 div, frac, divisor;
 	struct clk_wzrd_divider *divider = to_clk_wzrd_divider(hw);
 	void __iomem *div_addr =
 			(void __iomem *)((u64)divider->base + divider->offset);
@@ -258,8 +258,12 @@ static unsigned long clk_wzrd_recalc_ratef(struct clk_hw *hw,
 	val = readl(div_addr);
 	div = val & div_mask(divider->width);
 	frac = (val >> WZRD_CLKOUT_FRAC_SHIFT) & WZRD_CLKOUT_FRAC_MASK;
+	divisor = div * 1000U + frac;
+	if (!divisor)
+		return 0;
 
-	return ((parent_rate * 1000) / ((div * 1000) + frac));
+	return DIV_ROUND_DOWN_ULL((u64)parent_rate * 1000ULL,
+				  divisor);
 }
 
 static int clk_wzrd_dynamic_reconfig_f(struct clk_hw *hw, unsigned long rate,
@@ -273,6 +277,9 @@ static int clk_wzrd_dynamic_reconfig_f(struct clk_hw *hw, unsigned long rate,
 	struct clk_wzrd_divider *divider = to_clk_wzrd_divider(hw);
 	void __iomem *div_addr =
 			(void __iomem *)((u64)divider->base + divider->offset);
+
+	if (!rate || !parent_rate)
+		return -EINVAL;
 
 	if (divider->lock)
 		spin_lock_irqsave(divider->lock, flags);
@@ -288,6 +295,8 @@ static int clk_wzrd_dynamic_reconfig_f(struct clk_hw *hw, unsigned long rate,
 
 	value = ((f << WZRD_CLKOUT_DIVIDE_WIDTH) | (clockout0_div &
 			WZRD_CLKOUT_DIVIDE_MASK));
+	if (f)
+		value |= WZRD_CLKOUT0_FRAC_EN;
 
 	/* Set divisor and clear phase offset */
 	writel(value, div_addr);
@@ -359,9 +368,10 @@ static unsigned long clk_wzrd_vco_mul_recalc_rate_f(struct clk_hw *hw,
 	clkfbout_frac = (clk_cfg_reg0 & WZRD_CLKFBOUT_FRAC_MASK) >>
 			 WZRD_CLKFBOUT_FRAC_SHIFT;
 
-	rate = parent_rate *
-	       (clkfbout_mult * 1000 + clkfbout_frac) / /* multiplier x1000 */
-	       1000;
+	rate = DIV_ROUND_DOWN_ULL(
+		(u64)parent_rate *
+		(clkfbout_mult * 1000ULL + clkfbout_frac), /* multiplier x1000 */
+		1000);
 
 	return (unsigned long)rate;
 }
@@ -381,8 +391,11 @@ static int clk_wzrd_vco_mul_dynamic_reconfig_f(struct clk_hw *hw,
 						 struct clk_wzrd,
 						 vco_clk_mul_hw);
 
-	/* The 8*125 give the x1000 that is needed */
-	new_mult = (rate * 8 / parent_rate) * 125;
+	if (!rate || !parent_rate)
+		return -EINVAL;
+
+	new_mult = (unsigned int)DIV_ROUND_CLOSEST_ULL(
+		(u64)rate * 1000ULL, parent_rate);
 	new_mult = clamp(new_mult, CLKFBOUT_MULT_F_MIN, CLKFBOUT_MULT_F_MAX);
 
 	clkfbout_mult = new_mult / 1000;
@@ -396,6 +409,8 @@ static int clk_wzrd_vco_mul_dynamic_reconfig_f(struct clk_hw *hw,
 	value = clkfbout_frac << WZRD_CLKFBOUT_FRAC_SHIFT |
 		 clkfbout_mult << WZRD_CLKFBOUT_MULT_SHIFT |
 		 divclk_divide << WZRD_DIVCLK_DIVIDE_SHIFT;
+	if (clkfbout_frac)
+		value |= WZRD_CLKFBOUT_FRAC_EN;
 
 	if (clk_wzrd->lock)
 		spin_lock_irqsave(clk_wzrd->lock, flags);

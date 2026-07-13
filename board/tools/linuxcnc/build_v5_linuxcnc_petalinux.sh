@@ -20,6 +20,9 @@ overlay_root="$build_root/linuxcnc-overlay"
 overlay_upper="$overlay_root/upper"
 overlay_work="$overlay_root/work"
 overlay_merged="$overlay_root/merged"
+source_projection_root=${VM_SOURCE_PROJECTION_ROOT:-$build_root/temp_source/current}
+linuxcnc_projection="$source_projection_root/linuxcnc"
+linuxcnc_projection_state="$source_projection_root/.linuxcnc-source-identity"
 recipe_target=""
 artifact_stage=""
 rootfs_gate_marker=""
@@ -46,6 +49,9 @@ fi
 build_root=$(mkdir -p "$build_root" && CDPATH= cd -- "$build_root" && pwd)
 petalinux_root="$build_root/petalinux/overlay/merged"
 downloads_root="$build_root/petalinux/cache/downloads"
+source_projection_root=${VM_SOURCE_PROJECTION_ROOT:-$build_root/temp_source/current}
+linuxcnc_projection="$source_projection_root/linuxcnc"
+linuxcnc_projection_state="$source_projection_root/.linuxcnc-source-identity"
 missing_source_report="$build_root/petalinux/v5-missing-source-inputs.json"
 
 command -v findmnt >/dev/null 2>&1 || {
@@ -180,15 +186,58 @@ recipe_target="$petalinux_root/project-spec/meta-user/recipes-apps/linuxcnc-preb
 mkdir -p "$overlay_upper" "$overlay_work" "$overlay_merged" "$recipe_target/files"
 chown "$build_user":"$(id -gn "$build_user")" \
     "$overlay_root" "$overlay_upper" "$overlay_work" "$overlay_merged"
+command -v rsync >/dev/null 2>&1 || {
+    echo "rsync is required for the persistent LinuxCNC projection" >&2
+    exit 12
+}
+case "$linuxcnc_projection" in
+    "$source_projection_root"/*) ;;
+    *) echo "LinuxCNC projection escaped the unique current projection" >&2; exit 12 ;;
+esac
+[ ! -L "$source_projection_root" ] && [ ! -L "$linuxcnc_projection" ] || {
+    echo "LinuxCNC projection path must not be a symlink" >&2
+    exit 12
+}
+mkdir -p "$source_projection_root" "$linuxcnc_projection"
+source_identity=$(sha256sum "$source_root/v5_linuxcnc_source_identity.json" | awk '{print $1}')
+source_hash=$(python3 "$script_dir/verify_v5_linuxcnc_source.py" \
+    --project-root "$project_root" \
+    --source-root "$source_root" \
+    --allow-flattened-symlinks \
+    --print-source-hash)
+source_projection_key="$source_identity:$source_hash"
+projected_identity=
+[ ! -f "$linuxcnc_projection_state" ] || projected_identity=$(cat "$linuxcnc_projection_state")
+if [ "$projected_identity" = "$source_projection_key" ] && \
+   [ -f "$linuxcnc_projection/v5_linuxcnc_source_identity.json" ]; then
+    echo "V5_LINUXCNC_PROJECTION_REUSED identity=$source_identity content=$source_hash"
+else
+    rsync -a --checksum --delete --exclude '.git/' \
+        "$source_root/" "$linuxcnc_projection/"
+    python3 "$script_dir/verify_v5_linuxcnc_source.py" \
+        --project-root "$project_root" \
+        --source-root "$source_root" \
+        --allow-flattened-symlinks \
+        --materialize-symlinks "$linuxcnc_projection" >/dev/null
+    projected_hash=$(python3 "$script_dir/verify_v5_linuxcnc_source.py" \
+        --project-root "$project_root" \
+        --source-root "$linuxcnc_projection" \
+        --print-source-hash)
+    [ "$projected_hash" = "$source_hash" ] || {
+        echo "LinuxCNC projection hash mismatch: $projected_hash != $source_hash" >&2
+        exit 12
+    }
+    printf '%s\n' "$source_projection_key" >"$linuxcnc_projection_state.new"
+    mv "$linuxcnc_projection_state.new" "$linuxcnc_projection_state"
+    echo "V5_LINUXCNC_PROJECTION_UPDATED identity=$source_identity content=$projected_hash"
+fi
 mount -t overlay overlay \
-    -o "lowerdir=$source_root,upperdir=$overlay_upper,workdir=$overlay_work" \
+    -o "lowerdir=$linuxcnc_projection,upperdir=$overlay_upper,workdir=$overlay_work" \
     "$overlay_merged"
 chown "$build_user":"$(id -gn "$build_user")" "$overlay_merged"
 python3 "$script_dir/verify_v5_linuxcnc_source.py" \
     --project-root "$project_root" \
-    --source-root "$source_root" \
-    --allow-flattened-symlinks \
-    --materialize-symlinks "$overlay_merged"
+    --source-root "$linuxcnc_projection"
 ln -s "$integration_root/yocto/linuxcnc-prebuilt.bb" "$recipe_target/linuxcnc-prebuilt.bb"
 ln -s "$runtime_allowlist" "$recipe_target/files/v5_linuxcnc_runtime_allowlist.tsv"
 

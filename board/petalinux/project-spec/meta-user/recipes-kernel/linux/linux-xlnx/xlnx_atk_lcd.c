@@ -12,8 +12,10 @@
 #include <linux/pwm.h>
 #include <linux/component.h>
 #include <linux/device.h>
+#include <linux/gpio.h>
 #include <linux/math64.h>
 #include <linux/of_device.h>
+#include <linux/of_gpio.h>
 #include <linux/of_graph.h>
 #include <video/of_display_timing.h>
 #include <video/videomode.h>
@@ -47,6 +49,7 @@ struct atk_dpi {
 
 #define connector_to_dpi(c) container_of(c, struct atk_dpi, connector)
 #define encoder_to_dpi(e) container_of(e, struct atk_dpi, encoder)
+#define ATK_RGB_MSB_GPIO_COUNT 3U
 
 static enum drm_connector_status
 atk_dpi_detect(struct drm_connector *connector, bool force)
@@ -95,6 +98,12 @@ static int lcd_get_modes(struct drm_connector *connector)
 static int lcd_mode_valid(struct drm_connector *connector,
 			       struct drm_display_mode *mode)
 {
+	struct atk_dpi *dpi = connector_to_dpi(connector);
+	u64 requested_rate = (u64)mode->clock * 1000ULL;
+
+	if (!dpi->vm || requested_rate != dpi->vm->pixelclock)
+		return MODE_CLOCK_RANGE;
+
 	return MODE_OK;
 }
 
@@ -108,15 +117,17 @@ static void atk_dpi_mode_set(struct drm_encoder *encoder,
 				struct drm_display_mode *adjusted_mode)
 {
 	struct atk_dpi *dpi = encoder_to_dpi(encoder);
-	long unsigned int pclk_rate;
-	int ret;
+	u64 requested_rate = (u64)mode->clock * 1000ULL;
 
-	pclk_rate =  mode->clock * 1000;
-	ret = clk_set_rate(dpi->pclk,pclk_rate);
-
-	if (ret)
-		DRM_DEV_ERROR(dpi->dev, "failed to set clk rate = %lu\n",
-			pclk_rate);
+	/*
+	 * The Clock Wizard feeds the complete video pipeline. Its product rate is
+	 * configured once in probe, before the DRM component is registered. A
+	 * second dynamic reconfiguration here can desynchronise VTC/DMA/video IP.
+	 */
+	if (!dpi->vm || requested_rate != dpi->vm->pixelclock)
+		DRM_DEV_ERROR(dpi->dev,
+			      "refusing runtime pclk change to %llu Hz\n",
+			      (unsigned long long)requested_rate);
 }
 
 static void atk_dpi_enable(struct drm_encoder *encoder)
@@ -204,6 +215,31 @@ static const struct component_ops atk_dpi_component_ops = {
 	.unbind	= atk_dpi_unbind,
 };
 
+static int atk_dpi_drive_rgb_msb_lanes(struct device *dev)
+{
+	unsigned int i;
+
+	for (i = 0; i < ATK_RGB_MSB_GPIO_COUNT; i++) {
+		int gpio;
+		int ret;
+
+		gpio = of_get_named_gpio(dev->of_node, "rgb-msb-gpios", i);
+		if (!gpio_is_valid(gpio)) {
+			DRM_DEV_ERROR(dev, "invalid RGB-MSB gpio[%u]: %d\n", i, gpio);
+			return gpio < 0 ? gpio : -EINVAL;
+		}
+		ret = devm_gpio_request_one(dev, gpio, GPIOF_OUT_INIT_LOW,
+					    "lcd rgb msb");
+		if (ret) {
+			DRM_DEV_ERROR(dev, "failed to drive RGB-MSB gpio[%u] low: %d\n",
+				      i, ret);
+			return ret;
+		}
+	}
+
+	return 0;
+}
+
 static int atkencoder_init_dt(struct atk_dpi *dpi)
 {
 	struct device *dev = dpi->dev;
@@ -251,6 +287,9 @@ static int atk_dpi_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	dpi->dev = dev;
+	ret = atk_dpi_drive_rgb_msb_lanes(dev);
+	if (ret)
+		return ret;
 
 	dpi->pclk = devm_clk_get(dev, "lcd_pclk");
 	if (IS_ERR(dpi->pclk)) {

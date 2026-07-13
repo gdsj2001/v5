@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import argparse
+import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -7,6 +9,10 @@ import tempfile
 from pathlib import Path
 
 import verify_v5_linux_source as contract
+
+
+STATE_NAME = ".v5-projection-state.json"
+STATE_SCHEMA = "v5-linux-projection-state-v1"
 
 
 def fail(message):
@@ -101,6 +107,130 @@ def copy_override(source, destination):
         fail("registered source override is unavailable: %s" % source)
 
 
+def source_signature(path):
+    if path.is_symlink():
+        return "symlink:%s" % os.readlink(path)
+    if not path.is_file():
+        fail("registered projection source is unavailable: %s" % path)
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return "file:%o:%s" % (path.stat().st_mode & 0o777, digest.hexdigest())
+
+
+def registered_overrides(project_root):
+    overrides = {}
+    for owner in contract.OWNERS:
+        source_root = project_root / owner["relative"]
+        identity = contract.load_identity(source_root, owner)
+        relative_paths = identity.get("working_tree_overrides")
+        if not isinstance(relative_paths, list) or len(relative_paths) != len(set(relative_paths)):
+            fail("invalid working_tree_overrides: %s" % owner["relative"])
+        relative_paths = list(relative_paths) + [owner["identity"]]
+        for relative in relative_paths:
+            path = Path(relative)
+            if path.is_absolute() or ".." in path.parts:
+                fail("source override escaped its owner: %s" % relative)
+            projected = (Path(owner["relative"]) / path).as_posix()
+            source = source_root / path
+            overrides[projected] = (source, "owner:%s" % source_signature(source))
+    return overrides
+
+
+def indexed_projection_entries(project_root, index_path):
+    records = git_command(
+        project_root,
+        index_path,
+        ["ls-files", "-s", "-z", "--", "linux/kernel", "linux/realtime"],
+    ).stdout
+    entries = {}
+    encoded_paths = {}
+    for record in nul_records(records):
+        metadata, encoded_path = record.split(b"\t", 1)
+        mode, object_id, stage = metadata.split(b" ", 2)
+        if stage != b"0":
+            fail("unmerged source index entry: %s" % encoded_path.decode("utf-8", errors="replace"))
+        try:
+            path = encoded_path.decode("utf-8")
+        except UnicodeDecodeError:
+            fail("non-UTF-8 source path is unsupported")
+        entries[path] = "git:%s:%s" % (mode.decode("ascii"), object_id.decode("ascii"))
+        encoded_paths[path] = encoded_path
+    return entries, encoded_paths
+
+
+def load_projection_state(output_root):
+    state_path = output_root / STATE_NAME
+    if not state_path.is_file():
+        return None
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        fail("invalid projection state %s: %s" % (state_path, exc))
+    entries = state.get("entries")
+    if state.get("schema") != STATE_SCHEMA or not isinstance(entries, dict):
+        fail("invalid projection state schema: %s" % state_path)
+    if any(not isinstance(path, str) or not isinstance(value, str) for path, value in entries.items()):
+        fail("invalid projection state entries: %s" % state_path)
+    return entries
+
+
+def write_projection_state(output_root, entries):
+    state_path = output_root / STATE_NAME
+    temporary = state_path.with_name(state_path.name + ".new")
+    temporary.write_text(
+        json.dumps({"schema": STATE_SCHEMA, "entries": entries}, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    os.replace(str(temporary), str(state_path))
+
+
+def projected_path_exists(path):
+    return path.is_symlink() or path.exists()
+
+
+def remove_projected_path(path):
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    elif path.is_dir():
+        shutil.rmtree(path)
+
+
+def apply_projection_delta(
+    project_root, index_path, output_root, desired_entries, encoded_paths, overrides, previous_entries
+):
+    previous_entries = previous_entries or {}
+    removed = sorted(set(previous_entries) - set(desired_entries), key=lambda item: item.count("/"), reverse=True)
+    changed = {
+        path
+        for path, signature in desired_entries.items()
+        if previous_entries.get(path) != signature
+        or not projected_path_exists(output_root / Path(path))
+    }
+    for relative in removed:
+        remove_projected_path(output_root / Path(relative))
+    indexed_changed = sorted(changed - set(overrides))
+    for relative in indexed_changed:
+        remove_projected_path(output_root / Path(relative))
+    if indexed_changed:
+        payload = b"\0".join(encoded_paths[path] for path in indexed_changed) + b"\0"
+        prefix = output_root.as_posix().rstrip("/") + "/"
+        git_command(
+            project_root,
+            index_path,
+            ["checkout-index", "--stdin", "-z", "--force", "--prefix=" + prefix],
+            input_data=payload,
+        )
+    for relative in sorted(changed & set(overrides)):
+        source, unused_signature = overrides[relative]
+        copy_override(source, output_root / Path(relative))
+    print(
+        "V5_LINUX_PROJECTION_DELTA changed=%d removed=%d unchanged=%d"
+        % (len(changed), len(removed), len(desired_entries) - len(changed))
+    )
+
+
 def owner_overrides(project_root, output_root, owner):
     source_root = project_root / owner["relative"]
     identity = contract.load_identity(source_root, owner)
@@ -121,7 +251,9 @@ def owner_overrides(project_root, output_root, owner):
 def verify_projection(output_root, print_hashes=False):
     hashes = {}
     for owner in contract.OWNERS:
-        hashes[owner["relative"]] = contract.verify_owner(output_root, owner, print_hashes)
+        hashes[owner["relative"]] = contract.verify_owner(
+            output_root, owner, print_hashes, allow_build_git=True
+        )
     contract.validate_rt_contract(output_root / "linux/realtime")
     print(
         "V5_LINUX_PROJECTION_OK kernel=%s realtime=%s"
@@ -140,17 +272,6 @@ def initialize_kernel_git(output_root):
         ["git", "init", "-q"],
         ["git", "symbolic-ref", "HEAD", "refs/heads/master"],
         ["git", "add", "-A"],
-        [
-            "git",
-            "-c",
-            "user.name=V5 Build Projection",
-            "-c",
-            "user.email=v5-build-projection@invalid",
-            "commit",
-            "-q",
-            "-m",
-            "V5 canonical kernel projection",
-        ],
     )
     for command in commands:
         try:
@@ -165,6 +286,41 @@ def initialize_kernel_git(output_root):
         except subprocess.CalledProcessError as exc:
             detail = exc.stderr.decode("utf-8", errors="replace").strip()
             fail("failed to initialize projected kernel Git metadata: %s" % detail)
+    head_exists = subprocess.run(
+        ["git", "rev-parse", "--verify", "HEAD"],
+        cwd=str(kernel_root),
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    ).returncode == 0
+    changed = subprocess.run(
+        ["git", "diff", "--cached", "--quiet"],
+        cwd=str(kernel_root),
+        env=environment,
+    ).returncode != 0
+    if not head_exists or changed:
+        try:
+            subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "user.name=V5 Build Projection",
+                    "-c",
+                    "user.email=v5-build-projection@invalid",
+                    "commit",
+                    "-q",
+                    "-m",
+                    "V5 canonical kernel projection",
+                ],
+                cwd=str(kernel_root),
+                env=environment,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            detail = exc.stderr.decode("utf-8", errors="replace").strip()
+            fail("failed to commit projected kernel Git metadata: %s" % detail)
     head = subprocess.run(
         ["git", "rev-parse", "HEAD"],
         cwd=str(kernel_root),
@@ -181,12 +337,9 @@ def project_and_verify(
 ):
     project_root, build_root, output_root = validate_paths(project_root, build_root, output_root)
     output_root.parent.mkdir(parents=True, exist_ok=True)
-    if output_root.exists():
-        shutil.rmtree(output_root)
-    output_root.mkdir(parents=True)
 
     index_file = tempfile.NamedTemporaryFile(
-        prefix="v5-linux-index-", dir=build_root, delete=False
+        prefix="v5-linux-index-", dir=output_root.parent, delete=False
     )
     index_path = Path(index_file.name)
     index_file.close()
@@ -236,28 +389,37 @@ def project_and_verify(
                 "untracked Linux source is outside the canonical Git snapshot: %s"
                 % untracked[0].decode("utf-8", errors="replace")
             )
-        listing = git_command(
-            project_root,
-            index_path,
-            ["ls-files", "-z", "--", "linux/kernel", "linux/realtime"],
-        ).stdout
-        if not listing:
+        indexed_entries, encoded_paths = indexed_projection_entries(project_root, index_path)
+        if not indexed_entries:
             fail("Git index contains no canonical Linux owner files")
-        prefix = output_root.as_posix().rstrip("/") + "/"
-        git_command(
+        overrides = registered_overrides(project_root)
+        desired_entries = dict(indexed_entries)
+        desired_entries.update({path: value[1] for path, value in overrides.items()})
+        previous_entries = None
+        if output_root.exists():
+            previous_entries = load_projection_state(output_root)
+            if previous_entries is None:
+                try:
+                    verify_projection(output_root)
+                    previous_entries = dict(desired_entries)
+                    print("V5_LINUX_PROJECTION_STATE_MIGRATED output=%s" % output_root)
+                except (OSError, ValueError):
+                    shutil.rmtree(output_root)
+                    print("V5_LINUX_PROJECTION_REPAIRED reason=untrusted-state")
+        output_root.mkdir(parents=True, exist_ok=True)
+        apply_projection_delta(
             project_root,
             index_path,
-            ["checkout-index", "--stdin", "-z", "--force", "--prefix=" + prefix],
-            input_data=listing,
+            output_root,
+            desired_entries,
+            encoded_paths,
+            overrides,
+            previous_entries,
         )
-        for owner in contract.OWNERS:
-            owner_overrides(project_root, output_root, owner)
         hashes = verify_projection(output_root, print_hashes=print_hashes)
         if not clean_after:
             initialize_kernel_git(output_root)
-    except Exception:
-        shutil.rmtree(output_root, ignore_errors=True)
-        raise
+        write_projection_state(output_root, desired_entries)
     finally:
         try:
             index_path.unlink()

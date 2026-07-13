@@ -9,7 +9,7 @@ RULE_SOURCE=AGENTS.md
 HIGHEST_RULE_1:
 - Windows 是默认执行主机。能在 Windows 正确完成的 compile/check/codegen/package/manifest/schema/test 步骤必须留在 Windows；VM 只承担 Windows 无法提供所需 Linux ABI、PetaLinux/Yocto、ARM 交叉环境、Linux 内核行为或 vendor 能力的最小步骤。
 - 正式构建输入必须落到 Windows `D:\v5` 的唯一 canonical owner，并有固定 identity/hash/provenance。VM/BitBake 发现缺项时必须输出 inventory 绑定的机器可读报告并停止；只允许 Windows importer 下载报告中已登记、checksum/许可证齐全的包到 canonical owner，复核后再让 VM 只读消费。VM、BitBake、代理、sstate 或构建脚本不得自行联网补下载，未知输入必须 `blocked`。
-- 每份源码只允许 Windows `D:\v5` 内一个持久 owner。VM 只允许 `${VM_BUILD_ROOT}/temp_source/current` 一套由 Windows identity 派生、不可编辑的加速投影；identity 一致可跨任务复用，不一致只刷新这一处。禁止第二投影、VM checkout、手工 patch、反向覆盖 Windows 或把投影当 owner。
+- 每份源码只允许 Windows `D:\v5` 内一个持久 owner。VM 只允许 `${VM_BUILD_ROOT}/temp_source/current` 一套由 Windows identity 派生、不可编辑的加速投影；identity 一致可跨任务复用，不一致只按文件 identity/hash 原地更新新增、修改、删除集合，未变文件必须保持 inode/mtime。禁止因总 identity 变化删除重建整棵投影、全量强制复制、第二投影、VM checkout、手工 patch、反向覆盖 Windows 或把投影当 owner。
 - 日常工作默认 `incremental-current`：Windows focused gate -> 受影响 target/recipe compile/install/package -> 必要 rootfs/manifest -> 一次 current 镜像。缺项补齐后只重跑报告登记的原失败层并保留有效 sstate/tmp/work/stamp；不得未过单包就跑最终镜像，不得无证据清 kernel/sstate/tmp/downloads/fetch stamp。空 build/downloads/sstate 的断网全量构建只用于用户明确要求、发布/灾难恢复里程碑或离线能力重新认证。
 - 只保留一个 mainline、一个实现和一个 owner。确认属于退役/重复/fallback/shadow/bypass 的路径，在真实依赖迁移后同 slice 物理删除；不得改名、disabled、env gate、TODO、测试入口或备份保留。
 
@@ -44,7 +44,8 @@ TASK_ROUTER:
 | 提问/审查/诊断 | 相关 owner/source/运行证据 | 默认不改 | 证据化回答；诊断不自动扩成修复 |
 
 DOC_OWNER_RULES:
-- `功能/` 保存 settled product truth；`功能/需求真源索引.md` 只登记 REQ、owner、路由和跨功能 owner；一个易变需求只能有一个 owner。
+- 项目根目录只允许 `AGENTS.md` 这一份 Markdown；其余 canonical 项目 Markdown 全部放在 `功能/`，活动输入继续放在 `待做工作/`。
+- `功能/` 保存 settled product truth、跨功能架构和项目指导；`功能/需求真源索引.md` 只登记 REQ、owner、路由和跨功能 owner；一个易变需求只能有一个 owner。
 - `AGENTS.md` 只保存每个任务都必须自动加载的执行核，不复制功能字段表、按钮语义、公式、完整错误表或专项验收正文。
 - `待做工作/` 只保存活动输入；需求稳定后必须落入 owner。除非用户明确指定，不把进度、命令输出、截图路径、板端结果或完成摘要写入 human Markdown。
 - 快读卡只保存 `owner_reqs/read_when/truth/forbidden/readback/impact/acceptance/detail_sections` 指针；正文裁决，禁止平行摘要、JSON 规则库或第二真源。
@@ -79,7 +80,7 @@ OFFLINE_FULL_SD:
 
 VM_BUILD_BOUNDARY:
 - `VM_SOURCE_MOUNT_ROOT=/mnt/v5-source` 必须是 Windows owner 的 live read-only mount；`VM_SOURCE_PROJECTION_ROOT=/root/v5-build/temp_source/current` 是唯一派生投影；build output 只能写到 canonical external build directories。
-- 每个 owner identity 一轮只验证一次；源码未变时跨 package/rootfs/image 复用，不重复全树 hash、重投影或 remount。
+- 每个 owner identity 一轮只验证一次；源码未变时跨 package/rootfs/image 复用，不重复全树 hash、重投影或 remount。identity 变化时只同步机器可读差量并保持未变文件 mtime；只有投影缺失/损坏且严格校验失败或明确空缓存离线认证才允许整棵重建。
 - VM 可以保留一套 current image 集合方便普通复核/重写卡；新集合替换旧集合。它是产物副本，不是离线从零证明。
 - VM 不得安装/使用 WSL。VM 长期外网访问能力不算第二源码/构建 owner；允许通过正常虚拟网卡直接联网，直连受限时也允许一套常驻 Linux 代理客户端服务，但代理地址、凭据或订阅不得进入项目源码、recipe、镜像、普通文档或构建配置。
 - VM 外网只用于系统维护、非构建诊断和用户明确要求的普通联网操作。source import、Git/HTTP source acquisition、BitBake fetch、远程 sstate、configure/compile/package/rootfs/image 和离线认证仍禁止借外网补输入；正式构建前清除大小写 proxy 变量并执行 network-disabled gate。
@@ -91,7 +92,7 @@ BOARD_AND_QSPI_BOUNDARY:
 
 ## P0_ARCHITECTURE_KERNEL
 
-ARCH_OWNER=`系统代码架构硬边界守则.md`
+ARCH_OWNER=`功能/系统代码架构硬边界守则.md`
 CONTROL_PATH=UI C -> framed UDS native Command Gate -> LinuxCNC/HAL/EtherCAT/native owner
 STATE_PATH=microkernel/native resident memory/API -> allowed display projection -> typed SHM -> UI
 

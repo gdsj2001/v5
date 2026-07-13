@@ -297,10 +297,30 @@ def validate_contract(project_root, source_root):
             '"--force-remove", "-z", "--stdin"',
             '"--others"',
             '"--exclude-standard"',
+            'STATE_SCHEMA = "v5-linux-projection-state-v1"',
+            "def apply_projection_delta(",
+            "V5_LINUX_PROJECTION_DELTA",
+            "write_projection_state(output_root, desired_entries)",
             'if not clean_after:',
             'initialize_kernel_git(output_root)',
             'V5_LINUX_KERNEL_BUILD_GIT_OK',
         ),
+        (
+            "if output_root.exists():\n        shutil.rmtree(output_root)",
+        ),
+    )
+    require_tokens(
+        project_root,
+        "board/tools/linuxcnc/build_v5_linuxcnc_petalinux.sh",
+        (
+            'source_projection_root=${VM_SOURCE_PROJECTION_ROOT:-$build_root/temp_source/current}',
+            'linuxcnc_projection="$source_projection_root/linuxcnc"',
+            "V5_LINUXCNC_PROJECTION_REUSED",
+            "V5_LINUXCNC_PROJECTION_UPDATED",
+            'rsync -a --checksum --delete',
+            'lowerdir=$linuxcnc_projection',
+        ),
+        ('lowerdir=$source_root',),
     )
     require_tokens(
         source_root,
