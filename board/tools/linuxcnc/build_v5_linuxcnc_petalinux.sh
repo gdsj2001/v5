@@ -15,6 +15,7 @@ petalinux_root="$build_root/petalinux/overlay/merged"
 artifact_dir=${V5_LINUXCNC_ARTIFACT_DIR:-$build_root/board/linuxcnc-native}
 build_user=${V5_PETALINUX_BUILD_USER:-}
 downloads_root="$build_root/petalinux/cache/downloads"
+missing_source_report="$build_root/petalinux/v5-missing-source-inputs.json"
 overlay_root="$build_root/linuxcnc-overlay"
 overlay_upper="$overlay_root/upper"
 overlay_work="$overlay_root/work"
@@ -45,6 +46,7 @@ fi
 build_root=$(mkdir -p "$build_root" && CDPATH= cd -- "$build_root" && pwd)
 petalinux_root="$build_root/petalinux/overlay/merged"
 downloads_root="$build_root/petalinux/cache/downloads"
+missing_source_report="$build_root/petalinux/v5-missing-source-inputs.json"
 
 command -v findmnt >/dev/null 2>&1 || {
     echo "findmnt is required to validate the Windows source mount" >&2
@@ -194,6 +196,8 @@ run_petalinux_build() {
     task_args=$1
     build_home=$(getent passwd "$build_user" | cut -d: -f6)
     runuser -u "$build_user" -- env \
+        -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
+        -u http_proxy -u https_proxy -u all_proxy \
         HOME="$build_home" \
         PETALINUX="${PETALINUX:-}" \
         PETALINUX_VER="${PETALINUX_VER:-}" \
@@ -215,6 +219,8 @@ run_bitbake_direct() {
         exit 12
     }
     runuser -u "$build_user" -- env \
+        -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
+        -u http_proxy -u https_proxy -u all_proxy \
         HOME="$build_home" \
         PETALINUX="${PETALINUX:-}" \
         PETALINUX_VER="${PETALINUX_VER:-}" \
@@ -306,9 +312,20 @@ EOF
 }
 
 verify_windows_source_packages() {
-    python3 "$source_package_verifier" \
+    if python3 "$source_package_verifier" \
         --project-root "$project_root" \
-        --source-root "$source_package_root"
+        --source-root "$source_package_root" \
+        --missing-report "$missing_source_report" \
+        --resume-scope "linuxcnc-$build_mode"
+    then
+        return 0
+    else
+        verify_rc=$?
+    fi
+    if [ "$verify_rc" -eq 42 ]; then
+        echo "V5_WINDOWS_SOURCE_IMPORT_REQUIRED report=$missing_source_report resume_scope=linuxcnc-$build_mode" >&2
+    fi
+    return "$verify_rc"
 }
 
 verify_rootfs_package_selection() {

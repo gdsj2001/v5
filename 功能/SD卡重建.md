@@ -48,14 +48,23 @@ Windows v5 唯一源码/离线输入
 
 项目根只允许一个 `.git`。上游源码树内的 `.gitignore`、`.gitattributes` 是普通源文件，不是嵌套 Git；真正的子目录 `.git`、第二工作树、VM checkout、源码备份树必须不存在。
 
-缺源码时只能在 Windows 执行一次显式导入：
+缺源码时只能由 Windows importer 写入 canonical owner。普通主动导入使用：
 
 ```powershell
 python .\board\tools\petalinux\import_v5_source_packages.py --project-root .
 python .\board\tools\petalinux\verify_v5_source_packages.py --project-root .
 ```
 
-正式构建开始后禁止 Git/HTTP/HTTPS 临时补源码。VM 的 downloads、work、sstate 和已生成镜像都不是源码真值。
+若 VM focused build 返回 `V5_WINDOWS_SOURCE_IMPORT_REQUIRED`，先通过现有 VM 执行入口读取其 `v5-missing-source-inputs-v1` 报告到 Windows `repo_ignored/`，再执行：
+
+```powershell
+python .\board\tools\petalinux\import_v5_source_packages.py `
+  --project-root . `
+  --missing-report .\repo_ignored\source_input_closure\v5-missing-source-inputs.json
+python .\board\tools\petalinux\verify_v5_source_packages.py --project-root .
+```
+
+只允许自动导入 inventory 已登记且 checksum/许可证齐全的缺项。完成后按报告中的 `resume_scope` 只重跑原失败 target/recipe/stage，保留 `sstate/tmp/work/stamp`；不得清 kernel、扩大到无关包或直接跑最终镜像。正式构建本身仍禁止 Git/HTTP/HTTPS 临时补源码。VM 的 downloads、work、sstate 和已生成镜像都不是源码真值。
 
 ## 3. 当前 Vivado 工程和硬件交接
 

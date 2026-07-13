@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import json
+import itertools
 import os
 from pathlib import Path
 
@@ -109,6 +110,23 @@ def map_point(coefficients, raw_point):
     return (raw_x * sx) + (raw_y * sxy) + ox, (raw_x * syx) + (raw_y * sy) + oy
 
 
+def _orientation_invariant_corner_error(mapped_raw_corners, target_corners):
+    if len(mapped_raw_corners) != 4 or len(target_corners) != 4:
+        raise ValueError("corner quality check requires four raw and target corners")
+
+    best_maximum_error = None
+    for target_order in itertools.permutations(target_corners):
+        errors = []
+        for pixel, target in zip(mapped_raw_corners, target_order):
+            dx = pixel[0] - target[0]
+            dy = pixel[1] - target[1]
+            errors.append((dx * dx + dy * dy) ** 0.5)
+        maximum_error = max(errors)
+        if best_maximum_error is None or maximum_error < best_maximum_error:
+            best_maximum_error = maximum_error
+    return best_maximum_error
+
+
 def validate_fit(samples, coefficients, targets=CAL_TARGETS):
     fit_errors = []
     for sample, target in zip(samples, targets):
@@ -125,20 +143,22 @@ def validate_fit(samples, coefficients, targets=CAL_TARGETS):
     target_max_x = max(float(point[0]) for point in targets)
     target_min_y = min(float(point[1]) for point in targets)
     target_max_y = max(float(point[1]) for point in targets)
-    edge_samples = (
-        ((raw_min_x, raw_min_y), (target_min_x, target_min_y)),
-        ((raw_max_x, raw_min_y), (target_max_x, target_min_y)),
-        ((raw_max_x, raw_max_y), (target_max_x, target_max_y)),
-        ((raw_min_x, raw_max_y), (target_min_x, target_max_y)),
+    raw_corners = (
+        (raw_min_x, raw_min_y),
+        (raw_max_x, raw_min_y),
+        (raw_max_x, raw_max_y),
+        (raw_min_x, raw_max_y),
     )
-    edge_errors = []
-    for raw_point, target in edge_samples:
-        pixel_x, pixel_y = map_point(coefficients, raw_point)
-        dx = pixel_x - target[0]
-        dy = pixel_y - target[1]
-        edge_errors.append((dx * dx + dy * dy) ** 0.5)
+    target_corners = (
+        (target_min_x, target_min_y),
+        (target_max_x, target_min_y),
+        (target_max_x, target_max_y),
+        (target_min_x, target_max_y),
+    )
+    mapped_raw_corners = tuple(map_point(coefficients, raw_point) for raw_point in raw_corners)
+    edge_error = _orientation_invariant_corner_error(mapped_raw_corners, target_corners)
     average_error = sum(fit_errors) / float(len(fit_errors))
-    return average_error, max(fit_errors), max(edge_errors)
+    return average_error, max(fit_errors), edge_error
 
 
 def calibration_payload(coefficients):

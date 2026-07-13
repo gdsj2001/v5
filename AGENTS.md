@@ -8,9 +8,9 @@ RULE_SOURCE=AGENTS.md
 
 HIGHEST_RULE_1:
 - Windows 是默认执行主机。能在 Windows 正确完成的 compile/check/codegen/package/manifest/schema/test 步骤必须留在 Windows；VM 只承担 Windows 无法提供所需 Linux ABI、PetaLinux/Yocto、ARM 交叉环境、Linux 内核行为或 vendor 能力的最小步骤。
-- 正式构建前，全部源码、固定第三方包、patch、硬件输入、recipe/config、离线工具链/VM/安装介质、许可证边界和制卡工具必须已落到 Windows `D:\v5` 的唯一 canonical owner，并有固定 identity/hash/provenance。缺项只能由 Windows 明确导入到 `v5`；VM、BitBake、Git、HTTP、代理、sstate 或构建脚本不得在正式构建中补下载。
+- 正式构建输入必须落到 Windows `D:\v5` 的唯一 canonical owner，并有固定 identity/hash/provenance。VM/BitBake 发现缺项时必须输出 inventory 绑定的机器可读报告并停止；只允许 Windows importer 下载报告中已登记、checksum/许可证齐全的包到 canonical owner，复核后再让 VM 只读消费。VM、BitBake、代理、sstate 或构建脚本不得自行联网补下载，未知输入必须 `blocked`。
 - 每份源码只允许 Windows `D:\v5` 内一个持久 owner。VM 只允许 `${VM_BUILD_ROOT}/temp_source/current` 一套由 Windows identity 派生、不可编辑的加速投影；identity 一致可跨任务复用，不一致只刷新这一处。禁止第二投影、VM checkout、手工 patch、反向覆盖 Windows 或把投影当 owner。
-- 日常工作默认 `incremental-current`：Windows focused gate -> 受影响 target/recipe compile/install/package -> 必要 rootfs/manifest -> 一次 current 镜像。不得未过单包就跑最终镜像，不得无证据清 kernel/sstate/tmp/downloads/fetch stamp。空 build/downloads/sstate 的断网全量构建只用于用户明确要求、发布/灾难恢复里程碑或离线能力重新认证。
+- 日常工作默认 `incremental-current`：Windows focused gate -> 受影响 target/recipe compile/install/package -> 必要 rootfs/manifest -> 一次 current 镜像。缺项补齐后只重跑报告登记的原失败层并保留有效 sstate/tmp/work/stamp；不得未过单包就跑最终镜像，不得无证据清 kernel/sstate/tmp/downloads/fetch stamp。空 build/downloads/sstate 的断网全量构建只用于用户明确要求、发布/灾难恢复里程碑或离线能力重新认证。
 - 只保留一个 mainline、一个实现和一个 owner。确认属于退役/重复/fallback/shadow/bypass 的路径，在真实依赖迁移后同 slice 物理删除；不得改名、disabled、env gate、TODO、测试入口或备份保留。
 
 STRICT_STATUS_WORDS=[source_only, local_verified_only, board_verified, blocked]
