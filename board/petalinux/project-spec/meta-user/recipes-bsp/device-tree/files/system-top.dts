@@ -1083,7 +1083,7 @@
 			clocks = <0x8 0x0>;
 			clock-names = "lcd_pclk";
 			pwms = <0x24 0x0 0x4c4b40>;
-			lcdID = <0x25 0x0 0x0 0x1 0x25 0x1 0x0 0x1 0x25 0x2 0x0 0x1>;
+			backlight-duty-percent = <0x64>;
 
 			ports {
 				#address-cells = <0x1>;
@@ -1102,37 +1102,6 @@
 			display-timings {
 				native-mode = <0x27>;
 
-				timing0 {
-					clock-frequency = <0x895440>;
-					hactive = <0x1e0>;
-					vactive = <0x110>;
-					hback-porch = <0x2>;
-					hfront-porch = <0x2>;
-					hsync-len = <0x29>;
-					vback-porch = <0x2>;
-					vfront-porch = <0x2>;
-					vsync-len = <0xa>;
-					hsync-active = <0x0>;
-					vsync-active = <0x0>;
-					de-active = <0x1>;
-				};
-
-				timing1 {
-					clock-frequency = <0x1fc9350>;
-					hactive = <0x320>;
-					vactive = <0x1e0>;
-					hback-porch = <0x58>;
-					hfront-porch = <0x28>;
-					hsync-len = <0x80>;
-					vback-porch = <0x21>;
-					vfront-porch = <0xa>;
-					vsync-len = <0x2>;
-					hsync-active = <0x0>;
-					vsync-active = <0x0>;
-					de-active = <0x1>;
-					pixelclk-active = <0x0>;
-				};
-
 				timing2 {
 					clock-frequency = <0x30d4000>;
 					hactive = <0x400>;
@@ -1148,22 +1117,6 @@
 					de-active = <0x1>;
 					pixelclk-active = <0x0>;
 					phandle = <0x27>;
-				};
-
-				timing3 {
-					clock-frequency = <0x43ce660>;
-					hactive = <0x500>;
-					vactive = <0x320>;
-					hback-porch = <0x50>;
-					hfront-porch = <0x46>;
-					hsync-len = <0xa>;
-					vback-porch = <0xa>;
-					vfront-porch = <0xa>;
-					vsync-len = <0x3>;
-					hsync-active = <0x0>;
-					vsync-active = <0x0>;
-					de-active = <0x1>;
-					pixelclk-active = <0x0>;
 				};
 			};
 		};

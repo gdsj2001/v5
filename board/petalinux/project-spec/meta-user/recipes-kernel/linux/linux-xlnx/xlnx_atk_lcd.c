@@ -12,9 +12,10 @@
 #include <linux/pwm.h>
 #include <linux/component.h>
 #include <linux/device.h>
+#include <linux/math64.h>
 #include <linux/of_device.h>
 #include <linux/of_graph.h>
-#include <linux/of_gpio.h>
+#include <video/of_display_timing.h>
 #include <video/videomode.h>
 #include <video/of_videomode.h>
 
@@ -25,13 +26,6 @@
 #include <drm/drm_connector.h>
 #include <drm/drm_probe_helper.h>
 #include <drm/drm_print.h>
-
-/* 姝ｇ偣鍘熷瓙LCD灞忕‖浠禝D */
-#define ATK4342		0			//锛?00锛?4.3瀵?80*272
-#define ATK4384		4			//锛?00锛?4.3瀵?00*480
-#define ATK7084		1			//锛?01锛?7瀵?00*480
-#define ATK7016		2			//锛?10锛?7瀵?024*600
-#define ATK1018		5			//锛?01锛?10瀵?280*800
 
 /**
  * struct atk_dpi - Core configuration atk Tx subsystem device structure
@@ -48,13 +42,11 @@ struct atk_dpi {
 
 	struct videomode *vm;
 	struct clk *pclk;
+	struct pwm_device *backlight_pwm;
 };
 
 #define connector_to_dpi(c) container_of(c, struct atk_dpi, connector)
 #define encoder_to_dpi(e) container_of(e, struct atk_dpi, encoder)
-
-/* Global variables */
-unsigned lcd_id;
 
 static enum drm_connector_status
 atk_dpi_detect(struct drm_connector *connector, bool force)
@@ -217,62 +209,18 @@ static int atkencoder_init_dt(struct atk_dpi *dpi)
 	struct device *dev = dpi->dev;
 	struct device_node *dn = dev->of_node;
 	struct device_node *np;
-	int display_timing;
-	int gpios[3];
-	int ret, i;
-
-	/* 璇诲彇LCD灞廔D */
-	for (i = 0; i < 3; i++) {
-		gpios[i] = of_get_named_gpio(dev->of_node, "lcdID", i);
-		if (!gpio_is_valid(gpios[i])) {
-			DRM_DEV_ERROR(dev, "Failed to get lcd id gpio : %d\n", gpios[i]);
-			lcd_id = ATK7084; // 璁剧疆涓洪粯璁?LCD 灞?7 瀵?800x480
-			break;
-		}
-
-		ret = devm_gpio_request_one(dev, gpios[i], GPIOF_IN, "lcd hardware ID");
-		if (ret < 0) {
-			DRM_DEV_ERROR(dev, "Failed to request lcd id gpio\n");
-			lcd_id = ATK7084; // 璁剧疆涓洪粯璁?LCD 灞?7 瀵?800x480
-			break;
-	 	}
-
-		lcd_id |= (gpio_get_value_cansleep(gpios[i]) << i); // read GPIO
-	}
-
-	dev_info(dev, "Alientek LCD ID: %d\n", lcd_id);
-
-	/* 鏍规嵁LCD ID鍖归厤瀵瑰簲鐨勬椂搴忓弬鏁?*/
-	switch (lcd_id) {
-	case ATK4342: display_timing = 0; break;
-	case ATK4384: display_timing = 1; break;
-	case ATK7084: display_timing = 1; break; // ATK4384鍜?084閮芥槸800*480鐨勫垎杈ㄧ巼
-	case ATK7016: display_timing = 2; break;
-	case ATK1018: display_timing = 3; break;
-	default: display_timing = 1;
-			dev_info(dev, "LCD ID Match failed, using default configuration\n");
-			break;
-	}
-
-	/* 灏哃CD纭欢ID寮曡剼璁剧疆涓鸿緭鍑烘ā寮?*/
-	display_timing = 2; /* timing2 = 1024x600 */
-	dev_info(dev,
-		 "Force using 1024x600 resolution (timing_7016), ignoring LCD ID detection\n");
-
-	for (i = 0; i < 3; i++)
-		gpio_direction_output(gpios[i], 0);
+	int ret;
 
 	np = of_get_child_by_name(dn, "display-timings");
 	if (np) {
 		struct videomode *vm;
-		int ret;
 		of_node_put(np);
 
 		vm = devm_kzalloc(dev, sizeof(*dpi->vm), GFP_KERNEL);
 		if (!vm)
 			return -ENOMEM;
 
-		ret = of_get_videomode(dn, vm, display_timing);
+		ret = of_get_videomode(dn, vm, OF_USE_NATIVE_MODE);
 		if (ret < 0) {
 			DRM_DEV_ERROR(dev, "Failed to get videomode from DT\n");
 			devm_kfree(dev, vm);
@@ -284,9 +232,8 @@ static int atkencoder_init_dt(struct atk_dpi *dpi)
 		return 0;
 	}
 
-	dev_info(dev, "atkfb_init_fbinfo_dt finished\n");
-
-	return 0;
+	DRM_DEV_ERROR(dev, "Missing display-timings in DT\n");
+	return -EINVAL;
 }
 
 static int atk_dpi_probe(struct platform_device *pdev)
@@ -294,6 +241,9 @@ static int atk_dpi_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct atk_dpi *dpi;
 	struct pwm_device *pwm;
+	struct pwm_args pwm_args;
+	struct pwm_state pwm_state;
+	u32 duty_percent;
 	int ret;
 
 	dpi = devm_kzalloc(dev, sizeof(*dpi), GFP_KERNEL);
@@ -317,7 +267,12 @@ static int atk_dpi_probe(struct platform_device *pdev)
 		goto out1;
 	}
 
-	clk_set_rate(dpi->pclk, dpi->vm->pixelclock);
+	ret = clk_set_rate(dpi->pclk, dpi->vm->pixelclock);
+	if (ret) {
+		DRM_DEV_ERROR(dev, "failed to set pclk %d\n", ret);
+		goto out1;
+	}
+
 	ret = clk_prepare_enable(dpi->pclk);
 	if (ret) {
 		DRM_DEV_ERROR(dev, "failed to enable pclk %d\n", ret);
@@ -327,25 +282,50 @@ static int atk_dpi_probe(struct platform_device *pdev)
 	/* 鎵撳紑LCD鑳屽厜 */
 	pwm = devm_pwm_get(dev, NULL);
 	if (IS_ERR(pwm)) {
+		ret = PTR_ERR(pwm);
 		DRM_DEV_ERROR(dev, "failed devm_pwm_get- %d\n", ret);
-		goto out1;
+		goto err_disable_pclk;
 	}
-	else {
-		/* Backlight: 20kHz PWM, 80% duty (reduce visible low-frequency flicker). */
-		pwm_config(pwm, 40000, 50000);
-		pwm_enable(pwm);
+
+	ret = of_property_read_u32(dev->of_node, "backlight-duty-percent",
+				   &duty_percent);
+	if (ret || !duty_percent || duty_percent > 100) {
+		DRM_DEV_ERROR(dev, "invalid backlight-duty-percent in DT\n");
+		ret = ret ? ret : -EINVAL;
+		goto err_disable_pclk;
 	}
+
+	pwm_get_args(pwm, &pwm_args);
+	if (!pwm_args.period) {
+		DRM_DEV_ERROR(dev, "missing backlight PWM period in DT\n");
+		ret = -EINVAL;
+		goto err_disable_pclk;
+	}
+
+	pwm_init_state(pwm, &pwm_state);
+	pwm_state.duty_cycle = DIV_ROUND_CLOSEST_ULL(
+		(u64)pwm_args.period * duty_percent, 100);
+	pwm_state.enabled = true;
+	ret = pwm_apply_state(pwm, &pwm_state);
+	if (ret) {
+		DRM_DEV_ERROR(dev, "failed to apply DT backlight PWM %d\n", ret);
+		goto err_disable_pclk;
+	}
+	dpi->backlight_pwm = pwm;
 
 	platform_set_drvdata(pdev, dpi);
 
 	ret = component_add(dev, &atk_dpi_component_ops);
 	if (ret < 0){
 		DRM_DEV_ERROR(dev, "failed component_add- %d\n", ret);
-		goto err_disable_pclk;
+		goto err_disable_backlight;
 	}
 
 	dev_info(&pdev->dev, "Atk encoder driver probed\n");
 	return ret;
+
+err_disable_backlight:
+	pwm_disable(dpi->backlight_pwm);
 
 err_disable_pclk:
 	clk_disable_unprepare(dpi->pclk);
@@ -361,6 +341,7 @@ static int atk_dpi_remove(struct platform_device *pdev)
 	struct atk_dpi *dpi = platform_get_drvdata(pdev);
 
 	component_del(&pdev->dev, &atk_dpi_component_ops);
+	pwm_disable(dpi->backlight_pwm);
 	clk_disable_unprepare(dpi->pclk);
 
 	return 0;
@@ -382,10 +363,6 @@ static struct platform_driver atk_dpi_driver = {
 };
 module_platform_driver(atk_dpi_driver);
 
-EXPORT_SYMBOL(lcd_id);
-
 MODULE_AUTHOR("CX <saurabhs@xilinx.com>");
 MODULE_DESCRIPTION("Alientek FPGA LCd Tx Driver");
 MODULE_LICENSE("GPL v2");
-
-

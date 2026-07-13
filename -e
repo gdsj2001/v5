@@ -1,0 +1,12 @@
+board\petalinux\project-spec\meta-user\recipes-kernel\linux\linux-xlnx\xlnx_atk_lcd.c:17:#include <linux/of_gpio.h>
+board\petalinux\project-spec\meta-user\recipes-kernel\linux\linux-xlnx\xlnx_atk_lcd.c:123:	ret = clk_set_rate(dpi->pclk,pclk_rate);
+board\petalinux\project-spec\meta-user\recipes-kernel\linux\linux-xlnx\xlnx_atk_lcd.c:221:	int gpios[3];
+board\petalinux\project-spec\meta-user\recipes-kernel\linux\linux-xlnx\xlnx_atk_lcd.c:226:		gpios[i] = of_get_named_gpio(dev->of_node, "lcdID", i);
+board\petalinux\project-spec\meta-user\recipes-kernel\linux\linux-xlnx\xlnx_atk_lcd.c:227:		if (!gpio_is_valid(gpios[i])) {
+board\petalinux\project-spec\meta-user\recipes-kernel\linux\linux-xlnx\xlnx_atk_lcd.c:228:			DRM_DEV_ERROR(dev, "Failed to get lcd id gpio : %d\n", gpios[i]);
+board\petalinux\project-spec\meta-user\recipes-kernel\linux\linux-xlnx\xlnx_atk_lcd.c:233:		ret = devm_gpio_request_one(dev, gpios[i], GPIOF_IN, "lcd hardware ID");
+board\petalinux\project-spec\meta-user\recipes-kernel\linux\linux-xlnx\xlnx_atk_lcd.c:235:			DRM_DEV_ERROR(dev, "Failed to request lcd id gpio\n");
+board\petalinux\project-spec\meta-user\recipes-kernel\linux\linux-xlnx\xlnx_atk_lcd.c:240:		lcd_id |= (gpio_get_value_cansleep(gpios[i]) << i); // read GPIO
+board\petalinux\project-spec\meta-user\recipes-kernel\linux\linux-xlnx\xlnx_atk_lcd.c:263:		gpio_direction_output(gpios[i], 0);
+board\petalinux\project-spec\meta-user\recipes-kernel\linux\linux-xlnx\xlnx_atk_lcd.c:275:		ret = of_get_videomode(dn, vm, display_timing);
+board\petalinux\project-spec\meta-user\recipes-kernel\linux\linux-xlnx\xlnx_atk_lcd.c:320:	clk_set_rate(dpi->pclk, dpi->vm->pixelclock);

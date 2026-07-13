@@ -10,6 +10,7 @@
     "tree": "0c55c83b2e27806e0eb582884ac299a8bd8a5b12"
   },
   "working_tree_overrides": [
+    "drivers/clk/clk-xlnx-clock-wizard.c",
     "drivers/gpu/drm/xlnx/xlnx_pl_disp.c"
   ],
   "vm_share_inaccessible_paths": [
@@ -17,7 +18,7 @@
     "drivers/gpu/drm/nouveau/nvkm/subdev/i2c/aux.h",
     "include/soc/arc/aux.h"
   ],
-  "content_sha256": "22701e7c78e4f9ad2799fb8abcaa6b43fa592c749fe8f03bf86b1a6fef47fb28",
+  "content_sha256": "e4d07f1587ff4213204a4a7177123565578286c6d486bfc32cd97988adb253b5",
   "file_count": 65803,
   "symlink_count": 35
 }

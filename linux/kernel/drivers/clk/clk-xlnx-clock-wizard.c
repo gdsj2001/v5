@@ -12,6 +12,7 @@
 #include <linux/clk-provider.h>
 #include <linux/slab.h>
 #include <linux/io.h>
+#include <linux/math64.h>
 #include <linux/of.h>
 #include <linux/module.h>
 #include <linux/err.h>
@@ -278,10 +279,10 @@ static int clk_wzrd_dynamic_reconfig_f(struct clk_hw *hw, unsigned long rate,
 	else
 		__acquire(divider->lock);
 
-	rate_div = ((parent_rate * 1000) / rate);
+	rate_div = DIV_ROUND_DOWN_ULL((u64)parent_rate * 1000ULL, rate);
 	clockout0_div = rate_div / 1000;
 
-	pre = DIV_ROUND_CLOSEST((parent_rate * 1000), rate);
+	pre = DIV_ROUND_CLOSEST_ULL((u64)parent_rate * 1000ULL, rate);
 	f = (u32)(pre - (clockout0_div * 1000));
 	f = f & WZRD_CLKOUT_FRAC_MASK;
 
