@@ -8,6 +8,17 @@
 
 ## AI 阅读入口
 
+<!-- AI_FAST_READ_BEGIN -->
+owner_reqs: []
+read_when: [native helper, linuxcncrsh, command gate, UDS request, helper 白名单, 控制旁路]
+truth: [UI C -> UDS native command gate -> 单条常驻 linuxcncrsh 连接 -> native owner readback]
+forbidden: [halcmd 产品旁路, Python 多级中转, 多 socket 并发, 短生命周期 helper, 未登记程序]
+readback: [同一请求的 native response, owner actual, gate health, 顺序一致的 generation]
+impact: [UI 控制入口, native gate, helper allow-list, 状态 provider, runtime manifest]
+acceptance: [白名单与动作登记一致；产品路径无旁路；动作成功由 native owner 回读证明]
+detail_sections: [linuxcncrsh 长连接与高频输入边界, UDS request 强类型校验边界, 2. 状态与通道白名单, 3. 合规边界]
+<!-- AI_FAST_READ_END -->
+
 - 启动内存/热路径通用规则：见 `REQ-PARAM-MEMORY-LIGHTWEIGHT-SAVE` / `功能/0-1开机参数入内存.md`，本文只保留 native helper 特有边界。
 - native helper 特有边界：linuxcncrsh/native gate、UI 控制入口、allowed helper 表、动作登记表和状态 provider 必须随产品自写运行闭包开机进入 RAM；运行期控制热路径不得临时扫描 helper、懒导入脚本、按文件名执行未登记程序或用旧 wrapper 兜底。
 - 修改 helper 白名单时只允许收缩到微内核/native owner 明确需要的长驻 gate 或诊断入口；已退役 helper 不得以 renamed wrapper、环境变量、测试入口或 VM 打包校验形式保留。

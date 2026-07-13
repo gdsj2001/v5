@@ -4,6 +4,17 @@
 
 ## AI 阅读入口
 
+<!-- AI_FAST_READ_BEGIN -->
+owner_reqs: [REQ-DRIVE-PROFILE-AUTH-CHAIN]
+read_when: [VPS 登录, 授权, private/public 下载, drive profile, OTA package, remote relay]
+truth: [授权身份 -> package/profile identity -> 板端校验/加载 -> runtime readback]
+forbidden: [public fallback 冒充授权, 客户分叉产品代码, 未验 hash 的下载, SSH/FIFO 控制旁路]
+readback: [license/entitlement, package/profile hash/version, 板端加载 identity, relay health]
+impact: [dealer/factory client, VPS API, drive mapping, OTA, settings actiond, runtime manifest]
+acceptance: [身份与产物 hash 闭合；板端加载相同 identity 后才可声称生效]
+detail_sections: [2. Remote Relay 健康, 3. 板端诊断、G-code 上传与 OTA 升级入口, 6. VPS 登录, 7. VPS 数据, 9. 核对项, 10. 禁止事项]
+<!-- AI_FAST_READ_END -->
+
 - 启动内存/热路径通用规则：见 `REQ-PARAM-MEMORY-LIGHTWEIGHT-SAVE` / `功能/0-1开机参数入内存.md`，本文只保留本功能特有边界。
 - 先读 `REQ-DRIVE-PROFILE-AUTH-CHAIN`；涉及控制链、WCS 或参数真源时回到对应 REQ owner。
 - 不得为客户、驱动、收费档位或现场临时需求 fork 板端产品代码；下载状态、诊断快照和 public fallback 不能冒充 private 授权成功。

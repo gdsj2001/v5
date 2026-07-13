@@ -4,575 +4,206 @@ AI_LOAD_ONLY=true
 PROJECT_ROOT=.
 RULE_SOURCE=AGENTS.md
 
-## P0_AI_FAST_PATH
+## P0_ENTRY_KERNEL
 
-HIGHEST_RULE_1: Read and obey `P0_ENTRY_RULES` item 1 before every task: Windows is the default execution host for every compile/check/generate/package step it can correctly perform; use the VM only for an irreducible Linux/PetaLinux/Yocto/ARM step that Windows cannot perform; all SD build inputs must already be physically closed under `D:\v5`; each source has exactly one persistent canonical owner; missing source is downloaded only by the Windows host into `v5` before compilation; the VM may keep only one identity-checked derived source projection at `${VM_BUILD_ROOT}/temp_source/current`, never edit it or create another projection; VM/formal builds never download or fetch source; ordinary work is fail-fast incremental and blank-cache offline certification is separate; one canonical mainline only; discovered retired paths are deleted in the same slice.
+HIGHEST_RULE_1:
+- Windows 是默认执行主机。能在 Windows 正确完成的 compile/check/codegen/package/manifest/schema/test 步骤必须留在 Windows；VM 只承担 Windows 无法提供所需 Linux ABI、PetaLinux/Yocto、ARM 交叉环境、Linux 内核行为或 vendor 能力的最小步骤。
+- 正式构建前，全部源码、固定第三方包、patch、硬件输入、recipe/config、离线工具链/VM/安装介质、许可证边界和制卡工具必须已落到 Windows `D:\v5` 的唯一 canonical owner，并有固定 identity/hash/provenance。缺项只能由 Windows 明确导入到 `v5`；VM、BitBake、Git、HTTP、代理、sstate 或构建脚本不得在正式构建中补下载。
+- 每份源码只允许 Windows `D:\v5` 内一个持久 owner。VM 只允许 `${VM_BUILD_ROOT}/temp_source/current` 一套由 Windows identity 派生、不可编辑的加速投影；identity 一致可跨任务复用，不一致只刷新这一处。禁止第二投影、VM checkout、手工 patch、反向覆盖 Windows 或把投影当 owner。
+- 日常工作默认 `incremental-current`：Windows focused gate -> 受影响 target/recipe compile/install/package -> 必要 rootfs/manifest -> 一次 current 镜像。不得未过单包就跑最终镜像，不得无证据清 kernel/sstate/tmp/downloads/fetch stamp。空 build/downloads/sstate 的断网全量构建只用于用户明确要求、发布/灾难恢复里程碑或离线能力重新认证。
+- 只保留一个 mainline、一个实现和一个 owner。确认属于退役/重复/fallback/shadow/bypass 的路径，在真实依赖迁移后同 slice 物理删除；不得改名、disabled、env gate、TODO、测试入口或备份保留。
 
-THIS_SECTION_IS_INDEX_ONLY:
-- 本节是给 AI 的快读入口，不替代后文详细规则。
-- 若本节和后文 P0 细则冲突，以更具体的后文 P0 细则为准；若项目规则和系统/开发者/工具安全规则冲突，以系统/开发者/工具安全规则为准。
+STRICT_STATUS_WORDS=[source_only, local_verified_only, board_verified, blocked]
 
-AI_FAST_READ_PROTOCOL:
-1. 先用 `功能/需求真源索引.md` 的任务阅读包定位唯一 `REQ-*` owner；不要先全文读取所有功能文档。
-2. 打开 owner 后先读 `AI_FAST_READ_BEGIN` 到 `AI_FAST_READ_END`；只有任务命中该卡的 `detail_sections`、发生冲突或需要字段级实现时，才继续读取对应正文锚点。
-3. AI 快读卡只允许保存路由、owner、truth、forbidden、readback、impact 和 acceptance 指针，不得复制或改写完整需求正文；正文仍是唯一裁决依据。
-4. 快读卡与正文冲突时立即停止实现，以正文和最新用户反馈为准，先修正同一 owner 内的快读卡；不得新建平行摘要文件。
-5. 修改 owner 正文时，同一文件内同步检查快读卡是否需要更新；不相关字段保持不动。
+## P0_ROUTING_AND_PRECEDENCE
 
-AI_FAST_READ_KEYS:
-- `owner_reqs`: 本文件拥有或直接裁决的 `REQ-*`。
-- `read_when`: 哪类任务必须读本文件。
-- `truth`: 唯一真值 owner、writer 和主要消费方向。
-- `forbidden`: 最容易把工程改废的禁止路径，只写关键词和正文锚点。
-- `readback`: 声称成功前必须取得的 owner 回读。
-- `impact`: 修改时必须一起核对的下游模块或文档。
-- `acceptance`: 最低验收入口和允许声明的状态。
-- `detail_sections`: 本任务需要继续读取的正文稳定章节。
-
-FIRST_90_SECONDS:
-1. 先读最新用户消息，判断任务类型：规则/文档、功能需求、代码修复、板端验证、VM/部署、纯提问。
-2. 读本节，然后只跳到匹配的详细章节，不要全文漫游后才行动。
-3. 先看 `git status` 和相关 diff；不要覆盖用户已有改动。
-4. 如果是产品功能/行为变化，先走 `功能/需求真源索引.md` 找单一 `REQ-*` owner，再改 owner 文档，然后改代码。
-5. 如果只是 `AGENTS.md`、规则、说明文档整理，直接修改唯一 canonical 文件并依赖根 Git 历史回退，不创建编辑前备份；随后跑 `git diff --check`。
-6. 如果改 `D:\v5\board` 下板端可见代码，先完成 Windows 本地门禁，再按“受影响 target/recipe -> 必要 rootfs/manifest -> 一次 current 镜像”逐级执行，部署后走原始 UI/operator 路径；VM 可从只读 Windows 真源刷新并复用唯一 `${VM_BUILD_ROOT}/temp_source/current` 本地投影。除非明确进行离线恢复认证，不得默认清缓存全量重编；没有板端证据只能报 `source_only` 或 `local_verified_only`。
-7. 最终回复只讲改了什么、验证了什么、缺什么；不要写命令试错过程。
-
-TASK_ROUTER:
-| User request kind | Read first | Edit first | Required closure |
-| --- | --- | --- | --- |
-| Product behavior / feature requirement | `功能/需求真源索引.md` then one indexed owner | indexed `功能/` owner | code/config + targeted tests; board-visible changes need board closure |
-| Specific `待做工作/*.md` request | named workdoc, then indexed `功能/` owner | indexed `功能/` owner if behavior changes | implementation against owner, not stale workdoc text |
-| Rule/workflow cleanup | `AGENTS.md` matching section | `AGENTS.md` only unless user names another file | `git diff --check` |
-| Board runtime source change | `AGENTS.md`, indexed owner if behavior changes, relevant `D:\v5\board` source | Windows `D:\v5\board` unique source truth | Windows focused gates -> affected VM target/package -> needed rootfs/manifest -> one current image -> deploy -> original operator-path proof |
-| Local non-board code/tool change | relevant source + focused owner docs | canonical local source/tool | nearest compile/unit/contract/static gate |
-| Pure question / review | relevant docs/source only | no edit unless requested | answer with evidence and status limits |
+AI_READ_SEQUENCE:
+1. 读最新用户消息并判断任务类型。
+2. 读本文件入口核，不要先全文漫游项目文档。
+3. 产品功能/行为先读 `功能/需求真源索引.md` 的“AI 任务阅读包”，定位唯一 `REQ-*` owner。
+4. 先读 owner 的 `AI_FAST_READ_BEGIN` 到 `AI_FAST_READ_END`；只继续读命中的 `detail_sections`。字段级实现、冲突或验收时再扩展正文。
+5. 读相关源码、当前 `git status` 和 focused diff；不得覆盖用户已有改动。
+6. 行为变化先改索引登记的 owner 正文并同步同文件快读卡，再改 source/config/tests。纯提问/审查默认只读。
 
 CONFLICT_PRIORITY:
-1. System/developer/tool safety instructions.
-2. Latest explicit user message as requirement-change input.
-3. `功能/需求真源索引.md` plus the single indexed owner for product truth.
-4. `AGENTS.md` for workflow, placement, cleanup, verification, and delivery.
-5. `待做工作/` as active input/progress only, not settled product truth.
-6. Old notes, comments, tests, generated files, VM/board copies, and chat summaries are stale when they conflict with the above.
+1. system/developer/tool safety instructions
+2. 最新明确用户反馈，作为需求变更输入
+3. `功能/需求真源索引.md` 与其中登记的唯一 owner
+4. 本文件的流程、放置、锁、删除、验证和交付规则
+5. `待做工作/` 的活动输入
+6. 旧聊天、旧笔记、代码注释、测试、生成物、VM/板端副本
 
-SOURCE_AND_DELIVERY_SHORTCUTS:
-- Unique source truth: every maintainable V5 source file has exactly one persistent canonical owner in the Windows Git worktree under `D:\v5`, with three non-overlapping owners: Linux kernel plus PREEMPT_RT source in `LINUX_KERNEL_SOURCE_ROOT` (`D:\v5\linux`), complete LinuxCNC source plus V5 native changes in `LINUXCNC_SOURCE_ROOT` (`D:\v5\linuxcnc`), and board runtime/LVGL/services/integration/tools in `RUNTIME_SOURCE_ROOT` (`D:\v5\board`). The only persistent VM source-shaped content allowed is the derived, non-editable acceleration projection `${VM_BUILD_ROOT}/temp_source/current`; a second VM projection, VM checkout, task/date/AI copy, duplicate archive/expanded tree, duplicate patch implementation, or editable board copy is forbidden.
-- Source-first board delivery is mandatory: fix source under `D:\v5` / `D:\v5\board`, verify it on Windows, refresh the single VM projection from the live read-only mount when identity changed, then build/package/deploy from that identity-matched projection. Do not SSH/SCP/edit product source on the VM or board. `${VM_BUILD_ROOT}/temp_source/current` may persist and be reused only while its manifest matches Windows; it must never be manually edited, committed, copied to another path, or treated as owner truth.
-- Highest offline full-SD invariant: the complete `D:\v5` folder is the sole portable disaster-recovery unit. On a supported computer with no network and no historical VM build-output/downloads/sstate, that folder alone must provide every project-specific source, fixed third-party input, hardware input, build configuration, required offline toolchain/VM/install media, legal offline license boundary, and write/readback tool needed to build from zero and write a bootable product SD. A preinstalled toolchain outside `v5`, remote Git/HTTP/sstate, NAS, the original computer, an old SD, board files, prior VM outputs, or a ready-made image may not be required. Closure requires a real blank-cache offline build, blank-SD write/readback, and board cold boot.
-- Deletion beats fallback: remove retired/shadow/duplicate/bypass paths instead of adding wrappers or compatibility branches.
-- SHM is display projection only unless an indexed owner explicitly says otherwise; native/microkernel actuals must come from native owner/readback.
-- Board-facing behavior is not fixed until the real board/operator path is proven. Local tests are pre-board gates, not closure.
-- Status words are strict: `source_only`, `local_verified_only`, `board_verified`, `blocked`.
+TASK_ROUTER:
+| 任务 | 第一读取 | 第一修改 | 最低关闭 |
+| --- | --- | --- | --- |
+| 产品行为/需求 | 需求索引 -> 唯一 owner 快读卡/命中章节 | 唯一 owner | source/config + focused gates；板端行为再走板端闭环 |
+| 指定 `待做工作/*.md` | 指定 workdoc -> 需求索引 -> owner | 行为变化先改 owner | 按 owner 实施；workdoc 不替代真源 |
+| 规则/文档结构 | 本文件对应节、需求索引 | 唯一 canonical 文档 | 文档路由校验 + `git diff --check` |
+| 板端源码 | owner + Windows canonical source | Windows owner | focused -> affected target -> current artifact -> deploy -> operator path |
+| 本地非板端代码 | 相关 source/owner | canonical local source | 最近的 compile/unit/contract/static gate |
+| 提问/审查/诊断 | 相关 owner/source/运行证据 | 默认不改 | 证据化回答；诊断不自动扩成修复 |
 
-## P0_AI_READ_FIRST
+DOC_OWNER_RULES:
+- `功能/` 保存 settled product truth；`功能/需求真源索引.md` 只登记 REQ、owner、路由和跨功能 owner；一个易变需求只能有一个 owner。
+- `AGENTS.md` 只保存每个任务都必须自动加载的执行核，不复制功能字段表、按钮语义、公式、完整错误表或专项验收正文。
+- `待做工作/` 只保存活动输入；需求稳定后必须落入 owner。除非用户明确指定，不把进度、命令输出、截图路径、板端结果或完成摘要写入 human Markdown。
+- 快读卡只保存 `owner_reqs/read_when/truth/forbidden/readback/impact/acceptance/detail_sections` 指针；正文裁决，禁止平行摘要、JSON 规则库或第二真源。
+- 文档结构修改后运行 `python board/tools/docs/verify_v5_document_routes.py --strict-details`。工具只读当前 Markdown，不生成需求副本。
 
-READ_ORDER:
-1. Latest user message in this chat.
-2. `AGENTS.md` top rules and the matching section below.
-3. If the user message is a feature requirement, first check `功能/需求真源索引.md` and the corresponding document under `功能/` for an existing record.
-4. If the feature requirement is recorded but conflicts with the latest user message, update the indexed `功能/` owner first; if it is not recorded, add or assign the `REQ-*` entry and owner document under `功能/` first.
-5. `功能/需求真源索引.md` to find the single `REQ-*` owner.
-6. The one indexed owner document under `功能/`.
-7. Relevant work note under `待做工作/`, then `git status` and focused diff.
+NO_TASK_BOARD=true
+FORBIDDEN_PROCESS_DOCS=[AI_并行任务看板.md, MULTI_AI_MODULES.md, FILE_STRUCTURE.md, AI自动作业指导书.md, process.md, 过程.md]
 
-ONE_SENTENCE_MODEL:
-- `功能/` owns settled product truth.
-- `AGENTS.md` owns workflow, cleanup, placement, and verification.
-- `待做工作/` is active input/progress, not final truth after settlement.
-- Source truth is split only inside Windows `D:\v5`: `linux/` owns Linux kernel/PREEMPT_RT, `linuxcnc/` owns complete LinuxCNC/V5 native source, `board/` owns board integration/LVGL/runtime services/project tools, `vivado_hw_project/` owns the FPGA function used by the current product/SD, and `new-vivado/z20_v1_5_hw_project/` owns a different FPGA function that is not an input to the current product build; Markdown, screenshots and other Windows owners stay under the project root. The two FPGA projects are distinct owners, never backup/copy/fallback sources for each other; `D:\v3` is read-only reference only.
+## P0_SOURCE_AND_BUILD_KERNEL
 
-DEFAULT_ACTION:
-- Implement/fix/verify to the required endpoint.
-- Delete retired/fallback/shadow paths before adding another path.
-- Keep status honest: `source_only`, `local_verified_only`, `board_verified`, or `blocked`.
-- For user-raised feature changes, edit only the indexed `功能/` owner document for requirement text, then modify code, build/deploy, and test on the board when required. Do not write implementation results, board evidence, screenshots, or progress summaries into `功能/`, `待做工作/`, backlog, legacy, or process documents unless the user explicitly asks for that specific document update.
+CANONICAL_SOURCE_OWNERS:
+- `D:\v5\linux`：Linux kernel/PREEMPT_RT；对应 identity 文件随 owner 保存。
+- `D:\v5\linuxcnc`：完整 LinuxCNC 与 V5 native 改动；`board/linuxcnc` 只允许 HAL/INI/runtime/recipe 集成，不得成为第二源码树。
+- `D:\v5\board`：LVGL、runtime services、HAL/INI 集成、PetaLinux project、部署和项目工具。
+- `D:\v5\vivado_hw_project`：当前产品/SD 使用的 FPGA 功能。
+- `D:\v5\new-vivado\z20_v1_5_hw_project`：另一 FPGA 功能，不是当前产品 XSA/bitstream 输入；两项目互不备份、互不 fallback。
+- `D:\v3` 只读参考；不得成为 V5 build/runtime owner。
+- 根目录是唯一 Git；`v5` 内禁止嵌套 `.git`、第二 worktree、源码压缩包、NAS 可编辑镜像、backup/bak/source copy。
 
-## P0_NON_NEGOTIABLES
+SOURCE_AND_PATH_RULES:
+- 产品源码只能在 owning Windows path 修改。VM 投影、VM build tree、板端 `/opt/8ax`、SD、部署目录和 generated output 都不是 source truth。
+- 源码/config/script/test/manifest 中的项目内地址必须从 project/resource root 或 caller-relative path 解析；禁止硬编码 `D:\v5`、`C:\...`、VM home、临时目录或板端项目目录。真实 OS/device/API 绝对路径只在 owner 明确登记且 fail-closed 时允许。
+- Markdown 链接相对当前 Markdown 文件；最终回复引用真实本地文件时使用绝对可点击路径。
+- `.gitignore` 只排除可再生 build/cache/log/evidence/runtime/scratch；必要 source/hardware/recipe/config/schema/recovery input 不得只在 ignored、VM、板端或旧 SD。
+- 源码/文档编辑前备份禁止；根 Git 历史是唯一回退。Git 用于恢复和协作，不作为工程质量评分；未获用户明确授权不得 blanket `git add/commit/push`。
 
-FEATURE_OWNER_SUPREMACY:
-- Highest product truth is `功能/需求真源索引.md` plus the single owner document named there.
-- If code, tests, notes, AGENTS wording, or old chat conflicts with the indexed owner, treat the non-owner text as stale.
-- Latest explicit user feedback is requirement-change input; settle it into the indexed owner before implementation.
-- For any feature requirement proposed by the user, AI must first check the corresponding `功能/` record. If a record exists and is inconsistent, update that owner before source/config/tests/backlog; if no record exists, record it by adding or assigning the `REQ-*` entry and owner document under `功能/` before implementation.
+OFFLINE_FULL_SD:
+- `REQ-V5-OFFLINE-FULL-SD-REPRODUCTION` 的 owner 是 `功能/全局通用配置需求.md`；可执行重建方法由 `功能/SD卡重建.md` 裁决。
+- 完整 `D:\v5` 是唯一可携带灾难恢复单元：在支持的断网电脑上，不依赖原机、预装工具链、历史 VM、旧 downloads/sstate、远程 Git/HTTP、NAS、旧 SD 或 ready image，从空缓存生成、写入并全量回读空白 SD，最后板端冷启动。
+- proprietary/restricted 工具必须有合法、版本化、校验过的离线介质及激活/许可证步骤在 `v5` 内；法律/厂商边界无法闭合时状态必须是 `blocked`，不得写“以后下载”。
+- `origin/main` 加全部可达 Git LFS 对象是唯一 off-host recovery history；恢复声明还需 `HEAD == origin/main`、无必要 untracked/ignored input、Git/LFS/source identity gates 与真实离线生产证明。两者不能互相替代。
 
-DELETE_FIRST_NO_FALLBACK:
-- First cleanup action is deleting unsupported forked, legacy, duplicate, bypass, shadow, fallback, split-brain, or AI-made paths.
-- No disabled branch, env gate, wrapper, alias, renamed survivor, test-only entry, TODO, or doc warning may remain as rollback insurance.
-- If a real supported path still depends on old code, migrate that dependency to the canonical owner first, then delete the old path in the same slice.
-- Temporary patches and workaround overlays are forbidden. Each supported behavior must have one canonical mainline path only; do not leave quick-fix branches, bypass adapters, hotfix copies, or "clean up later" alternate routes that can be forgotten and become forks.
+VM_BUILD_BOUNDARY:
+- `VM_SOURCE_MOUNT_ROOT=/mnt/v5-source` 必须是 Windows owner 的 live read-only mount；`VM_SOURCE_PROJECTION_ROOT=/root/v5-build/temp_source/current` 是唯一派生投影；build output 只能写到 canonical external build directories。
+- 每个 owner identity 一轮只验证一次；源码未变时跨 package/rootfs/image 复用，不重复全树 hash、重投影或 remount。
+- VM 可以保留一套 current image 集合方便普通复核/重写卡；新集合替换旧集合。它是产物副本，不是离线从零证明。
+- VM 不得安装/使用 WSL 或第二常驻代理。非构建 OS maintenance/diagnostic 可在一个 SSH 命令内临时借用正在运行的 Windows proxy，host/port 运行时发现；不得持久化到 environment/profile/systemd/Git/BitBake/recipe。
+- source import、Git/HTTP source acquisition、BitBake fetch、sstate、configure/compile/package/rootfs/image 和离线认证禁止使用代理；正式构建前清除大小写 proxy 变量并执行 network-disabled gate。
 
-FILE_PLACEMENT:
-- Classify files before creation or movement: source, docs, tools, screenshots, evidence, scratch, caches, runtime JSON, and logs each have an owner directory. Source/document edit backups are forbidden; use root Git history.
-- Temporary/runtime outputs go under `repo_ignored/temp/` or a more specific ignored evidence/scratch directory.
-- Fix the generator path when scattered temporary files are found; do not only hide them with `.gitignore`.
+BOARD_AND_QSPI_BOUNDARY:
+- 禁止用 SSH/SCP/sed/tee/vi/nano/重定向直接修改板端产品文件来实现修复；板端访问只用于 inspection/log/runtime probe/safe recovery 和部署由 Windows source 构建的 artifact。
+- 临时板端诊断 mutation 不能关闭任务；必须在 Windows owner 重现、从 source 重新部署并清除临时变更。
+- QSPI 只作为独立最小 SSH 恢复入口，用于更新/校验 SD；不得扩展为产品 rootfs、功能 fallback 或依赖待修 SD 才能登录。
 
-SOURCE_TRUTH:
-- Do not use `D:\v3` as live source; it is frozen read-only reference only.
-- New v5 maintainable entries must use v5 names, not new `z20_*` names. Existing hardware hostnames/SSH aliases may appear only as external facts.
-- Windows local `D:\v5` is the only active V5 source owner tree. Linux kernel/PREEMPT_RT edits belong only in `D:\v5\linux`; LinuxCNC source/native edits belong only in `D:\v5\linuxcnc`; board HAL/INI/runtime packaging, LVGL, services and project tools belong in `D:\v5\board`; the current product FPGA function belongs only in `D:\v5\vivado_hw_project`, while the different non-current FPGA function belongs only in `D:\v5\new-vivado\z20_v1_5_hw_project` and must never supply current product XSA/bitstream inputs. Docs and other Windows owners stay under `D:\v5`. `D:\v5\board\linuxcnc` may contain only board runtime integration such as HAL, INI, runtime parameter/tool files, component contracts and image recipes; it must not contain a second LinuxCNC source owner, active source patch stack or source lock. VM may retain only `${VM_BUILD_ROOT}/temp_source/current` as an identity-derived, non-editable acceleration projection; no other VM source tree is allowed.
-- The board SD card is not durable and is never a source repository. Treat every board filesystem path, including `/opt/8ax`, LinuxCNC runtime directories, service units, deployed scripts, binaries, HAL/INI files, and runtime state, as rebuildable output. A clean SD card must be reconstructable from the complete portable `D:\v5` folder alone on a supported offline host through the canonical bundled/offline VM build and deploy workflow; project-specific external prerequisites outside `v5` are forbidden.
-- The Windows Git worktree is the only persistent source-bearing workspace and canonical owner. Do not create source owners in VM directories, board directories, desktop temp folders, backup folders, `bak/`, `repo_ignored/`, NAS mirrors, deploy staging folders, SD-card paths, Git worktrees, task directories, or archives. The one VM projection `${VM_BUILD_ROOT}/temp_source/current` is generated acceleration state only: it may persist, but cannot be edited, committed, downloaded into, copied again, or used to overwrite Windows; identity mismatch requires refreshing that same path. The root repository's `origin/main` plus Git LFS is the only allowed off-host source/document recovery history; no NAS mirror, editable archive, source bundle or second working tree is allowed.
-- `origin/main` plus its Git LFS objects is the mandatory off-host disaster-recovery snapshot. Every non-regenerable input required to recreate V5 after total loss of the Windows disk must be tracked and pushed: Linux/PREEMPT_RT source, complete LinuxCNC source, board runtime and integration source, PetaLinux project-spec/recipes and current hardware handoff inputs, both distinct FPGA-function source owners with explicit current/non-current identity, Windows application source, build/deploy tools, configs, schemas and settled documentation. A successful local commit without the matching remote ref and LFS objects is not a recovery snapshot.
-- `.gitignore` may exclude only reproducible build outputs, caches, logs, evidence, runtime state and scratch data. No required source, hardware handoff, recipe, patch, configuration, schema, keyless public build input or recovery instruction may exist only in an ignored directory, VM build tree, board filesystem, local archive or tool cache. Generated artifacts remain excluded when tracked sources and documented tools can regenerate them.
-- Proprietary or redistributability-restricted toolchains must still have a legal, versioned, checksummed offline installation/VM medium and offline activation or license procedure stored inside `v5` so the folder can be used without network access or a preconfigured original machine. If vendor or legal restrictions make that impossible, `REQ-V5-OFFLINE-FULL-SD-REPRODUCTION` is honestly `blocked`; do not weaken it to “download later” or “assume the target computer already has the toolchain.”
-- Disaster-recovery closure requires both Git recovery integrity and offline production proof. Git recovery integrity includes `HEAD == origin/main`, no necessary untracked or ignored input, `git fsck` success, all reachable Git LFS objects uploaded, and the Linux, PREEMPT_RT, LinuxCNC, PetaLinux and product-source identity/closure gates passing. Offline production proof may transfer the complete `v5` tree into one isolated, read-only, task-temporary disconnected test environment; that test copy may not be edited or reused and must be deleted after acceptance. The test starts from empty build/downloads/sstate, generates all SD artifacts, writes and fully reads back a blank SD, and cold-boots the product board. Neither half alone is sufficient.
-- Direct board editing is forbidden as an implementation path. Do not use SSH, SCP, `sed`, `tee`, `vi`, `nano`, inline shell redirection, or ad hoc copy commands to modify `/opt/8ax`, LinuxCNC configs, services, scripts, UI binaries, HAL/INI files, or other product/runtime files on the board. Board-side access is for inspection, logs, runtime probes, safe recovery, and deployment of artifacts built from the Windows source truth only.
-- If a temporary board-side diagnostic patch is ever required to understand a fault, it is not a source fix and cannot close the task. Reproduce the change in the owning Windows source under `D:\v5` / `D:\v5\board`, remove the temporary board mutation by redeploying from source, then verify the original operator path before claiming fixed.
-- VM Linux builds must use `VM_SOURCE_MOUNT_ROOT` as the live read-only Windows owner input. Large small-file trees may be compiled from the single local projection `${VM_BUILD_ROOT}/temp_source/current` for speed after its manifest is checked against the mount; identity match permits cross-task reuse, mismatch refreshes only this path. All CMake/Ninja state, generated files, objects, packages, and artifacts must be written outside the projection in canonical build directories; manual edits, patches, commits, a second projection, or reverse-sync to Windows are forbidden.
-- `board/tools/sync_win_source_to_vm.py`, editable VM mirrors, alternate VM source manifests, and workflows that create multiple VM source trees remain retired. Existing `/root/Desktop/v5` and every VM source copy except the single canonical projection `${VM_BUILD_ROOT}/temp_source/current` must be removed after confirming the Windows owner contains the required source; do not rename, archive, retain, or reuse them as fallback. Projection refresh must have one canonical tool/path and one Windows-linked identity manifest.
-- Do not install, enable, or use WSL on Windows for this project. When Linux userspace/tooling is required, use the VM toolchain against the direct Windows source mount; if the mount is unavailable, the VM build is `blocked`, and copying source is not an allowed fallback.
+## P0_ARCHITECTURE_KERNEL
 
-OFFLINE_FULL_SD_REPRODUCTION:
-- `REQ-V5-OFFLINE-FULL-SD-REPRODUCTION` in `功能/需求真源索引.md` and owner `功能/全局通用配置需求.md` is a highest P0 product-recovery requirement. It overrides older assumptions that the VM installation, VM build-output directory, online installer, remote source/cache, NAS, or original host may remain an external prerequisite.
-- Before any canonical offline build starts, every actual compiler/generator/patch/configure/package/rootfs source input must already exist under the Windows `v5` tree with version, provenance, license and content hash. Any missing source may be acquired only by a separate Windows-host import step that downloads directly into its canonical `v5` location and verifies it there. The VM, BitBake `SRC_URI`, or any other configure/build/package entry may not download or fetch missing source.
-- Every project-specific tool required to regenerate `BOOT.BIN`, `image.ub`, `boot.scr`, device tree, rootfs and the SD layout must be installable or runnable from versioned offline media under `v5`. A build that succeeds only because `/opt/pkg`, the original VM, a host-global install, old `downloads`, sstate, workdir, or prior deploy artifacts already exist does not prove recovery.
-- The mandatory acceptance starts with network disabled, a new/clean tool environment created from the `v5` offline bundle as applicable, empty build/downloads/sstate directories, and a blank SD. It must build every deployed layer, generate the complete boot/rootfs manifest, write and hash/readback the full card, safely unmount it, and cold-boot the board through the real product path.
-- Remote and local caches may be evaluated as optional acceleration during ordinary development, but the highest offline acceptance must not use them. The VM may retain exactly one current generated image set under `VM_BUILD_ROOT` for ordinary reflash convenience/evidence; the set may contain `BOOT.BIN`, `image.ub`, `boot.scr`, rootfs and a full-SD image, and uniqueness makes an additional `COPY`/“副本” label optional. Its manifest must record source identity, build mode, generation time, artifact SHA-256 values and board-verification state. A new current image set replaces the old set instead of creating versioned/backup image copies, and reuse is allowed only when the manifest source identity matches the current Windows canonical source and all hashes pass. The retained image set is generated output, never source truth, the only recoverable input, or a substitute for the from-zero proof.
-- Until that acceptance has passed, answer “can the `v5` folder alone fully reproduce the SD offline?” with `blocked` and list the exact missing source/tool/license/hardware input; never infer closure from source identity checks, one successful cached VM build, or a previously written SD.
+ARCH_OWNER=`系统代码架构硬边界守则.md`
+CONTROL_PATH=UI C -> framed UDS native Command Gate -> LinuxCNC/HAL/EtherCAT/native owner
+STATE_PATH=microkernel/native resident memory/API -> allowed display projection -> typed SHM -> UI
 
-FAST_BUILD_EXECUTION_LADDER:
-- DEFAULT_BUILD_MODE=`incremental-current`. Ordinary fixes do not start with blank-cache full-SD certification. Use one canonical pipeline in this order: Windows owner/doc/diff/syntax/unit/identity gates -> smallest affected VM recipe/target configure/compile/install/package -> rootfs/manifest only when deployed closure changes -> exactly one current final image when board media changes -> deploy and original operator path. A stage must pass before the next stage starts.
-- FAIL_FAST_RERUN: when a stage fails, fix the canonical Windows source and rerun only that stage plus its downstream. Do not rerun an already-passed upstream stage unless its input identity changed. A LinuxCNC change must prove the LinuxCNC recipe/package before final image; kernel, UI/runtime and other owners follow the same affected-target rule. Final image generation is not the first compile test.
-- CACHE_PRESERVATION: ordinary builds keep valid `sstate`, `tmp/work`, stamps, unaffected packages and the unique current image. `cleanall`, `cleansstate`, kernel clean, whole `tmp/sstate` deletion, global fetch-stamp reset, or forced unrelated rebuild requires concrete evidence naming the corrupt/mismatched cache or changed input. Convenience, uncertainty, or “make it clean” is not evidence.
-- VM_LOCAL_PROJECTION: `VM_SOURCE_PROJECTION_ROOT=${VM_BUILD_ROOT}/temp_source/current` is the sole permitted VM source projection. It may persist across tasks to avoid VMware shared-folder small-file latency. Before reuse, compare its machine-readable identity with the current read-only Windows mount; match means reuse, mismatch means refresh this same path. Never edit, patch, commit, download into, reverse-sync, fork, timestamp, or duplicate the projection. Build-generated files stay outside it.
-- IDENTITY_ONCE_PER_CHANGE: compute owner content identity on Windows when that owner changes; in one unchanged build run, verify the VM mount/projection once and reuse that result across package/rootfs/image stages. Do not repeatedly full-tree hash, remount, or re-project unchanged source between stages.
-- FULL_CURRENT_SEMANTICS: elsewhere in this file, ordinary `full-current`, `full current build`, or `full build` means the final current artifact is assembled against all current canonical owners after affected-target gates, while valid caches and unchanged outputs remain. It does not mean blank cache, rebuild every recipe, or offline disaster-recovery certification.
-- OFFLINE_CERTIFICATION_TRIGGER: empty build/downloads/sstate, disconnected full build, blank-SD write/readback and cold boot run only when the user explicitly requests it, a release/disaster-recovery milestone requires it, or the task is claiming/renewing `REQ-V5-OFFLINE-FULL-SD-REPRODUCTION`. Changes to offline inputs/toolchain/license/hardware handoff/base image invalidate the prior offline certificate, but ordinary feature repair still closes first through the incremental ladder.
+ARCH_RULES:
+- native/microkernel 能拥有的参数、actual、运动、安全、WCS/G92、RTCP、active model、stillness、segment/wcheckpoint 和动作结果必须由 native owner/readback 裁决；UI/Broker/provider 只请求、路由、显示和诊断。
+- SHM 只承载 `REQ-SHM-DISPLAY-PROJECTION` 白名单显示投影。SHM epoch/cache/UI dirty/JSON/result/default 不能成为保存、控制、安全、运动或动作成功真值。
+- UI、自写脚本、microkernel/runtime service、owner mapping 和热路径资源按 `REQ-PARAM-MEMORY-LIGHTWEIGHT-SAVE` 在开机或 canonical reload 进入 RAM；运行期除明确保存、Program Open、限频事件日志和受控重启外不得读盘、扫描、懒加载或用 wrapper fallback。
+- CPU0 专属 microkernel/native realtime motion。UI、Broker、Publisher、provider、日志、构建/部署和诊断不得 pin/affinity 到 CPU0；CPU0 ownership/scheduling 是 P0。
+- 控制/状态 owner、ABI、resident lifecycle、service privilege/capability、remote relay exposure 的完整边界只读索引登记 owner，不在本文件复制。
 
-BOARD_UNREACHABLE_RECOVERY:
-- If board SSH/MCP/relay is unreachable, do not just wait or add a nicer error.
-- Open COM monitoring when available, run the canonical project tool from `D:\v5\board\tools\v5_board_power_cycle.py` through the configured VM/Windows-capable path, then re-probe board readiness and record evidence.
-
-PARAMETER_NATIVE_TRUTH:
-- Use `REQ-PARAM-MEMORY-LIGHTWEIGHT-SAVE` in `功能/需求真源索引.md` and owner `功能/0-1开机参数入内存.md`.
-- Microkernel/native parameters and data must be consumed from microkernel/native memory/API when they exist.
-- Exception: SHM display whitelist only. Do not create a second V3 parameter table for native-owned truth.
-- Drive parameter tables are an explicit drive-only custom-schema exception.
+PARAMETER_RULE:
+- 微内核/native 已有或可承载的字段先进入 native resident owner/API；drive mapping 已有的驱动私域字段进入 drive owner；只有两者都没有的设置字段才进入自建参数表。
+- UI 可持有 edit/dirty 并发请求，但保存成功必须等唯一持久 owner 源位置回读；运行生效必须等 controlled reload 后 native/drive actual。UI 不直接写 runtime INI、linuxcnc.var、tool.tbl、HAL 或 settings_runtime.json。
+- `settings_runtime.json` 只允许 drive-only schema/证据；不得回流 WCS/G92/TLO/tool/RTCP/modal/status/runtime INI 真值。
 
 SELF_WRITTEN_CODE_SIZE:
-- The 500-line guardrail applies only to v5 self-written business/control-flow code.
-- Parameter files, parameter schemas, pure parameter tables, generated/schema/config/data files, tests, docs, constants, and other atomic files should not be mechanically split.
-- Microkernel/native/upstream files should not be changed, split, or reformatted for line-count compliance; touch them only for the smallest owner-required native change.
+- 500 行只约束 V5 自写 business/control-flow owners。新 owner/状态机/算法/parser/write path 不得继续塞入超过 500 行的业务文件；先按 page/protocol/domain/precheck/runtime/verify/result 拆分。
+- tests、docs、generated、pure config/schema/parameter/data/table/constants/ABI 及真正原子声明文件不机械拆分。microkernel/native/upstream 文件不为行数规则重排，只做 owner 所需最小改动。
 
-PATH_AND_DOC_CONSTANTS:
-- PROJECT_PATH_RULE: project-local paths stay under `PROJECT_ROOT` so the v5 folder can move intact.
-- SOURCE_RELATIVE_ADDRESS_RULE: source code must use relative filesystem/resource addresses only. Do not hard-code absolute project, host, VM, board, Windows, or Linux paths such as `D:/...`, `C:\...`, `D:\v5\board\...`, `/home/...`, or `/tmp/...` in source, config, scripts, tests, manifests, or generated runtime constants; resolve them from `PROJECT_ROOT`, the executable/resource root, or a caller-provided relative path instead. A real OS/device/API absolute path is allowed only when it is an external non-project fact, fail-closed, and recorded by the indexed owner.
-- MARKDOWN_LINK_RELATIVE_EXCEPTION: Markdown links are relative to the markdown file directory.
-- REQUIREMENT_SOURCE_INDEX: `功能/需求真源索引.md`.
-- HIGHEST_PARAMETER_REQUIREMENT: `功能/0-1开机参数入内存.md`.
-- ARCH_BOUNDARY_DOC: `系统代码架构硬边界守则.md`.
-- PROJECT_GUIDE_DOC: `项目软硬件架构和后期修改指导说明.md`.
-- CMV_GUIDE_DOC: `CMV自动化体系.md`.
-- LEGACY_FILE: `待做工作/遗留.md`.
-- NO_TASK_BOARD: true. Do not recreate `AI_并行任务看板.md`, `MULTI_AI_MODULES.md`, `FILE_STRUCTURE.md`, or `AI自动作业指导书.md`.
+## P0_WORKFLOW_AND_LOCKS
 
-## P0_ENTRY_RULES
-1. V5_OFFLINE_SOURCE_CLOSURE_AND_DELETE_FIRST:
-   - WINDOWS_FIRST_EXECUTION: For every compile, syntax check, static analysis, code generation, packaging, manifest, hash, schema, unit-test or other build-related step, first determine whether the Windows host can execute the required tool correctly. If it can, that step must run directly on Windows. The VM is permitted only for the smallest irreducible step whose required Linux ABI, kernel behavior, PetaLinux/Yocto environment, Linux-only dependency, ARM cross-runtime or vendor tool is unavailable or invalid on Windows. Convenience, habit, existing VM caches, an already-open VM session or avoiding a Windows tool setup are not reasons to use the VM. A mixed pipeline must keep every Windows-capable stage on Windows and send only the irreducible stage to the VM; record the concrete Windows limitation before invoking the VM. The VM remains a consumer of the Windows unique source and never becomes the default execution host.
-   - Before any configure/compile/package/rootfs/image task starts, every source, fixed third-party package, patch, hardware input, recipe/configuration, generator input, offline toolchain/VM/install medium, license prerequisite and SD write/readback tool that can affect the product SD must already physically exist under the single Windows `D:\v5` tree with its canonical owner, fixed identity, content hash and license/provenance record. If anything is missing, do not let the VM, BitBake, Git, HTTP, HTTPS, a remote mirror, sstate or any build script fetch it as part of compilation: stop before the formal build, run one explicit import on the Windows host only, download the missing input directly into its canonical location under `D:\v5`, verify and register it there, then restart the formal build with network access unavailable. The VM is a source consumer, never a source downloader.
-   - Every source input has exactly one persistent canonical owner path inside `D:\v5`. Do not retain another editable owner, archive, backup, task tree or sync tree. For Linux/PetaLinux/Yocto builds, the VM may retain only the derived projection `${VM_BUILD_ROOT}/temp_source/current` to avoid shared-folder small-file latency. It may be reused across tasks only when its identity matches Windows, must be refreshed in place when mismatched, and must never be edited, patched, committed, downloaded into, forked, duplicated or treated as source truth.
-   - The complete `v5` folder alone must rebuild every full-SD artifact from empty build/downloads/sstate on a supported disconnected computer, write/read back a blank SD and cold-boot the board; an installed VM/toolchain outside `v5`, old cache/output, original computer, NAS, remote repository, existing SD or ready image is never a required input.
-   - Keep exactly one canonical mainline: do not create Git task/worktree branches or alternative source, build, package, deploy, compatibility, fallback, hotfix, bypass, shadow or copied implementation branches. Necessary real product/runtime condition handling must stay inside that one owner path and is not authority for a second implementation. Whenever any unsupported, retired, legacy, duplicate, fallback, compatibility, shadow, bypass, split-brain or AI-made code, document, test, configuration, recipe or build/deploy path is discovered during any task, remove it in the same slice; if the canonical path still depends on it, migrate that dependency first and then delete the retired path immediately. Do not postpone deletion, rename it as backup, disable it, hide it behind an environment gate, leave a TODO, or keep it for rollback.
-2. V5_BOOT_MEMORY_NO_EMPTY_RUN_FIRST: For v5 project boot/startup, the UI, product self-written runtime code/scripts, microkernel/runtime services, provider/action paths, and parameter owner mappings must enter RAM/resident memory directly at boot or through the canonical controlled reload before runtime use. Because the self-written UI, self-written scripts, and microkernel footprint is small and available memory is sufficient, keeping them resident is the default performance path to speed up runtime execution; do not trade it for lazy disk reads, repeated import/path scans, startup probing, wrapper runners, or fallback loaders. During board runtime, except for necessary parameter save/writeback to the unique persistent owner, UI code, product self-written scripts/code, and microkernel/runtime services must not read from or depend on disk/flash for hot-path execution, state truth, action discovery, UI resources, scripts, command handlers, provider data, or proof of success; these must already be resident in RAM or refreshed only through the canonical controlled reload. Runtime code must solve the real execution direction and must not silently empty-run/no-op because data, owner, UI, action, microkernel state, or startup state is missing. Do not add fallback/compatibility/default/wrapper/shadow branches. Delete forked, legacy, fallback, duplicate, shadow, bypass, split-brain, or unsupported code/docs/tests/configs as required by item 1.
-3. Classify every slice before editing: P0 for native/SHM/State Publisher/Broker control/motion/safety/parameters/wcheckpoint/segment boundary/stillness/fallback survivors; P1 for ordinary product behavior, non-motion UI, feature docs, local refactors, and non-realtime config; P2 only for spelling, comments, formatting, links, test names, and non-semantic annotation/import compatibility.
-4. If uncertain, choose the higher class. If a P1/P2 slice touches ownership, ABI/schema, resident daemon lifecycle, control IPC, native helper allowlists, board-visible behavior, or fallback policy, escalate immediately.
-5. `功能/` files are mandatory settled product memory and the highest product requirement source. Work notes may describe active tasks and evidence, but behavior, runtime truth, owner boundaries, and acceptance conditions must obey `功能/需求真源索引.md` and the indexed `功能/` owner. For any user-proposed feature requirement, AI must first check whether the corresponding `功能/` document already records it; if recorded but inconsistent, update the owner first; if unrecorded, add or assign the `REQ-*` and owner record first. Behavior or requirement changes update that owner before source/config/tests/backlog.
-6. Runtime truth has one owner. UI and Broker may display/request/consume typed state, but must not invent native, microkernel, SHM, parameter, motion, safety, wcheckpoint, segment boundary, or stillness truth.
-7. Finish status must be honest: use `source_only` for source/doc-only work, `local_verified_only` for local gates without board proof, `board_verified` only after the original board/operator/motion path is proven, and `blocked` only for a real blocker with the next acceptance condition recorded.
-8. In parallel AI work, do not take over another active owner/card or broad shared ABI/lifecycle file. If a shared file must change, make the smallest patch and state which owner semantics were not changed.
-
-## P0_WORKDOC_TO_FEATURE_FLOW
-- `待做工作/` is the user's active requirement input, investigation note, implementation card, and progress/evidence record. It may propose or correct requirements, but it is not the final execution truth after those requirements are settled.
-- When the user asks to implement a specific `待做工作/*.md`, read that workdoc first, then locate the related `功能/` owner through `功能/需求真源索引.md`.
-- If the specified workdoc changes, corrects, or clarifies product behavior, runtime truth, owner boundaries, acceptance conditions, or forbidden paths, update the indexed `功能/` owner first. Then implement code/tests/configs against the updated owner, not against stale copied text.
-- If the workdoc and the current `功能/` owner conflict, treat the specified workdoc plus the latest user message as the requirement-change input; do not bypass `功能/`. Convert the stable requirement into the owner, then synchronize implementation.
-- After implementation, do not write status, evidence, screenshots, command output, board results, or completion summaries back into the workdoc by default. Report verification in the final chat reply instead. Update a workdoc only when the user explicitly asks to update that workdoc, or when the user names that workdoc as the target artifact and asks for its content to change.
-
-## P0_RULE_POINTERS
-
-- PROJECT_PATH_RULE: all project-local paths stay under `PROJECT_ROOT`.
-- SOURCE_RELATIVE_ADDRESS_RULE: all source-code filesystem/resource addresses must be relative; hard-coded absolute project/host paths are forbidden unless the indexed owner records a real external OS/device/API exception.
-- SOURCE_FILE_MAX_LINES_RULE: see `SELF_WRITTEN_CODE_SIZE` and `TOUCH_OWNER_DOWNSHIFT`.
-- MARKDOWN_LINK_RELATIVE_EXCEPTION: markdown link hrefs are relative to the markdown file directory.
-- DOC_SINGLE_SOURCE_RULE: every fast-changing requirement has one `REQ-*` owner in `功能/需求真源索引.md`.
-- HIGHEST_REQUIREMENT_DOC_FIRST_RULE: requirement changes update the indexed `功能/` owner before source/config/tests/backlog.
-- PARAMETER_DOC_PRECEDENCE: microkernel-owned parameter truth uses `功能/0-1开机参数入内存.md`.
-- HIGHEST_PARAMETER_TABLE_MEMORY_RULE: use `REQ-PARAM-MEMORY-LIGHTWEIGHT-SAVE`; microkernel/native truth wins except SHM display whitelist and drive-only parameter table exception.
-- HIGHEST_NATIVE_TRUTH_RULE: use `REQ-NATIVE-OWNER-FIRST` and `REQ-LINUXCNC-COMMAND-GATE`; owner text lives in `系统代码架构硬边界守则.md`.
-- NATIVE_GAP_EXCEPTION_RULE: native-gap exceptions need exact gap, minimal adapter, fail-closed boundary, readback evidence, and deletion/upstream condition.
-- DEPRECATED_CODE_NO_REVIVAL_PRECEDENCE: do not revive retired paths unless latest user reverses retirement and owner docs are updated first.
-- DELETE_OVER_ADD_PRECEDENCE: deleting retired/duplicate/shadow code is higher priority than adding another route.
-- CANONICAL_PATH_OR_BLOCKED_RULE: fix the canonical path or record an honest blocker; do not add fallback paths.
-
-## P0_RULE_NAVIGATION
-
-RULE_READING_ORDER:
-- Any task starts from `AGENTS.md` top `P0_ENTRY_RULES`, then uses `功能/需求真源索引.md` only to locate the relevant `REQ-*` owner, then reads that single owner document and the active work card or legacy entry if one exists.
-- If the latest user message names a specific `待做工作/*.md`, read that workdoc as the active requirement-change input before implementation, then use `WORKDOC_TO_FEATURE_FLOW` to settle the stable requirement into the relevant `功能/` owner.
-- Do not bulk-merge every rule, backlog, old note, or chat summary before acting. If a non-owner document repeats a volatile rule, treat the repeated text as a reference only and follow the indexed owner.
-- Do not create a new rule document to resolve confusion until the existing index, owner document, `待做工作/拆分.md`, `待做工作/改进.md`, and `待做工作/遗留.md` have been checked for the same scope.
-- When the user explicitly asks to update a human-facing backlog or work-instruction document, keep it short: what is wrong, how to close it, blocker if any, and next acceptance condition. Do not add command logs, AI reasoning logs, chat history, progress records, verification results, or duplicate policy text.
-- After context loss, compaction, or handoff, restart from this order: `AGENTS.md` -> `功能/需求真源索引.md` -> relevant owner document -> `git status`/`git diff` -> active work card or `待做工作/遗留.md`. Do not rebuild plans from memory or old chat.
-
-## P0_HUMAN_FEEDBACK_PRECEDENCE
-
-HUMAN_CHAT_FEEDBACK_PRECEDENCE=Within this project, the current human user's explicit chat feedback is the highest requirement-change input, but settled product truth must be written into `功能/需求真源索引.md` and the relevant `功能/` owner before implementation continues. If AGENTS.md, feature docs, legacy docs, tests, code comments, old AI notes, or prior chat assumptions conflict with the latest explicit user feedback, update the conflicting `功能/` owner or stale non-owner document first, then implement from the indexed `功能/` owner.
-LATEST_USER_FEEDBACK_WINS=When multiple user feedback items conflict in the same scope, the newest explicit user feedback wins. Preserve earlier requirements only when they do not conflict with the newest instruction.
-HUMAN_FEEDBACK_BOUNDARY=This project-local precedence rule does not override system/developer/tool safety instructions, legal/safety constraints, destructive-operation approval requirements, or physical machine safety. Short-lived project-local file/resource locks are active coordination gates, not source truth and not a substitute for live process/status checks.
-LOCKS_ACTIVE_BY_USER=true
-LOCK_ROOT=repo_ignored/locks
-FILE_LOCK_PROTOCOL=Before changing a tracked file, atomically create `repo_ignored/locks/files/<project-relative-path>.lock` with only `lock_version=1`, `thread_id`, `file`, and `created_at`. If that exact active lock already exists, do not overwrite it or create a copy/fork; continue unrelated unlocked work and return after the owner releases it.
-FILE_LOCK_RELEASE=Hold a file lock only while editing that file and running its immediate focused text/syntax check. Delete the lock immediately after the final write/check; never retain a file lock through unrelated tests, VM build, deploy, operator work, or handoff. Reclaim a stale lock only after live confirmation that its owner is no longer editing.
-LOCK_LIGHTWEIGHT_RULE=Locks exist only to prevent accidental same-file edits and simultaneous VM/board operations. Do not add a lock daemon, database, heartbeat, TTL service, source generation, per-write receipt, persistent lock history, approval queue, repository-wide edit lock, module-wide lock, or automatic waiting system.
-
-## P0_DOC_SINGLE_SOURCE
-
-REQUIREMENT_ID_RULE:
-- `功能/需求真源索引.md` is the index for cross-feature and fast-changing product requirements.
-- Do not maintain a complete or authoritative `REQ-*` list in `AGENTS.md`; it drifts as `功能/` evolves. Always read `功能/需求真源索引.md` for the current owner list, route map, and conflict decision.
-- Common high-volatility domains include doc single-source, file placement, boot-to-memory parameters, SHM display projection, UI refresh/cache, native/LinuxCNC command ownership, settings runtime drive-only, BUS/Pulse mode, G-code hot path, Start/Home/E-stop operator paths, RTCP native status, RTCP/G53/active model geometry, WCS/G92, rotary unwrap/rebase, remote display relay, board full-build closure, and automatic closed-loop proof. These names are reminders only; the index decides the exact `REQ-*` and owner document.
-- Every volatile requirement must have one `REQ-*` entry and one owner document. Change that owner document when the requirement changes; do not chase every non-owner feature doc just to restate the same policy.
-- User-proposed feature requirements must not be implemented from chat alone. First search the relevant `功能/` owner path through this index; when the requirement is missing, create or assign the `REQ-*` record and owner document before source/config/tests/backlog changes.
-- Non-owner docs should cite the relevant `REQ-*` IDs and keep only local implementation detail, owner cards, field mappings, and verification requirements.
-- If copied text in a non-owner doc conflicts with the indexed owner, the copied text is stale. Update the owner requirement first, then implementation; update references only when missing or actively misleading.
-- New or edited feature docs that mention native owner, `settings_runtime.json`, SHM, UI refresh/cache, G-code Start/Open, Home, E-stop, board closure, G92, WCS, RTCP/G53, active model, rotary unwrap/checkpoint, remote display relay, or LinuxCNC command gate must cite the corresponding `REQ-*` entry from the index.
-
-## P0_FINISH_LINE_READ_FIRST
-
-DEFAULT_GOAL=Reach the required verification endpoint, not merely edit files.
-
-USER_ISSUE_SOLVING_RULE:
-- Treat every user-raised problem/question as a request to solve or advance the real issue to the required verification endpoint, not as a request to merely report the first error.
-- A user-reported defect is not closed by adding a new error prompt, popup, warning text, disabled button, guard rejection, or friendlier failure message. Those are only acceptable when the user explicitly asks for messaging, or when they are the minimal safety surface while the real root cause remains honestly open.
-- If the symptom is a wrong behavior, failed action, missing result, motion/UI/runtime mismatch, or operator-visible failure, the default work is to fix the underlying path and then re-run the same user-visible scenario. Do not convert the requested fix into a designed refusal, preflight block, or explanatory error state unless the latest user requirement says that behavior is the product requirement.
-- Existing error prompts, popup warnings, guard rejections, disabled states, and "not supported" branches found on the reported path must be treated as implementation gaps, not product acceptance. Implement the missing behavior so the original path no longer reports the error, then delete the obsolete prompt/guard branch in the same slice unless it is still required as a real safety interlock by the indexed owner.
-- Do not preserve old error text as compatibility, diagnostics, or rollback insurance after the underlying issue has been implemented. If the error still appears in the original scenario, the issue remains open; continue fixing or record an honest blocker with the exact unsupported dependency and next deletion condition.
-- When fixing a reported path, keep real product/process choices, hardware/runtime states, safety interlocks and owner-approved operator workflows only as condition handling inside the one canonical implementation. Do not represent them as a second source/build/runtime branch. Delete AI-made paths that exist only to explain, route around, simulate, special-case, or preserve an invented alternate behavior.
-- A tool, command, build, test, deploy, board, or runtime failure is diagnostic evidence. Investigate the cause, try a reasonable fix-forward or alternate allowed path, and continue toward closure when safe.
-- Do not treat "command failed", "tool errored", "cannot access", "test failed", "board unavailable", or "stopped here" as complete work. These can only be intermediate findings or blockers.
-- Stop as `blocked` only when solving would be unsafe/destructive without user approval, required external state is unavailable, user input is genuinely required, or multiple meaningful attempts have hit the same concrete blocker.
-- Multiple meaningful attempts means at least three distinct relevant attempts, or three consecutive turns/tries ending at the same blocker after diagnosis. When this threshold is reached, report the blocker, attempts made, missing verification, next acceptance condition, and strongest honest status in the final chat reply.
-- A LEGACY_FILE entry is not a substitute for attempting the solution. Do not write a LEGACY_FILE entry unless the user explicitly asks for a persistent unresolved-work record.
-
-CONTINUOUS_PROGRESS_RULE:
-- The default execution mode is continuous progress. If a requested workstream has a known next safe action, continue to that action without waiting for user confirmation, intermediate approval, status acknowledgement, or a new chat prompt.
-- Do not stop after a plan, partial inventory, one field migration, one local gate, one tool run, one source edit, one doc update, or `local_verified_only` for a field. Use that result as input for the next field/slice, missing-tool build, cleanup scan, integration manifest, or final board slice as applicable.
-- If a needed migration/test tool is missing, build the smallest reusable tool or task-local diagnostic helper allowed by TOOLING, verify that tool, then continue the migration. Missing convenience tooling is not a reason to stop.
-- Pause only for unsafe/destructive operations needing approval, a real external blocker, VM/board contention, a rule conflict that cannot be resolved from local context, or user input that is genuinely required. Otherwise keep advancing source, docs, tools, tests, cleanup, and verification toward the required endpoint.
-- When context is compacted or previous chat detail is unavailable, reload AGENTS.md, the controlling feature docs, current git status/diff, and existing tool outputs, then continue from current source truth instead of restarting or waiting.
-
-INCREMENTAL_UI_AUTOMATION_GATE:
-- Before any full automation flow, full operator pipeline, full motion pipeline, regression matrix, or equivalent end-to-end automation, close the relevant single issue/function in isolation first.
-- For UI/operator paths, the isolated check must proceed by screenshot/remote-frame confirmation first: confirm the real screen, color/state, and next click target before sending input.
-- Simulated screen clicks or remote-input clicks must be executed one small action at a time, with screenshot/remote-frame evidence after each step. If the screen is wrong, the click target is unclear, or one small action fails, stop and fix that single function before continuing.
-- For v5 UI layout-only shells, non-motion page navigation, and non-motion button hit testing, AI should drive the screen itself with simulated screen clicks or the canonical remote-input tool. Before every simulated click, drag, scroll, or remote-input action, first capture a screenshot/remote frame and confirm the current screen, color/state, and exact target position; never send a bare coordinate without this pre-action frame. After each action, record the target, after screenshot, and UI/remote-input event evidence. Do not wait for the human operator for these routine UI clicks.
-- Simulated clicks are not valid evidence for touch calibration, raw touch hardware health, real-finger ergonomics, motion-capable closure, Start/MDI execution, or any owner that explicitly requires real operator touch. Those paths still require the owner-specified real input or motion gate.
-- Do not start or continue the full automation flow while the single function is still unclosed. Full automation is final regression evidence, not the primary debugging tool for an unclosed single problem.
-- For batch improvement work that explicitly requires local-first closure, complete each single item with its local focused gate first; after all local single items pass, build once from full current RUNTIME_SOURCE_ROOT, deploy once, then perform per-function board checks before final full automation.
-- Under CONTINUOUS_PROGRESS_RULE, this gate defines the next safe action for UI/operator/motion work. Full automation is not a next safe action until the relevant single-function checks have passed.
-- Running the full flow before per-function screenshot/click verification is a P0 workflow violation because it hides the real failing step and wastes VM/board/motion time. Report `blocked_by_incremental_ui_automation_gate` instead of bypassing this gate.
-
-PROGRESS_DOC_SYNC_RULE:
-- Do not auto-write progress, results, board/operator evidence, screenshot paths, command output, or completion summaries into human documents. The default result channel is the final chat reply.
-- `功能/` owner documents record only settled requirements, owner boundaries, field mappings, and acceptance rules based on the user's requested behavior. Do not turn owner rule files into process logs or verification-result logs.
-- `待做工作/`, backlog, legacy, and process documents are not updated with results by default. Update them only when the latest user message explicitly asks to modify that specific document or when the user names that document as the requested target artifact.
-- If a true blocker prevents implementation or board testing, report the blocker in the final chat reply. Write a blocker into `待做工作/遗留.md` only when the user explicitly requests a persistent legacy/blocker record.
-- If the user explicitly requests a human document update, keep it concise and human-readable. Do not write command流水, long logs, AI-only reasoning, progress records, or verification-result logs into human docs.
-
-RISK_GRADED_EXECUTION_RULE:
-- This is the detailed gate expansion for `P0_ENTRY_RULES` item 2. The top entry rules decide the first path; this section defines the full gate expectations after classification.
-- Before choosing gates, classify the slice as P0, P1, or P2. If uncertain, choose the higher risk class. If a low-risk slice discovers native ownership, SHM ABI, Broker/control routing, motion safety, parameter truth, fallback survivor, or board-visible behavior, escalate immediately and use the higher class from that point.
-- P0 high-risk slices include any change to native/LinuxCNC/HAL/EtherCAT ownership, microkernel parameter truth, CPU0 ownership/isolation/affinity/scheduling, typed SHM ABI or State Publisher ownership, Broker/product control paths, runtime motion, safety gates, wcheckpoint, segment boundary, stillness gate, settings-runtime truth, board-visible behavior, deploy/startup scripts for resident owners, or any supported fallback/compatibility survivor. P0 keeps the full doc-first, owner, no-fallback, ABI, focused test, VM/board/motion gates required elsewhere in this file.
-- P1 medium-risk slices include ordinary product behavior, non-motion UI behavior, feature documentation, local refactors, non-realtime configuration, and tests that can affect a supported runtime path but do not change P0 ownership or safety semantics. P1 requires the relevant owner document when behavior changes, scoped no-fallback cleanup for touched paths, targeted compile/unit/contract tests, and honest `local_verified_only` if board gates are not run.
-- P2 low-risk slices include spelling, comments, formatting, markdown link fixes, test name cleanup, and source annotation/import compatibility changes that do not alter runtime semantics, public contracts, owners, schemas, generated ABI, deployment, or board-visible behavior. P2 uses status/diff review, the root Git history instead of an edit backup, `git diff --check`, and the smallest syntax/import/focused gate that can catch breakage from the touched file; it must not expand into full VM/board/motion gates unless the change is reclassified.
-- Low-risk changes must not update high-volatility owner requirements, SHM schemas, native helper allowlists, resident daemon lifecycle, product control IPC, or fallback policy text as a side effect. If those files must change, the slice is not P2.
-- Board/operator/motion verification is mandatory for P0/P1 slices whose behavior is board-visible or motion-capable. Any board program change that enters the board artifact or affects board runtime behavior under `D:\v5\board` requires the affected-target incremental ladder, one current board artifact, board deploy, and original UI/operator/control path closure before pass/fixed/verified language. Blank-cache full rebuild is required only by `OFFLINE_CERTIFICATION_TRIGGER`. Do not require board gates for P2 cleanup or doc/rule-only edits unless the edit itself changes a board-visible requirement.
-
-FINISH_LINE_MATRIX:
-- doc_or_rule_only: update requested document/rule -> run text sanity such as `git diff --check` -> final may say doc/rule updated when the edited text is internally consistent.
-- non_board_local_code: update doc first if behavior changed -> edit source/config -> run targeted compile/unit/contract/static gates -> final status `local_verified_only` unless board closure also ran.
-- board_program_change: update doc first if behavior changed -> edit board source/config/script/service/deploy files in the Windows owner -> run focused local gates -> refresh/reuse the unique VM projection -> build the smallest affected target/package -> build rootfs/manifest only if needed -> generate one current artifact -> deploy -> restart/reload the affected board runtime closure -> trigger the original UI/operator/control path -> collect deployment identity and behavior evidence -> final status `board_verified` only after verification actually ran.
-- board_visible_function_code: update doc first if behavior changed -> edit source/config in the owning truth location -> pass the affected target/package gate -> assemble one current runtime artifact when needed -> deploy canonical artifact -> trigger the original UI/operator path -> collect the minimal verification outputs needed for the claim -> final status `board_verified` only after verification actually ran.
-- motion_capable_code: complete board_visible_function_code plus native active model 对应的 `board/gcode/golden/cc-ac.ngc` 或 `board/gcode/golden/cc-bc.ngc` golden motion run result；no golden loop means no pass/fixed/done claim.
-- blocked_or_unsafe: keep source state honest -> record exact blocker and missing test in final reply -> final status `blocked` or `source_only`; never claim fixed/done/verified. Do not append/update LEGACY_FILE unless the user explicitly asks for a persistent blocker record.
-DO_NOT_STOP_AT:
-- source edits only
-- docs/rules/legacy records only
-- local compile/unit/mock tests only when board closure is required
-- touched-target or partial VM build when a board program change requires full board-source build
-- direct UDS diagnostics when the user-facing defect is a UI button/operator path
-- replacing the reported failure with a new popup/error/guard/disabled-state instead of fixing the requested behavior
-- keeping an existing popup/error/guard/disabled-state on the reported path after implementation work claims the behavior is supported
-- keeping an AI-made branch, alternate route, compatibility mode, or shadow path that is not an actual supported product/process flow
-- VM build without board deploy when board-visible behavior changed
-- plan/checklist/legacy record without executing required tests
-- reporting the first command/tool/test error without diagnosis and fix-forward attempts
-- writing any result/blocker record into LEGACY_FILE or other human documents unless the user explicitly asks for that document update
-
-PASS_WORDS_REQUIRE_VERIFICATION=fixed, repaired, done, passed, verified, board_verified, release_ready, works on board, live, closed-loop complete, operator_says_ok
-
-FINAL_STATUS_REQUIRED:
-- Always state changed files, verification actually run, and blocker if any.
-- If board closure was required, final must include `board_closure_state=board_verified|local_verified_only|source_only|blocked`.
-- If only local gates ran, say `local_verified_only`; do not imply board behavior is fixed.
-- If tests did not run, say `source_only` or `blocked` and name the missing test.
-
-## P0_ARCH_NO_POLLUTION
-
-CONTROL_PATH_ONLY=UI C -> Command Broker UDS framed socket -> product action -> LinuxCNC/HAL/EtherCAT
-STATE_PATH_ONLY=microkernel/native resident memory/API truth -> state publisher display/diagnostic projection -> /dev/shm/v3_status_shm typed SHM -> UI SHM reader
-UI_ROLE=display,input,state_view,command_sender
-MOTION_TRUTH=LinuxCNC/HAL/EtherCAT
-CPU0_MICROKERNEL_EXCLUSIVE=CPU0 is reserved exclusively for the microkernel/native motion-precision control flow. UI, Broker, State Publisher, provider/action scripts, diagnostics, deploy/build helpers, logging, and other non-microkernel work must not pin, affinity-bind, isolate-escape, or intentionally schedule on CPU0. Motion precision and deterministic microkernel/native flow priority beat UI refresh, throughput, diagnostics, automation, and convenience; any CPU0 ownership, isolation, or scheduling change is P0 and must be owned by the indexed architecture/native owner before source changes.
-ARCH_BOUNDARY_OWNER=系统代码架构硬边界守则.md
-ARCH_BOUNDARY_INDEX=功能/需求真源索引.md REQ-NATIVE-OWNER-FIRST, REQ-LINUXCNC-COMMAND-GATE, REQ-PARAM-MEMORY-LIGHTWEIGHT-SAVE, REQ-SETTINGS-RUNTIME-DRIVE-ONLY
-ARCH_FAST_FAIL=Any new direct LinuxCNC/HAL control path, UI disk/default parameter truth, file/JSON/FIFO product control IPC, product fallback to old scripts, env-gated compatibility survivor, or V3 private truth for native-owned state is blocked unless the architecture owner explicitly allows the narrow diagnostic exception.
-ARCH_EXCEPTION_RULE=Temporary diagnostic exceptions must stay outside product source/runtime/deploy paths, must not become hidden fallbacks, and must be converted back into canonical source fixes before delivery; see 系统代码架构硬边界守则.md for the full exception contract. When the canonical source fix exists, the temporary exception path must be deleted in the same slice; it cannot remain disabled, env-gated, renamed, or test-only as insurance.
-
-## P0_WORKFLOW
+RISK_CLASS:
+- P0：native/LinuxCNC/HAL/EtherCAT owner、CPU0、SHM ABI/Publisher、control IPC、motion/safety、参数真值、WCS/G92/RTCP、wcheckpoint/segment/stillness、resident startup、board-visible deploy、fallback survivor。
+- P1：普通产品行为、非运动 UI、feature docs、local refactor、non-realtime config。
+- P2：不改变语义/contract/owner/schema/deploy 的拼写、注释、格式、链接、test name 和 import annotation。
+- 不确定选更高；低风险任务触碰 owner/ABI/lifecycle/control/fallback/board behavior 立即升级。
 
 BEFORE_EDIT:
-1. Read AGENTS.md
-2. Run git status/diff for relevant paths
-3. For user-proposed feature requirements, check `功能/需求真源索引.md` and the corresponding `功能/` owner before implementation.
-4. If the requirement already exists but differs from the latest user message, update the indexed `功能/` owner first; if it does not exist, record it by adding or assigning the `REQ-*` and owner document first.
-5. If the latest explicit user feedback conflicts with any project doc/rule/test/code comment/old AI note: treat the old project text as stale, edit the conflicting doc/rule first, then source/config
-6. Do not create source/document edit backups; use the root Git history. Do not create or update process files (`process.md` or `过程.md`).
+1. 读取路由到的 owner 和当前 source。
+2. `git status` + focused diff；保留用户/其它任务已有改动。
+3. 原子获取精确文件锁；同文件已被活跃 owner 锁定时不覆盖、不复制绕路，只做无关未锁工作。
+4. 需求变更先 owner，随后 canonical source/config/tests。
 
-PROCESS_FILE_DISABLED:
-- Do not create or update `process.md`, `过程.md`, or equivalent per-task process markdown.
-- Use git status/diff, final reply, and generated verification outputs for required traceability. Use LEGACY_FILE only when the user explicitly asks for a persistent legacy/blocker record.
-- Low-level scratch logs may be generated only when required by a tool or verification output; do not create a separate process markdown just to narrate work.
-
-LEGACY_RECORD:
-- If any unfinished, blocked, deferred, fail-closed, not-board-verified, or follow-up item remains at the end of a task, report it in the final chat reply.
-- If board closure was required but not executed or failed, report the exact missing test, blocker, and acceptance condition in the final chat reply.
-- If multiple meaningful attempts cannot resolve a user-raised problem, report the exact blocker, attempts made, missing verification, next concrete action, and status `blocked`, `source_only`, or `local_verified_only` in the final chat reply.
-- Do not use LEGACY_FILE as a way to stop early or as a default result sink. First diagnose, retry with allowed alternatives, and fix forward unless blocked by safety, missing user input, external unavailability, or repeated same-blocker attempts. Write LEGACY_FILE only when the user explicitly asks for a persistent record.
-- `待做工作/遗留.md` is a legacy backlog record only; do not use it as a task board, file lock, deploy lock, or replacement for disabled process files.
-
-USER_FEEDBACK_NOISE_FILTER:
-- Chat updates must be high-signal only: current action, material finding, meaningful risk, blocker, verification result, or user decision needed.
-- Do not describe self-recovered command/tool failures, shell quoting mistakes, bad search regex, retry mechanics, or other operational trial-and-error in the chat.
-- Record useful low-level failure/retry details only in scratch logs when they are necessary for verification; otherwise omit them.
-- Surface a tool/command failure in chat only when it changes the outcome, blocks progress, risks source/board state, or requires user input.
-
-AI_LOCKS_SINGLE_MAINLINE:
-- This project has one authoritative mainline only: current `main` plus the current PROJECT_ROOT working tree after synchronizing with `origin/main`.
-- Code may be changed only on that authoritative mainline. Do not create side branches, Git worktrees, per-AI source trees, task source copies, module forks, shadow product truths, stale VM source copies, or alternate runtime owners.
-- Before editing, inspect `git status` and the focused diff, then atomically acquire the exact file lock defined by `FILE_LOCK_PROTOCOL`. Different AIs may edit different unlocked files, but the same file must never be edited concurrently.
-- An active file lock is a real ownership signal. Never overwrite or ignore it, and never route around it with a renamed/copy file; coordinate or wait while continuing only unrelated unlocked work.
-- After the final write and immediate focused text/syntax check, release that file lock at once as required by `FILE_LOCK_RELEASE`. Later work must reread the current file/diff; if another AI changed it after release, accept the new mainline and rerun affected checks instead of restoring a private version. Do not create per-edit hashes, receipts, or generation bookkeeping.
-- Before committing, syncing, building, deploying, or verifying, inspect `git status` and `git diff` again; account for all current mainline changes and do not overwrite unrelated user work.
+FILE_LOCK_PROTOCOL:
+- 位置：`repo_ignored/locks/files/<project-relative-path>.lock`。
+- 内容只能有 `lock_version=1`、`thread_id`、`file`、`created_at`。
+- 只在编辑和立即 focused text/syntax check 期间持有，完成即删除；不得等待 unrelated test/VM/build/deploy/handoff。
+- 锁只防同文件并发，不是 source truth；禁止 lock daemon/database/heartbeat/TTL/history/approval queue/repository-wide lock。
 
 VM_BOARD_SINGLE_OPERATOR:
-- VM source-mount validation, VM/ARM build, package, board deploy, board UI restart, operator probe, and motion closure are global single-operator resources.
-- Immediately before an actual source-mount validation, native compile, ARM compile, package, board deploy, board UI restart, operator probe, or motion closure command, atomically acquire `repo_ignored/locks/resources/vm_board.lock` and confirm the relevant VM/board process is idle. The lock covers only that active remote operation and must be released as soon as the command finishes or stops; do not acquire it during planning, local editing, or local tests.
-- VM native compilation and VM ARM compilation must never run simultaneously, even though they use different canonical build directories. A second AI that finds `vm_board.lock` active must continue unrelated local work instead of starting another VM compile or waiting idly.
-- If a real VM, board, build, deploy, UI restart, operator, or motion process is busy, diagnose it. The current user authorizes ending other blocking processes when it is safe and non-destructive; otherwise stop the VM/board step and report the real process/resource blocker.
-- Never change/remount the source mount while a build is running, deploy while another real build/deploy is running, or run board verification while another real operator/motion process is controlling the board.
-- VM source input and build output have one canonical line only: read-only Windows source mount `VM_SOURCE_MOUNT_ROOT`, unique derived projection `VM_SOURCE_PROJECTION_ROOT=${VM_BUILD_ROOT}/temp_source/current`, native build `VM_LINUX_BUILD_DIR`, and ARM build `VM_BOARD_BUILD_DIR`. Do not create per-AI/per-task/date source or build directories; reuse the same identity-matched projection and canonical build directories.
-- Before configuring or compiling, prove `VM_SOURCE_MOUNT_ROOT` is the live read-only Windows mount, compare the unique projection identity, and verify canonical build path, toolchain and target architecture. Refresh only the mismatched projection owner and reconfigure only the affected target; do not clean unaffected build state or create an alternate source/build tree.
-- Board deployment must use artifacts produced from the identity-matched current Windows owner through the unique VM projection and canonical build directories. Recheck the relevant Windows diff and source identity before deploy; if affected inputs changed after build, rebuild only the invalidated target and downstream artifact. Stale artifacts cannot close board delivery.
+- mount/projection refresh、VM native/ARM compile、package、board deploy/restart/operator/motion 是单 operator resource。实际操作前获取 `repo_ignored/locks/resources/vm_board.lock` 并 live-check 进程；命令结束/停止立即释放。
+- VM native 和 ARM 编译不得并发；发现活跃 lock/process 时继续本地无关工作，不启动第二构建，不 remount，不强杀/重启 active build。
+- canonical paths 固定：`VM_LINUX_BUILD_DIR=/root/v5-build/linux`，`VM_BOARD_BUILD_DIR=/root/v5-build/board`；不得按 AI/task/date 创建第二 source/build tree。
 
-BOARD_UNREACHABLE_RECOVERY_RULE:
-- If the development board is unreachable by ping/SSH/remote relay during a board deploy, restart, recovery, or verification slice, treat the failure as a recoverable board-access fault before declaring `blocked`: use the existing tools relay power-cycle path for the development board plus COM/serial boot monitoring when available, then re-probe ping, SSH, port 18080, `/remote/info`, and board relay/input readiness.
-- Relay power-cycle and COM monitoring are recovery/diagnostic steps only. They must not patch board product files, bypass the canonical affected-target/current-artifact build and deploy, replace original UI/operator-path verification, or become a hidden runtime fallback.
-- Use bounded attempts and preserve evidence in generated verification output where needed; summarize only the relevant result in the final reply. If relay control or COM monitoring cannot restore access after meaningful attempts, report the exact remaining blocker, attempts made, missing verification, and next acceptance condition in the final reply; do not append/update `待做工作/遗留.md` unless the user explicitly asks.
+MAINLINE_AND_RETIREMENT:
+- 只在当前 Windows mainline 工作；禁止 Git side branch/worktree/per-AI source tree/task source copy。不同 AI 可编辑不同已锁文件，不能交叉覆盖。
+- 删除只针对已确认 retired/duplicate/fallback/shadow/bypass 且依赖已迁移的路径；不得借“删除优先”破坏无关用户工作或尚在支持的行为。
+- 退役路径不得以 wrapper/alias/env/CLI/test/package/doc example/archive/repo_ignored copy 留存；canonical 暂坏时诚实报状态并修主线，不加第二路。
+- 不创建源码/文档 backup、过程文档或任务板；临时 output 进入 `repo_ignored/temp/` 或更具体 ignored evidence/scratch owner。
 
-SOURCE_TRUTH:
-- Source truth is split by owner only inside the one Windows worktree: Linux kernel and PREEMPT_RT source belong in `LINUX_KERNEL_SOURCE_ROOT`; complete LinuxCNC source and V5 native motion changes belong in `LINUXCNC_SOURCE_ROOT`; board HAL/INI/runtime packaging, LVGL, services and project tools belong in `RUNTIME_SOURCE_ROOT`; the current product FPGA function belongs in `PROJECT_ROOT/vivado_hw_project`; the different non-current FPGA function belongs in `PROJECT_ROOT/new-vivado/z20_v1_5_hw_project` and cannot supply current product XSA/bitstream; Markdown, screenshots and other Windows-owned sources belong in `PROJECT_ROOT`; `D:\v3` is read-only reference only. The two FPGA owners are separate functions, not source copies, and may not import or fall back to each other. `RUNTIME_SOURCE_ROOT/linuxcnc` is board integration only and must not duplicate LinuxCNC source or active source patches. VM source trees, board `/opt/8ax/...`, deploy outputs, `bak/`, `repo_ignored/`, `artifacts/`, `deploy_tmp/`, old builds, and temp copies are not source truth.
-- Source fixes must be made only in the owning Windows path. The VM source mount is read-only and board/runtime artifacts must never be patched as an implementation path; rebuild from the Windows owner and redeploy before any source/fix claim.
-- Every VM/board build/package/deploy must use the latest Windows `RUNTIME_SOURCE_ROOT` identity after current diffs and relevant untracked source files are understood. The single persistent VM projection may carry that exact identity under item 1 and may be reused while it matches; any second projection, retained source archive, side branch or stale artifact is forbidden. Build and deploy only the affected target plus required downstream current artifact, then close the original operator path.
-- Existing VM source mirrors must be deleted once their required content is confirmed in Windows. Destructive deletion is allowed only for the verified non-owner VM mirror path; verify the resolved absolute target and the active mount boundary first, and never delete the Windows owner or VM build-output root.
-
-DOC_FIRST:
-- Any new or changed product requirement starts in `功能/`: update `功能/需求真源索引.md` only to locate or assign the single `REQ-*` owner, then update that owner document before changing code, tests, plans, backlog, legacy notes, or other docs.
-- Latest explicit user feedback is the highest requirement-change input; when it conflicts with current docs/rules/tests/comments/old notes, settle the change into `功能/需求真源索引.md` and the relevant `功能/` owner first, then source/config.
-- Parameter/native truth changes use `功能/需求真源索引.md` and `功能/0-1开机参数入内存.md`/architecture owners before source edits.
-- Required order is owner doc/rule -> canonical source/config -> local gates -> VM/board original operator-path closure when required -> final chat report. Do not create a document result record unless the user explicitly asks for one.
-- Board-facing behavior cannot close at doc/source/local-test level; without board/operator evidence, report only `source_only` or `local_verified_only`.
-
-MICROKERNEL_PARAM_MIGRATION_WORKFLOW:
-- Scope source of truth: 功能/0-1开机参数入内存.md is the highest feature requirement for boot-into-memory parameters, microkernel/native truth, and V3 second-truth retirement.
-- New or retained V3-made parameters are allowed only after inventory proves the microkernel/LinuxCNC/HAL/EtherCAT/native owner has no existing field, no registrable native helper/gate, no extensible runtime-memory/API readback, and no equivalent persistent owner for that semantic. Record that proof in 功能/0-1开机参数入内存.md before adding the parameter.
-- If the microkernel/native owner already has or can own the semantic, every V3-made duplicate parameter is migration debt. Do not expand its callers, add write paths, use it as config generation input, runtime gate, save-success evidence, fallback, or diagnostic crutch. When a slice touches such a field, migrate the supported dependency to the microkernel/native owner first, then delete every now-unused V3-made entry in the same slice; leave only an honest blocker when a supported dependency still prevents deletion.
-- Except for UI coordinate-value display projection, every microkernel/native-owned status, parameter, actual, gate, save-success fact, action result, and safety fact must be consumed from microkernel/native resident memory status data, direct memory/API readback, or a registered native memory block. Do not use `/dev/shm/v3_status_shm`, typed SHM, State Publisher projection, Broker read-only fields, product-action snapshots, JSON, `/run` results, or cached UI state as the source for those facts; touching such a dependency means migrate it to microkernel/native memory first and delete the SHM/V3 duplicate path when unused.
-- Classify every touched parameter as one of: migrate to LinuxCNC/runtime INI, migrate to PARAMETER_FILE/linuxcnc.var, migrate to tool.tbl/native tool owner, migrate to registered non-Python native gate/helper, keep in Settings Drive private domain, or keep only as read-only diagnostic/UI dirty state.
-- Implementation order is fixed: inventory owner card -> sync affected docs -> microkernel/native memory readback -> Broker/product action write path through registered native gate/helper or controlled apply/restart -> restart/reload/readback proof -> retire old V3 owner -> board/operator/motion evidence when required.
-- UI may show dirty values and send Broker requests, but save success must wait for microkernel/native memory readback from the owner. UI must not directly edit runtime INI, linuxcnc.var, tool.tbl, HAL, or settings_runtime.json.
-- status_epoch only proves the UI sample freshness. Long flows and real execution must reread current microkernel/native safety facts through the registered owner/gate; SHM is display/diagnostic projection only and cannot replace the lower-level fact.
-- G92 is allowed only as explicit LinuxCNC native policy with readback. It must not replace Work Zero, RTCP geometry, Rebase, machine zero, or coordinate-base owners.
-- Startup/default writes and runtime actual writes are separate domains. A controlled apply may update native startup/default configuration for persistent settings, but a running G-code, MDI, button action, RTCP toggle, override change, or G92/modal actual change must only affect current runtime memory/actual state and SHM readback, not disk defaults or V3 parameter files.
-- current_tool_state.json, linuxcnc_modal_defaults.var, V3 WCS/G92/tool/RTCP/modal/coordinate patch files, config_cache, Broker snapshots, /run results, UI dirty values, and diagnostic JSON are not final truth. Once replacement owner/readback/board evidence exists, retire the old product dependency instead of renaming it.
-
-BUTTON_FUNCTION_FLOW:
-- New or changed button/operator functions must prove the backend/script behavior before UI wiring.
-- For single-step buttons, first run the script/product-action/Broker contract path successfully with focused local checks, then connect the UI button, popup, and state display.
-- For multi-step buttons, first run each step-level process script/action successfully in isolation, then run the full chained process script/action sequence successfully, and only after that connect the UI button flow.
-- UI code must not hide missing backend behavior behind visual-only success, placeholder popups, or client-side-only state changes.
-- After UI integration, board-facing buttons still require original UI/operator-path verification before any fixed/done/verified claim.
-
-PROTECT_USER_WORK:
-- Never revert unrelated dirty files
-- Work with existing edits
-- If switching scope, final/notes must state changed files, deploy state, verification state, rollback state
-
-DEPRECATED_CODE_RETIREMENT:
-- Deletion is a first-class delivery requirement, not cleanup after the fact. Removing retired/duplicate/confusing paths is often more important than writing replacement code, because extra branches make later agents and operators lose the canonical route.
-- Prefer accidental over-deletion of retired/unclear paths, repaired later through a deliberate canonical change, over leaving deprecated code in mainline as a permanent source of confusion. This bias applies only to retired, duplicate, bypass, shadow, or unsupported paths; it does not authorize deleting active supported behavior without migration.
-- When a path, script, compatibility switch, API, config key, UI mode, test hook, command example, deploy hook, package entry, environment variable, or document section is declared retired/deprecated and no supported runtime path still depends on it, delete it in the same slice.
-- Do not keep bypasses, "temporary" compatibility, deferred cleanup, disabled branches, dead wrappers, alias macros, rename-only survivors, hidden fallbacks, stale tests, stale docs, or examples that can lead later AI or operators back to the retired path.
-- No fallback survivor is allowed after migration: do not leave old behavior behind an environment variable, config switch, test hook, CLI flag, importable helper, package entry, deploy script, disabled branch, documentation snippet, archived copy, or "for rollback" wrapper. If rollback is needed, use only the root repository's Git history; do not create another source or reference copy.
-- Finding and leaving a fallback survivor is incomplete work. The slice must either remove the survivor from source, runtime, config, tests, docs, packaging, deploy inputs, and callable tools, or explicitly record `blocked` with the active supported dependency that prevents deletion.
-- Do not convert a fallback survivor into a comment, TODO, disabled flag, renamed file, compatibility macro, ignored test, hidden CLI, environment switch, package alias, doc-only warning, or non-callable archive/reference copy. These are still survivor paths and must be deleted.
-- If any supported runtime path still depends on the old path, do not declare it retired yet. First move that dependency to the canonical replacement, prove the replacement path, then delete the old path immediately in the same workstream.
-- Retired code must not remain importable, compilable, packageable, deployable, callable by Broker/UI/scripts, readable as product truth, or referenced by tests as an accepted path.
-- Do not copy retired code, documents, tests, configuration or build/deploy paths into `repo_ignored`, backup directories, archives or reference locations. The root repository's Git history is the only retirement history; the active `v5` tree contains only the canonical current path.
-- Reintroducing a retired path is blocked unless the latest user explicitly reverses the retirement and the owning rule/doc is updated first; otherwise treat any re-addition, bypass, or "temporarily parked" branch as rule pollution to delete.
-- If the canonical path is temporarily broken, keep the status honest as `source_only`, `local_verified_only`, or `blocked` and repair the canonical path. Do not add a second route merely to make the task appear unblocked.
-- Before adding a new helper, adapter, mode, command or test entrypoint, search for an existing retired, duplicate or confusing path in the same scope and delete or merge it first. A genuinely new owner must replace the retired route rather than coexist with it; canonical implementation count must not increase through parallel paths.
-
-TOUCH_OWNER_DOWNSHIFT:
-- Deleting obsolete owners, branches, shims, and split candidates has priority over adding another owner. When the current path is confusing, simplify toward one canonical owner before introducing new code.
-- Split ownership by page, protocol, business flow, algorithm, write/readback proof, and hardware boundary; line count is a hard guardrail, not the only design signal.
-- V5 self-written business/control-flow source owners should stay at or below 500 lines. New business ownership must not be added past 500 lines unless the file is atomic and genuinely indivisible; convenience, habit, or avoiding a split is not an exception.
-- Self-written business/control-flow files over 500 lines must not accept a new feature owner, new business helper, state machine, parser, algorithm, parameter-migration write path, UI command category, or cross-layer decision.
-- Exempt files include tests, generated files, docs, pure config, parameter files/schemas, pure parameter tables, pure data tables, constants/enums/maps, style/assets, schema/ABI declarations, and other atomic declarative files with no business/control-flow logic.
-- Atomic indivisible means the file is naturally one declaration/data/schema/config artifact and cannot be reasonably split without making the owner less clear. A parameter file or parameter table that represents one runtime/config truth is atomic for this rule and should stay whole. Once it gains branching business logic, owner decisions, fallback behavior, runtime state transitions, parser/algorithm logic, parameter-migration write paths, or command/control flow, it is no longer atomic for this rule and must be split.
-- Microkernel/native/upstream-owned files are outside the self-written 500-line cleanup target. Do not split, reformat, or churn them for line-count compliance; only make the smallest owner-required change when native behavior must change.
-- Oversized business/control-flow legacy files may receive only deletion, migration out, or a narrow blocker-removal fix that does not add new behavior; record the remaining split condition when they cannot be made compliant in the same slice.
-- New business helpers, state machines, parsers, algorithms, table-driven blocks, parameter-migration write paths, UI command categories, and cross-layer decisions must land in an existing suitable owner or a new owner/sub-owner.
-- Business action owners should target 300-500 lines and must not exceed 500 lines. Complex business flows must split into sub-owners such as precheck, plan, runtime, verify, and result before reaching the ceiling.
-- Registries must stay small and only register or look up handlers; they must not own business logic.
-- Broker cores keep socket, frame, peer credentials, jobs, idempotency, and dispatch. Business handlers must be split by domain, for example drive, program, jog, settings, home, and fault/estop.
-- C/LVGL page files keep layout, event entry, and light forwarding. Dirty/readback state, request construction, command execution flow, parsing, algorithms, projection, and state decisions must downshift to owners.
-- Algorithm-heavy files must split by responsibilities such as parser, projection, rotary, cache, and verify.
+PROGRESS_AND_BLOCKERS:
+- 有已知安全下一步就持续推进，不停在 plan、inventory、单字段、首次错误或 local gate。命令/工具失败是诊断证据，应 fix-forward。
+- 只有安全/破坏性审批、真实 external state、活跃 VM/board contention、无法从 owner 裁决的规则冲突或必要用户输入才暂停。
+- 同一具体 blocker 经至少 3 次有意义诊断/尝试仍无法推进，报告 attempts、缺失验证、下一接受条件和最强诚实状态；不自动写 `待做工作/遗留.md`。
+- commentary 只报告当前动作、关键发现、风险、阻塞和验证结果；省略已自行恢复的 shell quoting/regex/命令试错。
 
 TOOLING:
-- Repetitive work should be automated with small task tools/scripts when practical
-- MCP_FIRST: When an MCP tool/resource is available for the target VM, board, browser, repository, filesystem, or service, use MCP first. Use SSH, shell commands, browser automation, or ad hoc probes only when the relevant MCP path is unavailable, insufficient, or explicitly not suited to the task; state the fallback reason in the final reply when it affects verification.
-- V5_MCP_BOUNDARY: For this project, the only v5 remote MCP execution entries are VM `vm_exec` and board `board_exec`; do not use or add separate VM build/scan/sync or board diagnostic MCP entries. Use the canonical project sync/build/deploy scripts through these execution entries.
-- REPEAT_WORK_TOOL_FIRST: If a task requires repeated checks, repeated edits, repeated migration, repeated verification, or broad pattern application, use an existing focused tool first. If no suitable tool exists, build the smallest task-appropriate tool or script, verify it on a narrow sample, then continue the repeated work through that tool instead of manual repetition.
-- Prefer reusable project tools under `D:\v5\board\tools\` for project-wide checks; do not create or preserve `D:\v5\tools` as a second tool source.
-- Use repo_ignored/<short_task>/scratch/ for task-only scratch tools
-- Record useful tool command/path in final reply or generated verification output when it is needed for handoff
-- Do not install, enable, configure, or depend on WSL. Linux build/test work must use the VM toolchain against the read-only Windows source mount, or existing board/VM tools only; runtime source edits still belong only in `D:\v5\board`.
+- 搜索先 `rg`；重复审计/迁移/验证优先现有 focused tool。缺失时先建最小工具并验证，再执行重复工作。
+- reusable 项目工具只放 `board/tools/`；task-only probe 放 `repo_ignored/<task>/scratch/`；临时板端 probe 只放 `/tmp/v5_test_tools` 或 `/run/v5_test_tools`，不得进入产品 runtime。
+- Python 工具至少 `python -m py_compile` 加 focused test/self-check；shell/C 用最近 syntax/build/contract gate。证据输出持久化前去除 token/password/header/private key/cookie/secret-like env。
 
-TOOL_GAP_FIRST:
-- If the required local, VM, board, SHM, Broker, ABI, artifact-identity, or motion evidence cannot be produced by existing tools, build or extend the smallest appropriate tool before changing product behavior further.
-- Reusable evidence tools belong under `D:\v5\board\tools\` with focused tests or self-checks. Task-only probes belong under `repo_ignored/<short_task>/scratch/`; temporary board probes belong only under `/tmp/v5_test_tools` or `/run/v5_test_tools` and must never become product runtime paths or hidden fallbacks.
-- New or changed tools must be verified before their output is trusted: Python tools need `python -m py_compile` plus focused tests/self-test where practical; shell/C helpers need the nearest syntax/build/contract gate. Tool output must be redacted before persistence.
-- A missing tool is not a reason to skip verification or declare success. Until the tool exists and produces usable evidence, keep the affected slice at `source_only`, `local_verified_only`, or `blocked` according to the evidence actually available.
+## P0_VERIFICATION_AND_DELIVERY
 
-## P0_VERIFICATION
+LOCAL_FIRST:
+- doc/rule：严格文档路由校验（涉及文档路由时）+ `git diff --check`。
+- Python：touched `py_compile` + focused pytest/contract/self-test。
+- C/CMake/LVGL：Windows 能执行的 syntax/static/CMake target 先在 Windows；板端 ABI/ARM/PetaLinux 最小不可替代步骤再进 VM。
+- owner/native/SHM/parameter 变化先跑现有 `board/tools/` focused audit；工具缺口不能用猜测代替。
 
-CODE_CHANGE_TEST_REQUIRED:
-- After modifying product/test/tool source code, run tests targeted to the modified part before stopping; do not end after code edits only.
-- Writing or updating docs, rules, plans, checklists, or legacy records is never a substitute for executing tests after a code/config change.
-- Targeted tests mean the smallest meaningful compile/unit/contract/static gate that directly covers the touched module, behavior, protocol, or regression; broaden only when the change crosses shared APIs, motion/control/state boundaries, UI behavior, or runtime packaging.
-- For touched Python, include `python -m py_compile` on touched Python files plus focused pytest/contract tests where available.
-- For touched C/C++/UI code, include the applicable build/compile gate and the focused UI/protocol/state simulation or board-facing test required by the change scope.
-- If no focused automated test exists, add or update a focused test when practical; otherwise run the nearest available gate and state the test gap in the final reply.
-- Doc-only or rule-only edits do not require product tests, but still require `git diff --check` or an equivalent text sanity gate for touched files.
-- A code/config change with required tests not executed is incomplete unless testing is genuinely blocked; record the blocker and do not claim passed, verified, board_verified, release_ready, fixed, usable, or done beyond source-level completion.
+BUILD_LADDER:
+1. 证明 Windows owner diff、source identity、VM read-only mount 和唯一 projection identity。
+2. 构建最小受影响 target/recipe/package；失败先修该层。
+3. 只有部署内容变化才生成必要 rootfs/manifest。
+4. 只生成一套 current artifact；不清未受影响缓存。
+5. 检查 ARM/Linux ELF/ABI（`file`/`readelf -h`）；host/x86/Windows artifact 不得覆盖板端。
+6. 部署 canonical artifact，走原始 UI/operator/control path，并取得 owner actual/readback。
 
-BOARD_FUNCTION_CLOSURE_REQUIRED:
-- Any code/config/script change intended to implement, repair, or change a board-facing operator function must run real board closed-loop verification before any pass/fixed/done claim.
-- Board-facing operator functions include main-page buttons, setting-page buttons, popups/error reasons, Home, Jog, Start, Stop/Pause, E-stop, program open/run, MDI, axis zero, drive/profile actions, coordinates, following error, toolpath, RTCP/rotary display, remote input, Broker actions, SHM publisher/reader, state freshness, and any UI-visible status derived from the board.
-- Local compile/unit/mock tests are required but not sufficient for board-facing operator functions; they are only pre-board gates.
-- The required board sequence is: prove the VM read-only mount resolves the full current Windows `RUNTIME_SOURCE_ROOT` (`D:\v5\board`) -> build VM/ARM artifacts in the canonical external build directories -> deploy canonical artifact -> trigger the original operator path automatically -> collect the minimal Broker result, SHM/status, events/touch logs, UI screenshot/framebuffer, or service logs needed to prove the specific claim -> run motion golden verification when motion-capable.
-- Writing documentation, adding a legacy item, showing a plan, or running only local tests cannot close a board-facing code change.
-- If the board is unavailable, a live board/VM/operator/motion process is active, hardware is unsafe, or a required precondition is missing, retry or work around when practical; if still blocked, mark the task blocked/source-only in the final reply, and do not claim the feature is fixed or board-verified. Do not append/update `待做工作/遗留.md` unless the user explicitly asks.
+FINISH_LINE:
+| Slice | 必须执行 | 允许的正向状态 |
+| --- | --- | --- |
+| doc/rule only | focused 文档结构/文本检查 | 文档已更新；不是板端功能通过 |
+| local non-board code | nearest compile/unit/contract/static gate | `local_verified_only` |
+| board program/visible behavior | local gates + build ladder + deploy + original operator path | `board_verified` |
+| motion/Home/Jog/Start/MDI/E-stop/axis/rotary | board closure + fresh native actual + active model 对应 `cc-ac.ngc` 或 `cc-bc.ngc` golden motion | `board_verified` |
+| 缺验证/真实 blocker | 明确缺失 test、原因和下一条件 | `source_only` 或 `blocked` |
 
-LOCAL_GATES:
-- compile/build where applicable
-- python -m py_compile for touched Python
-- focused pytest/contract tests
-- UDS/SHM simulation for protocol/state changes
-- rg/static scans for forbidden paths
-- for microkernel-owned parameter work, run the current parameter audit tool from `D:\v5\board\tools\` when such a v5 tool exists, using the VM read-only Windows source mount if Linux execution is required, then scan/classify settings_runtime.json/current_tool_state.json/linuxcnc_modal_defaults.var/config_cache/Broker snapshot/SHM snapshot usages, direct linuxcnc.command/halcmd access, V3 private parameter files, and stale unnumbered boot-parameter doc references before claiming the rule/doc is aligned
-- git diff --check for touched files
-
-CODE_CHANGE_BATCH_CADENCE:
-- Default code/config cadence is local-tool-first, then the affected-target VM gate, and finally one current-artifact board/operator/motion slice when required. Blank-cache certification is not part of ordinary cadence.
-
-LOCAL_FIRST_FAST_PROGRESS:
-- For split, Broker, UI, SHM, settings, drive, tool, or board-visible code work, start with the existing focused local gates for the touched path from `D:\v5\board`: touched-file `python -m py_compile`, focused pytest/contract tests, current v5 audit tools under `D:\v5\board\tools\` when microkernel/native truth is relevant, and `git diff --check`.
-- Prefer the remaining focused local checks before any board use: touched-file `python -m py_compile`, focused pytest/contract tests, and current v5 microkernel-specific tools under `D:\v5\board\tools\` when relevant.
-- Default cadence is batch-local-then-one-board: keep iterating source fixes against local/static/unit/contract gates until clean, run the smallest affected VM target/package gates, then assemble one current image, deploy once, and close operator/motion for the accumulated slice. Preserve caches and the unique VM projection; do not repeatedly build/deploy/operate the board for every small local edit unless the blocker is board-only or the user explicitly asks for incremental probing.
-- Field-level work must stop at `local_verified_only` until it joins an integration board slice. For each field or field group, first run current v5 audit tools under `D:\v5\board\tools\` when microkernel/native truth is relevant, touched-file `python -m py_compile`, focused pytest/contract tests, and `git diff --check`. Until the integration board slice runs, the only allowed positive conclusion is `local_verified_only`; do not write fixed/done/verified/board_verified/works on board/live/board usable equivalents.
-- If existing tools do not cover the needed owner-local, VM, board, SHM, Broker, ABI, artifact-identity, or motion evidence, build the missing tool before changing product behavior: reusable project tools go under `D:\v5\board\tools\` with focused tests; one-off diagnostic probes stay under `repo_ignored/<short_task>/` and must never become product runtime paths or hidden fallbacks.
-- For C/LVGL or board-shipped runtime changes, edit only `D:\v5\board`, refresh/reuse the identity-matched unique VM projection, build the affected target and needed downstream artifact, deploy with the canonical v5 deploy/verify entry, then run the focused operator or motion probe required by that owner.
-- A failed final VM/board/operator/motion pipeline should be treated as evidence: fix the canonical source, rerun the relevant local gates first, and only rerun the required final pipeline stage after the local failure class is closed.
-- After multiple fields reach `local_verified_only`, review the accumulated Windows source truth once before the final integration board slice: prove the VM read-only mount and unique projection identities are current, build only invalidated targets in canonical VM build directories, assemble/deploy one current artifact, trigger the original UI/operator path, collect required evidence, and run the active-model matching golden motion for motion-related claims.
-- If dry-run or touched-path classification requires `operator` or `motion`, do not run the final pipeline without an explicit probe. Provide `--operator-probe` and a task-local `--operator-probe-config` under `repo_ignored/<short_task>/` unless the selected pipeline mode already has a built-in probe.
-- For Python shipped to the board, local Python may be newer than board Python; avoid runtime-evaluated modern type aliases or syntax in product modules unless target import/build proves compatibility.
-
-BOARD_CLOSURE_ENTRY:
-- Do not cite a missing orchestration tool as a required or optional closure path. A new orchestration entry may be named only after a real tool is added in the same slice with tests.
-- Board-visible closure uses the existing canonical v5 tools: validate the read-only Windows mount, refresh/reuse the single VM projection, build the affected VM/ARM target and necessary downstream current artifact in canonical build directories, deploy/verify, then run the focused operator or motion probe required by the owner.
-- stdout/stderr/result files must be redacted before persistence. Tokens, passwords, authorization headers, private key material, cookies, and secret-like environment values must not be written to `repo_ignored/` evidence.
-- Before any board deploy, operator probe, or motion probe, acquire the short-lived VM/board resource lock and perform a live board/VM busy check. Release the lock immediately when the operation slice finishes; stop as `blocked` only for an active lock owner, real process/resource contention, or another genuine blocker.
-- For driver profile, driver parameter, authorization, or VPS-downloaded map changes, evidence must include local SHA256, uploaded/board SHA256, and runtime-loaded identity where applicable. A mismatch is fail-closed and cannot support a pass claim.
-- Board deploy artifacts must be ARM/Linux ELF from the VM/ARM toolchain. Verify `file`/`readelf -h` before upload; x86/x86-64/Windows/host-built artifacts fail with `ARTIFACT_ARCH_MISMATCH` and must not overwrite the board.
-- Status words such as `relay_ready`, `board_deployed`, or `board_runtime_ready` do not override `PASS_CLAIM_GATE`; motion claims still require original operator path plus the native active model matching `cc-ac.ngc` or `cc-bc.ngc`.
-
-BOARD_REQUIRED_WHEN:
-- Use `BOARD_FUNCTION_CLOSURE_REQUIRED`, `INCREMENTAL_UI_AUTOMATION_GATE`, and `PASS_CLAIM_GATE` to decide board need; this block is only a fast reminder.
-- Board closure is required for user-visible pass/verified/board_verified/release_ready claims, board-facing button/function behavior, and motion/state/control path behavior.
-
-BOARD_CLOSURE:
-- Board closure follows `BOARD_FUNCTION_CLOSURE_REQUIRED`: full current Windows `RUNTIME_SOURCE_ROOT` direct mount, VM build/deploy, canonical artifact, original UI/operator path, and minimal SHM/Broker/log/screenshot or relay evidence.
-- Direct UDS is diagnostic unless the original defect is UDS/API; UI issues require simulated screen tap/button path.
-- Motion-capable closure requires the native active model matching `cc-ac.ngc` or `cc-bc.ngc` golden motion loop; simulated UI input is the trigger path, not a substitute.
-- Do not use direct `/dev/fb0` dump/capture scripts for screenshots; use product remote relay/LVGL flush framebuffer or another verified color-correct path.
-
-- Do not leave `/run/8ax_v3_product_ui/disable_remote_relay` or `/run/8ax_v3_product_ui/disable_remote_input` present at handoff unless the user explicitly asked for remote access to remain disabled.
+OPERATOR_AND_UI_PROOF:
+- UI/operator defect 不得用 direct UDS/linuxcncrsh/SSH backend 直跑替代。模拟点击前先抓 fresh screenshot/remote frame，确认页面/状态/target；每次只做一个小动作并检查后帧/事件。
+- 模拟点击不能证明真实触摸校准、real-finger ergonomics、motion-capable closure 或 owner 明确要求的真实输入。
+- 先关闭单功能，再跑 full automation/regression；full flow 不是调试未关闭单点的第一工具。
+- 缓存/首帧、弹窗、刷新率、dirty rect 与 remote relay 按需求索引对应 owner 验收；禁止用整屏兜底掩盖 dirty 缺口。
 
 PASS_CLAIM_GATE:
-- Words or equivalents such as fixed, repaired, done, passed, verified, board_verified, release_ready, works on board, live, closed-loop complete, or operator_says_ok require matching executed verification.
-- If board closure was required but not run, final status must explicitly say `not_board_verified` or `source_only`; do not bury this after summaries.
-- If only local gates ran, final status is `local_verified_only`; it is not a substitute for board closure.
-- Output paths are required only when files are actually generated or needed to substantiate the verification; do not create separate basis files just to satisfy process.
+- fixed/repaired/done/passed/verified/board_verified/release_ready/works/live 等词必须有对应已执行证据。
+- source edit、doc、smoke、dry-run、VM build、board_deployed、direct UDS、旧 result、错误提示或新 guard 都不能替代用户报告路径的真实修复。
+- board-visible change 未部署/未走原始 operator path，只能 `source_only` 或 `local_verified_only`；motion 没有 model-matched golden loop 不能通过。
+- 所有 motion/board acceptance 结束后保持 ESTOP/safe state，并证明 `estop_active=1`、`machine_enabled=0` 或 owner 等价安全回读。
 
-MOTION_OR_REAL_MACHINE:
-- Home/Jog/Start/run/E-stop/program/axis/rotary validation requires native active model 对应的 `cc-ac.ngc` 或 `cc-bc.ngc` golden motion verification before any pass claim
-- Motion-related "passed/verified/board_verified" requires UI original-path trigger plus model-matched golden loop verification
-- `cc-ac.ngc` and `cc-bc.ngc` are model-specific validation inputs; do not rewrite or axis-substitute either program at runtime
-- If cc loop fails, fix code/config/build/deploy/probe/SHM/UI/toolpath, not G-code
-
-## P0_DELIVERY
+BOARD_UNREACHABLE_RECOVERY:
+- 板端在 deploy/restart/verification 中不可达时，先用 canonical `board/tools/v5_board_power_cycle.py` 的 relay power-cycle 与 COM/serial monitoring，再 probe ping/SSH/18080/`/remote/info`/input readiness。
+- recovery 只诊断和恢复访问，不能改产品文件或绕过 build/deploy/operator proof；bounded 尝试后才报告 blocker。
 
 FINAL_REPLY_MIN:
 - changed files
-- fix summary
-- verification result
-- output path only if generated, or blocker
-- next step only if needed
-- If board closure was required, include board_closure_state as one of: board_verified, local_verified_only, source_only, blocked.
+- verification actually run and result
+- board closure state when relevant
+- exact blocker/missing test/next condition
+- generated artifact/evidence path only when it真实存在且有交接价值
 
-HASH_RULE:
-- Include hashes only for deployed/release artifacts or source/board identity proof
+## P1_PATHS_AND_COMMAND_STYLE
 
-BOARD_DELIVERY_RECORD:
-- pre-deploy board owner/readback identity when required
-- deployed target path
-- direct functional output path when generated
-- process/log output when relevant
-
-EVIDENCE_OUTPUT:
-- Long-lived verification outputs/history -> repo_ignored/<short_task>/
-- Do not create process files or source/document backups. Do not place verification outputs or task scratch outside PROJECT_ROOT; the project folder must remain self-contained for whole-folder moves
-
-## P1_PATHS
-
-MAIN_BRANCH=main
-PRODUCT_UI=app
-WIN_CLIENT=8ax-win
-VM_SSH_TARGET=z20-vm
-VM_PATH_USER=root
+PROJECT_ROOT=D:\v5
 RUNTIME_SOURCE_ROOT=D:\v5\board
 LINUX_KERNEL_SOURCE_ROOT=D:\v5\linux
 LINUXCNC_SOURCE_ROOT=D:\v5\linuxcnc
@@ -583,73 +214,14 @@ VM_LINUX_BUILD_DIR=/root/v5-build/linux
 VM_BOARD_BUILD_DIR=/root/v5-build/board
 EVIDENCE_ROOT=repo_ignored
 
-VM_ACCESS:
-- Preferred target for Linux build/deploy execution is the existing VM MCP access; use the existing SSH alias only as fallback when MCP is unavailable or insufficient. Do not invent credentials or require a different user unless that is already configured.
-- Before any VM build, confirm `RUNTIME_SOURCE_ROOT` exists on Windows and prove `VM_SOURCE_MOUNT_ROOT` is its live read-only shared mount. Compare the Windows/mount identity to `VM_SOURCE_PROJECTION_ROOT`; if equal, reuse the VM-local projection without rescanning/reprojecting, otherwise refresh that same projection and verify once. Any other local ext4 source tree, VM checkout, archive extraction, rsync/scp staging, or stale mount fails closed.
-- The VM may temporarily use an already-running Windows proxy only through one explicitly scoped SSH command for non-build OS maintenance or diagnostics. Discover the current Windows host address and proxy port at runtime; do not hard-code them. Prefix only that command with upper/lower-case proxy variables, never persist proxy settings in `/etc/environment`, profiles, systemd, Git, BitBake, recipes or services, and do not install a second resident proxy client in the VM by default.
-- Source import, Git/HTTP source acquisition, BitBake fetch, sstate access, configure/compile/package/rootfs/image and offline certification must never use the Windows proxy. Before a formal build, explicitly unset `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `http_proxy`, `https_proxy`, `all_proxy` and retain the canonical network-disabled build gate. Do not interrupt or restart an active build to configure the proxy.
-- If MCP and SSH alias are unavailable, use the existing VM console or hypervisor network setup; do not restore a retired VM source backup and do not install or enable WSL as a workaround.
-- Treat Windows `PROJECT_ROOT`/`RUNTIME_SOURCE_ROOT` as the unique canonical source owner. VM may persist only `VM_SOURCE_PROJECTION_ROOT` as a non-editable derived projection; no second projection or VM source owner is allowed. Build directories contain generated output only. If the live Windows mount is unavailable or projection identity cannot be proven, stop instead of building from the projection alone or another source.
-
-## P1_FEATURE_DOCS
-
-FEATURE_DOCS_NOTE:
-- This is a convenience route map only. `功能/需求真源索引.md` remains the authoritative `REQ-*` owner index when this map is incomplete or stale.
-- Prefer searching the index for the exact `REQ-*` before editing requirements; use the aliases below only to open likely owner docs quickly.
-
-requirements_index=功能/需求真源索引.md
-boot_params_memory=功能/0-1开机参数入内存.md
-param_classification=功能/0-2参数归类.md
-shared_memory=功能/0-4共享内存.md
-shm_display_projection=功能/0-4共享内存.md
-remote_display_relay=功能/0-4共享内存.md
-microkernel=功能/微内核.md
-rtcp_native_status=功能/微内核.md
-no_periodic_disk_writes=功能/微内核.md
-settings_bus_pulse=功能/2-2设置页总线模式设置项作用说明.md
-bus_pulse_difference=功能/2-1总线脉冲区别.md
-settings_buttons=功能/2-3设置页每个按钮作用和目的.md
-settings_set_drive=功能/2-4设置页设置驱动按钮作用和目的.md
-axis_zero=功能/2-5轴设0软件偏置方案.md
-home=功能/3-2回零按钮开机强制回零与双模式真实回零方案.md
-wcs_work_offset=功能/1-1加工坐标系偏移值保存与读取实现.md
-drive_command_map=功能/1驱动命令映射表命令需求.md
-drive_profile_adapter=功能/1驱动命令映射表命令需求.md
-vps_auth=功能/VPS登录与项目对接说明.md
-toolpath=功能/3-4UI刀路绘图顺序与状态稳定方案.md
-rtcp_g53_active_model=功能/3-4UI刀路绘图顺序与状态稳定方案.md
-ui_refresh_rate=功能/需求真源索引.md
-ui_first_frame_cache=功能/需求真源索引.md
-main_buttons=功能/3-1主页面按钮功能.md
-estop=功能/3-1主页面按钮功能.md
-start=功能/3-1主页面按钮功能.md
-gcode_hot_path=功能/0-1开机参数入内存.md
-start_hot_path=功能/3-1主页面按钮功能.md
-rotary_equivalent=功能/3-3旋转轴等效角目标与解决方案.md
-native_helper_whitelist=功能/0-3native_helper白名单与验收说明.md
-popup=功能/跳窗提示方案.md
-touch_input=功能/-触摸校准与输入链路说明.md
-auto_closed_loop=功能/自动闭环测试方式.md
-board_full_build_closure=功能/自动闭环测试方式.md
-red_point=功能/3-4UI刀路绘图顺序与状态稳定方案.md
-
-## P1_COMMAND_STYLE
-
-SEARCH=rg first
-WINDOWS_SEARCH_QUOTING:
-- For repository searches on Windows, call `rg` directly whenever possible; do not wrap `rg` searches in `cmd /d /c` unless a real cmd builtin is required.
-- Do not pass multi-keyword searches as one quoted regex with `|` through PowerShell or cmd. Use separate ripgrep patterns: `rg -n -e pattern1 -e pattern2 -- path`.
-- Treat `|`, `&`, `<`, `>`, `(`, `)`, `%`, `!`, and nested double quotes as shell metacharacters, not safe search text. Put each search term behind its own `-e`, and use `--` before paths when practical.
-- If a required search term contains shell-sensitive characters or mixed quotes, put the search in a small scratch script under `repo_ignored/<short_task>/scratch/` and run the script; do not keep retrying fragile one-line shell quoting.
-POWERSHELL:
-- keep commands simple
-- avoid fragile heredoc/pipeline/nested quote commands
-- put complex scratch scripts under repo_ignored/<short_task>/scratch/
-- Python text IO/logs use UTF-8; errors=replace/ignore when needed
+COMMAND_RULES:
+- 文件搜索优先 `rg`/`rg --files`。PowerShell 多关键词用多个 `-e`，不要把含 `|` 的 quoted regex 交给 cmd 误解析。
+- 本地文件修改使用 `apply_patch`；机械 formatter/bulk rewrite 可用对应 formatter。不要用 shell 重定向、`cat`、Python 随意覆盖 source/doc。
+- Windows 递归 delete/move 前解析并验证 absolute target 留在明确范围内；不要跨 shell 拼路径后删除。禁止 `git reset --hard`、`git checkout --` 覆盖用户工作。
+- 不把命令用 `echo ====;` 等分隔符串成噪声；长逻辑优先已有 script/tool。长操作每 60 秒内给高信号进展。
+- VM/board 首选现有 MCP execution entry；SSH 只在 MCP 不足时使用既有 alias，不发明凭据。不可达时按 recovery rule，不恢复旧 source mirror，不用 WSL。
 
 ## P2_UI_FRONTEND
 
-SCREENSHOT_REQUEST=reply must include inline image, not only path
-UI_HOT_PATH_NO_JSON_POLL=true
-UI_NO_SYSTEM_POPEN_FORK_EXEC=true
-TOOLPATH_DISPLAY_ONLY=true
+UI_LAYOUT=v3视觉参考；V5 source 与 native owner 是唯一实现真源
+UI_REFRESH=按 `REQ-UI-FIRST-FRAME-CACHE`、`REQ-UI-RUNTIME-REFRESH-RATE`、`REQ-UI-POPUP-RESULT-POLICY` 和具体页面 owner 实施，不在 AGENTS 重复专项规则
