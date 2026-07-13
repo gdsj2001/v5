@@ -852,6 +852,7 @@ docs:
 
 endif
 
+ifneq ($(V5_HEADLESS_RUNTIME),1)
 manpages: $(GENERATED_MANPAGES)
 TARGETS += manpages
 
@@ -870,3 +871,4 @@ $(DOC_DIR)/man/%: $(DOC_DIR)/src/man/%.adoc
 		-a mansource=LinuxCNC \
 		-a manmanual='LinuxCNC Documentation' \
 		$<
+endif

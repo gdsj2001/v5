@@ -15,6 +15,7 @@ REQUIRED_PATHS = (
     "project-spec/attributes",
     "project-spec/configs/config",
     "project-spec/configs/rootfs_config",
+    "v5_bitbake_source_inventory.json",
     "project-spec/hw-description/system.bit",
     "project-spec/hw-description/system.xsa",
     "project-spec/meta-user/conf/layer.conf",
@@ -23,8 +24,6 @@ REQUIRED_PATHS = (
     "project-spec/meta-user/recipes-apps/v5-stepgen-module/v5-stepgen-module.bb",
     "project-spec/meta-user/recipes-apps/v5-stepgen-module/files/zynq_stepgen_hw.c",
     "project-spec/meta-user/recipes-apps/linuxcnc-ethercat/linuxcnc-ethercat_git.bb",
-    "project-spec/meta-user/recipes-devtools/sip/sip3_4.19.16.bbappend",
-    "project-spec/meta-user/recipes-python/pyqt5/python3-pyqt5_5.12.1.bbappend",
     "project-spec/meta-user/recipes-kernel/ethercat-master/ethercat-master_git.bb",
     "project-spec/meta-user/recipes-kernel/linux/linux-xlnx_%.bbappend",
     "project-spec/meta-user/recipes-kernel/linux/linux-xlnx/v5-linux-source.marker",
@@ -35,6 +34,8 @@ RETIRED_PATHS = (
     "project-spec/meta-user/recipes-apps/peekpoke",
     "project-spec/meta-user/recipes-apps/z20-cnc-overlay",
     "project-spec/meta-user/recipes-apps/z20-stepgen-module",
+    "project-spec/meta-user/recipes-devtools/sip",
+    "project-spec/meta-user/recipes-python/pyqt5",
     "build",
     "components",
 )
@@ -192,6 +193,27 @@ def validate_recipe_inputs(source_root):
                 fail("recipe local input is missing: %s: file://%s" % (recipe, token))
 
 
+def validate_source_inventory(source_root):
+    path = source_root / "v5_bitbake_source_inventory.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        fail("invalid BitBake source inventory: %s" % exc)
+    if payload.get("schema") != "v5-bitbake-source-inventory-v1":
+        fail("unexpected BitBake source inventory schema")
+    if payload.get("target") != "petalinux-image-minimal":
+        fail("unexpected BitBake source inventory target")
+    recipes = payload.get("recipes")
+    packages = payload.get("source_packages")
+    if not isinstance(recipes, list) or payload.get("recipe_count") != len(recipes):
+        fail("BitBake source inventory recipe count mismatch")
+    if not isinstance(packages, list) or payload.get("source_package_count") != len(packages):
+        fail("BitBake source inventory package count mismatch")
+    paths = [package.get("path") for package in packages if isinstance(package, dict)]
+    if len(paths) != len(packages) or len(paths) != len(set(paths)):
+        fail("BitBake source inventory package paths are missing or duplicated")
+
+
 def require_tokens(source_root, relative, required, forbidden=()):
     text = (source_root / relative).read_text(encoding="utf-8", errors="strict")
     for token in required:
@@ -249,7 +271,7 @@ def validate_contract(project_root, source_root):
             "linux/realtime/v5_realtime_source_identity.json:True",
             "board/tools/petalinux/project_v5_linux_source.py:True",
             "board/tools/petalinux/verify_v5_linux_source.py:True",
-            "addtask v5_linux_projection after do_kernel_checkout before do_kernel_metadata do_symlink_kernsrc",
+            "addtask v5_linux_projection after do_unpack before do_kernel_checkout do_kernel_metadata do_symlink_kernsrc",
             "project_v5_linux_source.py",
         ),
         (
@@ -267,8 +289,14 @@ def validate_contract(project_root, source_root):
         "board/tools/petalinux/project_v5_linux_source.py",
         (
             "def initialize_kernel_git(output_root):",
+            "def vm_share_inaccessible_paths(project_root):",
             'environment.pop(name, None)',
             '["git", "init", "-q"]',
+            'b"120000"',
+            '"--deleted", "-z"',
+            '"--force-remove", "-z", "--stdin"',
+            '"--others"',
+            '"--exclude-standard"',
             'if not clean_after:',
             'initialize_kernel_git(output_root)',
             'V5_LINUX_KERNEL_BUILD_GIT_OK',
@@ -324,24 +352,6 @@ def validate_contract(project_root, source_root):
             'MASTER0_DEVICE="eth1"',
         ),
         ('MASTER0_DEVICE="eth0"', "/lib/modules"),
-    )
-    require_tokens(
-        source_root,
-        "project-spec/meta-user/recipes-devtools/sip/sip3_4.19.16.bbappend",
-        (
-            "https://downloads.yoctoproject.org/mirror/sources/",
-            "sip-${PV}.tar.gz",
-        ),
-        ("www.riverbankcomputing.com",),
-    )
-    require_tokens(
-        source_root,
-        "project-spec/meta-user/recipes-python/pyqt5/python3-pyqt5_5.12.1.bbappend",
-        (
-            "https://files.kde.org/krita/build/dependencies/",
-            "PyQt5_gpl-${PV}.tar.gz",
-        ),
-        ("www.riverbankcomputing.com",),
     )
     for relative in (
         "project-spec/meta-user/recipes-apps/v5-base-overlay/files/network/v5_net_core.sh",
@@ -402,6 +412,7 @@ def main():
     validate_layout(source_root, entries)
     validate_text_boundaries(source_root, entries)
     validate_recipe_inputs(source_root)
+    validate_source_inventory(source_root)
     validate_contract(project_root, source_root)
     actual_hash = validate_identity(source_root, identity, entries, args.print_source_hash)
     if not args.print_source_hash:

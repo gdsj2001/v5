@@ -11,6 +11,9 @@ EMCLCDSRCS := emc/usr_intf/emclcd.cc \
 
 HALUISRCS := emc/usr_intf/halui.cc
 
+ifeq ($(V5_HEADLESS_RUNTIME),1)
+USERSRCS += $(EMCRSHSRCS) $(EMCSCHEDSRCS) $(EMCLCDSRCS) $(USRMOTSRCS) $(HALUISRCS)
+else
 USERSRCS += $(EMCSHSRCS) $(EMCRSHSRCS) $(EMCSCHEDSRCS) $(EMCLCDSRCS) $(USRMOTSRCS) $(HALUISRCS)
 
 $(call TOOBJSDEPS, $(EMCSHSRCS)) : EXTRAFLAGS = $(ULFLAGS) $(TCL_CFLAGS) -fPIC
@@ -19,6 +22,7 @@ $(call TOOBJSDEPS, $(EMCSHSRCS)) : EXTRAFLAGS = $(ULFLAGS) $(TCL_CFLAGS) -fPIC
 	$(ECHO) Linking $(notdir $@)
 	$(Q)$(CXX) -shared $(LDFLAGS) -o $@ $(ULFLAGS) $(TCL_CFLAGS) $^ $(TCL_LIBS) -lXinerama
 TARGETS += ../tcl/linuxcnc.so
+endif
 
 ../bin/linuxcncrsh: $(call TOOBJS, $(EMCRSHSRCS)) ../lib/liblinuxcnchal.so.0 ../lib/liblinuxcnc.a ../lib/libnml.so.0 ../lib/liblinuxcncini.so.0
 	$(ECHO) Linking $(notdir $@)

@@ -27,29 +27,19 @@ do_configure[nostamp] = "1"
 DEPENDS += " \
     boost \
     gettext \
-    libglu \
     intltool-native \
-    asciidoc-native \
     python3-yapps2-native \
-    libice \
-    libsm \
     libtirpc \
-    libx11 \
-    libxau \
-    libxdmcp \
-    libxext \
-    libxinerama \
-    libxmu \
     python3 \
     readline \
-    tcl \
-    tk \
 "
 
 EXTRA_OECONF = " \
+    --enable-v5-headless-runtime \
     --with-realtime=uspace \
     --disable-gtk \
     --disable-gtk2 \
+    --disable-build-documentation \
     --without-libmodbus \
     --without-libusb-1.0 \
     --disable-check-runtime-deps \
@@ -82,12 +72,6 @@ do_configure() {
     fi
     ./autogen.sh
 
-    tcl_cfg=$(find ${RECIPE_SYSROOT}${libdir} ${RECIPE_SYSROOT}${base_libdir} -name tclConfig.sh | head -n1)
-    tk_cfg=$(find ${RECIPE_SYSROOT}${libdir} ${RECIPE_SYSROOT}${base_libdir} -name tkConfig.sh | head -n1)
-    if [ -z "$tcl_cfg" ] || [ -z "$tk_cfg" ]; then
-        bbfatal "Unable to locate tclConfig.sh/tkConfig.sh in target sysroot"
-    fi
-
     export PATH="$PATH:/usr/bin:/bin:/usr/sbin:/sbin"
     export KILL=/bin/kill
     export WHOAMI=/usr/bin/whoami
@@ -112,12 +96,8 @@ do_configure() {
         --sysconfdir=${sysconfdir} \
         --localstatedir=${localstatedir} \
         --mandir=${mandir} \
-        --with-tclConfig=$tcl_cfg \
-        --with-tkConfig=$tk_cfg \
         ${EXTRA_OECONF}
 
-    sed -i -E 's|^TCL_CFLAGS=.*$|TCL_CFLAGS=-I${RECIPE_SYSROOT}${includedir}/tcl8.6 -DUSE_TCL_STUBS|' Makefile.inc
-    sed -i -E 's|^TCL_LIBS=.*$|TCL_LIBS=-L${RECIPE_SYSROOT}${libdir} -ltclstub8.6 -ltk8.6 -lX11 -lXinerama -ltirpc -lpthread -ldl -lz -lm|' Makefile.inc
     sed -i -E 's|^BOOST_PYTHON_LIB=.*$|BOOST_PYTHON_LIB=-lboost_python37|' Makefile.inc
     sed -i -E 's/^CONFIG_HAL_SPEAKER=.*/CONFIG_HAL_SPEAKER=n/' Makefile.inc
     sed -i -E 's/^CONFIG_HAL_PARPORT=.*/CONFIG_HAL_PARPORT=n/' Makefile.inc
@@ -151,13 +131,8 @@ do_install() {
         sed -i -E 's#^GREP=.*$#GREP=/bin/grep#' ${D}${bindir}/linuxcnc
         sed -i -E 's#^IPCS=.*$#IPCS=/usr/bin/ipcs#' ${D}${bindir}/linuxcnc
         sed -i -E 's#PYTHONPATH=\$LINUXCNC_HOME/lib/python#PYTHONPATH=/usr/lib/python3/dist-packages:/usr/lib/python3.7/site-packages:\$LINUXCNC_HOME/lib/python#' ${D}${bindir}/linuxcnc
-        grep -Fq '/usr/bin/tclsh8.6 $HALLIB_DIR/check_config.tcl "$INIFILE"' ${D}${bindir}/linuxcnc || \
-            bbfatal "headless launcher Tcl/Tk removal target is missing"
-        sed -i '/^\/usr\/bin\/tclsh8\.6 \$HALLIB_DIR\/check_config\.tcl "\$INIFILE"$/,/^esac$/d' \
-            ${D}${bindir}/linuxcnc
-        if grep -Fq '/usr/bin/tclsh8.6 $HALLIB_DIR/check_config.tcl' ${D}${bindir}/linuxcnc; then
-            bbfatal "headless launcher still executes the Tcl/Tk config checker"
-        fi
+        grep -Fq 'if test "xyes" != "xyes"; then' ${D}${bindir}/linuxcnc || \
+            bbfatal "headless launcher configuration marker is missing"
     fi
     for realtime_helper in ${D}${libdir}/linuxcnc/realtime ${D}${bindir}/realtime; do
         if [ -f "$realtime_helper" ]; then

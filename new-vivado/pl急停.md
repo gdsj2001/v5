@@ -1,5 +1,7 @@
 # PL 侧硬件级绝对急停与软硬件协同设计方案
 
+> FPGA owner 边界：本文属于 `new-vivado/z20_v1_5_hw_project/` 所代表的另一套 FPGA 功能，不是当前产品使用的 `vivado_hw_project/` 的副本、升级分支或 fallback。当前产品/当前 SD 的 XSA、bitstream 和默认硬件合同只允许来自 `vivado_hw_project/`；本文方案不得被自动带入当前制卡链。
+
 ## 一、 设计背景与目标
 
 在商用数控（CNC）控制系统中，安全（Safety）是系统设计的首要红线。传统的急停（E-Stop）信号通常接入操作系统（PS 侧的 Linux），通过内核驱动、HAL 逻辑及 HMI 界面软件处理后再去封锁伺服。这种软件处理链路存在不可忽视的隐患：**一旦 PS 侧出现系统死机（Kernel Panic）、CPU 满载延迟、或是套接字通信中断，急停响应就会滞后甚至失效。**

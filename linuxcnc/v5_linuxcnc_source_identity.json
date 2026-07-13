@@ -10,24 +10,39 @@
     "tree": "cbadbb8d029aefe7a8d0e3218885aaa59798337b"
   },
   "v5_source_tree": "c1f4c53315c8e614fafbe48992afa91e8aef8014",
-  "content_sha256": "8381ef0bf1aab0411337a7b9525a6164ccb954d0a521002c500959cf943bf60b",
+  "content_sha256": "3a8590dc3ba99f2e3248613770d9cd6a80f1109fd57e52263b4007ef3ad6207a",
   "implementation": "in_tree",
   "changed_files": [
+    "scripts/linuxcnc.in",
     "src/Makefile",
+    "src/configure.ac",
     "src/emc/motion/command.c",
     "src/emc/motion/control.c",
     "src/emc/motion/mot_priv.h",
     "src/emc/motion/motion.c",
     "src/emc/motion/v5_wcheckpoint.c",
     "src/emc/motion/v5_wcheckpoint.h",
+    "src/emc/usr_intf/Submakefile",
     "src/emc/usr_intf/axis/Submakefile",
-    "src/emc/usr_intf/axis/extensions/emcmodule.cc"
+    "src/emc/usr_intf/axis/extensions/emcmodule.cc",
+    "src/hal/utils/Submakefile"
   ],
   "migration_provenance": {
     "retired_patch": "board/linuxcnc/patches/0001-v5-native-rotary-nearest-target.patch",
     "retired_patch_sha256": "ebec35941ffe592ea64d0e348160c3a144e7dbfb009c7992ecc7b65950e98423"
   },
   "required_tokens": {
+    "scripts/linuxcnc.in": [
+      "if test \"x@V5_HEADLESS_RUNTIME@\" != \"xyes\"; then"
+    ],
+    "src/Makefile": [
+      "install-software: install-kernel-dep install-v5-headless",
+      "install-v5-headless:"
+    ],
+    "src/configure.ac": [
+      "--enable-v5-headless-runtime",
+      "V5_HEADLESS_RUNTIME"
+    ],
     "src/emc/motion/command.c": [
       "v5_prepare_wrapped_rotary_target",
       "v5_commit_wrapped_rotary_turn_offset",
@@ -51,6 +66,12 @@
     ],
     "src/emc/usr_intf/axis/extensions/emcmodule.cc": [
       "#ifndef V5_HEADLESS_RUNTIME"
+    ],
+    "src/emc/usr_intf/Submakefile": [
+      "ifeq ($(V5_HEADLESS_RUNTIME),1)"
+    ],
+    "src/hal/utils/Submakefile": [
+      "ifeq ($(V5_HEADLESS_RUNTIME),1)"
     ]
   },
   "forbidden_tokens": {

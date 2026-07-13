@@ -12,7 +12,12 @@
   "working_tree_overrides": [
     "drivers/gpu/drm/xlnx/xlnx_pl_disp.c"
   ],
-  "content_sha256": "295b83c5bd866da1e87d32b8636533a7bcae00f3f0ed68a23bbfabc50783d42e",
-  "file_count": 66044,
+  "vm_share_inaccessible_paths": [
+    "drivers/gpu/drm/nouveau/nvkm/subdev/i2c/aux.c",
+    "drivers/gpu/drm/nouveau/nvkm/subdev/i2c/aux.h",
+    "include/soc/arc/aux.h"
+  ],
+  "content_sha256": "22701e7c78e4f9ad2799fb8abcaa6b43fa592c749fe8f03bf86b1a6fef47fb28",
+  "file_count": 65803,
   "symlink_count": 35
 }

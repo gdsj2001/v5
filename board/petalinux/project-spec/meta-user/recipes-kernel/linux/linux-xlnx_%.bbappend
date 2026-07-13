@@ -42,7 +42,7 @@ do_v5_linux_projection[file-checksums] = " \
     ${V5_PROJECT_SOURCE_ROOT}/board/tools/petalinux/project_v5_linux_source.py:True \
     ${V5_PROJECT_SOURCE_ROOT}/board/tools/petalinux/verify_v5_linux_source.py:True \
 "
-addtask v5_linux_projection after do_kernel_checkout before do_kernel_metadata do_symlink_kernsrc
+addtask v5_linux_projection after do_unpack before do_kernel_checkout do_kernel_metadata do_symlink_kernsrc
 
 do_patch_append() {
     install -m 0644 ${WORKDIR}/xlnx_atk_lcd.c ${S}/drivers/gpu/drm/xlnx/xlnx_atk_lcd.c

@@ -24,7 +24,11 @@ default: build-software
 
 install: install-software install-docs
 
+ifeq ($(V5_HEADLESS_RUNTIME),1)
+install-software: install-kernel-dep install-v5-headless
+else
 install-software: install-kernel-dep install-kernel-indep install-menu
+endif
 
 ifeq ($(origin KERNELRELEASE), undefined)
 #MAKEFLAGS += --warn-undefined-variables
@@ -693,6 +697,31 @@ install-dirs:
 		$(DESTDIR)$(datadir)/linuxcnc/pncconf \
 		$(DESTDIR)$(datadir)/linuxcnc/pncconf/pncconf-help \
 		$(DESTDIR)$(datadir)/linuxcnc/hallib
+
+install-v5-headless:
+	$(DIR) $(DESTDIR)$(bindir) \
+		$(DESTDIR)$(libdir) \
+		$(DESTDIR)$(libdir)/linuxcnc \
+		$(DESTDIR)$(includedir)/linuxcnc \
+		$(DESTDIR)$(SITEPY) \
+		$(DESTDIR)$(datadir)/linuxcnc
+	$(EXE) ../bin/halcmd ../bin/inivar ../bin/io ../bin/linuxcncrsh \
+		../bin/linuxcncsvr ../bin/milltask ../bin/halcompile \
+		$(DESTDIR)$(bindir)
+	$(EXE) ../scripts/linuxcnc $(DESTDIR)$(bindir)
+	$(EXE) ../scripts/realtime $(DESTDIR)$(libdir)/linuxcnc
+	$(FILE) ../lib/liblinuxcnchal.so.0 ../lib/liblinuxcncini.so.0 \
+		../lib/libnml.so.0 ../lib/libposemath.so.0 ../lib/libpyplugin.so.0 \
+		../lib/librs274.so.0 ../lib/libtooldata.so.0 ../lib/liblinuxcnc.a \
+		$(DESTDIR)$(libdir)
+	cp --no-dereference ../lib/liblinuxcnchal.so ../lib/liblinuxcncini.so \
+		../lib/libnml.so ../lib/libposemath.so ../lib/libpyplugin.so \
+		../lib/librs274.so ../lib/libtooldata.so $(DESTDIR)$(libdir)
+	$(FILE) ../lib/python/_hal.so ../lib/python/hal.py \
+		../lib/python/linuxcnc.so $(DESTDIR)$(SITEPY)
+	$(FILE) $(HEADERS) $(DESTDIR)$(includedir)/linuxcnc
+	$(FILE) Makefile.modinc $(DESTDIR)$(datadir)/linuxcnc
+	$(FILE) ../configs/common/linuxcnc.nml $(DESTDIR)$(datadir)/linuxcnc
 
 install-kernel-indep: install-dirs
 	$(FILE) ../docs/man/man1/*.1 $(DESTDIR)$(mandir)/man1

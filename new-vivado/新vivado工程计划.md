@@ -1,5 +1,7 @@
 # 新 Vivado 工程计划
 
+> FPGA owner 边界：本文属于 `new-vivado/z20_v1_5_hw_project/` 的另一套 FPGA 功能，不是当前产品使用的 `vivado_hw_project/` 的源码副本、升级分支或 fallback。当前产品/当前 SD 的 XSA、bitstream 和默认硬件合同只允许来自 `vivado_hw_project/`；本文中的交付与验证不得自动进入当前制卡链。
+
 ## 验收硬标准
 
 为了彻底防范间歇性/偶发性故障，保障功能安全边界，硬件工程交付必须卡住以下 **3条简要硬标准**；`WNS >= 0.1ns` 仅作为裕量观察/优化目标，不再作为硬失败门槛：
@@ -43,7 +45,7 @@
 - 当前用户最新要求优先：新工程必须独立、只用相对路径、使用 `new-vivado/z20-v1_5_20260623.xdc`，任何旧文档或旧工程做法与此冲突时都按本计划更新。
 - 本计划只是 `new-vivado/` 下的执行计划，不是跨功能需求真源；不得在这里新增 LinuxCNC/HAL、UI、运动控制或系统架构规则。
 - 不创建或更新 `process.md`、`过程.md`、任务看板、并行 AI 看板或锁文件；必要证据只放报告、diff、最终回复或已有 backlog 位置。
-- 编辑前备份将要改动的新工程文件到 `repo_ignored/vivado_new_project_plan/backup/`，但备份不得成为工程依赖。
+- 不创建编辑前备份；只修改本 FPGA 功能的唯一 owner 文件，回退使用根 Git 历史。
 - 保护用户工作：已有文件先盘点再处理，不用删除重建来掩盖半成品状态，不回滚无关改动。
 - 生成物和 scratch 输出必须留在 `new-vivado/z20_v1_5_hw_project/` 或 `repo_ignored/vivado_new_project_plan/` 下，不能散落到项目外。
 - 只有实际跑过的验证才能写入结论；未运行 Vivado、未生成 bit/XSA、未板上验证时，状态分别只能写为准备阶段、`source_only` 或 `local_verified_only`。
@@ -119,7 +121,7 @@
 - `new-vivado/z20_v1_5_hw_project/scripts/verify_project_independence.ps1`：校验新工程可移动边界，确认 `.xpr` 工程路径为 `$PPRDIR` 相对路径、active XDC 来源为 `constraints/z20_v1_5_active_mapped.xdc`、工程源/配置无盘符绝对路径、无老工程源码依赖。
 - `new-vivado/z20_v1_5_hw_project/scripts/verify_active_xdc_traceability.ps1`：逐条校验 active XDC 中每个 `PACKAGE_PIN` 都有 `../z20-v1_5_20260623.xdc` 来源注释，并且注释中的源 net 在 v1.5 源 XDC 中映射到同一 package pin；当前输出 `active_xdc_traceability=ok`、`active_pin_assignments=180`、`traced_assignments=180`、`old_project_xdc_dependency=none`。
 - `new-vivado/z20_v1_5_hw_project/scripts/verify_active_xdc_electrical_contract.ps1`：逐条校验 active XDC 中每个 `PACKAGE_PIN` 都有且只有一个匹配的 `IOSTANDARD LVCMOS33`，拒绝 orphan/duplicate IOSTANDARD 行和非 LVCMOS33 active-port 标准；当前输出 `active_xdc_electrical_contract=ok`、`active_pin_assignments=180`、`iostandard_assignments=180`、`lvcmos33_assignments=180`、`missing_iostandard_assignments=0`、`orphan_iostandard_assignments=0`、`non_lvcmos33_assignments=0`。
-- `new-vivado/z20_v1_5_hw_project/scripts/verify_project_portability.ps1`：全工程文本可移动性 gate，扫描工程文本、生成报告、Vivado run 文本、仿真文本产物、board-input 文件和 manifest，拒绝盘符绝对路径、老工程源码依赖、非相对 manifest artifact path 和临时写入文件；当前输出 `project_portability=ok`、`absolute_path_scan=ok`、`manifest_relative_paths=ok`、`manifest_artifact_paths=19`、`tmp_files=0`、`text_files_scanned=288`。本轮已把 Vivado/Icarus 生成文本中的当前机器路径相对化或替换为工具链占位符，原始文件备份在 `repo_ignored/new_vivado_portability_gate/absolute_path_text_backup/`。
+- `new-vivado/z20_v1_5_hw_project/scripts/verify_project_portability.ps1`：全工程文本可移动性 gate，扫描工程文本、生成报告、Vivado run 文本、仿真文本产物、board-input 文件和 manifest，拒绝盘符绝对路径、当前产品 FPGA owner 依赖、非相对 manifest artifact path 和临时写入文件；当前输出 `project_portability=ok`、`absolute_path_scan=ok`、`manifest_relative_paths=ok`、`manifest_artifact_paths=19`、`tmp_files=0`、`text_files_scanned=288`。Vivado/Icarus 生成文本中的机器路径必须直接改为相对路径或工具链占位符，不保留原始文件备份。
 - `new-vivado/z20_v1_5_hw_project/scripts/scrub_vivado_absolute_paths.ps1`：Vivado 重新生成 `.xpr`、run log、报告或 warning summary 后，先把当前工程路径替换为 `$PPRDIR`/项目占位符、把 Xilinx 安装路径替换为工具链占位符，再运行 portability/independence gate；该脚本不改 bit/XSA 二进制内容。
 - `new-vivado/z20_v1_5_hw_project/scripts/verify_vivado_xsa_cleanliness.ps1`：校验 Active Constraints 清理和 XSA 重新导出洁净度，确认 `.xpr` 只加载 `constraints/z20_v1_5_active_mapped.xdc`，Vivado run 没有解析 `../z20-v1_5_20260623.xdc` 或旧 `system.xdc`，run log 无 `ERROR:`/`CRITICAL WARNING:`，routed DRC 无 `NSTD-1`/`UCIO-1` 或 error 级规则，当前只允许 `RTSTAT-10` warning，且 `board_inputs/system.xsa` 不旧于当前 bitstream；当前输出 `vivado_xsa_cleanliness=ok`、`active_constraints_loaded=mapped_only`、`truth_source_xdc_loaded=no`、`old_project_xdc_loaded=no`、`drc_blocking_rules=0`、`drc_allowed_warning_rules=RTSTAT-10`、`build_status=bitstream_generated`、`timing_status=timing_met`。
 - `new-vivado/z20_v1_5_hw_project/scripts/export_vivado_warning_summary.ps1`：从当前 `synth_1/runme.log` 与 `impl_1/runme.log` 导出 `docs/vivado_warning_summary.csv` 和 `docs/vivado_warning_summary.md`，按 warning code 分类剩余普通 warning，并把约束真源/旧约束 warning 计数单独列出；当前输出 `vivado_warning_summary=classified`、`vivado_warning_lines=457`、`vivado_warning_codes=17`、`unexpected_warning_codes=0`、`constraint_truth_warning_lines=0`、`retired_hdmi_warning_lines=0`。
@@ -611,7 +613,7 @@ module pl_estop_core #(
 1. 记录 `vivado_hw_project/` 的 Git 状态，确认老工程没有被修改。
 2. 盘点新目录现状，确认是否已有半成品文件；已有文件先保留，除非明确确认是无效生成物。
 3. 复制前列出老工程必须复制的源文件和必须排除的生成物。
-4. 备份将要编辑的新工程文件，备份放在 `repo_ignored/vivado_new_project_plan/backup/` 下；不创建过程流水文档。
+4. 不创建编辑前备份；只修改本 FPGA 功能的唯一 owner 文件并使用根 Git 历史回退；不创建过程流水文档。
 5. 确认没有需要等待或创建的项目锁文件；只在真实 Vivado、VM、板卡进程发生资源冲突时停止诊断。
 
 阶段验收：
@@ -822,7 +824,7 @@ vivado.bat -mode batch -source new-vivado/z20_v1_5_hw_project/scripts/vivado_gat
 ## 当前状态
 
 - 阶段 0 已完成：已盘点目标目录，老工程保持未修改，未创建过程文件、任务看板或锁文件。
-- 阶段 1 已完成源码副本：新工程源文件已放入 `new-vivado/z20_v1_5_hw_project/`，入口为 `z20_v1_5_hw_project.xpr`。
+- 阶段 1 已建立另一套独立 FPGA 功能 owner：源文件位于 `new-vivado/z20_v1_5_hw_project/`，入口为 `z20_v1_5_hw_project.xpr`。它不是当前产品 `vivado_hw_project/` 的副本或 fallback，当前产品制卡不得消费本工程的 XSA/bitstream。
 - 阶段 2 已完成基础资料：旧约束参考副本已移出当前新工程交付边界，`new-vivado/z20-v1_5_20260623.xdc` 作为约束来源保留，端口映射见 `docs/port_mapping.md`。
 - 阶段 3 当前 DRC 已收口：当前 active XDC 与 `system_top.v` 自洽，LCD、RGMII/MDIO、CAN、PL UART、RS232、RS485、I2C3、触摸 I2C、TP_INT/TP_RST、完整 MPG、8 轴 `PULS/DIR/ENA/ALM`、8 轴编码器 ABZ、DI/FR_DI/TS_DI、`EGS_DI`、`BEEP_EN` 和 DO/PWM gate 已适配到当前 top；PL_RST、sys_clk 和备用 FPGA IO 仍保持 fail-closed。
 - ADC 当前状态：最终需求已改为 1 路 0-10V 模拟量，使用芯片自带 `XADC_VP/XADC_VN`；当前 `z20-v1_5_20260623.xdc` 写 XADC 单通道，方向一致。旧外部 ADC/SPI 只能作为“已退役”说明出现，不能作为 active 方案。

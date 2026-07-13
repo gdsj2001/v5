@@ -6,20 +6,22 @@ project_root=$(CDPATH= cd -- "$script_dir/../../.." && pwd)
 integration_root="$project_root/board/linuxcnc"
 source_root="$project_root/linuxcnc"
 petalinux_overlay_tool="$project_root/board/tools/petalinux/v5_petalinux_overlay.sh"
+source_package_verifier="$project_root/board/tools/petalinux/verify_v5_source_packages.py"
+source_package_root="$project_root/board/third_party/petalinux-source-packages"
 minimal_runtime_verifier="$project_root/board/tools/linuxcnc/verify_v5_linuxcnc_minimal_runtime.py"
 runtime_allowlist="$integration_root/yocto/files/v5_linuxcnc_runtime_allowlist.tsv"
 build_root=${VM_BUILD_ROOT:-${V5_BUILD_ROOT:-$HOME/v5-build}}
 petalinux_root="$build_root/petalinux/overlay/merged"
 artifact_dir=${V5_LINUXCNC_ARTIFACT_DIR:-$build_root/board/linuxcnc-native}
 build_user=${V5_PETALINUX_BUILD_USER:-}
-downloads_root="$build_root/petalinux/output/downloads"
+downloads_root="$build_root/petalinux/cache/downloads"
 overlay_root="$build_root/linuxcnc-overlay"
 overlay_upper="$overlay_root/upper"
 overlay_work="$overlay_root/work"
 overlay_merged="$overlay_root/merged"
 recipe_target=""
 artifact_stage=""
-rootfs_audit_dir=""
+rootfs_gate_marker=""
 petalinux_overlay_active=0
 build_mode=focused
 clean_kernel=0
@@ -42,7 +44,7 @@ if [ "$clean_kernel" -eq 1 ] && [ "$build_mode" != full ]; then
 fi
 build_root=$(mkdir -p "$build_root" && CDPATH= cd -- "$build_root" && pwd)
 petalinux_root="$build_root/petalinux/overlay/merged"
-downloads_root="$build_root/petalinux/output/downloads"
+downloads_root="$build_root/petalinux/cache/downloads"
 
 command -v findmnt >/dev/null 2>&1 || {
     echo "findmnt is required to validate the Windows source mount" >&2
@@ -64,14 +66,12 @@ if [ "$(id -u "$build_user")" -eq 0 ]; then
     echo "V5_PETALINUX_BUILD_USER must not be root" >&2
     exit 7
 fi
-mkdir -p "$downloads_root"
-chown "$build_user":"$(id -gn "$build_user")" "$downloads_root"
 if [ ! -f "$source_root/v5_linuxcnc_source_identity.json" ]; then
     echo "Windows-owned LinuxCNC source identity is missing: $source_root" >&2
     exit 8
 fi
-if [ ! -f "$petalinux_overlay_tool" ]; then
-    echo "canonical PetaLinux overlay tool is missing: $petalinux_overlay_tool" >&2
+if [ ! -f "$petalinux_overlay_tool" ] || [ ! -f "$source_package_verifier" ]; then
+    echo "canonical PetaLinux overlay/source package tool is missing" >&2
     exit 8
 fi
 if [ ! -f "$minimal_runtime_verifier" ] || [ ! -f "$runtime_allowlist" ]; then
@@ -152,8 +152,8 @@ cleanup() {
     if [ -n "$artifact_stage" ] && [ -e "$artifact_stage" ]; then
         case "$artifact_stage" in "$build_root"/*) rm -rf "$artifact_stage" ;; esac
     fi
-    if [ -n "$rootfs_audit_dir" ] && [ -e "$rootfs_audit_dir" ]; then
-        case "$rootfs_audit_dir" in "$build_root"/*) rm -rf "$rootfs_audit_dir" ;; esac
+    if [ -n "$rootfs_gate_marker" ] && [ -f "$rootfs_gate_marker" ]; then
+        case "$rootfs_gate_marker" in "$build_root"/*) rm -f "$rootfs_gate_marker" ;; esac
     fi
     if [ "$petalinux_overlay_active" -eq 1 ]; then
         run_petalinux_overlay clean >/dev/null 2>&1 || true
@@ -164,6 +164,8 @@ trap cleanup EXIT HUP INT TERM
 
 ensure_build_memory
 cleanup
+mkdir -p "$downloads_root"
+chown "$build_user":"$(id -gn "$build_user")" "$downloads_root"
 run_petalinux_overlay clean >/dev/null
 petalinux_overlay_active=1
 run_petalinux_overlay prepare
@@ -204,7 +206,28 @@ run_petalinux_build() {
         sh -c "cd '$petalinux_root' && petalinux-build $task_args"
 }
 
-configure_persistent_downloads() {
+run_bitbake_direct() {
+    task_args=$1
+    build_home=$(getent passwd "$build_user" | cut -d: -f6)
+    bitbake_bin="$petalinux_root/components/yocto/layers/core/bitbake/bin/bitbake"
+    [ -x "$bitbake_bin" ] || {
+        echo "generated BitBake executable is missing: $bitbake_bin" >&2
+        exit 12
+    }
+    runuser -u "$build_user" -- env \
+        HOME="$build_home" \
+        PETALINUX="${PETALINUX:-}" \
+        PETALINUX_VER="${PETALINUX_VER:-}" \
+        XSCT_TOOLCHAIN="${XSCT_TOOLCHAIN:-}" \
+        PATH="$(dirname "$bitbake_bin"):$PATH" \
+        SHELL=/bin/bash \
+        TERM="${TERM:-dumb}" \
+        BB_ENV_EXTRAWHITE="${BB_ENV_EXTRAWHITE:-} V5_LINUXCNC_EXTERNAL_SOURCE" \
+        V5_LINUXCNC_EXTERNAL_SOURCE="$overlay_merged" \
+        sh -c "cd '$petalinux_root/build' && bitbake $task_args"
+}
+
+configure_download_cache() {
     for conf in \
         "$petalinux_root/build/conf/local.conf" \
         "$petalinux_root/build/conf/plnxtool.conf"
@@ -235,7 +258,57 @@ configure_persistent_downloads() {
             exit 12
         }
     done
-    echo "V5_PETALINUX_DOWNLOAD_OWNER_OK path=$downloads_root"
+    echo "V5_PETALINUX_DOWNLOAD_CACHE_OK path=$downloads_root"
+}
+
+configure_offline_bitbake() {
+    for conf in \
+        "$petalinux_root/build/conf/local.conf" \
+        "$petalinux_root/build/conf/plnxtool.conf"
+    do
+        temp_conf="$conf.v5-offline"
+        awk '
+            BEGIN { skipping = 0; quote_parity = 0 }
+            skipping {
+                quote_parity = (quote_parity + split($0, quotes, /"/) - 1) % 2
+                continued = ($0 ~ /\\[[:space:]]*$/)
+                if (!continued && quote_parity == 0) skipping = 0
+                next
+            }
+            /^[[:space:]]*(BB_NO_NETWORK|BB_FETCH_PREMIRRORONLY|SOURCE_MIRROR_URL|SSTATE_MIRRORS|BB_GENERATE_MIRROR_TARBALLS|RM_WORK_EXCLUDE)[[:space:]]*[?:+]?=/ {
+                quote_parity = (split($0, quotes, /"/) - 1) % 2
+                continued = ($0 ~ /\\[[:space:]]*$/)
+                if (continued || quote_parity != 0) skipping = 1
+                next
+            }
+            /^[[:space:]]*do_fetch\[nostamp\][[:space:]]*=/ { next }
+            /^[[:space:]]*INHERIT[[:space:]]*\+=[[:space:]]*"own-mirrors"[[:space:]]*$/ { next }
+            { print }
+        ' "$conf" > "$temp_conf"
+        cat >> "$temp_conf" <<EOF
+BB_NO_NETWORK = "1"
+SOURCE_MIRROR_URL = "file://$source_package_root"
+INHERIT += "own-mirrors"
+BB_FETCH_PREMIRRORONLY = "1"
+SSTATE_MIRRORS = ""
+BB_GENERATE_MIRROR_TARBALLS = "0"
+RM_WORK_EXCLUDE += " linuxcnc-prebuilt petalinux-image-minimal"
+EOF
+        mv "$temp_conf" "$conf"
+        chown "$build_user":"$(id -gn "$build_user")" "$conf"
+        grep -Fqx 'BB_NO_NETWORK = "1"' "$conf" || exit 12
+        grep -Fqx "SOURCE_MIRROR_URL = \"file://$source_package_root\"" "$conf" || exit 12
+        grep -Fqx 'INHERIT += "own-mirrors"' "$conf" || exit 12
+        grep -Fqx 'BB_FETCH_PREMIRRORONLY = "1"' "$conf" || exit 12
+        grep -Fqx 'SSTATE_MIRRORS = ""' "$conf" || exit 12
+    done
+    echo "V5_PETALINUX_NETWORK_DISABLED"
+}
+
+verify_windows_source_packages() {
+    python3 "$source_package_verifier" \
+        --project-root "$project_root" \
+        --source-root "$source_package_root"
 }
 
 verify_rootfs_package_selection() {
@@ -269,8 +342,11 @@ verify_rootfs_package_selection() {
 }
 
 verify_rootfs_package_selection
+verify_windows_source_packages
 run_petalinux_build "-c linuxcnc-prebuilt -x listtasks"
-configure_persistent_downloads
+configure_download_cache
+configure_offline_bitbake
+run_bitbake_direct "linuxcnc-prebuilt -c listtasks"
 
 audit_minimal_runtime() {
     work_root="$build_root/petalinux/output/tmp/work"
@@ -279,29 +355,24 @@ audit_minimal_runtime() {
         echo "linuxcnc-prebuilt runtime package root was not found" >&2
         exit 12
     }
+    rootfs_root=$(find "$work_root" -type d -path '*/petalinux-image-minimal/*/rootfs' -print | sort | tail -n 1)
+    [ -n "$rootfs_root" ] || {
+        echo "focused rootfs directory was not found" >&2
+        exit 12
+    }
     image_manifest=""
-    deploy_root="$build_root/petalinux/output/tmp/deploy/images"
-    if [ -d "$deploy_root" ]; then
-        for candidate in $(find "$deploy_root" -type f -name '*.manifest' -print | sort); do
-            if grep -q '^linuxcnc-prebuilt[[:space:]]' "$candidate"; then
+    license_root="$build_root/petalinux/output/tmp/deploy/licenses"
+    if [ -d "$license_root" ] && [ -f "$rootfs_gate_marker" ]; then
+        for candidate in $(find "$license_root" -type f -name package.manifest -newer "$rootfs_gate_marker" -print | sort); do
+            if grep -Eq '^linuxcnc-prebuilt([[:space:]]|$)' "$candidate"; then
                 image_manifest="$candidate"
             fi
         done
     fi
     [ -n "$image_manifest" ] || {
-        echo "rootfs package manifest containing linuxcnc-prebuilt was not found" >&2
+        echo "fresh rootfs package manifest containing linuxcnc-prebuilt was not found" >&2
         exit 12
     }
-    rootfs_archive=${image_manifest%.manifest}.tar.gz
-    [ -f "$rootfs_archive" ] || {
-        echo "rootfs archive matching the package manifest was not found: $rootfs_archive" >&2
-        exit 12
-    }
-    rootfs_audit_dir="$build_root/petalinux/linuxcnc-rootfs-audit.$$"
-    rm -rf "$rootfs_audit_dir"
-    install -d "$rootfs_audit_dir"
-    tar -xzf "$rootfs_archive" -C "$rootfs_audit_dir"
-    rootfs_root="$rootfs_audit_dir"
     python3 "$minimal_runtime_verifier" \
         --allowlist "$runtime_allowlist" \
         --package-root "$package_root" \
@@ -310,7 +381,10 @@ audit_minimal_runtime() {
 }
 
 if [ "$build_mode" = focused ]; then
-    run_petalinux_build "-c rootfs"
+    run_bitbake_direct "linuxcnc-prebuilt -c package"
+    rootfs_gate_marker="$build_root/petalinux/rootfs-gate.$$.marker"
+    touch "$rootfs_gate_marker"
+    run_bitbake_direct "petalinux-image-minimal -c rootfs"
     audit_minimal_runtime
     cleanup
     trap - EXIT HUP INT TERM
@@ -321,7 +395,9 @@ fi
 if [ "$clean_kernel" -eq 1 ]; then
     run_petalinux_build "-c kernel -x clean"
 fi
-run_petalinux_build ""
+rootfs_gate_marker="$build_root/petalinux/rootfs-gate.$$.marker"
+touch "$rootfs_gate_marker"
+run_bitbake_direct "petalinux-image-minimal"
 audit_minimal_runtime
 
 work_root="$build_root/petalinux/output/tmp/work"
@@ -344,7 +420,7 @@ install -m 0644 "$image_root/usr/share/v5-native/v5_linuxcnc_source_identity.jso
 install -m 0644 "$project_root/board/petalinux/v5_petalinux_source_identity.json" \
     "$artifact_stage/v5_petalinux_source_identity.json"
 
-petalinux_images="$petalinux_root/images/linux"
+petalinux_images="$build_root/petalinux/output/tmp/deploy/images/zynq-generic"
 if [ ! -d "$petalinux_images" ]; then
     echo "PetaLinux image output is missing: $petalinux_images" >&2
     exit 13

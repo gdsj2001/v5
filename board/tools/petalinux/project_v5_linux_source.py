@@ -54,6 +54,38 @@ def git_command(project_root, index_path, arguments, input_data=None):
         fail("Git projection command failed: %s" % detail)
 
 
+def nul_records(data):
+    return [record for record in data.split(b"\0") if record]
+
+
+def indexed_symlinks(project_root, index_path):
+    records = git_command(
+        project_root,
+        index_path,
+        ["ls-files", "-s", "-z", "--", "linux/kernel", "linux/realtime"],
+    ).stdout
+    paths = set()
+    for record in nul_records(records):
+        metadata, path = record.split(b"\t", 1)
+        if metadata.split(b" ", 1)[0] == b"120000":
+            paths.add(path)
+    return paths
+
+
+def vm_share_inaccessible_paths(project_root):
+    paths = set()
+    for owner in contract.OWNERS:
+        source_root = project_root / owner["relative"]
+        identity = contract.load_identity(source_root, owner)
+        for relative in identity.get("vm_share_inaccessible_paths", []):
+            paths.add((Path(owner["relative"]) / relative).as_posix().encode("utf-8"))
+    return paths
+
+
+def below_indexed_symlink(path, symlinks):
+    return any(path == link or path.startswith(link + b"/") for link in symlinks)
+
+
 def copy_override(source, destination):
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.is_symlink() or destination.exists():
@@ -161,6 +193,49 @@ def project_and_verify(
     try:
         shutil.copyfile(project_root / ".git/index", index_path)
         git_command(project_root, index_path, ["update-index", "--no-fsmonitor"])
+        symlinks = indexed_symlinks(project_root, index_path)
+        inaccessible = vm_share_inaccessible_paths(project_root)
+        deleted_raw = git_command(
+            project_root,
+            index_path,
+            ["ls-files", "--deleted", "-z", "--", "linux/kernel", "linux/realtime"],
+        ).stdout
+        deleted_paths = [
+            path
+            for path in nul_records(deleted_raw)
+            if path not in symlinks and path not in inaccessible
+        ]
+        deleted = b"\0".join(deleted_paths) + (b"\0" if deleted_paths else b"")
+        if deleted:
+            git_command(
+                project_root,
+                index_path,
+                ["update-index", "--force-remove", "-z", "--stdin"],
+                input_data=deleted,
+            )
+        untracked_raw = git_command(
+            project_root,
+            index_path,
+            [
+                "ls-files",
+                "--others",
+                "--exclude-standard",
+                "-z",
+                "--",
+                "linux/kernel",
+                "linux/realtime",
+            ],
+        ).stdout
+        untracked = [
+            path
+            for path in nul_records(untracked_raw)
+            if path not in inaccessible and not below_indexed_symlink(path, symlinks)
+        ]
+        if untracked:
+            fail(
+                "untracked Linux source is outside the canonical Git snapshot: %s"
+                % untracked[0].decode("utf-8", errors="replace")
+            )
         listing = git_command(
             project_root,
             index_path,

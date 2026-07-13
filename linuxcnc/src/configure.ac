@@ -1339,6 +1339,25 @@ AH_BOTTOM(#endif
 # so testing is done by finding tclConfig.sh and tkConfig.sh                 #
 # if the search fails the traditional check is done                          #
 ##############################################################################
+AC_ARG_ENABLE(v5-headless-runtime,
+    AS_HELP_STRING(
+        [--enable-v5-headless-runtime],
+        [Build only the V5 headless LinuxCNC runtime without Tcl/Tk/X11 GUI targets.]
+    ),
+    [V5_HEADLESS_RUNTIME=$enableval],
+    [V5_HEADLESS_RUNTIME=no])
+AC_SUBST([V5_HEADLESS_RUNTIME])
+
+if test "$V5_HEADLESS_RUNTIME" = "yes"; then
+    TCL_CFLAGS=
+    TK_CFLAGS=
+    TCL_LIBS=
+    TK_LIBS=
+    TCL_DBGX=
+    TK_DBGX=
+    WISH=:
+    TCLSH=:
+else
 AC_MSG_CHECKING([for tcl])
 
 AC_ARG_WITH(tclConfig,
@@ -1435,6 +1454,7 @@ elif test -f $TCL_EXEC_PREFIX/bin/tclsh; then
 else
     TCLSH=tclsh
 fi
+fi
 
 AC_ARG_ENABLE(check-runtime-deps,
     AS_HELP_STRING(
@@ -1503,6 +1523,7 @@ AC_SUBST([TCLSH])
 # provides DATE in order to output it to the generated files
 DATE=$(date)
 AC_SUBST([DATE])
+if test "$V5_HEADLESS_RUNTIME" != "yes"; then
 AC_PATH_XTRA
 #X_CFLAGS gets set
 #X_LIBS and X_EXTRA_LIBS likewise
@@ -1520,6 +1541,11 @@ AC_CHECK_LIB(Xinerama, XineramaQueryExtension,
 
 if test "x$HAVE_XINERAMA" = "xno"; then
     AC_MSG_ERROR([Xinerama library or headers not found])
+fi
+else
+    X_LIBS=
+    X_CFLAGS=
+    X_EXTRA_LIBS=
 fi
 
 #clean out LIBS
@@ -1658,6 +1684,7 @@ then
 fi
 AC_MSG_RESULT(OK)
 
+if test "$V5_HEADLESS_RUNTIME" != "yes"; then
 AC_MSG_CHECKING([match between tk and Tkinter versions])
 if $PYTHON -c 'import sys;raise SystemExit(sys.hexversion<0x3040000)'
 then
@@ -1682,11 +1709,13 @@ if test "$PYTHON_TK_VERSION" != "$TK_VERSION"; then
     AC_MSG_ERROR(["Python requires use of Tk $TK_VERSION.  Install this version and specify --with-tkConfig if necessary"])
 fi
 AC_MSG_RESULT([$PYTHON_TK_VERSION])
+fi
 
 AC_MSG_CHECKING(for site-package location)
 SITEPY="$($PYTHON -c 'import sysconfig; s = sysconfig.get_scheme_names(); m=list(set(("deb_system", "rpm_prefix")) & set(s)); print(sysconfig.get_path("platlib", m.__getitem__(0))) if m else print("/usr/lib/python3/dist-packages");')"
 AC_MSG_RESULT($SITEPY)
 
+if test "$V5_HEADLESS_RUNTIME" != "yes"; then
 AC_MSG_CHECKING(for working GLU quadrics)
 AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
 #include <GL/gl.h>
@@ -1698,6 +1727,7 @@ AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
 
 AC_MSG_CHECKING(for Xmu headers)
 AC_CHECK_HEADERS(X11/Xmu/Xmu.h,[],[AC_MSG_ERROR([Required Xmu header missing.  Install it, or specify --disable-python to skip the parts of LinuxCNC that depend on Python])])
+fi
 
 AC_SUBST([LIBPYTHON])
 AC_SUBST([SITEPY])

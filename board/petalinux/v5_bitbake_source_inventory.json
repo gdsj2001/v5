@@ -1,0 +1,5600 @@
+{
+  "schema": "v5-bitbake-source-inventory-v1",
+  "target": "petalinux-image-minimal",
+  "recipe_count": 305,
+  "source_package_count": 222,
+  "recipes": [
+    {
+      "pn": "acl",
+      "pv": "2.2.52",
+      "license": "LGPLv2.1+ & GPLv2+",
+      "lic_files_chksum": "file://doc/COPYING;md5=c781d70ed2b4d48995b790403217a249                     file://doc/COPYING.LGPL;md5=9e9a206917f8af112da634ce3ab41764",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "acl-2.2.52.src.tar.gz"
+      ]
+    },
+    {
+      "pn": "alsa-lib-native",
+      "pv": "1.1.9",
+      "license": "LGPLv2.1 & GPLv2+",
+      "lic_files_chksum": "file://COPYING;md5=a916467b91076e631dd8edb7424769c7                     file://src/socket.c;md5=285675b45e83f571c6a957fe4ab79c93;beginline=9;endline=24                     ",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "alsa-lib-1.1.9.tar.bz2"
+      ]
+    },
+    {
+      "pn": "asciidoc-native",
+      "pv": "8.6.9+py3-gitAUTOINC+618f6e6f6b",
+      "license": "GPLv2",
+      "lic_files_chksum": "file://COPYING;md5=8ca43cbc842c2336e835926c2166c28b                     file://COPYRIGHT;md5=029ad5428ba5efa20176b396222d4069",
+      "srcrev": "618f6e6f6b558ed1e5f2588cd60a5a6b4f881ca0",
+      "source_packages": [
+        "git2_github.com.asciidoc.asciidoc-py3.tar.gz"
+      ]
+    },
+    {
+      "pn": "attr",
+      "pv": "2.4.47",
+      "license": "LGPLv2.1+ & GPLv2+",
+      "lic_files_chksum": "file://doc/COPYING;md5=2d0aa14b3fce4694e4f615e30186335f                     file://attr/attr.c;endline=17;md5=be0403261f0847e5f43ed5b08d19593c                     file://libattr/libattr.c;endline=17;md5=7970f77049f8fa1199fff62a7ab724fb",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "attr-2.4.47.src.tar.gz"
+      ]
+    },
+    {
+      "pn": "attr-native",
+      "pv": "2.4.47",
+      "license": "LGPLv2.1+ & GPLv2+",
+      "lic_files_chksum": "file://doc/COPYING;md5=2d0aa14b3fce4694e4f615e30186335f                     file://attr/attr.c;endline=17;md5=be0403261f0847e5f43ed5b08d19593c                     file://libattr/libattr.c;endline=17;md5=7970f77049f8fa1199fff62a7ab724fb",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "attr-2.4.47.src.tar.gz"
+      ]
+    },
+    {
+      "pn": "autoconf-archive",
+      "pv": "2019.01.06",
+      "license": "GPL-3.0-with-autoconf-exception",
+      "lic_files_chksum": "file://COPYING;md5=11cc2d3ee574f9d6b7ee797bdce4d423     file://COPYING.EXCEPTION;md5=fdef168ebff3bc2f13664c365a5fb515",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "autoconf-archive-2019.01.06.tar.xz"
+      ]
+    },
+    {
+      "pn": "autoconf-archive-native",
+      "pv": "2019.01.06",
+      "license": "GPL-3.0-with-autoconf-exception",
+      "lic_files_chksum": "file://COPYING;md5=11cc2d3ee574f9d6b7ee797bdce4d423     file://COPYING.EXCEPTION;md5=fdef168ebff3bc2f13664c365a5fb515",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "autoconf-archive-2019.01.06.tar.xz"
+      ]
+    },
+    {
+      "pn": "autoconf-native",
+      "pv": "2.69",
+      "license": "GPLv2 & GPLv3",
+      "lic_files_chksum": "file://COPYING;md5=751419260aa954499f7abaabaa882bbe \t\t    file://COPYINGv3;md5=d32239bcb673463ab874e80d47fae504",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "autoconf-2.69.tar.gz"
+      ]
+    },
+    {
+      "pn": "automake-native",
+      "pv": "1.16.1",
+      "license": "GPLv2",
+      "lic_files_chksum": "file://COPYING;md5=751419260aa954499f7abaabaa882bbe",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "automake-1.16.1.tar.gz"
+      ]
+    },
+    {
+      "pn": "base-files",
+      "pv": "3.0.14",
+      "license": "GPLv2",
+      "lic_files_chksum": "file://licenses/GPL-2;md5=94d55d512a9ba36caa9b7df079bae19f",
+      "srcrev": "INVALID",
+      "source_packages": []
+    },
+    {
+      "pn": "base-passwd",
+      "pv": "3.5.29",
+      "license": "GPLv2+",
+      "lic_files_chksum": "file://COPYING;md5=eb723b61539feef013de476e68b5c50a",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "base-passwd_3.5.29.tar.gz"
+      ]
+    },
+    {
+      "pn": "bash",
+      "pv": "5.0",
+      "license": "GPLv3+",
+      "lic_files_chksum": "file://COPYING;md5=d32239bcb673463ab874e80d47fae504",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "bash-5.0.tar.gz",
+        "bash50-001",
+        "bash50-002",
+        "bash50-003",
+        "bash50-004",
+        "bash50-005",
+        "bash50-006",
+        "bash50-007"
+      ]
+    },
+    {
+      "pn": "bash-completion",
+      "pv": "2.9",
+      "license": "GPLv2",
+      "lic_files_chksum": "file://COPYING;md5=751419260aa954499f7abaabaa882bbe",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "bash-completion-2.9.tar.xz"
+      ]
+    },
+    {
+      "pn": "bc",
+      "pv": "1.07.1",
+      "license": "GPLv3+",
+      "lic_files_chksum": "file://COPYING;md5=d32239bcb673463ab874e80d47fae504                     file://COPYING.LIB;md5=6a6a8e020838b23406c81b19c1d46df6                     file://bc/bcdefs.h;endline=17;md5=4295c06df9e833519a342f7b5d43db06                     file://dc/dc.h;endline=18;md5=36b8c600b63ee8c3aeade2764f6b2a4b                     file://lib/number.c;endline=20;md5=cf43068cc88f837731dc53240456cfaf",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "bc-1.07.1.tar.gz"
+      ]
+    },
+    {
+      "pn": "bc-native",
+      "pv": "1.07.1",
+      "license": "GPLv3+",
+      "lic_files_chksum": "file://COPYING;md5=d32239bcb673463ab874e80d47fae504                     file://COPYING.LIB;md5=6a6a8e020838b23406c81b19c1d46df6                     file://bc/bcdefs.h;endline=17;md5=4295c06df9e833519a342f7b5d43db06                     file://dc/dc.h;endline=18;md5=36b8c600b63ee8c3aeade2764f6b2a4b                     file://lib/number.c;endline=20;md5=cf43068cc88f837731dc53240456cfaf",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "bc-1.07.1.tar.gz"
+      ]
+    },
+    {
+      "pn": "binutils-cross-arm",
+      "pv": "2.32.0",
+      "license": "GPLv3",
+      "lic_files_chksum": "    file://COPYING;md5=59530bdf33659b29e73d4adb9f9f6552    file://COPYING.LIB;md5=9f604d8a4f8e74f4f5140845a21b6674    file://COPYING3;md5=d32239bcb673463ab874e80d47fae504    file://COPYING3.LIB;md5=6a6a8e020838b23406c81b19c1d46df6    file://gas/COPYING;md5=d32239bcb673463ab874e80d47fae504    file://include/COPYING;md5=59530bdf33659b29e73d4adb9f9f6552    file://include/COPYING3;md5=d32239bcb673463ab874e80d47fae504    file://libiberty/COPYING.LIB;md5=a916467b91076e631dd8edb7424769c7    file://bfd/COPYING;md5=d32239bcb673463ab874e80d47fae504    ",
+      "srcrev": "b8c1f608db9ef3edd483d21a921d1fbedc71df6f",
+      "source_packages": [
+        "git2_sourceware.org.git.binutils-gdb.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "binutils-native",
+      "pv": "2.32.0",
+      "license": "GPLv3",
+      "lic_files_chksum": "    file://COPYING;md5=59530bdf33659b29e73d4adb9f9f6552    file://COPYING.LIB;md5=9f604d8a4f8e74f4f5140845a21b6674    file://COPYING3;md5=d32239bcb673463ab874e80d47fae504    file://COPYING3.LIB;md5=6a6a8e020838b23406c81b19c1d46df6    file://gas/COPYING;md5=d32239bcb673463ab874e80d47fae504    file://include/COPYING;md5=59530bdf33659b29e73d4adb9f9f6552    file://include/COPYING3;md5=d32239bcb673463ab874e80d47fae504    file://libiberty/COPYING.LIB;md5=a916467b91076e631dd8edb7424769c7    file://bfd/COPYING;md5=d32239bcb673463ab874e80d47fae504    ",
+      "srcrev": "b8c1f608db9ef3edd483d21a921d1fbedc71df6f",
+      "source_packages": [
+        "git2_sourceware.org.git.binutils-gdb.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "bison-native",
+      "pv": "3.4.1",
+      "license": "GPLv3",
+      "lic_files_chksum": "file://COPYING;md5=d32239bcb673463ab874e80d47fae504",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "bison-3.4.1.tar.xz"
+      ]
+    },
+    {
+      "pn": "bjam-native",
+      "pv": "1.71.0",
+      "license": "BSL-1.0 & MIT & Python-2.0",
+      "lic_files_chksum": "file://LICENSE_1_0.txt;md5=e4224ccaecb14d942c71d31bef20d78c",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "boost_1_71_0.tar.bz2"
+      ]
+    },
+    {
+      "pn": "bluez5",
+      "pv": "5.50",
+      "license": "GPLv2+ & LGPLv2.1+",
+      "lic_files_chksum": "file://COPYING;md5=12f884d2ae1ff87c09e5b7ccc2c4ca7e                     file://COPYING.LIB;md5=fb504b67c50331fc78734fed90fb0e09                     file://src/main.c;beginline=1;endline=24;md5=9bc54b93cd7e17bf03f52513f39f926e",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "bluez-5.50.tar.xz"
+      ]
+    },
+    {
+      "pn": "boost",
+      "pv": "1.71.0",
+      "license": "BSL-1.0 & MIT & Python-2.0",
+      "lic_files_chksum": "file://LICENSE_1_0.txt;md5=e4224ccaecb14d942c71d31bef20d78c",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "boost_1_71_0.tar.bz2"
+      ]
+    },
+    {
+      "pn": "bridge-utils",
+      "pv": "1.6",
+      "license": "GPLv2",
+      "lic_files_chksum": "file://COPYING;md5=f9d20a453221a1b7e32ae84694da2c37",
+      "srcrev": "42c1aefc303fdf891fbb099ea51f00dca83ab606",
+      "source_packages": [
+        "git2_git.kernel.org.pub.scm.linux.kernel.git.shemminger.bridge-utils.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "btrfs-tools",
+      "pv": "5.2.2",
+      "license": "GPLv2",
+      "lic_files_chksum": "file://COPYING;md5=fcb02dc552a041dee27e4b85c7396067",
+      "srcrev": "55a8c9626fb906c20c3206f8fd39b9a8fb259b79",
+      "source_packages": [
+        "git2_git.kernel.org.pub.scm.linux.kernel.git.kdave.btrfs-progs.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "busybox",
+      "pv": "1.31.0",
+      "license": "GPLv2 & bzip2",
+      "lic_files_chksum": "file://LICENSE;md5=de10de48642ab74318e893a61105afbb",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "busybox-1.31.0.tar.bz2"
+      ]
+    },
+    {
+      "pn": "bzip2",
+      "pv": "1.0.8",
+      "license": "bzip2",
+      "lic_files_chksum": "file://LICENSE;beginline=4;endline=37;md5=600af43c50f1fcb82e32f19b32df4664",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "bzip2-1.0.8.tar.gz"
+      ]
+    },
+    {
+      "pn": "bzip2-native",
+      "pv": "1.0.8",
+      "license": "bzip2",
+      "lic_files_chksum": "file://LICENSE;beginline=4;endline=37;md5=600af43c50f1fcb82e32f19b32df4664",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "bzip2-1.0.8.tar.gz"
+      ]
+    },
+    {
+      "pn": "ca-certificates",
+      "pv": "20190110",
+      "license": "GPL-2.0+ & MPL-2.0",
+      "lic_files_chksum": "file://debian/copyright;md5=aeb420429b1659507e0a5a1b123e8308",
+      "srcrev": "c28799b138b044c963d24c4a69659b6e5486e3be",
+      "source_packages": [
+        "git2_salsa.debian.org.debian.ca-certificates.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "cairo",
+      "pv": "1.16.0",
+      "license": "(MPL-1.1 | LGPLv2.1) & GPLv3+",
+      "lic_files_chksum": "file://COPYING;md5=e73e999e0c72b5ac9012424fa157ad77",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "cairo-1.16.0.tar.xz"
+      ]
+    },
+    {
+      "pn": "can-utils",
+      "pv": "0.0+gitrAUTOINC+665d8699eb",
+      "license": "GPLv2 & BSD-3-Clause",
+      "lic_files_chksum": "file://include/linux/can.h;endline=44;md5=a9e1169c6c9a114a61329e99f86fdd31",
+      "srcrev": "665d8699ebe728bf48e63e8ae58d2482db72f954",
+      "source_packages": [
+        "git2_github.com.linux-can.can-utils.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "chrpath-native",
+      "pv": "0.16",
+      "license": "GPLv2",
+      "lic_files_chksum": "file://COPYING;md5=59530bdf33659b29e73d4adb9f9f6552",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "chrpath_0.16.orig.tar.gz"
+      ]
+    },
+    {
+      "pn": "cmake-native",
+      "pv": "3.15.3",
+      "license": "BSD",
+      "lic_files_chksum": "file://Copyright.txt;md5=622747147b46f22e1953876a7cba3323                     file://Source/cmake.h;md5=4494dee184212fc89c469c3acd555a14;beginline=1;endline=3                     ",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "cmake-3.15.3.tar.gz"
+      ]
+    },
+    {
+      "pn": "coreutils",
+      "pv": "8.31",
+      "license": "GPLv3+",
+      "lic_files_chksum": "file://COPYING;md5=d32239bcb673463ab874e80d47fae504                    file://src/ls.c;beginline=1;endline=15;md5=c456f9896277a0543e3866777ccc0255",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "coreutils-8.31.tar.xz"
+      ]
+    },
+    {
+      "pn": "cracklib",
+      "pv": "2.9.5",
+      "license": "LGPLv2.1+",
+      "lic_files_chksum": "file://COPYING.LIB;md5=e3eda01d9815f8d24aae2dbd89b68b06",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "cracklib-2.9.5.tar.gz"
+      ]
+    },
+    {
+      "pn": "cracklib-native",
+      "pv": "2.9.5",
+      "license": "LGPLv2.1+",
+      "lic_files_chksum": "file://COPYING.LIB;md5=e3eda01d9815f8d24aae2dbd89b68b06",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "cracklib-2.9.5.tar.gz"
+      ]
+    },
+    {
+      "pn": "createrepo-c-native",
+      "pv": "0.15.0",
+      "license": "GPLv2",
+      "lic_files_chksum": "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263",
+      "srcrev": "2077ba104eae04bb819e9e0c906c8c835b62e7a6",
+      "source_packages": [
+        "git2_github.com.rpm-software-management.createrepo_c.tar.gz"
+      ]
+    },
+    {
+      "pn": "cross-localedef-native",
+      "pv": "2.30",
+      "license": "LGPL-2.1",
+      "lic_files_chksum": "file://LICENSES;md5=cfc0ed77a9f62fa62eded042ebe31d72       file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263       file://posix/rxspencer/COPYRIGHT;md5=dc5485bb394a13b2332ec1c785f5d83a       file://COPYING.LIB;md5=4fbd65380cdd255951079008b364516c",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "git2_sourceware.org.git.glibc.git.tar.gz",
+        "git2_github.com.kraj.localedef.tar.gz"
+      ]
+    },
+    {
+      "pn": "curl-native",
+      "pv": "7.66.0",
+      "license": "MIT",
+      "lic_files_chksum": "file://COPYING;md5=be5d9e1419c4363f4b32037a2d3b7ffa",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "curl-7.66.0.tar.bz2"
+      ]
+    },
+    {
+      "pn": "cwautomacros-native",
+      "pv": "20110201",
+      "license": "GPLv2",
+      "lic_files_chksum": "file://LICENSE;md5=eb723b61539feef013de476e68b5c50a",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "cwautomacros-20110201.tar.bz2"
+      ]
+    },
+    {
+      "pn": "db",
+      "pv": "5.3.28",
+      "license": "Sleepycat",
+      "lic_files_chksum": "file://LICENSE;md5=ed1158e31437f4f87cdd4ab2b8613955",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "db-5.3.28.tar.gz"
+      ]
+    },
+    {
+      "pn": "db-native",
+      "pv": "5.3.28",
+      "license": "Sleepycat",
+      "lic_files_chksum": "file://LICENSE;md5=ed1158e31437f4f87cdd4ab2b8613955",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "db-5.3.28.tar.gz"
+      ]
+    },
+    {
+      "pn": "dbus",
+      "pv": "1.12.16",
+      "license": "AFL-2.1 | GPLv2+",
+      "lic_files_chksum": "file://COPYING;md5=10dded3b58148f3f1fd804b26354af3e                     file://dbus/dbus.h;beginline=6;endline=20;md5=7755c9d7abccd5dbd25a6a974538bb3c",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "dbus-1.12.16.tar.gz"
+      ]
+    },
+    {
+      "pn": "dbus-native",
+      "pv": "1.12.16",
+      "license": "AFL-2.1 | GPLv2+",
+      "lic_files_chksum": "file://COPYING;md5=10dded3b58148f3f1fd804b26354af3e                     file://dbus/dbus.h;beginline=6;endline=20;md5=7755c9d7abccd5dbd25a6a974538bb3c",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "dbus-1.12.16.tar.gz"
+      ]
+    },
+    {
+      "pn": "dbus-test",
+      "pv": "1.12.16",
+      "license": "AFL-2.1 | GPLv2+",
+      "lic_files_chksum": "file://COPYING;md5=10dded3b58148f3f1fd804b26354af3e                     file://dbus/dbus.h;beginline=6;endline=20;md5=7755c9d7abccd5dbd25a6a974538bb3c",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "dbus-1.12.16.tar.gz"
+      ]
+    },
+    {
+      "pn": "debianutils-native",
+      "pv": "4.8.6.3",
+      "license": "GPLv2 & SMAIL_GPL",
+      "lic_files_chksum": "file://debian/copyright;md5=f01a5203d50512fc4830b4332b696a9f",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "debianutils_4.8.6.3.tar.xz"
+      ]
+    },
+    {
+      "pn": "depmodwrapper-cross",
+      "pv": "1.0",
+      "license": "MIT",
+      "lic_files_chksum": "",
+      "srcrev": "INVALID",
+      "source_packages": []
+    },
+    {
+      "pn": "device-tree",
+      "pv": "xilinx-v2020.2+gitAUTOINC+f725aaecff",
+      "license": "GPLv2",
+      "lic_files_chksum": "file://xadcps/data/xadcps.mdd;md5=f7fa1bfdaf99c7182fc0d8e7fd28e04a",
+      "srcrev": "f725aaecffb806aff8dc081b6ab508ce7bb1fc3d",
+      "source_packages": [
+        "git2_github.com.xilinx.device-tree-xlnx.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "diffutils",
+      "pv": "3.7",
+      "license": "GPLv3+",
+      "lic_files_chksum": "file://COPYING;md5=d32239bcb673463ab874e80d47fae504",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "diffutils-3.7.tar.xz"
+      ]
+    },
+    {
+      "pn": "dnf-native",
+      "pv": "4.2.2",
+      "license": "GPLv2",
+      "lic_files_chksum": "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263                     file://PACKAGE-LICENSING;md5=4a0548e303dbc77f067335b4d688e745                     ",
+      "srcrev": "9947306a55271b8b7c9e2b6e3b7d582885b6045d",
+      "source_packages": [
+        "git2_github.com.rpm-software-management.dnf.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "docbook-xml-dtd4-native",
+      "pv": "4.5",
+      "license": "OASIS",
+      "lic_files_chksum": "file:///root/v5-build/petalinux/output/tmp/work/x86_64-linux/docbook-xml-dtd4-native/4.5-r0/LICENSE-OASIS;md5=c608985dd5f7f215e669e7639a0b1d2e",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "docbook-xml_4.5.orig.tar.gz"
+      ]
+    },
+    {
+      "pn": "docbook-xsl-stylesheets-native",
+      "pv": "1.79.1",
+      "license": "XSL",
+      "lic_files_chksum": "file://COPYING;md5=6beadd98f9c54ab0c387e14211ee4d0e",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "docbook-xsl-1.79.1.tar.bz2"
+      ]
+    },
+    {
+      "pn": "dropbear",
+      "pv": "2019.78",
+      "license": "MIT & BSD-3-Clause & BSD-2-Clause & PD",
+      "lic_files_chksum": "file://LICENSE;md5=a5ec40cafba26fc4396d0b550f824e01",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "dropbear-2019.78.tar.bz2"
+      ]
+    },
+    {
+      "pn": "dtc-native",
+      "pv": "1.5.1",
+      "license": "GPLv2 | BSD",
+      "lic_files_chksum": "file://GPL;md5=b234ee4d69f5fce4486a80fdaf4a4263 \t\t    file://libfdt/libfdt.h;beginline=4;endline=7;md5=05bb357cfb75cae7d2b01d2ee8d76407",
+      "srcrev": "60e0db3d65a1218b0d5a29474e769f28a18e3ca6",
+      "source_packages": [
+        "git2_git.kernel.org.pub.scm.utils.dtc.dtc.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "dwarfsrcfiles-native",
+      "pv": "1.0",
+      "license": "GPLv2+",
+      "lic_files_chksum": "file://../dwarfsrcfiles.c;md5=31483894e453a77acbb67847565f1b5c;beginline=1;endline=8",
+      "srcrev": "INVALID",
+      "source_packages": []
+    },
+    {
+      "pn": "e2fsprogs",
+      "pv": "1.45.3",
+      "license": "GPLv2 & LGPLv2 & BSD & MIT",
+      "lic_files_chksum": "file://NOTICE;md5=d50be0580c0b0a7fbc7a4830bbe6c12b                       file://lib/ext2fs/ext2fs.h;beginline=1;endline=9;md5=596a8dedcb4e731c6b21c7a46fba6bef                       file://lib/e2p/e2p.h;beginline=1;endline=7;md5=8a74ade8f9d65095d70ef2d4bf48e36a                       file://lib/uuid/uuid.h.in;beginline=1;endline=32;md5=dbb8079e114a5f841934b99e59c8820a                       file://lib/uuid/COPYING;md5=58dcd8452651fc8b07d1f65ce07ca8af                       file://lib/et/et_name.c;beginline=1;endline=11;md5=ead236447dac7b980dbc5b4804d8c836                       file://lib/ss/ss.h;beginline=1;endline=20;md5=6e89ad47da6e75fecd2b5e0e81e1d4a6",
+      "srcrev": "1f56fb81236fe3e25e2c60c1e89ea0aa7cb36260",
+      "source_packages": [
+        "git2_git.kernel.org.pub.scm.fs.ext2.e2fsprogs.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "e2fsprogs-native",
+      "pv": "1.45.3",
+      "license": "GPLv2 & LGPLv2 & BSD & MIT",
+      "lic_files_chksum": "file://NOTICE;md5=d50be0580c0b0a7fbc7a4830bbe6c12b                       file://lib/ext2fs/ext2fs.h;beginline=1;endline=9;md5=596a8dedcb4e731c6b21c7a46fba6bef                       file://lib/e2p/e2p.h;beginline=1;endline=7;md5=8a74ade8f9d65095d70ef2d4bf48e36a                       file://lib/uuid/uuid.h.in;beginline=1;endline=32;md5=dbb8079e114a5f841934b99e59c8820a                       file://lib/uuid/COPYING;md5=58dcd8452651fc8b07d1f65ce07ca8af                       file://lib/et/et_name.c;beginline=1;endline=11;md5=ead236447dac7b980dbc5b4804d8c836                       file://lib/ss/ss.h;beginline=1;endline=20;md5=6e89ad47da6e75fecd2b5e0e81e1d4a6",
+      "srcrev": "1f56fb81236fe3e25e2c60c1e89ea0aa7cb36260",
+      "source_packages": [
+        "git2_git.kernel.org.pub.scm.fs.ext2.e2fsprogs.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "elfutils",
+      "pv": "0.177",
+      "license": "GPLv2 & LGPLv3+ & GPLv3+",
+      "lic_files_chksum": "file://COPYING;md5=d32239bcb673463ab874e80d47fae504",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "elfutils-0.177.tar.bz2"
+      ]
+    },
+    {
+      "pn": "elfutils-native",
+      "pv": "0.177",
+      "license": "GPLv2 & LGPLv3+ & GPLv3+",
+      "lic_files_chksum": "file://COPYING;md5=d32239bcb673463ab874e80d47fae504",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "elfutils-0.177.tar.bz2"
+      ]
+    },
+    {
+      "pn": "ethercat-master",
+      "pv": "1.6.9+gitAUTOINC+b709e58147",
+      "license": "GPLv2 & LGPLv2.1",
+      "lic_files_chksum": "     file://COPYING;md5=59530bdf33659b29e73d4adb9f9f6552     file://COPYING.LESSER;md5=4fbd65380cdd255951079008b364516c ",
+      "srcrev": "b709e58147e65b5e3251b45f48c01ef33cc7366f",
+      "source_packages": [
+        "git2_gitlab.com.etherlab.org.ethercat.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "ethtool",
+      "pv": "5.2",
+      "license": "GPLv2+",
+      "lic_files_chksum": "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263                     file://ethtool.c;beginline=4;endline=17;md5=c19b30548c582577fc6b443626fc1216",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "ethtool-5.2.tar.gz"
+      ]
+    },
+    {
+      "pn": "eudev",
+      "pv": "3.2.8",
+      "license": "GPLv2.0+ & LGPL-2.1+",
+      "lic_files_chksum": "file://COPYING;md5=751419260aa954499f7abaabaa882bbe",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "eudev-3.2.8.tar.gz"
+      ]
+    },
+    {
+      "pn": "expat",
+      "pv": "2.2.8",
+      "license": "MIT",
+      "lic_files_chksum": "file://COPYING;md5=5b8620d98e49772d95fc1d291c26aa79",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "expat-2.2.8.tar.bz2"
+      ]
+    },
+    {
+      "pn": "expat-native",
+      "pv": "2.2.8",
+      "license": "MIT",
+      "lic_files_chksum": "file://COPYING;md5=5b8620d98e49772d95fc1d291c26aa79",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "expat-2.2.8.tar.bz2"
+      ]
+    },
+    {
+      "pn": "external-hdf",
+      "pv": "1.0",
+      "license": "CLOSED",
+      "lic_files_chksum": "",
+      "srcrev": "3dd3e5e8d895858d9d2aefd34a053822d19936a4",
+      "source_packages": []
+    },
+    {
+      "pn": "file",
+      "pv": "5.37",
+      "license": "BSD",
+      "lic_files_chksum": "file://COPYING;beginline=2;md5=0251eaec1188b20d9a72c502ecfdda1b",
+      "srcrev": "a0d5b0e4e9f97d74a9911e95cedd579852e25398",
+      "source_packages": [
+        "git2_github.com.file.file.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "file-native",
+      "pv": "5.37",
+      "license": "BSD",
+      "lic_files_chksum": "file://COPYING;beginline=2;md5=0251eaec1188b20d9a72c502ecfdda1b",
+      "srcrev": "a0d5b0e4e9f97d74a9911e95cedd579852e25398",
+      "source_packages": [
+        "git2_github.com.file.file.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "findutils",
+      "pv": "4.6.0",
+      "license": "GPLv3+",
+      "lic_files_chksum": "file://COPYING;md5=f27defe1e96c2e1ecd4e0c9be8967949",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "findutils-4.6.0.tar.gz"
+      ]
+    },
+    {
+      "pn": "flex",
+      "pv": "2.6.0",
+      "license": "BSD",
+      "lic_files_chksum": "file://COPYING;md5=e4742cf92e89040b39486a6219b68067",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "flex-2.6.0.tar.bz2"
+      ]
+    },
+    {
+      "pn": "flex-native",
+      "pv": "2.6.0",
+      "license": "BSD",
+      "lic_files_chksum": "file://COPYING;md5=e4742cf92e89040b39486a6219b68067",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "flex-2.6.0.tar.bz2"
+      ]
+    },
+    {
+      "pn": "fontconfig",
+      "pv": "2.13.1",
+      "license": "MIT-style & MIT & PD",
+      "lic_files_chksum": "file://COPYING;md5=7a0449e9bc5370402a94c00204beca3d                     file://src/fcfreetype.c;endline=45;md5=5d9513e3196a1fbfdfa94051c09dfc84                     file://src/fccache.c;beginline=1671;endline=1686;md5=0326cfeb4a7333dd4dd25fbbc4b9f27f",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "fontconfig-2.13.1.tar.gz"
+      ]
+    },
+    {
+      "pn": "fpga-manager-script",
+      "pv": "1.0",
+      "license": "Proprietary",
+      "lic_files_chksum": "file:///root/v5-build/petalinux/output/tmp/work/cortexa9t2hf-neon-xilinx-linux-gnueabi/fpga-manager-script/1.0-r0/fpgautil.c;beginline=1;endline=24;md5=8010e59a286b1e3a73a9fdd93bd18778",
+      "srcrev": "INVALID",
+      "source_packages": []
+    },
+    {
+      "pn": "freetype",
+      "pv": "2.10.1",
+      "license": "FreeType | GPLv2+",
+      "lic_files_chksum": "file://docs/LICENSE.TXT;md5=4af6221506f202774ef74f64932878a1                     file://docs/FTL.TXT;md5=9f37b4e6afa3fef9dba8932b16bd3f97                     file://docs/GPLv2.TXT;md5=8ef380476f642c20ebf40fecb0add2ec",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "freetype-2.10.1.tar.xz"
+      ]
+    },
+    {
+      "pn": "fsbl",
+      "pv": "2020.2+gitAUTOINC+08b9f4304d",
+      "license": "MIT",
+      "lic_files_chksum": "file://license.txt;md5=3a6e22aebf6516f0f74a82e1183f74f8",
+      "srcrev": "08b9f4304d1634ed632f4276d603d834940fd55a",
+      "source_packages": [
+        "git2_github.com.Xilinx.embeddedsw.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "gawk",
+      "pv": "5.0.1",
+      "license": "GPLv3",
+      "lic_files_chksum": "file://COPYING;md5=d32239bcb673463ab874e80d47fae504",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "gawk-5.0.1.tar.gz"
+      ]
+    },
+    {
+      "pn": "gcc-cross-arm",
+      "pv": "9.2.0",
+      "license": "GPL-3.0-with-GCC-exception & GPLv3",
+      "lic_files_chksum": "    file://COPYING;md5=59530bdf33659b29e73d4adb9f9f6552     file://COPYING3;md5=d32239bcb673463ab874e80d47fae504     file://COPYING3.LIB;md5=6a6a8e020838b23406c81b19c1d46df6     file://COPYING.LIB;md5=2d5025d4aa3495befef8f17206a5b0a1     file://COPYING.RUNTIME;md5=fe60d87048567d4fe8c8a0ed2448bcc8 ",
+      "srcrev": "INVALID",
+      "source_packages": []
+    },
+    {
+      "pn": "gcc-runtime",
+      "pv": "9.2.0",
+      "license": "GPL-3.0-with-GCC-exception",
+      "lic_files_chksum": "    file://COPYING;md5=59530bdf33659b29e73d4adb9f9f6552     file://COPYING3;md5=d32239bcb673463ab874e80d47fae504     file://COPYING3.LIB;md5=6a6a8e020838b23406c81b19c1d46df6     file://COPYING.LIB;md5=2d5025d4aa3495befef8f17206a5b0a1     file://COPYING.RUNTIME;md5=fe60d87048567d4fe8c8a0ed2448bcc8 ",
+      "srcrev": "INVALID",
+      "source_packages": []
+    },
+    {
+      "pn": "gcc-source-9.2.0",
+      "pv": "9.2.0",
+      "license": "GPL-3.0-with-GCC-exception & GPLv3",
+      "lic_files_chksum": "    file://COPYING;md5=59530bdf33659b29e73d4adb9f9f6552     file://COPYING3;md5=d32239bcb673463ab874e80d47fae504     file://COPYING3.LIB;md5=6a6a8e020838b23406c81b19c1d46df6     file://COPYING.LIB;md5=2d5025d4aa3495befef8f17206a5b0a1     file://COPYING.RUNTIME;md5=fe60d87048567d4fe8c8a0ed2448bcc8 ",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "gcc-9.2.0.tar.xz"
+      ]
+    },
+    {
+      "pn": "gdbm",
+      "pv": "1.18.1",
+      "license": "GPLv3",
+      "lic_files_chksum": "file://COPYING;md5=241da1b9fe42e642cbb2c24d5e0c4d24",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "gdbm-1.18.1.tar.gz"
+      ]
+    },
+    {
+      "pn": "gdbm-native",
+      "pv": "1.18.1",
+      "license": "GPLv3",
+      "lic_files_chksum": "file://COPYING;md5=241da1b9fe42e642cbb2c24d5e0c4d24",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "gdbm-1.18.1.tar.gz"
+      ]
+    },
+    {
+      "pn": "gettext",
+      "pv": "0.19.8.1",
+      "license": "GPLv3+ & LGPL-2.1+",
+      "lic_files_chksum": "file://COPYING;md5=d32239bcb673463ab874e80d47fae504",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "gettext-0.19.8.1.tar.gz"
+      ]
+    },
+    {
+      "pn": "gettext-minimal-native",
+      "pv": "0.19.8.1",
+      "license": "FSF-Unlimited",
+      "lic_files_chksum": "file://COPYING;md5=4bd090a20bfcd1a18f1f79837b5e3e91",
+      "srcrev": "INVALID",
+      "source_packages": []
+    },
+    {
+      "pn": "gettext-native",
+      "pv": "0.19.8.1",
+      "license": "GPLv3+ & LGPL-2.1+",
+      "lic_files_chksum": "file://COPYING;md5=d32239bcb673463ab874e80d47fae504",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "gettext-0.19.8.1.tar.gz"
+      ]
+    },
+    {
+      "pn": "glib-2.0",
+      "pv": "2.60.7",
+      "license": "LGPLv2.1+ & BSD & PD",
+      "lic_files_chksum": "file://COPYING;md5=4fbd65380cdd255951079008b364516c                     file://glib/glib.h;beginline=4;endline=17;md5=b88abb7f3ad09607e71cb9d530155906                     file://gmodule/COPYING;md5=4fbd65380cdd255951079008b364516c                     file://gmodule/gmodule.h;beginline=4;endline=17;md5=b88abb7f3ad09607e71cb9d530155906                     file://glib/pcre/pcre.h;beginline=8;endline=36;md5=3e2977dae4ad05217f58c446237298fc                     file://docs/reference/COPYING;md5=f51a5100c17af6bae00735cd791e1fcc",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "glib-2.60.7.tar.xz"
+      ]
+    },
+    {
+      "pn": "glib-2.0-native",
+      "pv": "2.60.7",
+      "license": "LGPLv2.1+ & BSD & PD",
+      "lic_files_chksum": "file://COPYING;md5=4fbd65380cdd255951079008b364516c                     file://glib/glib.h;beginline=4;endline=17;md5=b88abb7f3ad09607e71cb9d530155906                     file://gmodule/COPYING;md5=4fbd65380cdd255951079008b364516c                     file://gmodule/gmodule.h;beginline=4;endline=17;md5=b88abb7f3ad09607e71cb9d530155906                     file://glib/pcre/pcre.h;beginline=8;endline=36;md5=3e2977dae4ad05217f58c446237298fc                     file://docs/reference/COPYING;md5=f51a5100c17af6bae00735cd791e1fcc",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "glib-2.60.7.tar.xz"
+      ]
+    },
+    {
+      "pn": "glibc",
+      "pv": "2.30",
+      "license": "GPLv2 & LGPLv2.1",
+      "lic_files_chksum": "file://LICENSES;md5=cfc0ed77a9f62fa62eded042ebe31d72       file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263       file://posix/rxspencer/COPYRIGHT;md5=dc5485bb394a13b2332ec1c785f5d83a       file://COPYING.LIB;md5=4fbd65380cdd255951079008b364516c",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "git2_sourceware.org.git.glibc.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "glibc-locale",
+      "pv": "2.30",
+      "license": "GPLv2 & LGPLv2.1",
+      "lic_files_chksum": "file:///root/v5-build/petalinux/overlay/merged/components/yocto/layers/core/meta/files/common-licenses/GPL-2.0;md5=801f80980d171dd6425610833a22dbe6                      file:///root/v5-build/petalinux/overlay/merged/components/yocto/layers/core/meta/files/common-licenses/LGPL-2.1;md5=1a6d268fd218675ffea8be556788b780",
+      "srcrev": "INVALID",
+      "source_packages": []
+    },
+    {
+      "pn": "gmp",
+      "pv": "6.1.2",
+      "license": "GPLv2+ | LGPLv3+",
+      "lic_files_chksum": "file://COPYING;md5=d32239bcb673463ab874e80d47fae504                    file://COPYING.LESSERv3;md5=6a6a8e020838b23406c81b19c1d46df6                    file://COPYINGv2;md5=b234ee4d69f5fce4486a80fdaf4a4263 ",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "gmp-6.1.2.tar.bz2"
+      ]
+    },
+    {
+      "pn": "gmp-native",
+      "pv": "6.1.2",
+      "license": "GPLv2+ | LGPLv3+",
+      "lic_files_chksum": "file://COPYING;md5=d32239bcb673463ab874e80d47fae504                    file://COPYING.LESSERv3;md5=6a6a8e020838b23406c81b19c1d46df6                    file://COPYINGv2;md5=b234ee4d69f5fce4486a80fdaf4a4263 ",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "gmp-6.1.2.tar.bz2"
+      ]
+    },
+    {
+      "pn": "gnome-desktop-testing",
+      "pv": "2018.1",
+      "license": "LGPLv2+",
+      "lic_files_chksum": "file://COPYING;md5=3bf50002aefd002f49e7bb854063f7e7                     file://src/gnome-desktop-testing-runner.c;beginline=1;endline=20;md5=7ef3ad9da2ffcf7707dc11151fe007f4",
+      "srcrev": "4decade67b29ad170fcf3de148e41695fc459f48",
+      "source_packages": [
+        "git2_gitlab.gnome.org.GNOME.gnome-desktop-testing.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "gnu-config-native",
+      "pv": "20190501+gitAUTOINC+b98424c249",
+      "license": "GPL-3.0-with-autoconf-exception",
+      "lic_files_chksum": "file://config.guess;beginline=7;endline=27;md5=b75d42f59f706ea56d6a8e00216fca6a",
+      "srcrev": "b98424c249119b79d3f709e26eb86f2fd4d5e5f3",
+      "source_packages": [
+        "git2_git.savannah.gnu.org.config.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "gnutls",
+      "pv": "3.6.8",
+      "license": "GPLv3+ & LGPLv2.1+",
+      "lic_files_chksum": "file://LICENSE;md5=71391c8e0c1cfe68077e7fce3b586283                     file://doc/COPYING;md5=c678957b0c8e964aa6c70fd77641a71e                     file://doc/COPYING.LESSER;md5=a6f89e2100d9b6cdffcea4f398e37343",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "gnutls-3.6.8.tar.xz"
+      ]
+    },
+    {
+      "pn": "gobject-introspection",
+      "pv": "1.60.2",
+      "license": "LGPLv2+ & GPLv2+",
+      "lic_files_chksum": "file://COPYING;md5=c434e8128a68bedd59b80b2ac1eb1c4a                     file://tools/compiler.c;endline=20;md5=fc5007fc20022720e6c0b0cdde41fabd                     file://giscanner/sourcescanner.c;endline=22;md5=194d6e0c1d00662f32d030ce44de8d39                     file://girepository/giregisteredtypeinfo.c;endline=21;md5=661847611ae6979465415f31a759ba27                     ",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "gobject-introspection-1.60.2.tar.xz"
+      ]
+    },
+    {
+      "pn": "gobject-introspection-native",
+      "pv": "1.60.2",
+      "license": "LGPLv2+ & GPLv2+",
+      "lic_files_chksum": "file://COPYING;md5=c434e8128a68bedd59b80b2ac1eb1c4a                     file://tools/compiler.c;endline=20;md5=fc5007fc20022720e6c0b0cdde41fabd                     file://giscanner/sourcescanner.c;endline=22;md5=194d6e0c1d00662f32d030ce44de8d39                     file://girepository/giregisteredtypeinfo.c;endline=21;md5=661847611ae6979465415f31a759ba27                     ",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "gobject-introspection-1.60.2.tar.xz"
+      ]
+    },
+    {
+      "pn": "gperf-native",
+      "pv": "3.1",
+      "license": "GPLv3+",
+      "lic_files_chksum": "file://COPYING;md5=d32239bcb673463ab874e80d47fae504                     file://src/main.cc;beginline=8;endline=19;md5=dec8f611845d047387ed56b5b85fa99b",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "gperf-3.1.tar.gz"
+      ]
+    },
+    {
+      "pn": "gpgme-native",
+      "pv": "1.13.1",
+      "license": "GPLv2+ & LGPLv2.1+",
+      "lic_files_chksum": "file://COPYING;md5=94d55d512a9ba36caa9b7df079bae19f                     file://COPYING.LESSER;md5=bbb461211a33b134d42ed5ee802b37ff                     file://src/gpgme.h.in;endline=23;md5=2f0bf06d1c7dcb28532a9d0f94a7ca1d                     file://src/engine.h;endline=22;md5=4b6d8ba313d9b564cc4d4cfb1640af9d",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "gpgme-1.13.1.tar.bz2"
+      ]
+    },
+    {
+      "pn": "grep",
+      "pv": "3.3",
+      "license": "GPLv3",
+      "lic_files_chksum": "file://COPYING;md5=1ebbd3e34237af26da5dc08a4e440464",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "grep-3.3.tar.xz"
+      ]
+    },
+    {
+      "pn": "gtk-doc-native",
+      "pv": "1.31",
+      "license": "GPLv2",
+      "lic_files_chksum": "file://COPYING;md5=94d55d512a9ba36caa9b7df079bae19f",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "gtk-doc-1.31.tar.xz"
+      ]
+    },
+    {
+      "pn": "gzip",
+      "pv": "1.10",
+      "license": "GPLv3+",
+      "lic_files_chksum": "file://COPYING;md5=d32239bcb673463ab874e80d47fae504                     file://gzip.h;beginline=8;endline=20;md5=6e47caaa630e0c8bf9f1bc8d94a8ed0e",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "gzip-1.10.tar.gz"
+      ]
+    },
+    {
+      "pn": "hal-cia402",
+      "pv": "1.0",
+      "license": "GPLv2+",
+      "lic_files_chksum": "file://cia402.comp;beginline=1;endline=18;md5=74d33ade5912256d986c8b8e969496d0",
+      "srcrev": "INVALID",
+      "source_packages": []
+    },
+    {
+      "pn": "haveged",
+      "pv": "1.9.6",
+      "license": "GPLv3",
+      "lic_files_chksum": "file://COPYING;md5=d32239bcb673463ab874e80d47fae504",
+      "srcrev": "1470a82a7f79110c79beea1ca5f2d3b0fd1a4668",
+      "source_packages": [
+        "git2_github.com.jirka-h.haveged.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "i2c-tools",
+      "pv": "4.1",
+      "license": "GPLv2+",
+      "lic_files_chksum": "file://COPYING;md5=751419260aa954499f7abaabaa882bbe",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "i2c-tools-4.1.tar.gz"
+      ]
+    },
+    {
+      "pn": "icu",
+      "pv": "64.2",
+      "license": "ICU",
+      "lic_files_chksum": "file://../LICENSE;md5=8bc5d32052a96f214cbdd1e53dfc935d",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "icu4c-64_2-src.tgz"
+      ]
+    },
+    {
+      "pn": "icu-native",
+      "pv": "64.2",
+      "license": "ICU",
+      "lic_files_chksum": "file://../LICENSE;md5=8bc5d32052a96f214cbdd1e53dfc935d",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "icu4c-64_2-src.tgz"
+      ]
+    },
+    {
+      "pn": "init-ifupdown",
+      "pv": "1.0",
+      "license": "GPLv2",
+      "lic_files_chksum": "file:///root/v5-build/petalinux/output/tmp/work/cortexa9t2hf-neon-xilinx-linux-gnueabi/init-ifupdown/1.0-r7/copyright;md5=3dd6192d306f582dee7687da3d8748ab",
+      "srcrev": "INVALID",
+      "source_packages": []
+    },
+    {
+      "pn": "initscripts",
+      "pv": "1.0",
+      "license": "GPLv2",
+      "lic_files_chksum": "file://COPYING;md5=751419260aa954499f7abaabaa882bbe",
+      "srcrev": "INVALID",
+      "source_packages": []
+    },
+    {
+      "pn": "intltool-native",
+      "pv": "0.51.0",
+      "license": "GPLv2",
+      "lic_files_chksum": "file://COPYING;md5=94d55d512a9ba36caa9b7df079bae19f",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "intltool-0.51.0.tar.gz"
+      ]
+    },
+    {
+      "pn": "iproute2",
+      "pv": "5.2.0",
+      "license": "GPLv2+",
+      "lic_files_chksum": "file://COPYING;md5=eb723b61539feef013de476e68b5c50a                     file://ip/ip.c;beginline=3;endline=8;md5=689d691d0410a4b64d3899f8d6e31817",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "iproute2-5.2.0.tar.xz"
+      ]
+    },
+    {
+      "pn": "iptables",
+      "pv": "1.8.3",
+      "license": "GPLv2+",
+      "lic_files_chksum": "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263                    file://iptables/iptables.c;beginline=13;endline=25;md5=c5cffd09974558cf27d0f763df2a12dc",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "iptables-1.8.3.tar.bz2"
+      ]
+    },
+    {
+      "pn": "json-c-native",
+      "pv": "0.13.1",
+      "license": "MIT",
+      "lic_files_chksum": "file://COPYING;md5=de54b60fbbc35123ba193fea8ee216f2",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "json-c-0.13.1.tar.gz"
+      ]
+    },
+    {
+      "pn": "kern-tools-native",
+      "pv": "0.2+gitAUTOINC+bb6df0ef23",
+      "license": "GPLv2",
+      "lic_files_chksum": "file://git/tools/kgit;beginline=5;endline=9;md5=9c30e971d435e249624278c3e343e501",
+      "srcrev": "bb6df0ef2365689cd3df6f76a8838cddae0d9343",
+      "source_packages": [
+        "git2_git.yoctoproject.org.yocto-kernel-tools.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "kmod",
+      "pv": "26",
+      "license": "GPL-2.0+ & LGPL-2.1+",
+      "lic_files_chksum": "file://COPYING;md5=a6f89e2100d9b6cdffcea4f398e37343                     file://libkmod/COPYING;md5=a6f89e2100d9b6cdffcea4f398e37343                    ",
+      "srcrev": "58133a96c894c043e48c74ddf0bfe8db90bac62f",
+      "source_packages": [
+        "git2_git.kernel.org.pub.scm.utils.kernel.kmod.kmod.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "kmod-native",
+      "pv": "26",
+      "license": "GPL-2.0+ & LGPL-2.1+",
+      "lic_files_chksum": "file://COPYING;md5=a6f89e2100d9b6cdffcea4f398e37343                     file://libkmod/COPYING;md5=a6f89e2100d9b6cdffcea4f398e37343                    ",
+      "srcrev": "58133a96c894c043e48c74ddf0bfe8db90bac62f",
+      "source_packages": [
+        "git2_git.kernel.org.pub.scm.utils.kernel.kmod.kmod.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "ldconfig-native",
+      "pv": "2.12.1",
+      "license": "GPLv2+",
+      "lic_files_chksum": "file:///root/v5-build/petalinux/output/tmp/work/x86_64-linux/ldconfig-native/2.12.1-r2/ldconfig-native-2.12.1/ldconfig.c;endline=17;md5=1d15f20937c055cb5de2329a4c054399",
+      "srcrev": "INVALID",
+      "source_packages": []
+    },
+    {
+      "pn": "less",
+      "pv": "551",
+      "license": "GPLv3+ | BSD-2-Clause",
+      "lic_files_chksum": "file://COPYING;md5=d32239bcb673463ab874e80d47fae504                     file://LICENSE;md5=ba01d0cab7f62f7f2204c7780ff6a87d                     ",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "less-551.tar.gz"
+      ]
+    },
+    {
+      "pn": "libarchive-native",
+      "pv": "3.4.0",
+      "license": "BSD",
+      "lic_files_chksum": "file://COPYING;md5=fe01f5e02b1f0cc934d593a7b0ddceb6",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libarchive-3.4.0.tar.gz"
+      ]
+    },
+    {
+      "pn": "libassuan-native",
+      "pv": "2.5.3",
+      "license": "GPLv3+ & LGPLv2.1+",
+      "lic_files_chksum": "file://COPYING;md5=f27defe1e96c2e1ecd4e0c9be8967949                     file://COPYING.LIB;md5=2d5025d4aa3495befef8f17206a5b0a1                     file://src/assuan.c;endline=20;md5=ab92143a5a2adabd06d7994d1467ea5c                    file://src/assuan-defs.h;endline=20;md5=15d950c83e82978e35b35e790d7e4d39",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libassuan-2.5.3.tar.bz2"
+      ]
+    },
+    {
+      "pn": "libcap",
+      "pv": "2.27",
+      "license": "BSD | GPLv2",
+      "lic_files_chksum": "file://License;md5=3f84fd6f29d453a56514cb7e4ead25f1",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libcap-2.27.tar.xz"
+      ]
+    },
+    {
+      "pn": "libcap-native",
+      "pv": "2.27",
+      "license": "BSD | GPLv2",
+      "lic_files_chksum": "file://License;md5=3f84fd6f29d453a56514cb7e4ead25f1",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libcap-2.27.tar.xz"
+      ]
+    },
+    {
+      "pn": "libcap-ng",
+      "pv": "0.7.9",
+      "license": "GPLv2+ & LGPLv2.1+",
+      "lic_files_chksum": "file://COPYING;md5=94d55d512a9ba36caa9b7df079bae19f \t\t    file://COPYING.LIB;md5=e3eda01d9815f8d24aae2dbd89b68b06",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libcap-ng-0.7.9.tar.gz"
+      ]
+    },
+    {
+      "pn": "libcap-ng-native",
+      "pv": "0.7.9",
+      "license": "GPLv2+ & LGPLv2.1+",
+      "lic_files_chksum": "file://COPYING;md5=94d55d512a9ba36caa9b7df079bae19f \t\t    file://COPYING.LIB;md5=e3eda01d9815f8d24aae2dbd89b68b06",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libcap-ng-0.7.9.tar.gz"
+      ]
+    },
+    {
+      "pn": "libcheck-native",
+      "pv": "0.12.0",
+      "license": "LGPLv2.1+",
+      "lic_files_chksum": "file://COPYING.LESSER;md5=2d5025d4aa3495befef8f17206a5b0a1",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "check-0.12.0.tar.gz"
+      ]
+    },
+    {
+      "pn": "libcomps-native",
+      "pv": "0.1.11",
+      "license": "GPLv2",
+      "lic_files_chksum": "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263",
+      "srcrev": "d868a79b76fb980d1371c28124ae07f00d2b63a9",
+      "source_packages": [
+        "git2_github.com.rpm-software-management.libcomps.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "libcroco",
+      "pv": "0.6.13",
+      "license": "LGPLv2 & LGPLv2.1",
+      "lic_files_chksum": "file://COPYING;md5=55ca817ccb7d5b5b66355690e9abc605                     file://src/cr-rgb.c;endline=22;md5=31d5f0944d556c8589d04ea6055fcc66                     file://tests/cr-test-utils.c;endline=21;md5=2382c27934cae1d3792fcb17a6142c4e",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libcroco-0.6.13.tar.xz"
+      ]
+    },
+    {
+      "pn": "libdnf-native",
+      "pv": "0.28.1",
+      "license": "LGPLv2.1",
+      "lic_files_chksum": "file://COPYING;md5=4fbd65380cdd255951079008b364516c",
+      "srcrev": "751f89045b80d58c0d05800f74357cf78cdf7e77",
+      "source_packages": [
+        "git2_github.com.rpm-software-management.libdnf.tar.gz"
+      ]
+    },
+    {
+      "pn": "libdrm",
+      "pv": "2.4.99",
+      "license": "MIT",
+      "lic_files_chksum": "file://xf86drm.c;beginline=9;endline=32;md5=c8a3b961af7667c530816761e949dc71",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libdrm-2.4.99.tar.bz2"
+      ]
+    },
+    {
+      "pn": "libffi",
+      "pv": "3.3~rc0",
+      "license": "MIT",
+      "lic_files_chksum": "file://LICENSE;md5=3610bb17683a0089ed64055416b2ae1b",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libffi-3.3-rc0.tar.gz"
+      ]
+    },
+    {
+      "pn": "libffi-native",
+      "pv": "3.3~rc0",
+      "license": "MIT",
+      "lic_files_chksum": "file://LICENSE;md5=3610bb17683a0089ed64055416b2ae1b",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libffi-3.3-rc0.tar.gz"
+      ]
+    },
+    {
+      "pn": "libgcc",
+      "pv": "9.2.0",
+      "license": "GPL-3.0-with-GCC-exception & GPLv3",
+      "lic_files_chksum": "    file://COPYING;md5=59530bdf33659b29e73d4adb9f9f6552     file://COPYING3;md5=d32239bcb673463ab874e80d47fae504     file://COPYING3.LIB;md5=6a6a8e020838b23406c81b19c1d46df6     file://COPYING.LIB;md5=2d5025d4aa3495befef8f17206a5b0a1     file://COPYING.RUNTIME;md5=fe60d87048567d4fe8c8a0ed2448bcc8 ",
+      "srcrev": "INVALID",
+      "source_packages": []
+    },
+    {
+      "pn": "libgcc-initial",
+      "pv": "9.2.0",
+      "license": "GPL-3.0-with-GCC-exception",
+      "lic_files_chksum": "    file://COPYING;md5=59530bdf33659b29e73d4adb9f9f6552     file://COPYING3;md5=d32239bcb673463ab874e80d47fae504     file://COPYING3.LIB;md5=6a6a8e020838b23406c81b19c1d46df6     file://COPYING.LIB;md5=2d5025d4aa3495befef8f17206a5b0a1     file://COPYING.RUNTIME;md5=fe60d87048567d4fe8c8a0ed2448bcc8 ",
+      "srcrev": "INVALID",
+      "source_packages": []
+    },
+    {
+      "pn": "libgcrypt",
+      "pv": "1.8.4",
+      "license": "GPLv2+ & LGPLv2.1+ & GPLv3+",
+      "lic_files_chksum": "file://COPYING;md5=94d55d512a9ba36caa9b7df079bae19f                     file://COPYING.LIB;md5=bbb461211a33b134d42ed5ee802b37ff                     file://LICENSES;md5=840e3bcb754e5046ffeda7619034cbd8",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libgcrypt-1.8.4.tar.bz2"
+      ]
+    },
+    {
+      "pn": "libgcrypt-native",
+      "pv": "1.8.4",
+      "license": "GPLv2+ & LGPLv2.1+ & GPLv3+",
+      "lic_files_chksum": "file://COPYING;md5=94d55d512a9ba36caa9b7df079bae19f                     file://COPYING.LIB;md5=bbb461211a33b134d42ed5ee802b37ff                     file://LICENSES;md5=840e3bcb754e5046ffeda7619034cbd8",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libgcrypt-1.8.4.tar.bz2"
+      ]
+    },
+    {
+      "pn": "libgpg-error",
+      "pv": "1.36",
+      "license": "GPLv2+ & LGPLv2.1+",
+      "lic_files_chksum": "file://COPYING;md5=59530bdf33659b29e73d4adb9f9f6552                     file://COPYING.LIB;md5=2d5025d4aa3495befef8f17206a5b0a1                     file://src/gpg-error.h.in;beginline=2;endline=18;md5=cd91e3ad1265a0c268efad541a39345e                     file://src/init.c;beginline=2;endline=17;md5=f01cdfcf747af5380590cfd9bbfeaaf7",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libgpg-error-1.36.tar.bz2"
+      ]
+    },
+    {
+      "pn": "libgpg-error-native",
+      "pv": "1.36",
+      "license": "GPLv2+ & LGPLv2.1+",
+      "lic_files_chksum": "file://COPYING;md5=59530bdf33659b29e73d4adb9f9f6552                     file://COPYING.LIB;md5=2d5025d4aa3495befef8f17206a5b0a1                     file://src/gpg-error.h.in;beginline=2;endline=18;md5=cd91e3ad1265a0c268efad541a39345e                     file://src/init.c;beginline=2;endline=17;md5=f01cdfcf747af5380590cfd9bbfeaaf7",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libgpg-error-1.36.tar.bz2"
+      ]
+    },
+    {
+      "pn": "libical",
+      "pv": "3.0.6",
+      "license": "LGPLv2.1 | MPL-2.0",
+      "lic_files_chksum": "file://LICENSE;md5=1910a2a76ddf6a9ba369182494170d87                     file://LICENSE.LGPL21.txt;md5=933adb561f159e7c3da079536f0ed871                     file://LICENSE.MPL2.txt;md5=9741c346eef56131163e13b9db1241b3",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libical-3.0.6.tar.gz"
+      ]
+    },
+    {
+      "pn": "libice",
+      "pv": "1.0.10",
+      "license": "MIT-style",
+      "lic_files_chksum": "file://COPYING;md5=d162b1b3c6fa812da9d804dcf8584a93",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libICE-1.0.10.tar.bz2"
+      ]
+    },
+    {
+      "pn": "libidn2",
+      "pv": "2.2.0",
+      "license": "(GPLv2+ | LGPLv3) & GPLv3+",
+      "lic_files_chksum": "file://COPYING;md5=2d834ea7d480438ada04e5d846152395                     file://COPYING.LESSERv3;md5=e6a600fd5e1d9cbde2d983680233ad02                     file://COPYINGv2;md5=b234ee4d69f5fce4486a80fdaf4a4263                     file://src/idn2.c;endline=16;md5=426b74d6deb620ab6d39c8a6efd4c13a                     file://lib/idn2.h.in;endline=27;md5=c2cd28d3f87260f157f022eabb83714f",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libidn2-2.2.0.tar.gz"
+      ]
+    },
+    {
+      "pn": "libjitterentropy",
+      "pv": "2.1.2",
+      "license": "GPLv2+ | BSD",
+      "lic_files_chksum": "file://COPYING;md5=e52365752b36cfcd7f9601d80de7d8c6                     file://COPYING.gplv2;md5=eb723b61539feef013de476e68b5c50a                     file://COPYING.bsd;md5=66a5cedaf62c4b2637025f049f9b826f                    ",
+      "srcrev": "f5a80c6f3fcc6deebd0eabf75324f48aed1afbce",
+      "source_packages": [
+        "git2_github.com.smuellerDD.jitterentropy-library.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "libmnl",
+      "pv": "1.0.4",
+      "license": "LGPLv2.1+",
+      "lic_files_chksum": "file://COPYING;md5=4fbd65380cdd255951079008b364516c",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libmnl-1.0.4.tar.bz2"
+      ]
+    },
+    {
+      "pn": "libmodulemd-native",
+      "pv": "2.6.0",
+      "license": "MIT",
+      "lic_files_chksum": "file://COPYING;md5=25a3927bff3ee4f5b21bcb0ed3fcd6bb",
+      "srcrev": "7c7f88258491866cdb86d26cadfce37a78f242ec",
+      "source_packages": [
+        "git2_github.com.fedora-modularity.libmodulemd.tar.gz"
+      ]
+    },
+    {
+      "pn": "libmpc-native",
+      "pv": "1.1.0",
+      "license": "LGPLv3",
+      "lic_files_chksum": "file://COPYING.LESSER;md5=e6a600fd5e1d9cbde2d983680233ad02",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "mpc-1.1.0.tar.gz"
+      ]
+    },
+    {
+      "pn": "libnl",
+      "pv": "3.5.0",
+      "license": "LGPLv2.1",
+      "lic_files_chksum": "file://COPYING;md5=4fbd65380cdd255951079008b364516c",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libnl-3.5.0.tar.gz"
+      ]
+    },
+    {
+      "pn": "libnsl2",
+      "pv": "1.2.0+gitAUTOINC+37c5ffe303",
+      "license": "LGPL-2.1",
+      "lic_files_chksum": "file://COPYING;md5=4fbd65380cdd255951079008b364516c",
+      "srcrev": "37c5ffe3038d42e9fa9ed232ad2cbca4d8f14681",
+      "source_packages": [
+        "git2_github.com.thkukuk.libnsl.tar.gz"
+      ]
+    },
+    {
+      "pn": "libnsl2-native",
+      "pv": "1.2.0+gitAUTOINC+37c5ffe303",
+      "license": "LGPL-2.1",
+      "lic_files_chksum": "file://COPYING;md5=4fbd65380cdd255951079008b364516c",
+      "srcrev": "37c5ffe3038d42e9fa9ed232ad2cbca4d8f14681",
+      "source_packages": [
+        "git2_github.com.thkukuk.libnsl.tar.gz"
+      ]
+    },
+    {
+      "pn": "libpam",
+      "pv": "1.3.1",
+      "license": "GPLv2+ | BSD",
+      "lic_files_chksum": "file://COPYING;md5=7eb5c1bf854e8881005d673599ee74d3                     file://libpamc/License;md5=a4da476a14c093fdc73be3c3c9ba8fb3                     ",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "Linux-PAM-1.3.1.tar.xz"
+      ]
+    },
+    {
+      "pn": "libpcap",
+      "pv": "1.9.1",
+      "license": "BSD",
+      "lic_files_chksum": "file://LICENSE;md5=5eb289217c160e2920d2e35bddc36453                     file://pcap.h;beginline=1;endline=32;md5=39af3510e011f34b8872f120b1dc31d2",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libpcap-1.9.1.tar.gz"
+      ]
+    },
+    {
+      "pn": "libpciaccess",
+      "pv": "0.16",
+      "license": "MIT & MIT-style",
+      "lic_files_chksum": "file://COPYING;md5=277aada5222b9a22fbf3471ff3687068",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libpciaccess-0.16.tar.bz2"
+      ]
+    },
+    {
+      "pn": "libpcre",
+      "pv": "8.43",
+      "license": "BSD",
+      "lic_files_chksum": "file://LICENCE;md5=91bee59d1b327eb1599b4c673e2fb3d1",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "pcre-8.43.tar.bz2"
+      ]
+    },
+    {
+      "pn": "libpcre-native",
+      "pv": "8.43",
+      "license": "BSD",
+      "lic_files_chksum": "file://LICENCE;md5=91bee59d1b327eb1599b4c673e2fb3d1",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "pcre-8.43.tar.bz2"
+      ]
+    },
+    {
+      "pn": "libpng",
+      "pv": "1.6.37",
+      "license": "Libpng",
+      "lic_files_chksum": "file://LICENSE;md5=b0085051bf265bac2bfc38bc89f50000",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libpng-1.6.37.tar.xz"
+      ]
+    },
+    {
+      "pn": "libpng-native",
+      "pv": "1.6.37",
+      "license": "Libpng",
+      "lic_files_chksum": "file://LICENSE;md5=b0085051bf265bac2bfc38bc89f50000",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libpng-1.6.37.tar.xz"
+      ]
+    },
+    {
+      "pn": "libpthread-stubs",
+      "pv": "0.4",
+      "license": "MIT",
+      "lic_files_chksum": "file://COPYING;md5=6edc1fea03d959f0c2d743fe5ca746ad",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libpthread-stubs-0.4.tar.bz2"
+      ]
+    },
+    {
+      "pn": "librepo-native",
+      "pv": "1.10.5",
+      "license": "LGPLv2.1",
+      "lic_files_chksum": "file://COPYING;md5=4fbd65380cdd255951079008b364516c",
+      "srcrev": "385e2ced1083cac0bcb19e30500311f6923e6dfc",
+      "source_packages": [
+        "git2_github.com.rpm-software-management.librepo.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "libsm",
+      "pv": "1.2.3",
+      "license": "MIT-style",
+      "lic_files_chksum": "file://COPYING;md5=c0fb37f44e02bdbde80546024400728d",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libSM-1.2.3.tar.bz2"
+      ]
+    },
+    {
+      "pn": "libsocketcan",
+      "pv": "0.0.11",
+      "license": "LGPLv2.1",
+      "lic_files_chksum": "file://src/libsocketcan.c;beginline=3;endline=17;md5=97e38adced4385d8fba1ae2437cedee1",
+      "srcrev": "0ff01ae7e4d271a7b81241e7a7026bfcea0add3f",
+      "source_packages": [
+        "git2_git.pengutronix.de.git.tools.libsocketcan.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "libsolv-native",
+      "pv": "0.7.6",
+      "license": "BSD-3-Clause",
+      "lic_files_chksum": "file://LICENSE.BSD;md5=62272bd11c97396d4aaf1c41bc11f7d8",
+      "srcrev": "17ce4bc4fb52a0b32964f3b7d491c18177980be1",
+      "source_packages": [
+        "git2_github.com.openSUSE.libsolv.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "libtirpc",
+      "pv": "1.1.4",
+      "license": "BSD",
+      "lic_files_chksum": "file://COPYING;md5=f835cce8852481e4b2bbbdd23b5e47f3                     file://src/netname.c;beginline=1;endline=27;md5=f8a8cd2cb25ac5aa16767364fb0e3c24",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libtirpc-1.1.4.tar.bz2"
+      ]
+    },
+    {
+      "pn": "libtirpc-native",
+      "pv": "1.1.4",
+      "license": "BSD",
+      "lic_files_chksum": "file://COPYING;md5=f835cce8852481e4b2bbbdd23b5e47f3                     file://src/netname.c;beginline=1;endline=27;md5=f8a8cd2cb25ac5aa16767364fb0e3c24",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libtirpc-1.1.4.tar.bz2"
+      ]
+    },
+    {
+      "pn": "libtool",
+      "pv": "2.4.6",
+      "license": "GPLv2 & LGPLv2.1",
+      "lic_files_chksum": "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263     file://libltdl/COPYING.LIB;md5=4fbd65380cdd255951079008b364516c ",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libtool-2.4.6.tar.gz"
+      ]
+    },
+    {
+      "pn": "libtool-cross",
+      "pv": "2.4.6",
+      "license": "GPLv2 & LGPLv2.1",
+      "lic_files_chksum": "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263     file://libltdl/COPYING.LIB;md5=4fbd65380cdd255951079008b364516c ",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libtool-2.4.6.tar.gz"
+      ]
+    },
+    {
+      "pn": "libtool-native",
+      "pv": "2.4.6",
+      "license": "GPLv2 & LGPLv2.1",
+      "lic_files_chksum": "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263     file://libltdl/COPYING.LIB;md5=4fbd65380cdd255951079008b364516c ",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libtool-2.4.6.tar.gz"
+      ]
+    },
+    {
+      "pn": "libunistring",
+      "pv": "0.9.10",
+      "license": "LGPLv3+ | GPLv2",
+      "lic_files_chksum": "file://COPYING.LIB;md5=6a6a8e020838b23406c81b19c1d46df6                     file://README;beginline=45;endline=65;md5=08287d16ba8d839faed8d2dc14d7d6a5                     file://doc/libunistring.texi;md5=287fa6075f78a3c85c1a52b0a92547cd                    ",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libunistring-0.9.10.tar.gz"
+      ]
+    },
+    {
+      "pn": "libx11",
+      "pv": "1.6.8",
+      "license": "MIT & MIT-style & BSD",
+      "lic_files_chksum": "file://COPYING;md5=172255dee66bb0151435b2d5d709fcf7",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libX11-1.6.8.tar.bz2"
+      ]
+    },
+    {
+      "pn": "libxau",
+      "pv": "1.0.9",
+      "license": "MIT-style",
+      "lic_files_chksum": "file://COPYING;md5=7908e342491198401321cec1956807ec",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libXau-1.0.9.tar.bz2"
+      ]
+    },
+    {
+      "pn": "libxcb",
+      "pv": "1.13.1",
+      "license": "MIT",
+      "lic_files_chksum": "file://COPYING;md5=d763b081cb10c223435b01e00dc0aba7",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libxcb-1.13.1.tar.bz2"
+      ]
+    },
+    {
+      "pn": "libxcrypt",
+      "pv": "4.4.8",
+      "license": "LGPLv2.1",
+      "lic_files_chksum": "file://LICENSING;md5=3bb6614cf5880cbf1b9dbd9e3d145e2c                      file://COPYING.LIB;md5=4fbd65380cdd255951079008b364516c ",
+      "srcrev": "acd84997a5a8b2badd28b70a642abee11272fad2",
+      "source_packages": [
+        "git2_github.com.besser82.libxcrypt.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "libxdamage",
+      "pv": "1.1.5",
+      "license": "MIT",
+      "lic_files_chksum": "file://COPYING;md5=9fe101f30dd24134cf43146863241868",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libXdamage-1.1.5.tar.bz2"
+      ]
+    },
+    {
+      "pn": "libxdmcp",
+      "pv": "1.1.3",
+      "license": "MIT-style",
+      "lic_files_chksum": "file://COPYING;md5=d559fb26e129626022e052a5e6e0e123",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libXdmcp-1.1.3.tar.bz2"
+      ]
+    },
+    {
+      "pn": "libxext",
+      "pv": "1.3.4",
+      "license": "MIT-style",
+      "lic_files_chksum": "file://COPYING;md5=879ce266785414bd1cbc3bc2f4d9d7c8",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libXext-1.3.4.tar.bz2"
+      ]
+    },
+    {
+      "pn": "libxfixes",
+      "pv": "5.0.3",
+      "license": "MIT-style",
+      "lic_files_chksum": "file://COPYING;md5=3c1ce42c334a6f5cccb0277556a053e0",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libXfixes-5.0.3.tar.bz2"
+      ]
+    },
+    {
+      "pn": "libxml-parser-perl-native",
+      "pv": "2.44",
+      "license": "Artistic-1.0 | GPL-1.0+",
+      "lic_files_chksum": "file://README;beginline=2;endline=6;md5=c8767d7516229f07b26e42d1cf8b51f1",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "XML-Parser-2.44.tar.gz"
+      ]
+    },
+    {
+      "pn": "libxml2",
+      "pv": "2.9.9",
+      "license": "MIT",
+      "lic_files_chksum": "file://Copyright;md5=2044417e2e5006b65a8b9067b683fcf1                     file://hash.c;beginline=6;endline=15;md5=96f7296605eae807670fb08947829969                     file://list.c;beginline=4;endline=13;md5=cdbfa3dee51c099edb04e39f762ee907                     file://trio.c;beginline=5;endline=14;md5=6c025753c86d958722ec76e94cae932e",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libxml2-2.9.9.tar.gz",
+        "xmlts20080827.tar.gz"
+      ]
+    },
+    {
+      "pn": "libxml2-native",
+      "pv": "2.9.9",
+      "license": "MIT",
+      "lic_files_chksum": "file://Copyright;md5=2044417e2e5006b65a8b9067b683fcf1                     file://hash.c;beginline=6;endline=15;md5=96f7296605eae807670fb08947829969                     file://list.c;beginline=4;endline=13;md5=cdbfa3dee51c099edb04e39f762ee907                     file://trio.c;beginline=5;endline=14;md5=6c025753c86d958722ec76e94cae932e",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libxml2-2.9.9.tar.gz",
+        "xmlts20080827.tar.gz"
+      ]
+    },
+    {
+      "pn": "libxrandr",
+      "pv": "1.5.2",
+      "license": "MIT-style",
+      "lic_files_chksum": "file://COPYING;md5=c9d1a2118a6cd5727521db8e7a2fee69",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libXrandr-1.5.2.tar.bz2"
+      ]
+    },
+    {
+      "pn": "libxrender",
+      "pv": "0.9.10",
+      "license": "MIT-style",
+      "lic_files_chksum": "file://COPYING;md5=d8bc71986d3b9b3639f6dfd6fac8f196",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libXrender-0.9.10.tar.bz2"
+      ]
+    },
+    {
+      "pn": "libxshmfence",
+      "pv": "1.3",
+      "license": "MIT-style",
+      "lic_files_chksum": "file://COPYING;md5=47e508ca280fde97906eacb77892c3ac",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libxshmfence-1.3.tar.bz2"
+      ]
+    },
+    {
+      "pn": "libxslt-native",
+      "pv": "1.1.33",
+      "license": "MIT",
+      "lic_files_chksum": "file://Copyright;md5=0cd9a07afbeb24026c9b03aecfeba458",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libxslt-1.1.33.tar.gz"
+      ]
+    },
+    {
+      "pn": "libxxf86vm",
+      "pv": "1.1.4",
+      "license": "MIT",
+      "lic_files_chksum": "file://COPYING;md5=fa0b9c462d8f2f13eba26492d42ea63d",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "libXxf86vm-1.1.4.tar.bz2"
+      ]
+    },
+    {
+      "pn": "libyaml-native",
+      "pv": "0.2.2",
+      "license": "MIT",
+      "lic_files_chksum": "file://LICENSE;md5=a76b4c69bfcf82313bbdc0393b04438a",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "yaml-0.2.2.tar.gz"
+      ]
+    },
+    {
+      "pn": "linux-libc-headers",
+      "pv": "5.2",
+      "license": "GPLv2",
+      "lic_files_chksum": "file://COPYING;md5=bbea815ee2795b2f4230826c0c6b8814",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "linux-5.2.tar.xz"
+      ]
+    },
+    {
+      "pn": "linux-xlnx",
+      "pv": "5.4+v5",
+      "license": "GPLv2",
+      "lic_files_chksum": "file://COPYING;md5=bbea815ee2795b2f4230826c0c6b8814",
+      "srcrev": "62ea514294a0c9a80455e51f1f4de36e66e8c546",
+      "source_packages": []
+    },
+    {
+      "pn": "linuxcnc-ethercat",
+      "pv": "1.0+gitAUTOINC+de7e377f76",
+      "license": "GPLv2",
+      "lic_files_chksum": "file://LICENSE;md5=8264535c0c4e9c6c335635c4026a8022",
+      "srcrev": "de7e377f76873fa99e8ea5dcafd7df916e118024",
+      "source_packages": [
+        "git2_github.com.linuxcnc-ethercat.linuxcnc-ethercat.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "linuxcnc-prebuilt",
+      "pv": "2.9.7+v5",
+      "license": "GPLv2",
+      "lic_files_chksum": "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263",
+      "srcrev": "INVALID",
+      "source_packages": []
+    },
+    {
+      "pn": "lsof",
+      "pv": "4.91",
+      "license": "BSD",
+      "lic_files_chksum": "file://00README;beginline=645;endline=679;md5=964df275d26429ba3b39dbb9f205172a",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "lsof_4.91.tar.bz2"
+      ]
+    },
+    {
+      "pn": "lzo",
+      "pv": "2.10",
+      "license": "GPLv2+",
+      "lic_files_chksum": "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263                     file://src/lzo_init.c;beginline=5;endline=25;md5=9ae697ca01829b0a383c5d2d163e0108",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "lzo-2.10.tar.gz"
+      ]
+    },
+    {
+      "pn": "lzo-native",
+      "pv": "2.10",
+      "license": "GPLv2+",
+      "lic_files_chksum": "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263                     file://src/lzo_init.c;beginline=5;endline=25;md5=9ae697ca01829b0a383c5d2d163e0108",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "lzo-2.10.tar.gz"
+      ]
+    },
+    {
+      "pn": "lzop-native",
+      "pv": "1.04",
+      "license": "GPLv2+",
+      "lic_files_chksum": "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263                     file://src/lzop.c;beginline=5;endline=21;md5=23d767de7754eb24b9e900b025cf7fc8",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "lzop-1.04.tar.gz"
+      ]
+    },
+    {
+      "pn": "m4",
+      "pv": "1.4.18",
+      "license": "GPLv3",
+      "lic_files_chksum": "file://COPYING;md5=d32239bcb673463ab874e80d47fae504\t            file://examples/COPYING;md5=4031593b2166d6c47cae282d944a7ede",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "m4-1.4.18.tar.gz"
+      ]
+    },
+    {
+      "pn": "m4-native",
+      "pv": "1.4.18",
+      "license": "GPLv3",
+      "lic_files_chksum": "file://COPYING;md5=d32239bcb673463ab874e80d47fae504\t            file://examples/COPYING;md5=4031593b2166d6c47cae282d944a7ede",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "m4-1.4.18.tar.gz"
+      ]
+    },
+    {
+      "pn": "make",
+      "pv": "4.2.1",
+      "license": "GPLv3 & LGPLv2",
+      "lic_files_chksum": "file://COPYING;md5=d32239bcb673463ab874e80d47fae504                     file://tests/COPYING;md5=d32239bcb673463ab874e80d47fae504                     file://glob/COPYING.LIB;md5=4a770b67e6be0f60da244beb2de0fce4",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "make-4.2.1.tar.bz2"
+      ]
+    },
+    {
+      "pn": "make-mod-scripts",
+      "pv": "1.0",
+      "license": "GPLv2",
+      "lic_files_chksum": "file:///root/v5-build/petalinux/overlay/merged/components/yocto/layers/core/meta/files/common-licenses/GPL-2.0;md5=801f80980d171dd6425610833a22dbe6",
+      "srcrev": "INVALID",
+      "source_packages": []
+    },
+    {
+      "pn": "make-native",
+      "pv": "4.2.1",
+      "license": "GPLv3 & LGPLv2",
+      "lic_files_chksum": "file://COPYING;md5=d32239bcb673463ab874e80d47fae504                     file://tests/COPYING;md5=d32239bcb673463ab874e80d47fae504                     file://glob/COPYING.LIB;md5=4a770b67e6be0f60da244beb2de0fce4",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "make-4.2.1.tar.bz2"
+      ]
+    },
+    {
+      "pn": "makedepend-native",
+      "pv": "1.0.6",
+      "license": "MIT-X",
+      "lic_files_chksum": "file://COPYING;md5=43a6eda34b48ee821b3b66f4f753ce4f",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "makedepend-1.0.6.tar.gz"
+      ]
+    },
+    {
+      "pn": "makedevs-native",
+      "pv": "1.0.1",
+      "license": "GPLv2",
+      "lic_files_chksum": "file://COPYING;md5=393a5ca445f6965873eca0259a17f833",
+      "srcrev": "INVALID",
+      "source_packages": []
+    },
+    {
+      "pn": "mdadm",
+      "pv": "4.1",
+      "license": "GPLv2 & GPLv2+",
+      "lic_files_chksum": "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263                     file://mdmon.c;beginline=4;endline=18;md5=af7d8444d9c4d3e5c7caac0d9d34039d                     file://mdadm.h;beglinlne=4;endline=22;md5=462bc9936ac0d3da110191a3f9994161",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "mdadm-4.1.tar.xz"
+      ]
+    },
+    {
+      "pn": "mesa",
+      "pv": "19.1.6",
+      "license": "MIT",
+      "lic_files_chksum": "file://docs/license.html;md5=725f991a1cc322aa7a0cd3a2016621c4",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "mesa-19.1.6.tar.xz"
+      ]
+    },
+    {
+      "pn": "meson-native",
+      "pv": "0.51.2",
+      "license": "Apache-2.0",
+      "lic_files_chksum": "file://COPYING;md5=3b83ef96387f14655fc854ddc3c6bd57",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "meson-0.51.2.tar.gz"
+      ]
+    },
+    {
+      "pn": "mklibs-native",
+      "pv": "0.1.44",
+      "license": "GPLv2+",
+      "lic_files_chksum": "file://debian/copyright;md5=98d31037b13d896e33890738ef01af64",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "mklibs_0.1.44.tar.xz"
+      ]
+    },
+    {
+      "pn": "modutils-initscripts",
+      "pv": "1.0",
+      "license": "PD",
+      "lic_files_chksum": "file://LICENSE;md5=7bf87fc37976e93ec66ad84fac58c098",
+      "srcrev": "INVALID",
+      "source_packages": []
+    },
+    {
+      "pn": "mpfr-native",
+      "pv": "4.0.2",
+      "license": "LGPLv3+",
+      "lic_files_chksum": "file://COPYING;md5=1ebbd3e34237af26da5dc08a4e440464                     file://COPYING.LESSER;md5=3000208d539ec061b899bce1d9ce9404                     ",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "mpfr-4.0.2.tar.xz"
+      ]
+    },
+    {
+      "pn": "mtd-utils",
+      "pv": "2.1.1",
+      "license": "GPLv2+",
+      "lic_files_chksum": "file://COPYING;md5=0636e73ff0215e8d672dc4c32c317bb3                     file://include/common.h;beginline=1;endline=17;md5=ba05b07912a44ea2bf81ce409380049c",
+      "srcrev": "4443221ce9b88440cd9f5bb78e6fe95621d36c8a",
+      "source_packages": [
+        "git2_git.infradead.org.mtd-utils.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "ncurses",
+      "pv": "6.1+20190803",
+      "license": "MIT",
+      "lic_files_chksum": "file://ncurses/base/version.c;beginline=1;endline=27;md5=cbc180a8c44ca642e97c35452fab5f66",
+      "srcrev": "3c9b2677c96c645496997321bf2fe465a5e7e21f",
+      "source_packages": [
+        "git2_salsa.debian.org.debian.ncurses.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "ncurses-native",
+      "pv": "6.1+20190803",
+      "license": "MIT",
+      "lic_files_chksum": "file://ncurses/base/version.c;beginline=1;endline=27;md5=cbc180a8c44ca642e97c35452fab5f66",
+      "srcrev": "3c9b2677c96c645496997321bf2fe465a5e7e21f",
+      "source_packages": [
+        "git2_salsa.debian.org.debian.ncurses.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "netbase",
+      "pv": "5.6",
+      "license": "GPLv2",
+      "lic_files_chksum": "file://debian/copyright;md5=3dd6192d306f582dee7687da3d8748ab",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "netbase_5.6.tar.xz"
+      ]
+    },
+    {
+      "pn": "nettle",
+      "pv": "3.5.1",
+      "license": "LGPLv3+ | GPLv2+",
+      "lic_files_chksum": "file://COPYING.LESSERv3;md5=6a6a8e020838b23406c81b19c1d46df6                     file://COPYINGv2;md5=b234ee4d69f5fce4486a80fdaf4a4263                     file://serpent-decrypt.c;beginline=14;endline=36;md5=ca0d220bc413e1842ecc507690ce416e                     file://serpent-set-key.c;beginline=14;endline=36;md5=ca0d220bc413e1842ecc507690ce416e",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "nettle-3.5.1.tar.gz"
+      ]
+    },
+    {
+      "pn": "ninja-native",
+      "pv": "1.9.0",
+      "license": "Apache-2.0",
+      "lic_files_chksum": "file://COPYING;md5=a81586a64ad4e476c791cda7e2f2c52e",
+      "srcrev": "b25c08bda4949192c69cea4cee057887341a2ffc",
+      "source_packages": [
+        "git2_github.com.ninja-build.ninja.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "nspr-native",
+      "pv": "4.21",
+      "license": "GPL-2.0 | MPL-2.0 | LGPL-2.1",
+      "lic_files_chksum": "file://configure.in;beginline=3;endline=6;md5=90c2fdee38e45d6302abcfe475c8b5c5                     file://Makefile.in;beginline=4;endline=38;md5=beda1dbb98a515f557d3e58ef06bca99",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "nspr-4.21.tar.gz"
+      ]
+    },
+    {
+      "pn": "nss-native",
+      "pv": "3.45",
+      "license": "MPL-2.0 | (MPL-2.0 & GPL-2.0+) | (MPL-2.0 & LGPL-2.1+)",
+      "lic_files_chksum": "file://nss/COPYING;md5=3b1e88e1b9c0b5a4b2881d46cce06a18                     file://nss/lib/freebl/mpi/doc/LICENSE;md5=491f158d09d948466afce85d6f1fe18f                     file://nss/lib/freebl/mpi/doc/LICENSE-MPL;md5=5d425c8f3157dbf212db2ec53d9e5132",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "nss-3.45.tar.gz"
+      ]
+    },
+    {
+      "pn": "openssh",
+      "pv": "8.0p1",
+      "license": "BSD & ISC & MIT",
+      "lic_files_chksum": "file://LICENCE;md5=429658c6612f3a9b1293782366ab29d8",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "openssh-8.0p1.tar.gz"
+      ]
+    },
+    {
+      "pn": "openssl",
+      "pv": "1.1.1d",
+      "license": "openssl",
+      "lic_files_chksum": "file://LICENSE;md5=d343e62fc9c833710bbbed25f27364c8",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "openssl-1.1.1d.tar.gz"
+      ]
+    },
+    {
+      "pn": "openssl-native",
+      "pv": "1.1.1d",
+      "license": "openssl",
+      "lic_files_chksum": "file://LICENSE;md5=d343e62fc9c833710bbbed25f27364c8",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "openssl-1.1.1d.tar.gz"
+      ]
+    },
+    {
+      "pn": "opkg-native",
+      "pv": "0.4.1",
+      "license": "GPLv2+",
+      "lic_files_chksum": "file://COPYING;md5=94d55d512a9ba36caa9b7df079bae19f                     file://src/opkg.c;beginline=4;endline=18;md5=9f5a1ad5395378a807d6d591e2f92d25",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "opkg-0.4.1.tar.gz"
+      ]
+    },
+    {
+      "pn": "opkg-utils",
+      "pv": "0.4.1",
+      "license": "GPLv2+",
+      "lic_files_chksum": "file://COPYING;md5=94d55d512a9ba36caa9b7df079bae19f                     file://opkg.py;beginline=2;endline=18;md5=63ce9e6bcc445181cd9e4baf4b4ccc35",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "opkg-utils-0.4.1.tar.gz"
+      ]
+    },
+    {
+      "pn": "opkg-utils-native",
+      "pv": "0.4.1",
+      "license": "GPLv2+",
+      "lic_files_chksum": "file://COPYING;md5=94d55d512a9ba36caa9b7df079bae19f                     file://opkg.py;beginline=2;endline=18;md5=63ce9e6bcc445181cd9e4baf4b4ccc35",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "opkg-utils-0.4.1.tar.gz"
+      ]
+    },
+    {
+      "pn": "packagegroup-core-boot",
+      "pv": "1.0",
+      "license": "MIT",
+      "lic_files_chksum": "",
+      "srcrev": "INVALID",
+      "source_packages": []
+    },
+    {
+      "pn": "packagegroup-core-ssh-dropbear",
+      "pv": "1.0",
+      "license": "MIT",
+      "lic_files_chksum": "",
+      "srcrev": "INVALID",
+      "source_packages": []
+    },
+    {
+      "pn": "pciutils",
+      "pv": "3.6.2",
+      "license": "GPLv2+",
+      "lic_files_chksum": "file://COPYING;md5=751419260aa954499f7abaabaa882bbe",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "pciutils-3.6.2.tar.xz"
+      ]
+    },
+    {
+      "pn": "perl",
+      "pv": "5.30.0",
+      "license": "Artistic-1.0 | GPL-1.0+",
+      "lic_files_chksum": "file://Copying;md5=5b122a36d0f6dc55279a0ebc69f3c60b                     file://Artistic;md5=71a4d5d9acc18c0952a6df2218bb68da                     ",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "perl-5.30.0.tar.gz",
+        "perl-cross-1.3.tar.gz"
+      ]
+    },
+    {
+      "pn": "perl-native",
+      "pv": "5.30.0",
+      "license": "Artistic-1.0 | GPL-1.0+",
+      "lic_files_chksum": "file://Copying;md5=5b122a36d0f6dc55279a0ebc69f3c60b                     file://Artistic;md5=71a4d5d9acc18c0952a6df2218bb68da                     ",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "perl-5.30.0.tar.gz",
+        "perl-cross-1.3.tar.gz"
+      ]
+    },
+    {
+      "pn": "petalinux-image-minimal",
+      "pv": "1.0",
+      "license": "MIT",
+      "lic_files_chksum": "",
+      "srcrev": "INVALID",
+      "source_packages": []
+    },
+    {
+      "pn": "pigz-native",
+      "pv": "2.4",
+      "license": "Zlib & Apache-2.0",
+      "lic_files_chksum": "file://pigz.c;md5=9ae6dee8ceba9610596ed0ada493d142;beginline=7;endline=21",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "pigz-2.4.tar.gz"
+      ]
+    },
+    {
+      "pn": "pixman",
+      "pv": "0.38.4",
+      "license": "MIT & MIT-style & PD",
+      "lic_files_chksum": "file://COPYING;md5=14096c769ae0cbb5fcb94ec468be11b3                     file://pixman/pixman-matrix.c;endline=21;md5=4a018dff3e4e25302724c88ff95c2456                     file://pixman/pixman-arm-neon-asm.h;endline=24;md5=9a9cc1e51abbf1da58f4d9528ec9d49b                    ",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "pixman-0.38.4.tar.bz2"
+      ]
+    },
+    {
+      "pn": "pixman-native",
+      "pv": "0.38.4",
+      "license": "MIT & MIT-style & PD",
+      "lic_files_chksum": "file://COPYING;md5=14096c769ae0cbb5fcb94ec468be11b3                     file://pixman/pixman-matrix.c;endline=21;md5=4a018dff3e4e25302724c88ff95c2456                     file://pixman/pixman-arm-neon-asm.h;endline=24;md5=9a9cc1e51abbf1da58f4d9528ec9d49b                    ",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "pixman-0.38.4.tar.bz2"
+      ]
+    },
+    {
+      "pn": "pkgconfig-native",
+      "pv": "0.29.2+gitAUTOINC+edf8e6f0ea",
+      "license": "GPLv2+",
+      "lic_files_chksum": "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263",
+      "srcrev": "edf8e6f0ea77ede073f07bff0d2ae1fc7a38103b",
+      "source_packages": [
+        "git2_anongit.freedesktop.org.pkg-config.tar.gz"
+      ]
+    },
+    {
+      "pn": "popt",
+      "pv": "1.16",
+      "license": "MIT",
+      "lic_files_chksum": "file://COPYING;md5=cb0613c30af2a8249b8dcc67d3edb06d",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "popt-1.16.tar.gz"
+      ]
+    },
+    {
+      "pn": "popt-native",
+      "pv": "1.16",
+      "license": "MIT",
+      "lic_files_chksum": "file://COPYING;md5=cb0613c30af2a8249b8dcc67d3edb06d",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "popt-1.16.tar.gz"
+      ]
+    },
+    {
+      "pn": "prelink-native",
+      "pv": "1.0+gitAUTOINC+a853a5d715",
+      "license": "GPLv2",
+      "lic_files_chksum": "file://COPYING;md5=c93c0550bd3173f4504b2cbd8991e50b",
+      "srcrev": "a853a5d715d84eec93aa68e8f2df26b7d860f5b2",
+      "source_packages": [
+        "git2_git.yoctoproject.org.prelink-cross.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "procps",
+      "pv": "3.3.15",
+      "license": "GPLv2+ & LGPLv2+",
+      "lic_files_chksum": "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263                     file://COPYING.LIB;md5=4cf66a4984120007c9881cc871cf49db                     ",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "procps-ng-3.3.15.tar.xz"
+      ]
+    },
+    {
+      "pn": "pseudo-native",
+      "pv": "1.9.0+gitAUTOINC+060058bb29",
+      "license": "LGPL2.1",
+      "lic_files_chksum": "file://COPYING;md5=a1d8023a6f953ac6ea4af765ff62d574",
+      "srcrev": "060058bb29f70b244e685b3c704eb0641b736f73",
+      "source_packages": [
+        "git2_git.yoctoproject.org.pseudo.tar.gz"
+      ]
+    },
+    {
+      "pn": "ptest-runner",
+      "pv": "2.3.2+gitAUTOINC+7015e9199c",
+      "license": "GPLv2",
+      "lic_files_chksum": "file://LICENSE;md5=751419260aa954499f7abaabaa882bbe",
+      "srcrev": "7015e9199ce748c0717addeebe7a8c47448bab03",
+      "source_packages": [
+        "git2_git.yoctoproject.org.ptest-runner2.tar.gz"
+      ]
+    },
+    {
+      "pn": "python-native",
+      "pv": "2.7.17",
+      "license": "PSFv2",
+      "lic_files_chksum": "file://LICENSE;md5=e466242989bd33c1bd2b6a526a742498",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "Python-2.7.17.tar.xz"
+      ]
+    },
+    {
+      "pn": "python3",
+      "pv": "3.7.6",
+      "license": "PSFv2",
+      "lic_files_chksum": "file://LICENSE;md5=e466242989bd33c1bd2b6a526a742498",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "Python-3.7.6.tar.xz"
+      ]
+    },
+    {
+      "pn": "python3-cython-native",
+      "pv": "0.29.13",
+      "license": "Apache-2.0",
+      "lic_files_chksum": "file://LICENSE.txt;md5=e23fadd6ceef8c618fc1c65191d846fa",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "Cython-0.29.13.tar.gz"
+      ]
+    },
+    {
+      "pn": "python3-dbus",
+      "pv": "1.2.12",
+      "license": "MIT",
+      "lic_files_chksum": "file://COPYING;md5=b03240518994df6d8c974675675e5ca4",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "dbus-python-1.2.12.tar.gz"
+      ]
+    },
+    {
+      "pn": "python3-dtc-native",
+      "pv": "1.5.1",
+      "license": "GPLv2 | BSD",
+      "lic_files_chksum": "file://libfdt.i;beginline=1;endline=6;md5=afda088c974174a29108c8d80b5dce90",
+      "srcrev": "60e0db3d65a1218b0d5a29474e769f28a18e3ca6",
+      "source_packages": [
+        "git2_git.kernel.org.pub.scm.utils.dtc.dtc.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "python3-iniparse-native",
+      "pv": "0.4",
+      "license": "MIT & PSF",
+      "lic_files_chksum": "file://LICENSE-PSF;md5=1c78a5bb3584b353496d5f6f34edb4b2                     file://LICENSE;md5=52f28065af11d69382693b45b5a8eb54",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "iniparse-0.4.tar.gz"
+      ]
+    },
+    {
+      "pn": "python3-mako-native",
+      "pv": "1.1.0",
+      "license": "MIT",
+      "lic_files_chksum": "file://LICENSE;md5=df7e6c7c82990acf0228a55e00d29bc9",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "Mako-1.1.0.tar.gz"
+      ]
+    },
+    {
+      "pn": "python3-native",
+      "pv": "3.7.6",
+      "license": "PSFv2",
+      "lic_files_chksum": "file://LICENSE;md5=e466242989bd33c1bd2b6a526a742498",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "Python-3.7.6.tar.xz"
+      ]
+    },
+    {
+      "pn": "python3-pycairo",
+      "pv": "1.18.1",
+      "license": "LGPLv2.1 & MPLv1.1",
+      "lic_files_chksum": "file://COPYING;md5=f2e071ab72978431b294a0d696327421                     file://COPYING-LGPL-2.1;md5=fad9b3332be894bab9bc501572864b29                     file://COPYING-MPL-1.1;md5=bfe1f75d606912a4111c90743d6c7325",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "pycairo-1.18.1.tar.gz"
+      ]
+    },
+    {
+      "pn": "python3-pygobject",
+      "pv": "3.34.0",
+      "license": "LGPLv2.1",
+      "lic_files_chksum": "file://COPYING;md5=a916467b91076e631dd8edb7424769c7",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "pygobject-3.34.0.tar.xz"
+      ]
+    },
+    {
+      "pn": "python3-pyyaml-native",
+      "pv": "5.1.2",
+      "license": "MIT",
+      "lic_files_chksum": "file://LICENSE;md5=a76b4c69bfcf82313bbdc0393b04438a",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "PyYAML-5.1.2.tar.gz"
+      ]
+    },
+    {
+      "pn": "python3-setuptools-native",
+      "pv": "41.2.0",
+      "license": "MIT",
+      "lic_files_chksum": "file://LICENSE;beginline=1;endline=19;md5=9a33897f1bca1160d7aad3835152e158",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "setuptools-41.2.0.zip"
+      ]
+    },
+    {
+      "pn": "python3-six-native",
+      "pv": "1.12.0",
+      "license": "MIT",
+      "lic_files_chksum": "file://LICENSE;md5=83e0f622bd5ac7d575dbd83d094d69b5",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "six-1.12.0.tar.gz"
+      ]
+    },
+    {
+      "pn": "python3-yapps2-native",
+      "pv": "2.2.0",
+      "license": "MIT",
+      "lic_files_chksum": "file://yapps/runtime.py;beginline=1;endline=9;md5=f068b2dde144f37b98f4b91e9173b504",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "Yapps2-2.2.0.tar.gz"
+      ]
+    },
+    {
+      "pn": "qemu-xilinx-helper-native",
+      "pv": "1.0",
+      "license": "GPLv2",
+      "lic_files_chksum": "file:///root/v5-build/petalinux/output/tmp/work/x86_64-linux/qemu-xilinx-helper-native/1.0-r1/tunctl.c;endline=4;md5=ff3a09996bc5fff6bc5d4e0b4c28f999",
+      "srcrev": "INVALID",
+      "source_packages": []
+    },
+    {
+      "pn": "qemu-xilinx-multiarch-helper-native",
+      "pv": "1.0",
+      "license": "MIT",
+      "lic_files_chksum": "file:///root/v5-build/petalinux/overlay/merged/components/yocto/layers/core/meta/files/common-licenses/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302",
+      "srcrev": "INVALID",
+      "source_packages": []
+    },
+    {
+      "pn": "qemu-xilinx-native",
+      "pv": "v5.1.0-xilinx-v2020.2+gitAUTOINC+7e3e3ae09a",
+      "license": "GPLv2 & LGPLv2.1",
+      "lic_files_chksum": " \t\tfile://COPYING;md5=441c28d2cf86e15a37fa47e15a72fbac \t\tfile://COPYING.LIB;endline=24;md5=8c5efda6cf1e1b03dcfd0e6c0d271c7f \t\t",
+      "srcrev": "7e3e3ae09af8abe70383a5dcf2e80801a07512d0",
+      "source_packages": [
+        "git2_github.com.Xilinx.qemu.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "qemu-xilinx-system-native",
+      "pv": "v5.1.0-xilinx-v2020.2+gitAUTOINC+7e3e3ae09a",
+      "license": "GPLv2 & LGPLv2.1",
+      "lic_files_chksum": " \t\tfile://COPYING;md5=441c28d2cf86e15a37fa47e15a72fbac \t\tfile://COPYING.LIB;endline=24;md5=8c5efda6cf1e1b03dcfd0e6c0d271c7f \t\t",
+      "srcrev": "7e3e3ae09af8abe70383a5dcf2e80801a07512d0",
+      "source_packages": [
+        "git2_github.com.Xilinx.qemu.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "qemuwrapper-cross",
+      "pv": "1.0",
+      "license": "MIT",
+      "lic_files_chksum": "",
+      "srcrev": "INVALID",
+      "source_packages": []
+    },
+    {
+      "pn": "quilt-native",
+      "pv": "0.66",
+      "license": "GPLv2",
+      "lic_files_chksum": "file://COPYING;md5=94d55d512a9ba36caa9b7df079bae19f",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "quilt-0.66.tar.gz"
+      ]
+    },
+    {
+      "pn": "re2c-native",
+      "pv": "1.0.1",
+      "license": "PD",
+      "lic_files_chksum": "file://README;beginline=146;md5=881056c9add17f8019ccd8c382ba963a",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "re2c-1.0.1.tar.gz"
+      ]
+    },
+    {
+      "pn": "readline",
+      "pv": "8.0",
+      "license": "GPLv3+",
+      "lic_files_chksum": "file://COPYING;md5=d32239bcb673463ab874e80d47fae504",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "readline-8.0.tar.gz"
+      ]
+    },
+    {
+      "pn": "readline-native",
+      "pv": "8.0",
+      "license": "GPLv3+",
+      "lic_files_chksum": "file://COPYING;md5=d32239bcb673463ab874e80d47fae504",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "readline-8.0.tar.gz"
+      ]
+    },
+    {
+      "pn": "rng-tools",
+      "pv": "6.7",
+      "license": "GPLv2",
+      "lic_files_chksum": "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263",
+      "srcrev": "9fc873c5af0e392632e6b736938b811f7ca97251",
+      "source_packages": [
+        "git2_github.com.nhorman.rng-tools.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "rpm-native",
+      "pv": "4.14.2.1",
+      "license": "GPL-2.0",
+      "lic_files_chksum": "file://COPYING;md5=c0bf017c0fd1920e6158a333acabfd4a",
+      "srcrev": "4a9440006398646583f0d9ae1837dad2875013aa",
+      "source_packages": [
+        "git2_github.com.rpm-software-management.rpm.tar.gz"
+      ]
+    },
+    {
+      "pn": "rsync",
+      "pv": "3.1.3",
+      "license": "GPLv3+",
+      "lic_files_chksum": "file://COPYING;md5=d32239bcb673463ab874e80d47fae504",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "rsync-3.1.3.tar.gz"
+      ]
+    },
+    {
+      "pn": "run-postinsts",
+      "pv": "1.0",
+      "license": "MIT",
+      "lic_files_chksum": "file:///root/v5-build/petalinux/overlay/merged/components/yocto/layers/core/meta/COPYING.MIT;md5=3da9cfbcb788c80a0384361b4de20420",
+      "srcrev": "INVALID",
+      "source_packages": []
+    },
+    {
+      "pn": "sed",
+      "pv": "4.2.2",
+      "license": "GPLv3+",
+      "lic_files_chksum": "file://COPYING;md5=f27defe1e96c2e1ecd4e0c9be8967949                     file://sed/sed.h;beginline=1;endline=17;md5=767ab3a06d7584f6fd0469abaec4412f",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "sed-4.2.2.tar.gz"
+      ]
+    },
+    {
+      "pn": "shadow",
+      "pv": "4.6",
+      "license": "BSD | Artistic-1.0",
+      "lic_files_chksum": "file://COPYING;md5=ed80ff1c2b40843cf5768e5229cf16e5                     file://src/passwd.c;beginline=2;endline=30;md5=5720ff729a6ff39ecc9f64555d75f4af",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "shadow-4.6.tar.gz"
+      ]
+    },
+    {
+      "pn": "shadow-native",
+      "pv": "4.6",
+      "license": "BSD | Artistic-1.0",
+      "lic_files_chksum": "file://COPYING;md5=ed80ff1c2b40843cf5768e5229cf16e5                     file://src/passwd.c;beginline=2;endline=30;md5=5720ff729a6ff39ecc9f64555d75f4af",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "shadow-4.6.tar.gz"
+      ]
+    },
+    {
+      "pn": "shadow-securetty",
+      "pv": "4.6",
+      "license": "MIT",
+      "lic_files_chksum": "file:///root/v5-build/petalinux/overlay/merged/components/yocto/layers/core/meta/COPYING.MIT;md5=3da9cfbcb788c80a0384361b4de20420",
+      "srcrev": "INVALID",
+      "source_packages": []
+    },
+    {
+      "pn": "shadow-sysroot",
+      "pv": "4.6",
+      "license": "BSD | Artistic-1.0",
+      "lic_files_chksum": "file://login.defs_shadow-sysroot;md5=25e2f2de4dfc8f966ac5cdfce45cd7d5",
+      "srcrev": "INVALID",
+      "source_packages": []
+    },
+    {
+      "pn": "shared-mime-info",
+      "pv": "1.10",
+      "license": "GPLv2",
+      "lic_files_chksum": "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "shared-mime-info-1.10.tar.xz"
+      ]
+    },
+    {
+      "pn": "shared-mime-info-native",
+      "pv": "1.10",
+      "license": "GPLv2",
+      "lic_files_chksum": "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "shared-mime-info-1.10.tar.xz"
+      ]
+    },
+    {
+      "pn": "socat",
+      "pv": "1.7.3.3",
+      "license": "GPL-2.0-with-OpenSSL-exception",
+      "lic_files_chksum": "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263                     file://README;beginline=257;endline=287;md5=338c05eadd013872abb1d6e198e10a3f",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "socat-1.7.3.3.tar.bz2"
+      ]
+    },
+    {
+      "pn": "sqlite3",
+      "pv": "3.29.0",
+      "license": "PD",
+      "lic_files_chksum": "file://sqlite3.h;endline=11;md5=786d3dc581eff03f4fd9e4a77ed00c66",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "sqlite-autoconf-3290000.tar.gz"
+      ]
+    },
+    {
+      "pn": "sqlite3-native",
+      "pv": "3.29.0",
+      "license": "PD",
+      "lic_files_chksum": "file://sqlite3.h;endline=11;md5=786d3dc581eff03f4fd9e4a77ed00c66",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "sqlite-autoconf-3290000.tar.gz"
+      ]
+    },
+    {
+      "pn": "strace",
+      "pv": "5.3",
+      "license": "LGPL-2.1+ & GPL-2+",
+      "lic_files_chksum": "file://COPYING;md5=0169a04810830e94f4b1cfb823c9f592",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "strace-5.3.tar.xz"
+      ]
+    },
+    {
+      "pn": "sudo",
+      "pv": "1.8.27",
+      "license": "ISC & BSD & Zlib",
+      "lic_files_chksum": "file://doc/LICENSE;md5=6c76b73603ac7763ab0516ebfbe67b42                     file://plugins/sudoers/redblack.c;beginline=1;endline=46;md5=4a162fc04b86b03f5632180fe6076cda                     file://lib/util/reallocarray.c;beginline=3;endline=15;md5=b47f1f85a12f05a0744cd8b1b6f41a0d                     file://lib/util/fnmatch.c;beginline=3;endline=27;md5=67f83ee9bd456557397082f8f1be0efd                     file://lib/util/getcwd.c;beginline=2;endline=27;md5=09068a19b4f6b6f0a0958655bfe98b63                     file://lib/util/glob.c;beginline=2;endline=31;md5=1f2f771c35fb0658d567a7824007e56d                     file://lib/util/snprintf.c;beginline=3;endline=33;md5=63e48e1b992bce749a19dd9b2256e9a0                     file://include/sudo_queue.h;beginline=2;endline=27;md5=082b138b72ba3e568a13a25c3bf254dc                     file://lib/util/inet_pton.c;beginline=3;endline=17;md5=3970ab0518ab79cbd0bafb697f10b33a                     file://lib/util/arc4random.c;beginline=3;endline=20;md5=15bdc89c1b003fa4d7353e6296ebfd68                     file://lib/util/arc4random_uniform.c;beginline=3;endline=17;md5=31e630ac814d692fd0ab7a942659b46f                     file://lib/util/getentropy.c;beginline=1;endline=19;md5=9f1a275ecd44cc264a2a4d5e06a75292                     ",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "sudo-1.8.27.tar.gz"
+      ]
+    },
+    {
+      "pn": "swig-native",
+      "pv": "3.0.12",
+      "license": "BSD & GPLv3",
+      "lic_files_chksum": "file://LICENSE;md5=e7807a6282784a7dde4c846626b08fc6                     file://LICENSE-GPL;md5=d32239bcb673463ab874e80d47fae504                     file://LICENSE-UNIVERSITIES;md5=8ce9dcc8f7c994de4a408b205c72ba08",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "swig-3.0.12.tar.gz"
+      ]
+    },
+    {
+      "pn": "sysfsutils",
+      "pv": "2.1.0",
+      "license": "GPLv2 & LGPLv2.1",
+      "lic_files_chksum": "file://COPYING;md5=3d06403ea54c7574a9e581c6478cc393                     file://cmd/GPL;md5=d41d4e2e1e108554e0388ea4aecd8d27                     file://lib/LGPL;md5=b75d069791103ffe1c0d6435deeff72e",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "sysfsutils-2.1.0.tar.gz"
+      ]
+    },
+    {
+      "pn": "sysvinit",
+      "pv": "2.88dsf",
+      "license": "GPLv2+",
+      "lic_files_chksum": "file://COPYING;md5=751419260aa954499f7abaabaa882bbe                     file://COPYRIGHT;endline=15;md5=349c872e0066155e1818b786938876a4",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "sysvinit-2.88dsf.tar.bz2"
+      ]
+    },
+    {
+      "pn": "sysvinit-inittab",
+      "pv": "2.88dsf",
+      "license": "GPLv2",
+      "lic_files_chksum": "file:///root/v5-build/petalinux/overlay/merged/components/yocto/layers/core/meta/files/common-licenses/GPL-2.0;md5=801f80980d171dd6425610833a22dbe6",
+      "srcrev": "INVALID",
+      "source_packages": []
+    },
+    {
+      "pn": "tar",
+      "pv": "1.32",
+      "license": "GPLv3",
+      "lic_files_chksum": "file://COPYING;md5=d32239bcb673463ab874e80d47fae504",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "tar-1.32.tar.bz2"
+      ]
+    },
+    {
+      "pn": "tcf-agent",
+      "pv": "1.7.0+gitAUTOINC+0c9ebd5829",
+      "license": "EPL-1.0 | EDL-1.0",
+      "lic_files_chksum": "file://edl-v10.html;md5=522a390a83dc186513f0500543ad3679",
+      "srcrev": "0c9ebd5829b7aeebb411526ff0d414894994cc72",
+      "source_packages": [
+        "git2_git.eclipse.org.gitroot.tcf.org.eclipse.tcf.agent.tar.gz"
+      ]
+    },
+    {
+      "pn": "tcp-wrappers",
+      "pv": "7.6",
+      "license": "BSD",
+      "lic_files_chksum": "file://DISCLAIMER;md5=071bd69cb78b18888ea5e3da5c3127fa",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "tcp_wrappers_7.6.tar.gz"
+      ]
+    },
+    {
+      "pn": "tcpdump",
+      "pv": "4.9.3",
+      "license": "BSD",
+      "lic_files_chksum": "file://LICENSE;md5=1d4b0366557951c84a94fabe3529f867",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "tcpdump-4.9.3.tar.gz"
+      ]
+    },
+    {
+      "pn": "texinfo-dummy-native",
+      "pv": "1.0",
+      "license": "MIT",
+      "lic_files_chksum": "file://COPYING;md5=d6bb62e73ca8b901d3f2e9d71542f4bb",
+      "srcrev": "INVALID",
+      "source_packages": []
+    },
+    {
+      "pn": "tzcode-native",
+      "pv": "2019c",
+      "license": "PD & BSD & BSD-3-Clause",
+      "lic_files_chksum": "file://LICENSE;md5=c679c9d6b02bc2757b3eaf8f53c43fba",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "tzcode2019c.tar.gz",
+        "tzdata2019c.tar.gz"
+      ]
+    },
+    {
+      "pn": "tzdata",
+      "pv": "2019c",
+      "license": "PD & BSD & BSD-3-Clause",
+      "lic_files_chksum": "file://LICENSE;md5=c679c9d6b02bc2757b3eaf8f53c43fba",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "tzcode2019c.tar.gz",
+        "tzdata2019c.tar.gz"
+      ]
+    },
+    {
+      "pn": "u-boot-tools-native",
+      "pv": "2019.07",
+      "license": "GPLv2+",
+      "lic_files_chksum": "file://Licenses/README;md5=30503fd321432fc713238f582193b78e",
+      "srcrev": "e5aee22e4be75e75a854ab64503fc80598bc2004",
+      "source_packages": [
+        "git2_git.denx.de.u-boot.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "u-boot-xlnx",
+      "pv": "v2020.01-xilinx-v2020.2+gitAUTOINC+bb4660c33a",
+      "license": "GPLv2+",
+      "lic_files_chksum": "file://README;beginline=1;endline=4;md5=744e7e3bb0c94b4b9f6b3db3bf893897",
+      "srcrev": "bb4660c33aa7ea64f78b2682bf0efd56765197d6",
+      "source_packages": [
+        "git2_github.com.Xilinx.u-boot-xlnx.git.tar.gz"
+      ]
+    },
+    {
+      "pn": "u-boot-zynq-scr",
+      "pv": "1.0",
+      "license": "MIT",
+      "lic_files_chksum": "file:///root/v5-build/petalinux/overlay/merged/components/yocto/layers/core/meta/files/common-licenses/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302",
+      "srcrev": "INVALID",
+      "source_packages": []
+    },
+    {
+      "pn": "udev-extraconf",
+      "pv": "1.1",
+      "license": "MIT",
+      "lic_files_chksum": "file:///root/v5-build/petalinux/overlay/merged/components/yocto/layers/core/meta/COPYING.MIT;md5=3da9cfbcb788c80a0384361b4de20420",
+      "srcrev": "INVALID",
+      "source_packages": []
+    },
+    {
+      "pn": "unifdef-native",
+      "pv": "2.11",
+      "license": "BSD-2-Clause",
+      "lic_files_chksum": "file://COPYING;md5=78fc6c2c1dc4f18c891ed5b7a469fe32                     file://unifdef.c;endline=32;md5=aaec84d8b68d8b6dea71f45e9949ebfe",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "unifdef-2.11.tar.xz"
+      ]
+    },
+    {
+      "pn": "unzip",
+      "pv": "6.0",
+      "license": "BSD-3-Clause",
+      "lic_files_chksum": "file://LICENSE;md5=94caec5a51ef55ef711ee4e8b1c69e29",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "unzip60.tar.gz"
+      ]
+    },
+    {
+      "pn": "unzip-native",
+      "pv": "6.0",
+      "license": "BSD-3-Clause",
+      "lic_files_chksum": "file://LICENSE;md5=94caec5a51ef55ef711ee4e8b1c69e29",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "unzip60.tar.gz"
+      ]
+    },
+    {
+      "pn": "update-rc.d",
+      "pv": "0.8",
+      "license": "GPLv2+",
+      "lic_files_chksum": "file://update-rc.d;beginline=5;endline=15;md5=d40a07c27f535425934bb5001f2037d9",
+      "srcrev": "4b150b25b38de688d25cde2b2d22c268ed65a748",
+      "source_packages": [
+        "git2_git.yoctoproject.org.update-rc.d.tar.gz"
+      ]
+    },
+    {
+      "pn": "update-rc.d-native",
+      "pv": "0.8",
+      "license": "GPLv2+",
+      "lic_files_chksum": "file://update-rc.d;beginline=5;endline=15;md5=d40a07c27f535425934bb5001f2037d9",
+      "srcrev": "4b150b25b38de688d25cde2b2d22c268ed65a748",
+      "source_packages": [
+        "git2_git.yoctoproject.org.update-rc.d.tar.gz"
+      ]
+    },
+    {
+      "pn": "util-linux",
+      "pv": "2.34",
+      "license": "GPLv2+ & LGPLv2.1+ & BSD-3-Clause & BSD-4-Clause",
+      "lic_files_chksum": "file://README.licensing;md5=972a134f1e14b2b060e365df2fab0099                     file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263                     file://Documentation/licenses/COPYING.GPL-2.0-or-later;md5=b234ee4d69f5fce4486a80fdaf4a4263                     file://Documentation/licenses/COPYING.LGPL-2.1-or-later;md5=4fbd65380cdd255951079008b364516c                     file://Documentation/licenses/COPYING.BSD-3-Clause;md5=58dcd8452651fc8b07d1f65ce07ca8af                     file://Documentation/licenses/COPYING.BSD-4-Clause-UC;md5=263860f8968d8bafa5392cab74285262                     file://libuuid/COPYING;md5=6d2cafc999feb2c2de84d4d24b23290c                     file://libmount/COPYING;md5=7c7e39fb7d70ffe5d693a643e29987c2                     file://libblkid/COPYING;md5=693bcbbe16d3a4a4b37bc906bc01cc04",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "util-linux-2.34.tar.xz"
+      ]
+    },
+    {
+      "pn": "util-linux-native",
+      "pv": "2.34",
+      "license": "GPLv2+ & LGPLv2.1+ & BSD-3-Clause & BSD-4-Clause",
+      "lic_files_chksum": "file://README.licensing;md5=972a134f1e14b2b060e365df2fab0099                     file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263                     file://Documentation/licenses/COPYING.GPL-2.0-or-later;md5=b234ee4d69f5fce4486a80fdaf4a4263                     file://Documentation/licenses/COPYING.LGPL-2.1-or-later;md5=4fbd65380cdd255951079008b364516c                     file://Documentation/licenses/COPYING.BSD-3-Clause;md5=58dcd8452651fc8b07d1f65ce07ca8af                     file://Documentation/licenses/COPYING.BSD-4-Clause-UC;md5=263860f8968d8bafa5392cab74285262                     file://libuuid/COPYING;md5=6d2cafc999feb2c2de84d4d24b23290c                     file://libmount/COPYING;md5=7c7e39fb7d70ffe5d693a643e29987c2                     file://libblkid/COPYING;md5=693bcbbe16d3a4a4b37bc906bc01cc04",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "util-linux-2.34.tar.xz"
+      ]
+    },
+    {
+      "pn": "util-macros",
+      "pv": "1.19.2",
+      "license": "MIT & MIT-style",
+      "lic_files_chksum": "file://COPYING;md5=1970511fddd439b07a6ba789d28ff662",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "util-macros-1.19.2.tar.gz"
+      ]
+    },
+    {
+      "pn": "util-macros-native",
+      "pv": "1.19.2",
+      "license": "MIT & MIT-style",
+      "lic_files_chksum": "file://COPYING;md5=1970511fddd439b07a6ba789d28ff662",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "util-macros-1.19.2.tar.gz"
+      ]
+    },
+    {
+      "pn": "v5-base-overlay",
+      "pv": "1.0",
+      "license": "CLOSED",
+      "lic_files_chksum": "",
+      "srcrev": "INVALID",
+      "source_packages": []
+    },
+    {
+      "pn": "v5-stepgen-module",
+      "pv": "1.0",
+      "license": "GPLv2",
+      "lic_files_chksum": "file:///root/v5-build/petalinux/overlay/merged/components/yocto/layers/core/meta/files/common-licenses/GPL-2.0;md5=801f80980d171dd6425610833a22dbe6",
+      "srcrev": "INVALID",
+      "source_packages": []
+    },
+    {
+      "pn": "which",
+      "pv": "2.21",
+      "license": "GPLv3+",
+      "lic_files_chksum": "file://COPYING;md5=d32239bcb673463ab874e80d47fae504                    file://which.c;beginline=1;endline=17;md5=a9963693af2272e7a8df6f231164e7a2",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "which-2.21.tar.gz"
+      ]
+    },
+    {
+      "pn": "wpa-supplicant",
+      "pv": "2.9",
+      "license": "BSD",
+      "lic_files_chksum": "file://COPYING;md5=279b4f5abb9c153c285221855ddb78cc                     file://README;beginline=1;endline=56;md5=e7d3dbb01f75f0b9799e192731d1e1ff                     file://wpa_supplicant/wpa_supplicant.c;beginline=1;endline=12;md5=0a8b56d3543498b742b9c0e94cc2d18b",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "wpa_supplicant-2.9.tar.gz"
+      ]
+    },
+    {
+      "pn": "xcb-proto",
+      "pv": "1.13",
+      "license": "MIT",
+      "lic_files_chksum": "file://COPYING;md5=d763b081cb10c223435b01e00dc0aba7                     file://src/dri2.xml;beginline=2;endline=28;md5=f8763b13ff432e8597e0d610cf598e65",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "xcb-proto-1.13.tar.bz2"
+      ]
+    },
+    {
+      "pn": "xorgproto",
+      "pv": "2019.1",
+      "license": "MIT-style",
+      "lic_files_chksum": "file://COPYING-x11proto;md5=b9e051107d5628966739a0b2e9b32676",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "xorgproto-2019.1.tar.bz2"
+      ]
+    },
+    {
+      "pn": "xorgproto-native",
+      "pv": "2019.1",
+      "license": "MIT-style",
+      "lic_files_chksum": "file://COPYING-x11proto;md5=b9e051107d5628966739a0b2e9b32676",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "xorgproto-2019.1.tar.bz2"
+      ]
+    },
+    {
+      "pn": "xrandr",
+      "pv": "1.5.1",
+      "license": "MIT",
+      "lic_files_chksum": "file://COPYING;md5=fe1608bdb33cf8c62a4438f7d34679b3",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "xrandr-1.5.1.tar.xz"
+      ]
+    },
+    {
+      "pn": "xtrans",
+      "pv": "1.4.0",
+      "license": "MIT & MIT-style",
+      "lic_files_chksum": "file://COPYING;md5=49347921d4d5268021a999f250edc9ca",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "xtrans-1.4.0.tar.bz2"
+      ]
+    },
+    {
+      "pn": "xz",
+      "pv": "5.2.4",
+      "license": "GPLv2+ & GPL-3.0-with-autoconf-exception & LGPLv2.1+ & PD",
+      "lic_files_chksum": "file://COPYING;md5=97d554a32881fee0aa283d96e47cb24a                     file://COPYING.GPLv2;md5=b234ee4d69f5fce4486a80fdaf4a4263                     file://COPYING.GPLv3;md5=d32239bcb673463ab874e80d47fae504                     file://COPYING.LGPLv2.1;md5=4fbd65380cdd255951079008b364516c                     file://lib/getopt.c;endline=23;md5=2069b0ee710572c03bb3114e4532cd84                     ",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "xz-5.2.4.tar.gz"
+      ]
+    },
+    {
+      "pn": "xz-native",
+      "pv": "5.2.4",
+      "license": "GPLv2+ & GPL-3.0-with-autoconf-exception & LGPLv2.1+ & PD",
+      "lic_files_chksum": "file://COPYING;md5=97d554a32881fee0aa283d96e47cb24a                     file://COPYING.GPLv2;md5=b234ee4d69f5fce4486a80fdaf4a4263                     file://COPYING.GPLv3;md5=d32239bcb673463ab874e80d47fae504                     file://COPYING.LGPLv2.1;md5=4fbd65380cdd255951079008b364516c                     file://lib/getopt.c;endline=23;md5=2069b0ee710572c03bb3114e4532cd84                     ",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "xz-5.2.4.tar.gz"
+      ]
+    },
+    {
+      "pn": "zip",
+      "pv": "3.0",
+      "license": "BSD-3-Clause",
+      "lic_files_chksum": "file://LICENSE;md5=04d43c5d70b496c032308106e26ae17d",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "zip30.tar.gz"
+      ]
+    },
+    {
+      "pn": "zlib",
+      "pv": "1.2.11",
+      "license": "Zlib",
+      "lic_files_chksum": "file://zlib.h;beginline=6;endline=23;md5=5377232268e952e9ef63bc555f7aa6c0",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "zlib-1.2.11.tar.xz"
+      ]
+    },
+    {
+      "pn": "zlib-native",
+      "pv": "1.2.11",
+      "license": "Zlib",
+      "lic_files_chksum": "file://zlib.h;beginline=6;endline=23;md5=5377232268e952e9ef63bc555f7aa6c0",
+      "srcrev": "INVALID",
+      "source_packages": [
+        "zlib-1.2.11.tar.xz"
+      ]
+    }
+  ],
+  "source_packages": [
+    {
+      "path": "Cython-0.29.13.tar.gz",
+      "scheme": "https",
+      "url": "https://files.pythonhosted.org/packages/source/C/Cython/Cython-0.29.13.tar.gz",
+      "checksums": {
+        "md5sum": "f8109a2a86cded40b3896ee7a63bc5a5",
+        "sha256sum": "c29d069a4a30f472482343c866f7486731ad638ef9af92bfe5fca9c7323d638e"
+      },
+      "recipes": [
+        "python3-cython-native@0.29.13"
+      ]
+    },
+    {
+      "path": "Linux-PAM-1.3.1.tar.xz",
+      "scheme": "https",
+      "url": "https://github.com/linux-pam/linux-pam/releases/download/v1.3.1/Linux-PAM-1.3.1.tar.xz",
+      "checksums": {
+        "md5sum": "558ff53b0fc0563ca97f79e911822165",
+        "sha256sum": "eff47a4ecd833fbf18de9686632a70ee8d0794b79aecb217ebd0ce11db4cd0db"
+      },
+      "recipes": [
+        "libpam@1.3.1"
+      ]
+    },
+    {
+      "path": "Mako-1.1.0.tar.gz",
+      "scheme": "https",
+      "url": "https://files.pythonhosted.org/packages/source/M/Mako/Mako-1.1.0.tar.gz",
+      "checksums": {
+        "md5sum": "6c3f2da0b74af529a4c4a537d0848bf2",
+        "sha256sum": "a36919599a9b7dc5d86a7a8988f23a9a3a3d083070023bab23d64f7f1d1e0a4b"
+      },
+      "recipes": [
+        "python3-mako-native@1.1.0"
+      ]
+    },
+    {
+      "path": "PyYAML-5.1.2.tar.gz",
+      "scheme": "https",
+      "url": "https://files.pythonhosted.org/packages/source/P/PyYAML/PyYAML-5.1.2.tar.gz",
+      "checksums": {
+        "md5sum": "20f87ab421b0271dbf371dc5c1cddb5c",
+        "sha256sum": "01adf0b6c6f61bd11af6e10ca52b7d4057dd0be0343eb9283c878cf3af56aee4"
+      },
+      "recipes": [
+        "python3-pyyaml-native@5.1.2"
+      ]
+    },
+    {
+      "path": "Python-2.7.17.tar.xz",
+      "scheme": "http",
+      "url": "http://www.python.org/ftp/python/2.7.17/Python-2.7.17.tar.xz",
+      "checksums": {
+        "md5sum": "b3b6d2c92f42a60667814358ab9f0cfd",
+        "sha256sum": "4d43f033cdbd0aa7b7023c81b0e986fd11e653b5248dac9144d508f11812ba41"
+      },
+      "recipes": [
+        "python-native@2.7.17"
+      ]
+    },
+    {
+      "path": "Python-3.7.6.tar.xz",
+      "scheme": "http",
+      "url": "http://www.python.org/ftp/python/3.7.6/Python-3.7.6.tar.xz",
+      "checksums": {
+        "md5sum": "c08fbee72ad5c2c95b0f4e44bf6fd72c",
+        "sha256sum": "55a2cce72049f0794e9a11a84862e9039af9183603b78bc60d89539f82cf533f"
+      },
+      "recipes": [
+        "python3@3.7.6",
+        "python3-native@3.7.6"
+      ]
+    },
+    {
+      "path": "XML-Parser-2.44.tar.gz",
+      "scheme": "http",
+      "url": "http://www.cpan.org/modules/by-module/XML/XML-Parser-2.44.tar.gz",
+      "checksums": {
+        "md5sum": "af4813fe3952362451201ced6fbce379",
+        "sha256sum": "1ae9d07ee9c35326b3d9aad56eae71a6730a73a116b9fe9e8a4758b7cc033216"
+      },
+      "recipes": [
+        "libxml-parser-perl-native@2.44"
+      ]
+    },
+    {
+      "path": "Yapps2-2.2.0.tar.gz",
+      "scheme": "https",
+      "url": "https://files.pythonhosted.org/packages/7f/5d/f8b7dec89104f27d14b11711baf057194670ab220ebb8262f9bc1a450380/Yapps2-2.2.0.tar.gz",
+      "checksums": {
+        "sha256sum": "fb5842d17177abc377e321edcc7349b1b903e4d883981784f27fa5bee1ab0091"
+      },
+      "recipes": [
+        "python3-yapps2-native@2.2.0"
+      ]
+    },
+    {
+      "path": "acl-2.2.52.src.tar.gz",
+      "scheme": "https",
+      "url": "https://download.savannah.gnu.org/releases/acl/acl-2.2.52.src.tar.gz",
+      "checksums": {
+        "md5sum": "a61415312426e9c2212bd7dc7929abda",
+        "sha256sum": "179074bb0580c06c4b4137be4c5a92a701583277967acdb5546043c7874e0d23"
+      },
+      "recipes": [
+        "acl@2.2.52"
+      ]
+    },
+    {
+      "path": "alsa-lib-1.1.9.tar.bz2",
+      "scheme": "https",
+      "url": "https://www.alsa-project.org/files/pub/lib/alsa-lib-1.1.9.tar.bz2",
+      "checksums": {
+        "md5sum": "e6d429dbdcfaa0f034d907fa6dc3735e",
+        "sha256sum": "488373aef5396682f3a411a6d064ae0ad196b9c96269d0bb912fbdeec94b994b"
+      },
+      "recipes": [
+        "alsa-lib-native@1.1.9"
+      ]
+    },
+    {
+      "path": "attr-2.4.47.src.tar.gz",
+      "scheme": "https",
+      "url": "https://download.savannah.gnu.org/releases/attr/attr-2.4.47.src.tar.gz",
+      "checksums": {
+        "md5sum": "84f58dec00b60f2dc8fd1c9709291cc7",
+        "sha256sum": "25772f653ac5b2e3ceeb89df50e4688891e21f723c460636548971652af0a859"
+      },
+      "recipes": [
+        "attr@2.4.47",
+        "attr-native@2.4.47"
+      ]
+    },
+    {
+      "path": "autoconf-2.69.tar.gz",
+      "scheme": "https",
+      "url": "https://ftp.gnu.org/gnu/autoconf/autoconf-2.69.tar.gz",
+      "checksums": {
+        "md5sum": "82d05e03b93e45f5a39b828dc9c6c29b",
+        "sha256sum": "954bd69b391edc12d6a4a51a2dd1476543da5c6bbf05a95b59dc0dd6fd4c2969"
+      },
+      "recipes": [
+        "autoconf-native@2.69"
+      ]
+    },
+    {
+      "path": "autoconf-archive-2019.01.06.tar.xz",
+      "scheme": "https",
+      "url": "https://ftp.gnu.org/gnu/autoconf-archive/autoconf-archive-2019.01.06.tar.xz",
+      "checksums": {
+        "md5sum": "d46413c8b00a125b1529bae385bbec55",
+        "sha256sum": "17195c833098da79de5778ee90948f4c5d90ed1a0cf8391b4ab348e2ec511e3f"
+      },
+      "recipes": [
+        "autoconf-archive@2019.01.06",
+        "autoconf-archive-native@2019.01.06"
+      ]
+    },
+    {
+      "path": "automake-1.16.1.tar.gz",
+      "scheme": "https",
+      "url": "https://ftp.gnu.org/gnu/automake/automake-1.16.1.tar.gz",
+      "checksums": {
+        "md5sum": "83cc2463a4080efd46a72ba2c9f6b8f5",
+        "sha256sum": "608a97523f97db32f1f5d5615c98ca69326ced2054c9f82e65bade7fc4c9dea8"
+      },
+      "recipes": [
+        "automake-native@1.16.1"
+      ]
+    },
+    {
+      "path": "base-passwd_3.5.29.tar.gz",
+      "scheme": "https",
+      "url": "https://launchpad.net/debian/+archive/primary/+files/base-passwd_3.5.29.tar.gz",
+      "checksums": {
+        "md5sum": "6beccac48083fe8ae5048acd062e5421",
+        "sha256sum": "f0b66388b2c8e49c15692439d2bee63bcdd4bbbf7a782c7f64accc55986b6a36"
+      },
+      "recipes": [
+        "base-passwd@3.5.29"
+      ]
+    },
+    {
+      "path": "bash-5.0.tar.gz",
+      "scheme": "https",
+      "url": "https://ftp.gnu.org/gnu/bash/bash-5.0.tar.gz;name=tarball",
+      "checksums": {
+        "md5sum": "2b44b47b905be16f45709648f671820b",
+        "sha256sum": "b4a80f2ac66170b2913efbfb9f2594f1f76c7b1afd11f799e22035d63077fb4d"
+      },
+      "recipes": [
+        "bash@5.0"
+      ]
+    },
+    {
+      "path": "bash-completion-2.9.tar.xz",
+      "scheme": "https",
+      "url": "https://github.com/scop/bash-completion/releases/download/2.9/bash-completion-2.9.tar.xz",
+      "checksums": {
+        "md5sum": "60139333b25c4d54ad40323b701be130",
+        "sha256sum": "d48fe378e731062f479c5f8802ffa9d3c40a275a19e6e0f6f6cc4b90fa12b2f5"
+      },
+      "recipes": [
+        "bash-completion@2.9"
+      ]
+    },
+    {
+      "path": "bash50-001",
+      "scheme": "https",
+      "url": "https://ftp.gnu.org/gnu/bash/bash-5.0-patches/bash50-001;apply=yes;striplevel=0;name=patch001",
+      "checksums": {
+        "md5sum": "b026862ab596a5883bb4f0d1077a3819",
+        "sha256sum": "f2fe9e1f0faddf14ab9bfa88d450a75e5d028fedafad23b88716bd657c737289"
+      },
+      "recipes": [
+        "bash@5.0"
+      ]
+    },
+    {
+      "path": "bash50-002",
+      "scheme": "https",
+      "url": "https://ftp.gnu.org/gnu/bash/bash-5.0-patches/bash50-002;apply=yes;striplevel=0;name=patch002",
+      "checksums": {
+        "md5sum": "2f4a7787365790ae57f36b311701ea7e",
+        "sha256sum": "87e87d3542e598799adb3e7e01c8165bc743e136a400ed0de015845f7ff68707"
+      },
+      "recipes": [
+        "bash@5.0"
+      ]
+    },
+    {
+      "path": "bash50-003",
+      "scheme": "https",
+      "url": "https://ftp.gnu.org/gnu/bash/bash-5.0-patches/bash50-003;apply=yes;striplevel=0;name=patch003",
+      "checksums": {
+        "md5sum": "af7f2dd93fd5429fb5e9a642ff74f87d",
+        "sha256sum": "4eebcdc37b13793a232c5f2f498a5fcbf7da0ecb3da2059391c096db620ec85b"
+      },
+      "recipes": [
+        "bash@5.0"
+      ]
+    },
+    {
+      "path": "bash50-004",
+      "scheme": "https",
+      "url": "https://ftp.gnu.org/gnu/bash/bash-5.0-patches/bash50-004;apply=yes;striplevel=0;name=patch004",
+      "checksums": {
+        "md5sum": "b60545b273bfa4e00a760f2c648bed9c",
+        "sha256sum": "14447ad832add8ecfafdce5384badd933697b559c4688d6b9e3d36ff36c62f08"
+      },
+      "recipes": [
+        "bash@5.0"
+      ]
+    },
+    {
+      "path": "bash50-005",
+      "scheme": "https",
+      "url": "https://ftp.gnu.org/gnu/bash/bash-5.0-patches/bash50-005;apply=yes;striplevel=0;name=patch005",
+      "checksums": {
+        "md5sum": "875a0bedf48b74e453e3997c84b5d8a4",
+        "sha256sum": "5bf54dd9bd2c211d2bfb34a49e2c741f2ed5e338767e9ce9f4d41254bf9f8276"
+      },
+      "recipes": [
+        "bash@5.0"
+      ]
+    },
+    {
+      "path": "bash50-006",
+      "scheme": "https",
+      "url": "https://ftp.gnu.org/gnu/bash/bash-5.0-patches/bash50-006;apply=yes;striplevel=0;name=patch006",
+      "checksums": {
+        "md5sum": "4a8ee95adb72c3aba03d9e8c9f96ece6",
+        "sha256sum": "d68529a6ff201b6ff5915318ab12fc16b8a0ebb77fda3308303fcc1e13398420"
+      },
+      "recipes": [
+        "bash@5.0"
+      ]
+    },
+    {
+      "path": "bash50-007",
+      "scheme": "https",
+      "url": "https://ftp.gnu.org/gnu/bash/bash-5.0-patches/bash50-007;apply=yes;striplevel=0;name=patch007",
+      "checksums": {
+        "md5sum": "411560d81fde2dc5b17b83c3f3b58c6f",
+        "sha256sum": "17b41e7ee3673d8887dd25992417a398677533ab8827938aa41fad70df19af9b"
+      },
+      "recipes": [
+        "bash@5.0"
+      ]
+    },
+    {
+      "path": "bc-1.07.1.tar.gz",
+      "scheme": "https",
+      "url": "https://ftp.gnu.org/gnu/bc/bc-1.07.1.tar.gz",
+      "checksums": {
+        "md5sum": "cda93857418655ea43590736fc3ca9fc",
+        "sha256sum": "62adfca89b0a1c0164c2cdca59ca210c1d44c3ffc46daf9931cf4942664cb02a"
+      },
+      "recipes": [
+        "bc@1.07.1",
+        "bc-native@1.07.1"
+      ]
+    },
+    {
+      "path": "bison-3.4.1.tar.xz",
+      "scheme": "https",
+      "url": "https://ftp.gnu.org/gnu/bison/bison-3.4.1.tar.xz",
+      "checksums": {
+        "md5sum": "201286a573b12da109df96282fe4ff4a",
+        "sha256sum": "27159ac5ebf736dffd5636fd2cd625767c9e437de65baa63cb0de83570bd820d"
+      },
+      "recipes": [
+        "bison-native@3.4.1"
+      ]
+    },
+    {
+      "path": "bluez-5.50.tar.xz",
+      "scheme": "https",
+      "url": "https://cdn.kernel.org/pub/linux/bluetooth/bluez-5.50.tar.xz",
+      "checksums": {
+        "md5sum": "8e35c67c81a55d3ad4c9f22280dae178",
+        "sha256sum": "5ffcaae18bbb6155f1591be8c24898dc12f062075a40b538b745bfd477481911"
+      },
+      "recipes": [
+        "bluez5@5.50"
+      ]
+    },
+    {
+      "path": "boost_1_71_0.tar.bz2",
+      "scheme": "https",
+      "url": "https://dl.bintray.com/boostorg/release/1.71.0/source/boost_1_71_0.tar.bz2",
+      "checksums": {
+        "md5sum": "4cdf9b5c2dc01fb2b7b733d5af30e558",
+        "sha256sum": "d73a8da01e8bf8c7eda40b4c84915071a8c8a0df4a6734537ddde4a8580524ee"
+      },
+      "recipes": [
+        "bjam-native@1.71.0",
+        "boost@1.71.0"
+      ]
+    },
+    {
+      "path": "busybox-1.31.0.tar.bz2",
+      "scheme": "https",
+      "url": "https://busybox.net/downloads/busybox-1.31.0.tar.bz2;name=tarball",
+      "checksums": {
+        "md5sum": "cdba5d4458f944ceec5cdcf7c4914b69",
+        "sha256sum": "0e4925392fd9f3743cc517e031b68b012b24a63b0cf6c1ff03cce7bb3846cc99"
+      },
+      "recipes": [
+        "busybox@1.31.0"
+      ]
+    },
+    {
+      "path": "bzip2-1.0.8.tar.gz",
+      "scheme": "https",
+      "url": "https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz",
+      "checksums": {
+        "md5sum": "67e051268d0c475ea773822f7500d0e5",
+        "sha256sum": "ab5a03176ee106d3f0fa90e381da478ddae405918153cca248e682cd0c4a2269"
+      },
+      "recipes": [
+        "bzip2@1.0.8",
+        "bzip2-native@1.0.8"
+      ]
+    },
+    {
+      "path": "cairo-1.16.0.tar.xz",
+      "scheme": "http",
+      "url": "http://cairographics.org/releases/cairo-1.16.0.tar.xz",
+      "checksums": {
+        "md5sum": "f19e0353828269c22bd72e271243a552",
+        "sha256sum": "5e7b29b3f113ef870d1e3ecf8adf21f923396401604bda16d44be45e66052331"
+      },
+      "recipes": [
+        "cairo@1.16.0"
+      ]
+    },
+    {
+      "path": "check-0.12.0.tar.gz",
+      "scheme": "https",
+      "url": "https://github.com/libcheck/check/releases/download/0.12.0/check-0.12.0.tar.gz",
+      "checksums": {
+        "md5sum": "31b17c6075820a434119592941186f70",
+        "sha256sum": "464201098bee00e90f5c4bdfa94a5d3ead8d641f9025b560a27755a83b824234"
+      },
+      "recipes": [
+        "libcheck-native@0.12.0"
+      ]
+    },
+    {
+      "path": "chrpath_0.16.orig.tar.gz",
+      "scheme": "http",
+      "url": "http://ftp.debian.org/debian/pool/main/c/chrpath/chrpath_0.16.orig.tar.gz",
+      "checksums": {
+        "md5sum": "2bf8d1d1ee345fc8a7915576f5649982",
+        "sha256sum": "bb0d4c54bac2990e1bdf8132f2c9477ae752859d523e141e72b3b11a12c26e7b"
+      },
+      "recipes": [
+        "chrpath-native@0.16"
+      ]
+    },
+    {
+      "path": "cmake-3.15.3.tar.gz",
+      "scheme": "https",
+      "url": "https://cmake.org/files/v3.15/cmake-3.15.3.tar.gz",
+      "checksums": {
+        "md5sum": "bf69e837eeda3dd4e9f52cffcf546a11",
+        "sha256sum": "13958243a01365b05652fa01b21d40fa834f70a9e30efa69c02604e64f58b8f5"
+      },
+      "recipes": [
+        "cmake-native@3.15.3"
+      ]
+    },
+    {
+      "path": "coreutils-8.31.tar.xz",
+      "scheme": "https",
+      "url": "https://ftp.gnu.org/gnu/coreutils/coreutils-8.31.tar.xz",
+      "checksums": {
+        "md5sum": "0009a224d8e288e8ec406ef0161f9293",
+        "sha256sum": "ff7a9c918edce6b4f4b2725e3f9b37b0c4d193531cac49a48b56c4d0d3a9e9fd"
+      },
+      "recipes": [
+        "coreutils@8.31"
+      ]
+    },
+    {
+      "path": "cracklib-2.9.5.tar.gz",
+      "scheme": "https",
+      "url": "https://downloads.sourceforge.net/cracklib/cracklib-2.9.5.tar.gz",
+      "checksums": {
+        "md5sum": "376790a95c1fb645e59e6e9803c78582",
+        "sha256sum": "59ab0138bc8cf90cccb8509b6969a024d5e58d2d02bcbdccbb9ba9b88be3fa33"
+      },
+      "recipes": [
+        "cracklib@2.9.5",
+        "cracklib-native@2.9.5"
+      ]
+    },
+    {
+      "path": "curl-7.66.0.tar.bz2",
+      "scheme": "http",
+      "url": "http://curl.haxx.se/download/curl-7.66.0.tar.bz2",
+      "checksums": {
+        "md5sum": "c238aa394e3aa47ca4fcb0491774149f",
+        "sha256sum": "6618234e0235c420a21f4cb4c2dd0badde76e6139668739085a70c4e2fe7a141"
+      },
+      "recipes": [
+        "curl-native@7.66.0"
+      ]
+    },
+    {
+      "path": "cwautomacros-20110201.tar.bz2",
+      "scheme": "https",
+      "url": "https://downloads.sourceforge.net/cwautomacros.berlios/cwautomacros-20110201.tar.bz2",
+      "checksums": {
+        "md5sum": "074afcb50d0a8bff10786a2954b2b02d",
+        "sha256sum": "3115603b891f3a163c0bbb5fea2f3742113a183fa6745ee5e89e5f6d0e9f6121"
+      },
+      "recipes": [
+        "cwautomacros-native@20110201"
+      ]
+    },
+    {
+      "path": "db-5.3.28.tar.gz",
+      "scheme": "https",
+      "url": "https://download.oracle.com/berkeley-db/db-5.3.28.tar.gz",
+      "checksums": {
+        "md5sum": "b99454564d5b4479750567031d66fe24",
+        "sha256sum": "e0a992d740709892e81f9d93f06daf305cf73fb81b545afe72478043172c3628"
+      },
+      "recipes": [
+        "db@5.3.28",
+        "db-native@5.3.28"
+      ]
+    },
+    {
+      "path": "dbus-1.12.16.tar.gz",
+      "scheme": "https",
+      "url": "https://dbus.freedesktop.org/releases/dbus/dbus-1.12.16.tar.gz",
+      "checksums": {
+        "md5sum": "2dbeae80dfc9e3632320c6a53d5e8890",
+        "sha256sum": "54a22d2fa42f2eb2a871f32811c6005b531b9613b1b93a0d269b05e7549fec80"
+      },
+      "recipes": [
+        "dbus@1.12.16",
+        "dbus-native@1.12.16",
+        "dbus-test@1.12.16"
+      ],
+      "alternate_urls": [
+        "http://dbus.freedesktop.org/releases/dbus/dbus-1.12.16.tar.gz"
+      ]
+    },
+    {
+      "path": "dbus-python-1.2.12.tar.gz",
+      "scheme": "http",
+      "url": "http://dbus.freedesktop.org/releases/dbus-python/dbus-python-1.2.12.tar.gz",
+      "checksums": {
+        "md5sum": "428b7a9e7e2d154a7ceb3e13536283e4",
+        "sha256sum": "cdd4de2c4f5e58f287b12013ed7b41dee81d503c8d0d2397c5bd2fb01badf260"
+      },
+      "recipes": [
+        "python3-dbus@1.2.12"
+      ]
+    },
+    {
+      "path": "debianutils_4.8.6.3.tar.xz",
+      "scheme": "http",
+      "url": "http://snapshot.debian.org/archive/debian/20190717T213444Z/pool/main/d/debianutils/debianutils_4.8.6.3.tar.xz",
+      "checksums": {
+        "md5sum": "ca57cc6621275346d7d516ab0b5fa1f5",
+        "sha256sum": "2cc7de3afc6df1cf6d00af9938efac7ee8f739228e548e512ddc186b6a7be221"
+      },
+      "recipes": [
+        "debianutils-native@4.8.6.3"
+      ]
+    },
+    {
+      "path": "diffutils-3.7.tar.xz",
+      "scheme": "https",
+      "url": "https://ftp.gnu.org/gnu/diffutils/diffutils-3.7.tar.xz",
+      "checksums": {
+        "md5sum": "4824adc0e95dbbf11dfbdfaad6a1e461",
+        "sha256sum": "b3a7a6221c3dc916085f0d205abf6b8e1ba443d4dd965118da364a1dc1cb3a26"
+      },
+      "recipes": [
+        "diffutils@3.7"
+      ]
+    },
+    {
+      "path": "docbook-xml_4.5.orig.tar.gz",
+      "scheme": "http",
+      "url": "http://snapshot.debian.org/archive/debian/20160728T043443Z/pool/main/d/docbook-xml/docbook-xml_4.5.orig.tar.gz",
+      "checksums": {
+        "md5sum": "487b4d44e15cffb1f4048af23f98208e",
+        "sha256sum": "b0f8edcf697f5318e63dd98c9a931f3fee167af0805ba441db372e0f17b2a44f"
+      },
+      "recipes": [
+        "docbook-xml-dtd4-native@4.5"
+      ]
+    },
+    {
+      "path": "docbook-xsl-1.79.1.tar.bz2",
+      "scheme": "https",
+      "url": "https://downloads.sourceforge.net/docbook/docbook-xsl-1.79.1.tar.bz2",
+      "checksums": {
+        "md5sum": "b48cbf929a2ad85e6672f710777ca7bc",
+        "sha256sum": "725f452e12b296956e8bfb876ccece71eeecdd14b94f667f3ed9091761a4a968"
+      },
+      "recipes": [
+        "docbook-xsl-stylesheets-native@1.79.1"
+      ]
+    },
+    {
+      "path": "dropbear-2019.78.tar.bz2",
+      "scheme": "http",
+      "url": "http://matt.ucc.asn.au/dropbear/releases/dropbear-2019.78.tar.bz2",
+      "checksums": {
+        "md5sum": "a972c85ed678ad0fdcb7844e1294fb54",
+        "sha256sum": "525965971272270995364a0eb01f35180d793182e63dd0b0c3eb0292291644a4"
+      },
+      "recipes": [
+        "dropbear@2019.78"
+      ]
+    },
+    {
+      "path": "elfutils-0.177.tar.bz2",
+      "scheme": "https",
+      "url": "https://sourceware.org/elfutils/ftp/0.177/elfutils-0.177.tar.bz2",
+      "checksums": {
+        "md5sum": "0b583722f911e1632544718d502aab87",
+        "sha256sum": "fa489deccbcae7d8c920f60d85906124c1989c591196d90e0fd668e3dc05042e"
+      },
+      "recipes": [
+        "elfutils@0.177",
+        "elfutils-native@0.177"
+      ]
+    },
+    {
+      "path": "ethtool-5.2.tar.gz",
+      "scheme": "https",
+      "url": "https://cdn.kernel.org/pub/software/network/ethtool/ethtool-5.2.tar.gz",
+      "checksums": {
+        "md5sum": "79cff0d4af62b030ad28be90414b5c4a",
+        "sha256sum": "8ad6cb30f6e1767d9d23a5cb5f606f3b51f83e85ebf0153c1506194f6709e90b"
+      },
+      "recipes": [
+        "ethtool@5.2"
+      ]
+    },
+    {
+      "path": "eudev-3.2.8.tar.gz",
+      "scheme": "https",
+      "url": "https://dev.gentoo.org/~blueness/eudev/eudev-3.2.8.tar.gz",
+      "checksums": {
+        "md5sum": "ce166b3fdd910c2a4a840378f48fedaf",
+        "sha256sum": "61e4948e9e51271c3cce2bb5311a30b206dd03ef011062e6c627fb007e43f6b8"
+      },
+      "recipes": [
+        "eudev@3.2.8"
+      ]
+    },
+    {
+      "path": "expat-2.2.8.tar.bz2",
+      "scheme": "https",
+      "url": "https://downloads.sourceforge.net/expat/expat-2.2.8.tar.bz2",
+      "checksums": {
+        "md5sum": "00858041acfea5757af55e6ee6b86231",
+        "sha256sum": "9a130948b05a82da34e4171d5f5ae5d321d9630277af02c8fa51e431f6475102"
+      },
+      "recipes": [
+        "expat@2.2.8",
+        "expat-native@2.2.8"
+      ]
+    },
+    {
+      "path": "findutils-4.6.0.tar.gz",
+      "scheme": "https",
+      "url": "https://ftp.gnu.org/gnu/findutils/findutils-4.6.0.tar.gz",
+      "checksums": {
+        "md5sum": "9936aa8009438ce185bea2694a997fc1",
+        "sha256sum": "ded4c9f73731cd48fec3b6bdaccce896473b6d8e337e9612e16cf1431bb1169d"
+      },
+      "recipes": [
+        "findutils@4.6.0"
+      ]
+    },
+    {
+      "path": "flex-2.6.0.tar.bz2",
+      "scheme": "https",
+      "url": "https://downloads.sourceforge.net/flex/flex-2.6.0.tar.bz2",
+      "checksums": {
+        "md5sum": "266270f13c48ed043d95648075084d59",
+        "sha256sum": "24e611ef5a4703a191012f80c1027dc9d12555183ce0ecd46f3636e587e9b8e9"
+      },
+      "recipes": [
+        "flex@2.6.0",
+        "flex-native@2.6.0"
+      ]
+    },
+    {
+      "path": "fontconfig-2.13.1.tar.gz",
+      "scheme": "http",
+      "url": "http://fontconfig.org/release/fontconfig-2.13.1.tar.gz",
+      "checksums": {
+        "md5sum": "690c6cb840a92fa8908cdf462d19ec66",
+        "sha256sum": "9f0d852b39d75fc655f9f53850eb32555394f36104a044bb2b2fc9e66dbbfa7f"
+      },
+      "recipes": [
+        "fontconfig@2.13.1"
+      ]
+    },
+    {
+      "path": "freetype-2.10.1.tar.xz",
+      "scheme": "https",
+      "url": "https://download.savannah.nongnu.org/releases/freetype/freetype-2.10.1.tar.xz",
+      "checksums": {
+        "md5sum": "bd42e75127f8431923679480efb5ba8f",
+        "sha256sum": "16dbfa488a21fe827dc27eaf708f42f7aa3bb997d745d31a19781628c36ba26f"
+      },
+      "recipes": [
+        "freetype@2.10.1"
+      ]
+    },
+    {
+      "path": "gawk-5.0.1.tar.gz",
+      "scheme": "https",
+      "url": "https://ftp.gnu.org/gnu/gawk/gawk-5.0.1.tar.gz",
+      "checksums": {
+        "md5sum": "c5441c73cc451764055ee65e9a4292bb",
+        "sha256sum": "625bf3718e25a84dc4486135d5cb5388174682362c70107fd13f21572f5603bb"
+      },
+      "recipes": [
+        "gawk@5.0.1"
+      ]
+    },
+    {
+      "path": "gcc-9.2.0.tar.xz",
+      "scheme": "https",
+      "url": "https://ftp.gnu.org/gnu/gcc/gcc-9.2.0/gcc-9.2.0.tar.xz",
+      "checksums": {
+        "md5sum": "3818ad8600447f05349098232c2ddc78",
+        "sha256sum": "ea6ef08f121239da5695f76c9b33637a118dcf63e24164422231917fa61fb206"
+      },
+      "recipes": [
+        "gcc-source-9.2.0@9.2.0"
+      ]
+    },
+    {
+      "path": "gdbm-1.18.1.tar.gz",
+      "scheme": "https",
+      "url": "https://ftp.gnu.org/gnu/gdbm/gdbm-1.18.1.tar.gz",
+      "checksums": {
+        "md5sum": "988dc82182121c7570e0cb8b4fcd5415",
+        "sha256sum": "86e613527e5dba544e73208f42b78b7c022d4fa5a6d5498bf18c8d6f745b91dc"
+      },
+      "recipes": [
+        "gdbm@1.18.1",
+        "gdbm-native@1.18.1"
+      ]
+    },
+    {
+      "path": "gettext-0.19.8.1.tar.gz",
+      "scheme": "https",
+      "url": "https://ftp.gnu.org/gnu/gettext/gettext-0.19.8.1.tar.gz",
+      "checksums": {
+        "md5sum": "97e034cf8ce5ba73a28ff6c3c0638092",
+        "sha256sum": "ff942af0e438ced4a8b0ea4b0b6e0d6d657157c5e2364de57baa279c1c125c43"
+      },
+      "recipes": [
+        "gettext@0.19.8.1",
+        "gettext-native@0.19.8.1"
+      ]
+    },
+    {
+      "path": "git2_anongit.freedesktop.org.pkg-config.tar.gz",
+      "scheme": "git",
+      "url": "git://anongit.freedesktop.org/pkg-config",
+      "checksums": {},
+      "recipes": [
+        "pkgconfig-native@0.29.2+gitAUTOINC+edf8e6f0ea"
+      ]
+    },
+    {
+      "path": "git2_git.denx.de.u-boot.git.tar.gz",
+      "scheme": "git",
+      "url": "git://git.denx.de/u-boot.git",
+      "checksums": {},
+      "recipes": [
+        "u-boot-tools-native@2019.07"
+      ]
+    },
+    {
+      "path": "git2_git.eclipse.org.gitroot.tcf.org.eclipse.tcf.agent.tar.gz",
+      "scheme": "git",
+      "url": "git://git.eclipse.org/gitroot/tcf/org.eclipse.tcf.agent",
+      "checksums": {},
+      "recipes": [
+        "tcf-agent@1.7.0+gitAUTOINC+0c9ebd5829"
+      ]
+    },
+    {
+      "path": "git2_git.infradead.org.mtd-utils.git.tar.gz",
+      "scheme": "git",
+      "url": "git://git.infradead.org/mtd-utils.git",
+      "checksums": {},
+      "recipes": [
+        "mtd-utils@2.1.1"
+      ]
+    },
+    {
+      "path": "git2_git.kernel.org.pub.scm.fs.ext2.e2fsprogs.git.tar.gz",
+      "scheme": "git",
+      "url": "git://git.kernel.org/pub/scm/fs/ext2/e2fsprogs.git",
+      "checksums": {},
+      "recipes": [
+        "e2fsprogs@1.45.3",
+        "e2fsprogs-native@1.45.3"
+      ]
+    },
+    {
+      "path": "git2_git.kernel.org.pub.scm.linux.kernel.git.kdave.btrfs-progs.git.tar.gz",
+      "scheme": "git",
+      "url": "git://git.kernel.org/pub/scm/linux/kernel/git/kdave/btrfs-progs.git",
+      "checksums": {},
+      "recipes": [
+        "btrfs-tools@5.2.2"
+      ]
+    },
+    {
+      "path": "git2_git.kernel.org.pub.scm.linux.kernel.git.shemminger.bridge-utils.git.tar.gz",
+      "scheme": "git",
+      "url": "git://git.kernel.org/pub/scm/linux/kernel/git/shemminger/bridge-utils.git",
+      "checksums": {},
+      "recipes": [
+        "bridge-utils@1.6"
+      ]
+    },
+    {
+      "path": "git2_git.kernel.org.pub.scm.utils.dtc.dtc.git.tar.gz",
+      "scheme": "git",
+      "url": "git://git.kernel.org/pub/scm/utils/dtc/dtc.git",
+      "checksums": {},
+      "recipes": [
+        "dtc-native@1.5.1",
+        "python3-dtc-native@1.5.1"
+      ]
+    },
+    {
+      "path": "git2_git.kernel.org.pub.scm.utils.kernel.kmod.kmod.git.tar.gz",
+      "scheme": "git",
+      "url": "git://git.kernel.org/pub/scm/utils/kernel/kmod/kmod.git",
+      "checksums": {},
+      "recipes": [
+        "kmod@26",
+        "kmod-native@26"
+      ]
+    },
+    {
+      "path": "git2_git.pengutronix.de.git.tools.libsocketcan.git.tar.gz",
+      "scheme": "git",
+      "url": "git://git.pengutronix.de/git/tools/libsocketcan.git;protocol=git",
+      "checksums": {},
+      "recipes": [
+        "libsocketcan@0.0.11"
+      ]
+    },
+    {
+      "path": "git2_git.savannah.gnu.org.config.git.tar.gz",
+      "scheme": "git",
+      "url": "git://git.savannah.gnu.org/config.git",
+      "checksums": {},
+      "recipes": [
+        "gnu-config-native@20190501+gitAUTOINC+b98424c249"
+      ]
+    },
+    {
+      "path": "git2_git.yoctoproject.org.prelink-cross.git.tar.gz",
+      "scheme": "git",
+      "url": "git://git.yoctoproject.org/prelink-cross.git;branch=cross_prelink_staging",
+      "checksums": {},
+      "recipes": [
+        "prelink-native@1.0+gitAUTOINC+a853a5d715"
+      ]
+    },
+    {
+      "path": "git2_git.yoctoproject.org.pseudo.tar.gz",
+      "scheme": "git",
+      "url": "git://git.yoctoproject.org/pseudo",
+      "checksums": {},
+      "recipes": [
+        "pseudo-native@1.9.0+gitAUTOINC+060058bb29"
+      ]
+    },
+    {
+      "path": "git2_git.yoctoproject.org.ptest-runner2.tar.gz",
+      "scheme": "git",
+      "url": "git://git.yoctoproject.org/ptest-runner2",
+      "checksums": {},
+      "recipes": [
+        "ptest-runner@2.3.2+gitAUTOINC+7015e9199c"
+      ]
+    },
+    {
+      "path": "git2_git.yoctoproject.org.update-rc.d.tar.gz",
+      "scheme": "git",
+      "url": "git://git.yoctoproject.org/update-rc.d",
+      "checksums": {},
+      "recipes": [
+        "update-rc.d@0.8",
+        "update-rc.d-native@0.8"
+      ]
+    },
+    {
+      "path": "git2_git.yoctoproject.org.yocto-kernel-tools.git.tar.gz",
+      "scheme": "git",
+      "url": "git://git.yoctoproject.org/yocto-kernel-tools.git",
+      "checksums": {},
+      "recipes": [
+        "kern-tools-native@0.2+gitAUTOINC+bb6df0ef23"
+      ]
+    },
+    {
+      "path": "git2_github.com.Xilinx.embeddedsw.git.tar.gz",
+      "scheme": "git",
+      "url": "git://github.com/Xilinx/embeddedsw.git;protocol=https;branch=master-rel-2020.2",
+      "checksums": {},
+      "recipes": [
+        "fsbl@2020.2+gitAUTOINC+08b9f4304d"
+      ]
+    },
+    {
+      "path": "git2_github.com.Xilinx.qemu.git.tar.gz",
+      "scheme": "gitsm",
+      "url": "gitsm://github.com/Xilinx/qemu.git;protocol=https;branch=branch/xilinx-v2020.2",
+      "checksums": {
+        "md5sum": "cdf2b5ca52b9abac9bacb5842fa420f8",
+        "sha256sum": "656e60218689bdeec69903087fd7582d5d3e72238d02f4481d8dc6d79fd909c6"
+      },
+      "recipes": [
+        "qemu-xilinx-native@v5.1.0-xilinx-v2020.2+gitAUTOINC+7e3e3ae09a",
+        "qemu-xilinx-system-native@v5.1.0-xilinx-v2020.2+gitAUTOINC+7e3e3ae09a"
+      ]
+    },
+    {
+      "path": "git2_github.com.Xilinx.u-boot-xlnx.git.tar.gz",
+      "scheme": "git",
+      "url": "git://github.com/Xilinx/u-boot-xlnx.git;protocol=https;branch=xlnx_rebase_v2020.01",
+      "checksums": {},
+      "recipes": [
+        "u-boot-xlnx@v2020.01-xilinx-v2020.2+gitAUTOINC+bb4660c33a"
+      ]
+    },
+    {
+      "path": "git2_github.com.asciidoc.asciidoc-py3.tar.gz",
+      "scheme": "git",
+      "url": "git://github.com/asciidoc/asciidoc-py3;protocol=https",
+      "checksums": {},
+      "recipes": [
+        "asciidoc-native@8.6.9+py3-gitAUTOINC+618f6e6f6b"
+      ]
+    },
+    {
+      "path": "git2_github.com.besser82.libxcrypt.git.tar.gz",
+      "scheme": "git",
+      "url": "git://github.com/besser82/libxcrypt.git;branch=develop",
+      "checksums": {},
+      "recipes": [
+        "libxcrypt@4.4.8"
+      ]
+    },
+    {
+      "path": "git2_github.com.fedora-modularity.libmodulemd.tar.gz",
+      "scheme": "git",
+      "url": "git://github.com/fedora-modularity/libmodulemd;protocol=https",
+      "checksums": {},
+      "recipes": [
+        "libmodulemd-native@2.6.0"
+      ]
+    },
+    {
+      "path": "git2_github.com.file.file.git.tar.gz",
+      "scheme": "git",
+      "url": "git://github.com/file/file.git",
+      "checksums": {},
+      "recipes": [
+        "file@5.37",
+        "file-native@5.37"
+      ]
+    },
+    {
+      "path": "git2_github.com.jirka-h.haveged.git.tar.gz",
+      "scheme": "git",
+      "url": "git://github.com/jirka-h/haveged.git",
+      "checksums": {},
+      "recipes": [
+        "haveged@1.9.6"
+      ]
+    },
+    {
+      "path": "git2_github.com.kraj.localedef.tar.gz",
+      "scheme": "git",
+      "url": "git://github.com/kraj/localedef;branch=master;name=localedef;destsuffix=git/localedef",
+      "checksums": {},
+      "recipes": [
+        "cross-localedef-native@2.30"
+      ]
+    },
+    {
+      "path": "git2_github.com.linux-can.can-utils.git.tar.gz",
+      "scheme": "git",
+      "url": "git://github.com/linux-can/can-utils.git;protocol=git;branch=master",
+      "checksums": {},
+      "recipes": [
+        "can-utils@0.0+gitrAUTOINC+665d8699eb"
+      ]
+    },
+    {
+      "path": "git2_github.com.linuxcnc-ethercat.linuxcnc-ethercat.git.tar.gz",
+      "scheme": "git",
+      "url": "git://github.com/linuxcnc-ethercat/linuxcnc-ethercat.git;protocol=https;branch=master",
+      "checksums": {},
+      "recipes": [
+        "linuxcnc-ethercat@1.0+gitAUTOINC+de7e377f76"
+      ]
+    },
+    {
+      "path": "git2_github.com.nhorman.rng-tools.git.tar.gz",
+      "scheme": "git",
+      "url": "git://github.com/nhorman/rng-tools.git",
+      "checksums": {},
+      "recipes": [
+        "rng-tools@6.7"
+      ]
+    },
+    {
+      "path": "git2_github.com.ninja-build.ninja.git.tar.gz",
+      "scheme": "git",
+      "url": "git://github.com/ninja-build/ninja.git;branch=release",
+      "checksums": {},
+      "recipes": [
+        "ninja-native@1.9.0"
+      ]
+    },
+    {
+      "path": "git2_github.com.openSUSE.libsolv.git.tar.gz",
+      "scheme": "git",
+      "url": "git://github.com/openSUSE/libsolv.git",
+      "checksums": {},
+      "recipes": [
+        "libsolv-native@0.7.6"
+      ]
+    },
+    {
+      "path": "git2_github.com.rpm-software-management.createrepo_c.tar.gz",
+      "scheme": "git",
+      "url": "git://github.com/rpm-software-management/createrepo_c",
+      "checksums": {},
+      "recipes": [
+        "createrepo-c-native@0.15.0"
+      ]
+    },
+    {
+      "path": "git2_github.com.rpm-software-management.dnf.git.tar.gz",
+      "scheme": "git",
+      "url": "git://github.com/rpm-software-management/dnf.git",
+      "checksums": {},
+      "recipes": [
+        "dnf-native@4.2.2"
+      ]
+    },
+    {
+      "path": "git2_github.com.rpm-software-management.libcomps.git.tar.gz",
+      "scheme": "git",
+      "url": "git://github.com/rpm-software-management/libcomps.git",
+      "checksums": {},
+      "recipes": [
+        "libcomps-native@0.1.11"
+      ]
+    },
+    {
+      "path": "git2_github.com.rpm-software-management.libdnf.tar.gz",
+      "scheme": "git",
+      "url": "git://github.com/rpm-software-management/libdnf",
+      "checksums": {},
+      "recipes": [
+        "libdnf-native@0.28.1"
+      ]
+    },
+    {
+      "path": "git2_github.com.rpm-software-management.librepo.git.tar.gz",
+      "scheme": "git",
+      "url": "git://github.com/rpm-software-management/librepo.git",
+      "checksums": {},
+      "recipes": [
+        "librepo-native@1.10.5"
+      ]
+    },
+    {
+      "path": "git2_github.com.rpm-software-management.rpm.tar.gz",
+      "scheme": "git",
+      "url": "git://github.com/rpm-software-management/rpm;branch=rpm-4.14.x",
+      "checksums": {},
+      "recipes": [
+        "rpm-native@4.14.2.1"
+      ]
+    },
+    {
+      "path": "git2_github.com.smuellerDD.jitterentropy-library.git.tar.gz",
+      "scheme": "git",
+      "url": "git://github.com/smuellerDD/jitterentropy-library.git",
+      "checksums": {},
+      "recipes": [
+        "libjitterentropy@2.1.2"
+      ]
+    },
+    {
+      "path": "git2_github.com.thkukuk.libnsl.tar.gz",
+      "scheme": "git",
+      "url": "git://github.com/thkukuk/libnsl",
+      "checksums": {},
+      "recipes": [
+        "libnsl2@1.2.0+gitAUTOINC+37c5ffe303",
+        "libnsl2-native@1.2.0+gitAUTOINC+37c5ffe303"
+      ]
+    },
+    {
+      "path": "git2_github.com.xilinx.device-tree-xlnx.git.tar.gz",
+      "scheme": "git",
+      "url": "git://github.com/xilinx/device-tree-xlnx.git;protocol=https;branch=master",
+      "checksums": {},
+      "recipes": [
+        "device-tree@xilinx-v2020.2+gitAUTOINC+f725aaecff"
+      ]
+    },
+    {
+      "path": "git2_gitlab.com.etherlab.org.ethercat.git.tar.gz",
+      "scheme": "git",
+      "url": "git://gitlab.com/etherlab.org/ethercat.git;protocol=https;branch=stable-1.6",
+      "checksums": {},
+      "recipes": [
+        "ethercat-master@1.6.9+gitAUTOINC+b709e58147"
+      ]
+    },
+    {
+      "path": "git2_gitlab.gnome.org.GNOME.gnome-desktop-testing.git.tar.gz",
+      "scheme": "git",
+      "url": "git://gitlab.gnome.org/GNOME/gnome-desktop-testing.git;protocol=http",
+      "checksums": {},
+      "recipes": [
+        "gnome-desktop-testing@2018.1"
+      ]
+    },
+    {
+      "path": "git2_salsa.debian.org.debian.ca-certificates.git.tar.gz",
+      "scheme": "git",
+      "url": "git://salsa.debian.org/debian/ca-certificates.git;protocol=https",
+      "checksums": {},
+      "recipes": [
+        "ca-certificates@20190110"
+      ]
+    },
+    {
+      "path": "git2_salsa.debian.org.debian.ncurses.git.tar.gz",
+      "scheme": "git",
+      "url": "git://salsa.debian.org/debian/ncurses.git;protocol=https",
+      "checksums": {},
+      "recipes": [
+        "ncurses@6.1+20190803",
+        "ncurses-native@6.1+20190803"
+      ]
+    },
+    {
+      "path": "git2_sourceware.org.git.binutils-gdb.git.tar.gz",
+      "scheme": "git",
+      "url": "git://sourceware.org/git/binutils-gdb.git;branch=binutils-2_32-branch;protocol=git",
+      "checksums": {},
+      "recipes": [
+        "binutils-cross-arm@2.32.0",
+        "binutils-native@2.32.0"
+      ]
+    },
+    {
+      "path": "git2_sourceware.org.git.glibc.git.tar.gz",
+      "scheme": "git",
+      "url": "git://sourceware.org/git/glibc.git;branch=release/2.30/master;name=glibc",
+      "checksums": {},
+      "recipes": [
+        "cross-localedef-native@2.30",
+        "glibc@2.30"
+      ]
+    },
+    {
+      "path": "glib-2.60.7.tar.xz",
+      "scheme": "https",
+      "url": "https://ftp.gnome.org/pub/GNOME/sources/glib/2.60/glib-2.60.7.tar.xz",
+      "checksums": {
+        "md5sum": "f036f78a7fca330d9f7d939fcf794bde",
+        "sha256sum": "8b12c0af569afd3b71200556ad751bad4cf4bf7bc4b5f880638459a42ca86310"
+      },
+      "recipes": [
+        "glib-2.0@2.60.7",
+        "glib-2.0-native@2.60.7"
+      ]
+    },
+    {
+      "path": "gmp-6.1.2.tar.bz2",
+      "scheme": "https",
+      "url": "https://gmplib.org/download/gmp/gmp-6.1.2.tar.bz2",
+      "checksums": {
+        "md5sum": "8ddbb26dc3bd4e2302984debba1406a5",
+        "sha256sum": "5275bb04f4863a13516b2f39392ac5e272f5e1bb8057b18aec1c9b79d73d8fb2"
+      },
+      "recipes": [
+        "gmp@6.1.2",
+        "gmp-native@6.1.2"
+      ]
+    },
+    {
+      "path": "gnutls-3.6.8.tar.xz",
+      "scheme": "https",
+      "url": "https://www.gnupg.org/ftp/gcrypt/gnutls/v3.6/gnutls-3.6.8.tar.xz",
+      "checksums": {
+        "md5sum": "9dcf0aa45d1a42e1b3ca5d39ec7c61a8",
+        "sha256sum": "aa81944e5635de981171772857e72be231a7e0f559ae0292d2737de475383e83"
+      },
+      "recipes": [
+        "gnutls@3.6.8"
+      ]
+    },
+    {
+      "path": "gobject-introspection-1.60.2.tar.xz",
+      "scheme": "https",
+      "url": "https://ftp.gnome.org/pub/GNOME/sources/gobject-introspection/1.60/gobject-introspection-1.60.2.tar.xz",
+      "checksums": {
+        "md5sum": "57c1c5dcf3d0a9aa73d06c2d5e6960d7",
+        "sha256sum": "ffdfe2368fb2e34a547898b01aac0520d52d8627fdeb1c306559bcb503ab5e9c"
+      },
+      "recipes": [
+        "gobject-introspection@1.60.2",
+        "gobject-introspection-native@1.60.2"
+      ]
+    },
+    {
+      "path": "gperf-3.1.tar.gz",
+      "scheme": "https",
+      "url": "https://ftp.gnu.org/gnu/gperf/gperf-3.1.tar.gz",
+      "checksums": {
+        "md5sum": "9e251c0a618ad0824b51117d5d9db87e",
+        "sha256sum": "588546b945bba4b70b6a3a616e80b4ab466e3f33024a352fc2198112cdbb3ae2"
+      },
+      "recipes": [
+        "gperf-native@3.1"
+      ]
+    },
+    {
+      "path": "gpgme-1.13.1.tar.bz2",
+      "scheme": "https",
+      "url": "https://www.gnupg.org/ftp/gcrypt/gpgme/gpgme-1.13.1.tar.bz2",
+      "checksums": {
+        "md5sum": "198f0a908ec3cd8f0ce9a4f3a4489645",
+        "sha256sum": "c4e30b227682374c23cddc7fdb9324a99694d907e79242a25a4deeedb393be46"
+      },
+      "recipes": [
+        "gpgme-native@1.13.1"
+      ]
+    },
+    {
+      "path": "grep-3.3.tar.xz",
+      "scheme": "https",
+      "url": "https://ftp.gnu.org/gnu/grep/grep-3.3.tar.xz",
+      "checksums": {
+        "md5sum": "05d0718a1b7cc706a4bdf8115363f1ed",
+        "sha256sum": "b960541c499619efd6afe1fa795402e4733c8e11ebf9fafccc0bb4bccdc5b514"
+      },
+      "recipes": [
+        "grep@3.3"
+      ]
+    },
+    {
+      "path": "gtk-doc-1.31.tar.xz",
+      "scheme": "https",
+      "url": "https://ftp.gnome.org/pub/GNOME/sources/gtk-doc/1.31/gtk-doc-1.31.tar.xz;name=archive",
+      "checksums": {
+        "md5sum": "6239713011369a4fbdc7619350403772",
+        "sha256sum": "a51687956d0377ac70904d03fdc73c9e116589b4a01453fa92162442b3657011"
+      },
+      "recipes": [
+        "gtk-doc-native@1.31"
+      ]
+    },
+    {
+      "path": "gzip-1.10.tar.gz",
+      "scheme": "https",
+      "url": "https://ftp.gnu.org/gnu/gzip/gzip-1.10.tar.gz",
+      "checksums": {
+        "md5sum": "cf9ee51aff167ff69844d5d7d71c8b20",
+        "sha256sum": "c91f74430bf7bc20402e1f657d0b252cb80aa66ba333a25704512af346633c68"
+      },
+      "recipes": [
+        "gzip@1.10"
+      ]
+    },
+    {
+      "path": "i2c-tools-4.1.tar.gz",
+      "scheme": "https",
+      "url": "https://cdn.kernel.org/pub/software/utils/i2c-tools/i2c-tools-4.1.tar.gz",
+      "checksums": {
+        "md5sum": "3536237a6b51fb10caacdc3b8a496237",
+        "sha256sum": "ef8f77afc70e7dbfd1171bfeae87a8a7f10074829370ce8d9ccd585a014e0073"
+      },
+      "recipes": [
+        "i2c-tools@4.1"
+      ]
+    },
+    {
+      "path": "icu4c-64_2-src.tgz",
+      "scheme": "http",
+      "url": "http://download.icu-project.org/files/icu4c/64.2/icu4c-64_2-src.tgz",
+      "checksums": {
+        "md5sum": "a3d18213beec454e3cdec9a3116d6b05",
+        "sha256sum": "627d5d8478e6d96fc8c90fed4851239079a561a6a8b9e48b0892f24e82d31d6c"
+      },
+      "recipes": [
+        "icu@64.2",
+        "icu-native@64.2"
+      ]
+    },
+    {
+      "path": "iniparse-0.4.tar.gz",
+      "scheme": "https",
+      "url": "https://files.pythonhosted.org/packages/source/i/iniparse/iniparse-0.4.tar.gz",
+      "checksums": {
+        "md5sum": "5e573e9e9733d97623881ce9bbe5eca6",
+        "sha256sum": "abc1ee12d2cfb2506109072d6c21e40b6c75a3fe90a9c924327d80bc0d99c054"
+      },
+      "recipes": [
+        "python3-iniparse-native@0.4"
+      ]
+    },
+    {
+      "path": "intltool-0.51.0.tar.gz",
+      "scheme": "http",
+      "url": "http://launchpad.net/intltool/trunk/0.51.0/+download/intltool-0.51.0.tar.gz",
+      "checksums": {
+        "md5sum": "12e517cac2b57a0121cda351570f1e63",
+        "sha256sum": "67c74d94196b153b774ab9f89b2fa6c6ba79352407037c8c14d5aeb334e959cd"
+      },
+      "recipes": [
+        "intltool-native@0.51.0"
+      ]
+    },
+    {
+      "path": "iproute2-5.2.0.tar.xz",
+      "scheme": "https",
+      "url": "https://cdn.kernel.org/pub/linux/utils/net/iproute2/iproute2-5.2.0.tar.xz",
+      "checksums": {
+        "md5sum": "0cb2736e7bc2f56254a363d3d23703b7",
+        "sha256sum": "a5b95dec26353fc71dba9bb403e9343fad2a06bd69fb154a22a2aa2914f74da8"
+      },
+      "recipes": [
+        "iproute2@5.2.0"
+      ]
+    },
+    {
+      "path": "iptables-1.8.3.tar.bz2",
+      "scheme": "http",
+      "url": "http://netfilter.org/projects/iptables/files/iptables-1.8.3.tar.bz2",
+      "checksums": {
+        "md5sum": "29de711d15c040c402cf3038c69ff513",
+        "sha256sum": "a23cac034181206b4545f4e7e730e76e08b5f3dd78771ba9645a6756de9cdd80"
+      },
+      "recipes": [
+        "iptables@1.8.3"
+      ]
+    },
+    {
+      "path": "json-c-0.13.1.tar.gz",
+      "scheme": "https",
+      "url": "https://s3.amazonaws.com/json-c_releases/releases/json-c-0.13.1.tar.gz",
+      "checksums": {
+        "md5sum": "04969ad59cc37bddd83741a08b98f350",
+        "sha256sum": "b87e608d4d3f7bfdd36ef78d56d53c74e66ab278d318b71e6002a369d36f4873"
+      },
+      "recipes": [
+        "json-c-native@0.13.1"
+      ]
+    },
+    {
+      "path": "less-551.tar.gz",
+      "scheme": "http",
+      "url": "http://www.greenwoodsoftware.com/less/less-551.tar.gz",
+      "checksums": {
+        "md5sum": "4ad4408b06d7a6626a055cb453f36819",
+        "sha256sum": "ff165275859381a63f19135a8f1f6c5a194d53ec3187f94121ecd8ef0795fe3d"
+      },
+      "recipes": [
+        "less@551"
+      ]
+    },
+    {
+      "path": "libICE-1.0.10.tar.bz2",
+      "scheme": "https",
+      "url": "https://www.x.org/releases//individual/lib/libICE-1.0.10.tar.bz2",
+      "checksums": {
+        "md5sum": "76d77499ee7120a56566891ca2c0dbcf",
+        "sha256sum": "6f86dce12cf4bcaf5c37dddd8b1b64ed2ddf1ef7b218f22b9942595fb747c348"
+      },
+      "recipes": [
+        "libice@1.0.10"
+      ]
+    },
+    {
+      "path": "libSM-1.2.3.tar.bz2",
+      "scheme": "https",
+      "url": "https://www.x.org/releases//individual/lib/libSM-1.2.3.tar.bz2",
+      "checksums": {
+        "md5sum": "87c7fad1c1813517979184c8ccd76628",
+        "sha256sum": "2d264499dcb05f56438dee12a1b4b71d76736ce7ba7aa6efbf15ebb113769cbb"
+      },
+      "recipes": [
+        "libsm@1.2.3"
+      ]
+    },
+    {
+      "path": "libX11-1.6.8.tar.bz2",
+      "scheme": "https",
+      "url": "https://www.x.org/releases//individual/lib/libX11-1.6.8.tar.bz2",
+      "checksums": {
+        "md5sum": "c5fa5a86a20e3591bed6c046498d4b8f",
+        "sha256sum": "b289a845c189e251e0e884cc0f9269bbe97c238df3741e854ec4c17c21e473d5"
+      },
+      "recipes": [
+        "libx11@1.6.8"
+      ]
+    },
+    {
+      "path": "libXau-1.0.9.tar.bz2",
+      "scheme": "https",
+      "url": "https://www.x.org/releases//individual/lib/libXau-1.0.9.tar.bz2",
+      "checksums": {
+        "md5sum": "c5f16288f2da9f071b29111d68797480",
+        "sha256sum": "ccf8cbf0dbf676faa2ea0a6d64bcc3b6746064722b606c8c52917ed00dcb73ec"
+      },
+      "recipes": [
+        "libxau@1.0.9"
+      ]
+    },
+    {
+      "path": "libXdamage-1.1.5.tar.bz2",
+      "scheme": "https",
+      "url": "https://www.x.org/releases//individual/lib/libXdamage-1.1.5.tar.bz2",
+      "checksums": {
+        "md5sum": "e3f554267a7a04b042dc1f6352bd6d99",
+        "sha256sum": "b734068643cac3b5f3d2c8279dd366b5bf28c7219d9e9d8717e1383995e0ea45"
+      },
+      "recipes": [
+        "libxdamage@1.1.5"
+      ]
+    },
+    {
+      "path": "libXdmcp-1.1.3.tar.bz2",
+      "scheme": "https",
+      "url": "https://www.x.org/releases//individual/lib/libXdmcp-1.1.3.tar.bz2",
+      "checksums": {
+        "md5sum": "115c5c12ecce0e749cd91d999a5fd160",
+        "sha256sum": "20523b44aaa513e17c009e873ad7bbc301507a3224c232610ce2e099011c6529"
+      },
+      "recipes": [
+        "libxdmcp@1.1.3"
+      ]
+    },
+    {
+      "path": "libXext-1.3.4.tar.bz2",
+      "scheme": "https",
+      "url": "https://www.x.org/releases//individual/lib/libXext-1.3.4.tar.bz2",
+      "checksums": {
+        "md5sum": "f5b48bb76ba327cd2a8dc7a383532a95",
+        "sha256sum": "59ad6fcce98deaecc14d39a672cf218ca37aba617c9a0f691cac3bcd28edf82b"
+      },
+      "recipes": [
+        "libxext@1.3.4"
+      ]
+    },
+    {
+      "path": "libXfixes-5.0.3.tar.bz2",
+      "scheme": "https",
+      "url": "https://www.x.org/releases//individual/lib/libXfixes-5.0.3.tar.bz2",
+      "checksums": {
+        "md5sum": "07e01e046a0215574f36a3aacb148be0",
+        "sha256sum": "de1cd33aff226e08cefd0e6759341c2c8e8c9faf8ce9ac6ec38d43e287b22ad6"
+      },
+      "recipes": [
+        "libxfixes@5.0.3"
+      ]
+    },
+    {
+      "path": "libXrandr-1.5.2.tar.bz2",
+      "scheme": "https",
+      "url": "https://www.x.org/releases//individual/lib/libXrandr-1.5.2.tar.bz2",
+      "checksums": {
+        "md5sum": "18f3b20d522f45e4dadd34afb5bea048",
+        "sha256sum": "8aea0ebe403d62330bb741ed595b53741acf45033d3bda1792f1d4cc3daee023"
+      },
+      "recipes": [
+        "libxrandr@1.5.2"
+      ]
+    },
+    {
+      "path": "libXrender-0.9.10.tar.bz2",
+      "scheme": "https",
+      "url": "https://www.x.org/releases//individual/lib/libXrender-0.9.10.tar.bz2",
+      "checksums": {
+        "md5sum": "802179a76bded0b658f4e9ec5e1830a4",
+        "sha256sum": "c06d5979f86e64cabbde57c223938db0b939dff49fdb5a793a1d3d0396650949"
+      },
+      "recipes": [
+        "libxrender@0.9.10"
+      ]
+    },
+    {
+      "path": "libXxf86vm-1.1.4.tar.bz2",
+      "scheme": "https",
+      "url": "https://www.x.org/releases//individual/lib/libXxf86vm-1.1.4.tar.bz2",
+      "checksums": {
+        "md5sum": "298b8fff82df17304dfdb5fe4066fe3a",
+        "sha256sum": "afee27f93c5f31c0ad582852c0fb36d50e4de7cd585fcf655e278a633d85cd57"
+      },
+      "recipes": [
+        "libxxf86vm@1.1.4"
+      ]
+    },
+    {
+      "path": "libarchive-3.4.0.tar.gz",
+      "scheme": "http",
+      "url": "http://libarchive.org/downloads/libarchive-3.4.0.tar.gz",
+      "checksums": {
+        "md5sum": "6046396255bd7cf6d0f6603a9bda39ac",
+        "sha256sum": "8643d50ed40c759f5412a3af4e353cffbce4fdf3b5cf321cb72cacf06b2d825e"
+      },
+      "recipes": [
+        "libarchive-native@3.4.0"
+      ]
+    },
+    {
+      "path": "libassuan-2.5.3.tar.bz2",
+      "scheme": "https",
+      "url": "https://www.gnupg.org/ftp/gcrypt/libassuan/libassuan-2.5.3.tar.bz2",
+      "checksums": {
+        "md5sum": "226c504ea78a232224bf3b6846b3adb9",
+        "sha256sum": "91bcb0403866b4e7c4bc1cc52ed4c364a9b5414b3994f718c70303f7f765e702"
+      },
+      "recipes": [
+        "libassuan-native@2.5.3"
+      ]
+    },
+    {
+      "path": "libcap-2.27.tar.xz",
+      "scheme": "https",
+      "url": "https://cdn.kernel.org/pub/linux/libs/security/linux-privs/libcap2/libcap-2.27.tar.xz",
+      "checksums": {
+        "md5sum": "2e8f9fab32eb5ccb37969fe317fd17aa",
+        "sha256sum": "dac1792d0118bee6aae6ba7fb93ff1602c6a9bda812fd63916eee1435b9c486a"
+      },
+      "recipes": [
+        "libcap@2.27",
+        "libcap-native@2.27"
+      ]
+    },
+    {
+      "path": "libcap-ng-0.7.9.tar.gz",
+      "scheme": "http",
+      "url": "http://people.redhat.com/sgrubb/libcap-ng/libcap-ng-0.7.9.tar.gz",
+      "checksums": {
+        "md5sum": "2398d695508fab9ce33668c53a89b0e9",
+        "sha256sum": "4a1532bcf3731aade40936f6d6a586ed5a66ca4c7455e1338d1f6c3e09221328"
+      },
+      "recipes": [
+        "libcap-ng@0.7.9",
+        "libcap-ng-native@0.7.9"
+      ]
+    },
+    {
+      "path": "libcroco-0.6.13.tar.xz",
+      "scheme": "https",
+      "url": "https://ftp.gnome.org/pub/GNOME/sources/libcroco/0.6/libcroco-0.6.13.tar.xz;name=archive",
+      "checksums": {
+        "md5sum": "c80c5a8385011a0260dce6bd0da93dce",
+        "sha256sum": "767ec234ae7aa684695b3a735548224888132e063f92db585759b422570621d4"
+      },
+      "recipes": [
+        "libcroco@0.6.13"
+      ]
+    },
+    {
+      "path": "libdrm-2.4.99.tar.bz2",
+      "scheme": "http",
+      "url": "http://dri.freedesktop.org/libdrm/libdrm-2.4.99.tar.bz2",
+      "checksums": {
+        "md5sum": "72539626815b35159a63d45bc4c14ee6",
+        "sha256sum": "4dbf539c7ed25dbb2055090b77ab87508fc46be39a9379d15fed4b5517e1da5e"
+      },
+      "recipes": [
+        "libdrm@2.4.99"
+      ]
+    },
+    {
+      "path": "libffi-3.3-rc0.tar.gz",
+      "scheme": "https",
+      "url": "https://github.com/libffi/libffi/releases/download/v3.3-rc0/libffi-3.3-rc0.tar.gz",
+      "checksums": {
+        "md5sum": "8d2a82a78faf10a5e53c27d986e8f04e",
+        "sha256sum": "403d67aabf1c05157855ea2b1d9950263fb6316536c8c333f5b9ab1eb2f20ecf"
+      },
+      "recipes": [
+        "libffi@3.3~rc0",
+        "libffi-native@3.3~rc0"
+      ]
+    },
+    {
+      "path": "libgcrypt-1.8.4.tar.bz2",
+      "scheme": "https",
+      "url": "https://www.gnupg.org/ftp/gcrypt/libgcrypt/libgcrypt-1.8.4.tar.bz2",
+      "checksums": {
+        "md5sum": "fbfdaebbbc6d7e5fbbf6ffdb3e139573",
+        "sha256sum": "f638143a0672628fde0cad745e9b14deb85dffb175709cacc1f4fe24b93f2227"
+      },
+      "recipes": [
+        "libgcrypt@1.8.4",
+        "libgcrypt-native@1.8.4"
+      ]
+    },
+    {
+      "path": "libgpg-error-1.36.tar.bz2",
+      "scheme": "https",
+      "url": "https://www.gnupg.org/ftp/gcrypt/libgpg-error/libgpg-error-1.36.tar.bz2",
+      "checksums": {
+        "md5sum": "eff437f397e858a9127b76c0d87fa5ed",
+        "sha256sum": "babd98437208c163175c29453f8681094bcaf92968a15cafb1a276076b33c97c"
+      },
+      "recipes": [
+        "libgpg-error@1.36",
+        "libgpg-error-native@1.36"
+      ]
+    },
+    {
+      "path": "libical-3.0.6.tar.gz",
+      "scheme": "https",
+      "url": "https://github.com/libical/libical/releases/download/v3.0.6/libical-3.0.6.tar.gz",
+      "checksums": {
+        "md5sum": "463a59244c6767b8e67b29379405e297",
+        "sha256sum": "5c8a21c2b732ece4a33e5c862970b4f35a8548bbcda50de5695f6fc211ac4d97"
+      },
+      "recipes": [
+        "libical@3.0.6"
+      ]
+    },
+    {
+      "path": "libidn2-2.2.0.tar.gz",
+      "scheme": "https",
+      "url": "https://ftp.gnu.org/gnu/libidn/libidn2-2.2.0.tar.gz",
+      "checksums": {
+        "md5sum": "b846d4d20e22b99d6f7387bb66e00a1f",
+        "sha256sum": "fc734732b506d878753ec6606982bf7b936e868c25c30ddb0d83f7d7056381fe"
+      },
+      "recipes": [
+        "libidn2@2.2.0"
+      ]
+    },
+    {
+      "path": "libmnl-1.0.4.tar.bz2",
+      "scheme": "https",
+      "url": "https://netfilter.org/projects/libmnl/files/libmnl-1.0.4.tar.bz2;name=tar",
+      "checksums": {
+        "md5sum": "be9b4b5328c6da1bda565ac5dffadb2d",
+        "sha256sum": "171f89699f286a5854b72b91d06e8f8e3683064c5901fb09d954a9ab6f551f81"
+      },
+      "recipes": [
+        "libmnl@1.0.4"
+      ]
+    },
+    {
+      "path": "libnl-3.5.0.tar.gz",
+      "scheme": "https",
+      "url": "https://github.com/thom311/libnl/releases/download/libnl3_5_0/libnl-3.5.0.tar.gz",
+      "checksums": {
+        "md5sum": "74ba57b1b1d6f9f92268aa8141d8e8e4",
+        "sha256sum": "352133ec9545da76f77e70ccb48c9d7e5324d67f6474744647a7ed382b5e05fa"
+      },
+      "recipes": [
+        "libnl@3.5.0"
+      ]
+    },
+    {
+      "path": "libpcap-1.9.1.tar.gz",
+      "scheme": "https",
+      "url": "https://www.tcpdump.org/release/libpcap-1.9.1.tar.gz",
+      "checksums": {
+        "md5sum": "21af603d9a591c7d96a6457021d84e6c",
+        "sha256sum": "635237637c5b619bcceba91900666b64d56ecb7be63f298f601ec786ce087094"
+      },
+      "recipes": [
+        "libpcap@1.9.1"
+      ]
+    },
+    {
+      "path": "libpciaccess-0.16.tar.bz2",
+      "scheme": "https",
+      "url": "https://www.x.org/releases//individual/lib/libpciaccess-0.16.tar.bz2",
+      "checksums": {
+        "md5sum": "b34e2cbdd6aa8f9cc3fa613fd401a6d6",
+        "sha256sum": "214c9d0d884fdd7375ec8da8dcb91a8d3169f263294c9a90c575bf1938b9f489"
+      },
+      "recipes": [
+        "libpciaccess@0.16"
+      ]
+    },
+    {
+      "path": "libpng-1.6.37.tar.xz",
+      "scheme": "https",
+      "url": "https://downloads.sourceforge.net/project/libpng/libpng16/1.6.37/libpng-1.6.37.tar.xz",
+      "checksums": {
+        "md5sum": "015e8e15db1eecde5f2eb9eb5b6e59e9",
+        "sha256sum": "505e70834d35383537b6491e7ae8641f1a4bed1876dbfe361201fc80868d88ca"
+      },
+      "recipes": [
+        "libpng@1.6.37",
+        "libpng-native@1.6.37"
+      ]
+    },
+    {
+      "path": "libpthread-stubs-0.4.tar.bz2",
+      "scheme": "http",
+      "url": "http://xcb.freedesktop.org/dist/libpthread-stubs-0.4.tar.bz2",
+      "checksums": {
+        "md5sum": "48c1544854a94db0e51499cc3afd797f",
+        "sha256sum": "e4d05911a3165d3b18321cc067fdd2f023f06436e391c6a28dff618a78d2e733"
+      },
+      "recipes": [
+        "libpthread-stubs@0.4"
+      ]
+    },
+    {
+      "path": "libtirpc-1.1.4.tar.bz2",
+      "scheme": "https",
+      "url": "https://downloads.sourceforge.net/libtirpc/libtirpc-1.1.4.tar.bz2",
+      "checksums": {
+        "md5sum": "f5d2a623e9dfbd818d2f3f3a4a878e3a",
+        "sha256sum": "2ca529f02292e10c158562295a1ffd95d2ce8af97820e3534fe1b0e3aec7561d"
+      },
+      "recipes": [
+        "libtirpc@1.1.4",
+        "libtirpc-native@1.1.4"
+      ]
+    },
+    {
+      "path": "libtool-2.4.6.tar.gz",
+      "scheme": "https",
+      "url": "https://ftp.gnu.org/gnu/libtool/libtool-2.4.6.tar.gz",
+      "checksums": {
+        "md5sum": "addf44b646ddb4e3919805aa88fa7c5e",
+        "sha256sum": "e3bd4d5d3d025a36c21dd6af7ea818a2afcd4dfc1ea5a17b39d7854bcd0c06e3"
+      },
+      "recipes": [
+        "libtool@2.4.6",
+        "libtool-cross@2.4.6",
+        "libtool-native@2.4.6"
+      ]
+    },
+    {
+      "path": "libunistring-0.9.10.tar.gz",
+      "scheme": "https",
+      "url": "https://ftp.gnu.org/gnu/libunistring/libunistring-0.9.10.tar.gz",
+      "checksums": {
+        "md5sum": "0d3274e9838396b12200f8b54ddaf43b",
+        "sha256sum": "a82e5b333339a88ea4608e4635479a1cfb2e01aafb925e1290b65710d43f610b"
+      },
+      "recipes": [
+        "libunistring@0.9.10"
+      ]
+    },
+    {
+      "path": "libxcb-1.13.1.tar.bz2",
+      "scheme": "http",
+      "url": "http://xcb.freedesktop.org/dist/libxcb-1.13.1.tar.bz2",
+      "checksums": {
+        "md5sum": "f33cdfc67346f7217a9326c0d8679975",
+        "sha256sum": "a89fb7af7a11f43d2ce84a844a4b38df688c092bf4b67683aef179cdf2a647c4"
+      },
+      "recipes": [
+        "libxcb@1.13.1"
+      ]
+    },
+    {
+      "path": "libxml2-2.9.9.tar.gz",
+      "scheme": "http",
+      "url": "http://www.xmlsoft.org/sources/libxml2-2.9.9.tar.gz;name=libtar",
+      "checksums": {
+        "md5sum": "c04a5a0a042eaa157e8e8c9eabe76bd6",
+        "sha256sum": "94fb70890143e3c6549f265cee93ec064c80a84c42ad0f23e85ee1fd6540a871"
+      },
+      "recipes": [
+        "libxml2@2.9.9",
+        "libxml2-native@2.9.9"
+      ]
+    },
+    {
+      "path": "libxshmfence-1.3.tar.bz2",
+      "scheme": "https",
+      "url": "https://www.x.org/releases//individual/lib/libxshmfence-1.3.tar.bz2",
+      "checksums": {
+        "md5sum": "42dda8016943dc12aff2c03a036e0937",
+        "sha256sum": "b884300d26a14961a076fbebc762a39831cb75f92bed5ccf9836345b459220c7"
+      },
+      "recipes": [
+        "libxshmfence@1.3"
+      ]
+    },
+    {
+      "path": "libxslt-1.1.33.tar.gz",
+      "scheme": "http",
+      "url": "http://xmlsoft.org/sources/libxslt-1.1.33.tar.gz",
+      "checksums": {
+        "md5sum": "b3bd254a03e46d58f8ad1e4559cd2c2f",
+        "sha256sum": "8e36605144409df979cab43d835002f63988f3dc94d5d3537c12796db90e38c8"
+      },
+      "recipes": [
+        "libxslt-native@1.1.33"
+      ]
+    },
+    {
+      "path": "linux-5.2.tar.xz",
+      "scheme": "https",
+      "url": "https://cdn.kernel.org/pub/linux/kernel/v5.x/linux-5.2.tar.xz",
+      "checksums": {
+        "md5sum": "ddf994de00d7b18395886dd9b30b9262",
+        "sha256sum": "54ad66f672e1a831b574f5e704e8a05f1e6180a8245d4bdd811208a6cb0ac1e7"
+      },
+      "recipes": [
+        "linux-libc-headers@5.2"
+      ]
+    },
+    {
+      "path": "lsof_4.91.tar.bz2",
+      "scheme": "http",
+      "url": "http://www.mirrorservice.org/sites/lsof.itap.purdue.edu/pub/tools/unix/lsof/lsof_4.91.tar.bz2",
+      "checksums": {
+        "md5sum": "148ed410cb52e08c2adc0c60f480f11f",
+        "sha256sum": "c9da946a525fbf82ff80090b6d1879c38df090556f3fe0e6d782cb44172450a3"
+      },
+      "recipes": [
+        "lsof@4.91"
+      ]
+    },
+    {
+      "path": "lzo-2.10.tar.gz",
+      "scheme": "http",
+      "url": "http://www.oberhumer.com/opensource/lzo/download/lzo-2.10.tar.gz",
+      "checksums": {
+        "md5sum": "39d3f3f9c55c87b1e5d6888e1420f4b5",
+        "sha256sum": "c0f892943208266f9b6543b3ae308fab6284c5c90e627931446fb49b4221a072"
+      },
+      "recipes": [
+        "lzo@2.10",
+        "lzo-native@2.10"
+      ]
+    },
+    {
+      "path": "lzop-1.04.tar.gz",
+      "scheme": "http",
+      "url": "http://www.lzop.org/download/lzop-1.04.tar.gz",
+      "checksums": {
+        "md5sum": "271eb10fde77a0a96b9cbf745e719ddf",
+        "sha256sum": "7e72b62a8a60aff5200a047eea0773a8fb205caf7acbe1774d95147f305a2f41"
+      },
+      "recipes": [
+        "lzop-native@1.04"
+      ]
+    },
+    {
+      "path": "m4-1.4.18.tar.gz",
+      "scheme": "https",
+      "url": "https://ftp.gnu.org/gnu/m4/m4-1.4.18.tar.gz",
+      "checksums": {
+        "md5sum": "a077779db287adf4e12a035029002d28",
+        "sha256sum": "ab2633921a5cd38e48797bf5521ad259bdc4b979078034a3b790d7fec5493fab"
+      },
+      "recipes": [
+        "m4@1.4.18",
+        "m4-native@1.4.18"
+      ]
+    },
+    {
+      "path": "make-4.2.1.tar.bz2",
+      "scheme": "https",
+      "url": "https://ftp.gnu.org/gnu/make/make-4.2.1.tar.bz2",
+      "checksums": {
+        "md5sum": "15b012617e7c44c0ed482721629577ac",
+        "sha256sum": "d6e262bf3601b42d2b1e4ef8310029e1dcf20083c5446b4b7aa67081fdffc589"
+      },
+      "recipes": [
+        "make@4.2.1",
+        "make-native@4.2.1"
+      ]
+    },
+    {
+      "path": "makedepend-1.0.6.tar.gz",
+      "scheme": "https",
+      "url": "https://www.x.org/releases//individual/util/makedepend-1.0.6.tar.gz",
+      "checksums": {
+        "md5sum": "8a583055c84914060c35b6c2f963fc07",
+        "sha256sum": "845f6708fc850bf53f5b1d0fb4352c4feab3949f140b26f71b22faba354c3365"
+      },
+      "recipes": [
+        "makedepend-native@1.0.6"
+      ]
+    },
+    {
+      "path": "mdadm-4.1.tar.xz",
+      "scheme": "https",
+      "url": "https://cdn.kernel.org/pub/linux/utils/raid/mdadm/mdadm-4.1.tar.xz",
+      "checksums": {
+        "md5sum": "51bf3651bd73a06c413a2f964f299598",
+        "sha256sum": "ab7688842908d3583a704d491956f31324c3a5fc9f6a04653cb75d19f1934f4a"
+      },
+      "recipes": [
+        "mdadm@4.1"
+      ]
+    },
+    {
+      "path": "mesa-19.1.6.tar.xz",
+      "scheme": "https",
+      "url": "https://mesa.freedesktop.org/archive/mesa-19.1.6.tar.xz",
+      "checksums": {
+        "md5sum": "7dbb40b8d10e89bee0a5bfc85350647b",
+        "sha256sum": "2a369b7b48545c6486e7e44913ad022daca097c8bd937bf30dcf3f17a94d3496"
+      },
+      "recipes": [
+        "mesa@19.1.6"
+      ]
+    },
+    {
+      "path": "meson-0.51.2.tar.gz",
+      "scheme": "https",
+      "url": "https://github.com/mesonbuild/meson/releases/download/0.51.2/meson-0.51.2.tar.gz",
+      "checksums": {
+        "md5sum": "d46c4a8e3cfd27f90e2c6fe4a69e574b",
+        "sha256sum": "23688f0fc90be623d98e80e1defeea92bbb7103bf9336a5f5b9865d36e892d76"
+      },
+      "recipes": [
+        "meson-native@0.51.2"
+      ]
+    },
+    {
+      "path": "mklibs_0.1.44.tar.xz",
+      "scheme": "http",
+      "url": "http://snapshot.debian.org/archive/debian/20180828T214102Z/pool/main/m/mklibs/mklibs_0.1.44.tar.xz",
+      "checksums": {
+        "md5sum": "6b6eeb9b4016c6a7317acc28c89e32cc",
+        "sha256sum": "3af0b6bd35e5b6fc58d8b68827fbae2ff6b7e20dd2b238ccb9b49d84722066c2"
+      },
+      "recipes": [
+        "mklibs-native@0.1.44"
+      ]
+    },
+    {
+      "path": "mpc-1.1.0.tar.gz",
+      "scheme": "https",
+      "url": "https://ftp.gnu.org/gnu/mpc/mpc-1.1.0.tar.gz",
+      "checksums": {
+        "md5sum": "4125404e41e482ec68282a2e687f6c73",
+        "sha256sum": "6985c538143c1208dcb1ac42cedad6ff52e267b47e5f970183a3e75125b43c2e"
+      },
+      "recipes": [
+        "libmpc-native@1.1.0"
+      ]
+    },
+    {
+      "path": "mpfr-4.0.2.tar.xz",
+      "scheme": "https",
+      "url": "https://www.mpfr.org/mpfr-4.0.2/mpfr-4.0.2.tar.xz",
+      "checksums": {
+        "md5sum": "320fbc4463d4c8cb1e566929d8adc4f8",
+        "sha256sum": "1d3be708604eae0e42d578ba93b390c2a145f17743a744d8f3f8c2ad5855a38a"
+      },
+      "recipes": [
+        "mpfr-native@4.0.2"
+      ]
+    },
+    {
+      "path": "netbase_5.6.tar.xz",
+      "scheme": "http",
+      "url": "http://ftp.debian.org/debian/pool/main/n/netbase/netbase_5.6.tar.xz",
+      "checksums": {
+        "md5sum": "7ad156272c5a42f49c73386ff39c8624",
+        "sha256sum": "5d93a099deb28869b7306e914700fafbd293b55bdb5df05a5aa6effd0af5930c"
+      },
+      "recipes": [
+        "netbase@5.6"
+      ]
+    },
+    {
+      "path": "nettle-3.5.1.tar.gz",
+      "scheme": "https",
+      "url": "https://ftp.gnu.org/gnu/nettle/nettle-3.5.1.tar.gz",
+      "checksums": {
+        "md5sum": "0e5707b418c3826768d41130fbe4ee86",
+        "sha256sum": "75cca1998761b02e16f2db56da52992aef622bf55a3b45ec538bc2eedadc9419"
+      },
+      "recipes": [
+        "nettle@3.5.1"
+      ]
+    },
+    {
+      "path": "nspr-4.21.tar.gz",
+      "scheme": "http",
+      "url": "http://ftp.mozilla.org/pub/nspr/releases/v4.21/src/nspr-4.21.tar.gz",
+      "checksums": {
+        "md5sum": "b865586f19912a50acc3755d8a45dbaa",
+        "sha256sum": "15ea32c7b100217b6e3193bc03e77f485d9bf7504051443ba9ce86d1c17c6b5a"
+      },
+      "recipes": [
+        "nspr-native@4.21"
+      ]
+    },
+    {
+      "path": "nss-3.45.tar.gz",
+      "scheme": "http",
+      "url": "http://ftp.mozilla.org/pub/mozilla.org/security/nss/releases/NSS_3_45_RTM/src/nss-3.45.tar.gz",
+      "checksums": {
+        "md5sum": "f1752d7223ee9d910d551e57264bafa8",
+        "sha256sum": "112f05223d1fde902c170966bfc6f011b24a838be16969b110ecf2bb7bc24e8b"
+      },
+      "recipes": [
+        "nss-native@3.45"
+      ]
+    },
+    {
+      "path": "openssh-8.0p1.tar.gz",
+      "scheme": "http",
+      "url": "http://ftp.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-8.0p1.tar.gz",
+      "checksums": {
+        "md5sum": "bf050f002fe510e1daecd39044e1122d",
+        "sha256sum": "bd943879e69498e8031eb6b7f44d08cdc37d59a7ab689aa0b437320c3481fd68"
+      },
+      "recipes": [
+        "openssh@8.0p1"
+      ]
+    },
+    {
+      "path": "openssl-1.1.1d.tar.gz",
+      "scheme": "http",
+      "url": "http://www.openssl.org/source/openssl-1.1.1d.tar.gz",
+      "checksums": {
+        "md5sum": "3be209000dbc7e1b95bcdf47980a3baa",
+        "sha256sum": "1e3a91bc1f9dfce01af26026f856e064eab4c8ee0a8f457b5ae30b40b8b711f2"
+      },
+      "recipes": [
+        "openssl@1.1.1d",
+        "openssl-native@1.1.1d"
+      ]
+    },
+    {
+      "path": "opkg-0.4.1.tar.gz",
+      "scheme": "http",
+      "url": "http://downloads.yoctoproject.org/releases/opkg/opkg-0.4.1.tar.gz",
+      "checksums": {
+        "md5sum": "ba0c21305fc93b26e844981ef100dc85",
+        "sha256sum": "45ac1e037d3877f635d883f8a555e172883a25d3eeb7986c75890fdd31250a43"
+      },
+      "recipes": [
+        "opkg-native@0.4.1"
+      ]
+    },
+    {
+      "path": "opkg-utils-0.4.1.tar.gz",
+      "scheme": "http",
+      "url": "http://git.yoctoproject.org/cgit/cgit.cgi/opkg-utils/snapshot/opkg-utils-0.4.1.tar.gz",
+      "checksums": {
+        "md5sum": "8c140f835b694a0c27cfb23d2426a02b",
+        "sha256sum": "9ea9efdd9fe13661ad251e3a2860c1c93045adcfaa6659c3e86d9748ecda3b6e"
+      },
+      "recipes": [
+        "opkg-utils@0.4.1",
+        "opkg-utils-native@0.4.1"
+      ]
+    },
+    {
+      "path": "pciutils-3.6.2.tar.xz",
+      "scheme": "https",
+      "url": "https://cdn.kernel.org/pub/software/utils/pciutils/pciutils-3.6.2.tar.xz",
+      "checksums": {
+        "md5sum": "77963796d1be4f451b83e6da28ba4f82",
+        "sha256sum": "db452ec986edefd88af0d222d22f6102f8030a8633fdfe846c3ae4bde9bb93f3"
+      },
+      "recipes": [
+        "pciutils@3.6.2"
+      ]
+    },
+    {
+      "path": "pcre-8.43.tar.bz2",
+      "scheme": "https",
+      "url": "https://ftp.pcre.org/pub/pcre/pcre-8.43.tar.bz2",
+      "checksums": {
+        "md5sum": "636222e79e392c3d95dcc545f24f98c4",
+        "sha256sum": "91e762520003013834ac1adb4a938d53b22a216341c061b0cf05603b290faf6b"
+      },
+      "recipes": [
+        "libpcre@8.43",
+        "libpcre-native@8.43"
+      ]
+    },
+    {
+      "path": "perl-5.30.0.tar.gz",
+      "scheme": "https",
+      "url": "https://www.cpan.org/src/5.0/perl-5.30.0.tar.gz;name=perl",
+      "checksums": {
+        "md5sum": "9770584cdf9b5631c38097645ce33549",
+        "sha256sum": "851213c754d98ccff042caa40ba7a796b2cee88c5325f121be5cbb61bbf975f2"
+      },
+      "recipes": [
+        "perl@5.30.0",
+        "perl-native@5.30.0"
+      ]
+    },
+    {
+      "path": "perl-cross-1.3.tar.gz",
+      "scheme": "https",
+      "url": "https://github.com/arsv/perl-cross/releases/download/1.3/perl-cross-1.3.tar.gz;name=perl-cross",
+      "checksums": {
+        "md5sum": "4dda3daf9c4fe42b3d6a5dd052852a48",
+        "sha256sum": "49edea1ea2cd6c5c47386ca71beda8d150c748835781354dbe7f75b1df27e703"
+      },
+      "recipes": [
+        "perl@5.30.0",
+        "perl-native@5.30.0"
+      ]
+    },
+    {
+      "path": "pigz-2.4.tar.gz",
+      "scheme": "http",
+      "url": "http://zlib.net/pigz/fossils/pigz-2.4.tar.gz",
+      "checksums": {
+        "md5sum": "def2f6e19d9d8231445adc1349d346df",
+        "sha256sum": "a4f816222a7b4269bd232680590b579ccc72591f1bb5adafcd7208ca77e14f73"
+      },
+      "recipes": [
+        "pigz-native@2.4"
+      ]
+    },
+    {
+      "path": "pixman-0.38.4.tar.bz2",
+      "scheme": "https",
+      "url": "https://www.x.org/releases//individual/lib/pixman-0.38.4.tar.bz2",
+      "checksums": {
+        "md5sum": "16a350a8a40116ddf67632a1d2623711",
+        "sha256sum": "84abb7fa2541af24d9c3b34bf75d6ac60cc94ac4410061bbb295b66a29221550"
+      },
+      "recipes": [
+        "pixman@0.38.4",
+        "pixman-native@0.38.4"
+      ]
+    },
+    {
+      "path": "popt-1.16.tar.gz",
+      "scheme": "http",
+      "url": "http://anduin.linuxfromscratch.org/BLFS/popt/popt-1.16.tar.gz",
+      "checksums": {
+        "md5sum": "3743beefa3dd6247a73f8f7a32c14c33",
+        "sha256sum": "e728ed296fe9f069a0e005003c3d6b2dde3d9cad453422a10d6558616d304cc8"
+      },
+      "recipes": [
+        "popt@1.16",
+        "popt-native@1.16"
+      ]
+    },
+    {
+      "path": "procps-ng-3.3.15.tar.xz",
+      "scheme": "http",
+      "url": "http://downloads.sourceforge.net/project/procps-ng/Production/procps-ng-3.3.15.tar.xz",
+      "checksums": {
+        "md5sum": "2b0717a7cb474b3d6dfdeedfbad2eccc",
+        "sha256sum": "10bd744ffcb3de2d591d2f6acf1a54a7ba070fdcc432a855931a5057149f0465"
+      },
+      "recipes": [
+        "procps@3.3.15"
+      ]
+    },
+    {
+      "path": "pycairo-1.18.1.tar.gz",
+      "scheme": "https",
+      "url": "https://github.com/pygobject/pycairo/releases/download/v1.18.1/pycairo-1.18.1.tar.gz",
+      "checksums": {
+        "md5sum": "7610da8a40a7bed548991aa3416431d1",
+        "sha256sum": "70172e58b6bad7572a3518c26729b074acdde15e6fee6cbab6d3528ad552b786"
+      },
+      "recipes": [
+        "python3-pycairo@1.18.1"
+      ]
+    },
+    {
+      "path": "pygobject-3.34.0.tar.xz",
+      "scheme": "http",
+      "url": "http://ftp.gnome.org/pub/GNOME/sources/pygobject/3.34/pygobject-3.34.0.tar.xz",
+      "checksums": {
+        "md5sum": "ca1dc4f31c1d6d283758e8f315a88ab6",
+        "sha256sum": "87e2c9aa785f352ef111dcc5f63df9b85cf6e05e52ff04f803ffbebdacf5271a"
+      },
+      "recipes": [
+        "python3-pygobject@3.34.0"
+      ]
+    },
+    {
+      "path": "quilt-0.66.tar.gz",
+      "scheme": "https",
+      "url": "https://download.savannah.gnu.org/releases/quilt/quilt-0.66.tar.gz",
+      "checksums": {
+        "md5sum": "6800c2404a2c0598ab2eff92a636ba70",
+        "sha256sum": "314b319a6feb13bf9d0f9ffa7ce6683b06919e734a41275087ea457cc9dc6e07"
+      },
+      "recipes": [
+        "quilt-native@0.66"
+      ]
+    },
+    {
+      "path": "re2c-1.0.1.tar.gz",
+      "scheme": "https",
+      "url": "https://downloads.sourceforge.net/re2c/re2c-1.0.1.tar.gz",
+      "checksums": {
+        "md5sum": "e2c6cf52fc6a21595f21bc82db5324f8",
+        "sha256sum": "605058d18a00e01bfc32aebf83af35ed5b13180b4e9f279c90843afab2c66c7c"
+      },
+      "recipes": [
+        "re2c-native@1.0.1"
+      ]
+    },
+    {
+      "path": "readline-8.0.tar.gz",
+      "scheme": "https",
+      "url": "https://ftp.gnu.org/gnu/readline/readline-8.0.tar.gz;name=archive",
+      "checksums": {
+        "md5sum": "7e6c1f16aee3244a69aba6e438295ca3",
+        "sha256sum": "e339f51971478d369f8a053a330a190781acb9864cf4c541060f12078948e461"
+      },
+      "recipes": [
+        "readline@8.0",
+        "readline-native@8.0"
+      ]
+    },
+    {
+      "path": "rsync-3.1.3.tar.gz",
+      "scheme": "https",
+      "url": "https://download.samba.org/pub/rsync/src/rsync-3.1.3.tar.gz",
+      "checksums": {
+        "md5sum": "1581a588fde9d89f6bc6201e8129afaf",
+        "sha256sum": "55cc554efec5fdaad70de921cd5a5eeb6c29a95524c715f3bbf849235b0800c0"
+      },
+      "recipes": [
+        "rsync@3.1.3"
+      ]
+    },
+    {
+      "path": "sed-4.2.2.tar.gz",
+      "scheme": "https",
+      "url": "https://ftp.gnu.org/gnu/sed/sed-4.2.2.tar.gz",
+      "checksums": {
+        "md5sum": "4111de4faa3b9848a0686b2f260c5056",
+        "sha256sum": "fea0a94d4b605894f3e2d5572e3f96e4413bcad3a085aae7367c2cf07908b2ff"
+      },
+      "recipes": [
+        "sed@4.2.2"
+      ]
+    },
+    {
+      "path": "setuptools-41.2.0.zip",
+      "scheme": "https",
+      "url": "https://files.pythonhosted.org/packages/source/s/setuptools/setuptools-41.2.0.zip",
+      "checksums": {
+        "md5sum": "a3470ce184da33f0fa6c9f44f6221bc0",
+        "sha256sum": "66b86bbae7cc7ac2e867f52dc08a6bd064d938bac59dfec71b9b565dd36d6012"
+      },
+      "recipes": [
+        "python3-setuptools-native@41.2.0"
+      ]
+    },
+    {
+      "path": "shadow-4.6.tar.gz",
+      "scheme": "https",
+      "url": "https://github.com/shadow-maint/shadow/releases/download/4.6/shadow-4.6.tar.gz",
+      "checksums": {
+        "md5sum": "36feb15665338ae3de414f2a88e434db",
+        "sha256sum": "4668f99bd087399c4a586084dc3b046b75f560720d83e92fd23bf7a89dda4d31"
+      },
+      "recipes": [
+        "shadow@4.6",
+        "shadow-native@4.6"
+      ]
+    },
+    {
+      "path": "shared-mime-info-1.10.tar.xz",
+      "scheme": "http",
+      "url": "http://freedesktop.org/~hadess/shared-mime-info-1.10.tar.xz",
+      "checksums": {
+        "md5sum": "418c2ced9dc4dd5ca8b06a755e6d64e9",
+        "sha256sum": "c625a83b4838befc8cafcd54e3619946515d9e44d63d61c4adf7f5513ddfbebf"
+      },
+      "recipes": [
+        "shared-mime-info@1.10",
+        "shared-mime-info-native@1.10"
+      ]
+    },
+    {
+      "path": "six-1.12.0.tar.gz",
+      "scheme": "https",
+      "url": "https://files.pythonhosted.org/packages/source/s/six/six-1.12.0.tar.gz",
+      "checksums": {
+        "md5sum": "9ae5d1feed8c0215f4ae4adcd9207fcb",
+        "sha256sum": "d16a0141ec1a18405cd4ce8b4613101da75da0e9a7aec5bdd4fa804d0e0eba73"
+      },
+      "recipes": [
+        "python3-six-native@1.12.0"
+      ]
+    },
+    {
+      "path": "socat-1.7.3.3.tar.bz2",
+      "scheme": "http",
+      "url": "http://www.dest-unreach.org/socat/download/socat-1.7.3.3.tar.bz2",
+      "checksums": {
+        "md5sum": "b2a032a47b8b89a18485697fa975154f",
+        "sha256sum": "0dd63ffe498168a4aac41d307594c5076ff307aa0ac04b141f8f1cec6594d04a"
+      },
+      "recipes": [
+        "socat@1.7.3.3"
+      ]
+    },
+    {
+      "path": "sqlite-autoconf-3290000.tar.gz",
+      "scheme": "http",
+      "url": "http://www.sqlite.org/2019/sqlite-autoconf-3290000.tar.gz",
+      "checksums": {
+        "md5sum": "8f3dfe83387e62ecb91c7c5c09c688dc",
+        "sha256sum": "8e7c1e2950b5b04c5944a981cb31fffbf9d2ddda939d536838ebc854481afd5b"
+      },
+      "recipes": [
+        "sqlite3@3.29.0",
+        "sqlite3-native@3.29.0"
+      ]
+    },
+    {
+      "path": "strace-5.3.tar.xz",
+      "scheme": "https",
+      "url": "https://strace.io/files/5.3/strace-5.3.tar.xz",
+      "checksums": {
+        "md5sum": "84f5e72de813c9b1bb6057ee8ab428d8",
+        "sha256sum": "6c131198749656401fe3efd6b4b16a07ea867e8f530867ceae8930bbc937a047"
+      },
+      "recipes": [
+        "strace@5.3"
+      ]
+    },
+    {
+      "path": "sudo-1.8.27.tar.gz",
+      "scheme": "https",
+      "url": "https://www.sudo.ws/dist/sudo-1.8.27.tar.gz",
+      "checksums": {
+        "md5sum": "b5c184b13b6b5de32af630af2fd013fd",
+        "sha256sum": "7beb68b94471ef56d8a1036dbcdc09a7b58a949a68ffce48b83f837dd33e2ec0"
+      },
+      "recipes": [
+        "sudo@1.8.27"
+      ]
+    },
+    {
+      "path": "swig-3.0.12.tar.gz",
+      "scheme": "https",
+      "url": "https://downloads.sourceforge.net/swig/swig-3.0.12.tar.gz",
+      "checksums": {
+        "md5sum": "82133dfa7bba75ff9ad98a7046be687c",
+        "sha256sum": "7cf9f447ae7ed1c51722efc45e7f14418d15d7a1e143ac9f09a668999f4fc94d"
+      },
+      "recipes": [
+        "swig-native@3.0.12"
+      ]
+    },
+    {
+      "path": "sysfsutils-2.1.0.tar.gz",
+      "scheme": "https",
+      "url": "https://downloads.sourceforge.net/linux-diag/sysfsutils-2.1.0.tar.gz",
+      "checksums": {
+        "md5sum": "14e7dcd0436d2f49aa403f67e1ef7ddc",
+        "sha256sum": "e865de2c1f559fff0d3fc936e660c0efaf7afe662064f2fb97ccad1ec28d208a"
+      },
+      "recipes": [
+        "sysfsutils@2.1.0"
+      ]
+    },
+    {
+      "path": "sysvinit-2.88dsf.tar.bz2",
+      "scheme": "https",
+      "url": "https://download.savannah.gnu.org/releases/sysvinit/sysvinit-2.88dsf.tar.bz2",
+      "checksums": {
+        "md5sum": "6eda8a97b86e0a6f59dabbf25202aa6f",
+        "sha256sum": "60bbc8c1e1792056e23761d22960b30bb13eccc2cabff8c7310a01f4d5df1519"
+      },
+      "recipes": [
+        "sysvinit@2.88dsf"
+      ]
+    },
+    {
+      "path": "tar-1.32.tar.bz2",
+      "scheme": "https",
+      "url": "https://ftp.gnu.org/gnu/tar/tar-1.32.tar.bz2",
+      "checksums": {
+        "md5sum": "17917356fff5cb4bd3cd5a6c3e727b05",
+        "sha256sum": "e4bb9e08e12e7fa9f11fef544efc85e59ba34538593d9ad38148c7ca2bfbb566"
+      },
+      "recipes": [
+        "tar@1.32"
+      ]
+    },
+    {
+      "path": "tcp_wrappers_7.6.tar.gz",
+      "scheme": "http",
+      "url": "http://ftp.porcupine.org/pub/security/tcp_wrappers_7.6.tar.gz",
+      "checksums": {
+        "md5sum": "e6fa25f71226d090f34de3f6b122fb5a",
+        "sha256sum": "9543d7adedf78a6de0b221ccbbd1952e08b5138717f4ade814039bb489a4315d"
+      },
+      "recipes": [
+        "tcp-wrappers@7.6"
+      ]
+    },
+    {
+      "path": "tcpdump-4.9.3.tar.gz",
+      "scheme": "http",
+      "url": "http://www.tcpdump.org/release/tcpdump-4.9.3.tar.gz",
+      "checksums": {
+        "md5sum": "a4ead41d371f91aa0a2287f589958bae",
+        "sha256sum": "2cd47cb3d460b6ff75f4a9940f594317ad456cfbf2bd2c8e5151e16559db6410"
+      },
+      "recipes": [
+        "tcpdump@4.9.3"
+      ]
+    },
+    {
+      "path": "tzcode2019c.tar.gz",
+      "scheme": "http",
+      "url": "http://www.iana.org/time-zones/repository/releases/tzcode2019c.tar.gz;name=tzcode",
+      "checksums": {
+        "md5sum": "195a17454c5db05cab96595380650391",
+        "sha256sum": "f6ebd3668e02d5ed223d3b7b1947561bf2d2da2f4bd1db61efefd9e06c167ed4"
+      },
+      "recipes": [
+        "tzcode-native@2019c",
+        "tzdata@2019c"
+      ]
+    },
+    {
+      "path": "tzdata2019c.tar.gz",
+      "scheme": "http",
+      "url": "http://www.iana.org/time-zones/repository/releases/tzdata2019c.tar.gz;name=tzdata",
+      "checksums": {
+        "md5sum": "f6987e6dfdb2eb83a1b5076a50b80894",
+        "sha256sum": "79c7806dab09072308da0e3d22c37d3b245015a591891ea147d3b133b60ffc7c"
+      },
+      "recipes": [
+        "tzcode-native@2019c",
+        "tzdata@2019c"
+      ]
+    },
+    {
+      "path": "unifdef-2.11.tar.xz",
+      "scheme": "http",
+      "url": "http://dotat.at/prog/unifdef/unifdef-2.11.tar.xz",
+      "checksums": {
+        "md5sum": "337053fd8a7d9ab3adf5e50f88af95b7",
+        "sha256sum": "828ffc270ac262b88fe011136acef2780c05b0dc3c5435d005651740788d4537"
+      },
+      "recipes": [
+        "unifdef-native@2.11"
+      ]
+    },
+    {
+      "path": "unzip60.tar.gz",
+      "scheme": "https",
+      "url": "https://downloads.sourceforge.net/infozip/UnZip%206.x%20%28latest%29/UnZip%206.0/unzip60.tar.gz",
+      "checksums": {
+        "md5sum": "62b490407489521db863b523a7f86375",
+        "sha256sum": "036d96991646d0449ed0aa952e4fbe21b476ce994abc276e49d30e686708bd37"
+      },
+      "recipes": [
+        "unzip@6.0",
+        "unzip-native@6.0"
+      ]
+    },
+    {
+      "path": "util-linux-2.34.tar.xz",
+      "scheme": "https",
+      "url": "https://cdn.kernel.org/pub/linux/utils/util-linux/v2.34/util-linux-2.34.tar.xz",
+      "checksums": {
+        "md5sum": "a78cbeaed9c39094b96a48ba8f891d50",
+        "sha256sum": "743f9d0c7252b6db246b659c1e1ce0bd45d8d4508b4dfa427bbb4a3e9b9f62b5"
+      },
+      "recipes": [
+        "util-linux@2.34",
+        "util-linux-native@2.34"
+      ]
+    },
+    {
+      "path": "util-macros-1.19.2.tar.gz",
+      "scheme": "https",
+      "url": "https://www.x.org/releases//individual/util/util-macros-1.19.2.tar.gz",
+      "checksums": {
+        "md5sum": "5059b328fac086b733ffac6607164c41",
+        "sha256sum": "9225c45c3de60faf971979a55a5536f3562baa4b6f02246c23e98ac0c09a75b7"
+      },
+      "recipes": [
+        "util-macros@1.19.2",
+        "util-macros-native@1.19.2"
+      ]
+    },
+    {
+      "path": "which-2.21.tar.gz",
+      "scheme": "https",
+      "url": "https://ftp.gnu.org/gnu/which/which-2.21.tar.gz",
+      "checksums": {
+        "md5sum": "097ff1a324ae02e0a3b0369f07a7544a",
+        "sha256sum": "f4a245b94124b377d8b49646bf421f9155d36aa7614b6ebf83705d3ffc76eaad"
+      },
+      "recipes": [
+        "which@2.21"
+      ]
+    },
+    {
+      "path": "wpa_supplicant-2.9.tar.gz",
+      "scheme": "http",
+      "url": "http://w1.fi/releases/wpa_supplicant-2.9.tar.gz",
+      "checksums": {
+        "md5sum": "2d2958c782576dc9901092fbfecb4190",
+        "sha256sum": "fcbdee7b4a64bea8177973299c8c824419c413ec2e3a95db63dd6a5dc3541f17"
+      },
+      "recipes": [
+        "wpa-supplicant@2.9"
+      ]
+    },
+    {
+      "path": "xcb-proto-1.13.tar.bz2",
+      "scheme": "http",
+      "url": "http://xcb.freedesktop.org/dist/xcb-proto-1.13.tar.bz2",
+      "checksums": {
+        "md5sum": "abe9aa4886138150bbc04ae4f29b90e3",
+        "sha256sum": "7b98721e669be80284e9bbfeab02d2d0d54cd11172b72271e47a2fe875e2bde1"
+      },
+      "recipes": [
+        "xcb-proto@1.13"
+      ]
+    },
+    {
+      "path": "xmlts20080827.tar.gz",
+      "scheme": "http",
+      "url": "http://www.w3.org/XML/Test/xmlts20080827.tar.gz;subdir=libxml2-2.9.9;name=testtar",
+      "checksums": {
+        "md5sum": "ae3d1ebe000a3972afa104ca7f0e1b4a",
+        "sha256sum": "96151685cec997e1f9f3387e3626d61e6284d4d6e66e0e440c209286c03e9cc7"
+      },
+      "recipes": [
+        "libxml2@2.9.9",
+        "libxml2-native@2.9.9"
+      ]
+    },
+    {
+      "path": "xorgproto-2019.1.tar.bz2",
+      "scheme": "https",
+      "url": "https://www.x.org/releases//individual/proto/xorgproto-2019.1.tar.bz2",
+      "checksums": {
+        "md5sum": "802ccb9e977ba3cf94ba798ddb2898a4",
+        "sha256sum": "a6daaa7a6cbc8e374032d83ff7f47d41be98f1e0f4475d66a4da3aa766a0d49b"
+      },
+      "recipes": [
+        "xorgproto@2019.1",
+        "xorgproto-native@2019.1"
+      ]
+    },
+    {
+      "path": "xrandr-1.5.1.tar.xz",
+      "scheme": "https",
+      "url": "https://www.x.org/releases//individual/app/xrandr-1.5.1.tar.xz",
+      "checksums": {
+        "md5sum": "fe40f7a4fd39dd3a02248d3e0b1972e4",
+        "sha256sum": "7bc76daf9d72f8aff885efad04ce06b90488a1a169d118dea8a2b661832e8762"
+      },
+      "recipes": [
+        "xrandr@1.5.1"
+      ]
+    },
+    {
+      "path": "xtrans-1.4.0.tar.bz2",
+      "scheme": "https",
+      "url": "https://www.x.org/releases//individual/lib/xtrans-1.4.0.tar.bz2",
+      "checksums": {
+        "md5sum": "ce2fb8100c6647ee81451ebe388b17ad",
+        "sha256sum": "377c4491593c417946efcd2c7600d1e62639f7a8bbca391887e2c4679807d773"
+      },
+      "recipes": [
+        "xtrans@1.4.0"
+      ]
+    },
+    {
+      "path": "xz-5.2.4.tar.gz",
+      "scheme": "https",
+      "url": "https://tukaani.org/xz/xz-5.2.4.tar.gz",
+      "checksums": {
+        "md5sum": "5ace3264bdd00c65eeec2891346f65e6",
+        "sha256sum": "b512f3b726d3b37b6dc4c8570e137b9311e7552e8ccbab4d39d47ce5f4177145"
+      },
+      "recipes": [
+        "xz@5.2.4",
+        "xz-native@5.2.4"
+      ]
+    },
+    {
+      "path": "yaml-0.2.2.tar.gz",
+      "scheme": "https",
+      "url": "https://pyyaml.org/download/libyaml/yaml-0.2.2.tar.gz",
+      "checksums": {
+        "md5sum": "54bf11ccb8bc488b5b3bec931f5b70dc",
+        "sha256sum": "4a9100ab61047fd9bd395bcef3ce5403365cafd55c1e0d0299cde14958e47be9"
+      },
+      "recipes": [
+        "libyaml-native@0.2.2"
+      ]
+    },
+    {
+      "path": "zip30.tar.gz",
+      "scheme": "https",
+      "url": "https://downloads.sourceforge.net/infozip/Zip%203.x%20%28latest%29/3.0/zip30.tar.gz",
+      "checksums": {
+        "md5sum": "7b74551e63f8ee6aab6fbc86676c0d37",
+        "sha256sum": "f0e8bb1f9b7eb0b01285495a2699df3a4b766784c1765a8f1aeedf63c0806369"
+      },
+      "recipes": [
+        "zip@3.0"
+      ]
+    },
+    {
+      "path": "zlib-1.2.11.tar.xz",
+      "scheme": "https",
+      "url": "https://downloads.sourceforge.net/libpng/zlib/1.2.11/zlib-1.2.11.tar.xz",
+      "checksums": {
+        "md5sum": "85adef240c5f370b308da8c938951a68",
+        "sha256sum": "4ff941449631ace0d4d203e3483be9dbc9da454084111f97ea0a2114e19bf066"
+      },
+      "recipes": [
+        "zlib@1.2.11",
+        "zlib-native@1.2.11"
+      ]
+    }
+  ]
+}

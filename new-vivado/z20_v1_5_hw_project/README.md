@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This directory is the independent Z20 v1.5 Vivado hardware project workspace. It was created from the earlier Vivado project as a one-time source copy, but all project files, scripts, reports, and generated outputs for this workspace must stay under `new-vivado/`.
+This directory owns a different Z20 v1.5 FPGA function. It is not a backup, source copy, upgrade branch, or fallback for `vivado_hw_project/`. The current product and current SD use `vivado_hw_project/`; this project's XSA, bitstream, and hardware contracts must never enter that current-product build unless the settled owner requirement is explicitly changed first.
 
 ## Hard Boundaries
 

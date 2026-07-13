@@ -2,7 +2,6 @@
 .DS_Store
 Thumbs.db
 Desktop.ini
-*~
 *.swp
 *.swo
 *.tmp
@@ -38,11 +37,7 @@ node_modules/
 /tmp/
 /temp/
 /logs/
-/bak/
-
 # Known .NET generated output directories
-/board/tools/v5_git_nas_backup/bin/
-/board/tools/v5_git_nas_backup/obj/
 /8ax-win/**/bin/
 /8ax-win/**/obj/
 /8ax-dealer-client-source/**/bin/
@@ -92,6 +87,10 @@ repo_ignored/**/temp/
 *.bz2
 *.xz
 *.zst
+
+# Fixed third-party source packages are canonical build inputs, not outputs.
+!board/third_party/petalinux-source-packages/
+!board/third_party/petalinux-source-packages/**
 
 # Test proof/evidence captures are not pushed
 artifacts/

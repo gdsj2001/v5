@@ -91,6 +91,15 @@ def load_identity(source_root, owner):
     for field in ("commit", "tree"):
         if not re.fullmatch(r"[0-9a-f]{40}", upstream[field]):
             fail("invalid upstream %s: %s" % (field, path))
+    inaccessible = identity.get("vm_share_inaccessible_paths", [])
+    if not isinstance(inaccessible, list) or len(inaccessible) != len(set(inaccessible)):
+        fail("invalid vm_share_inaccessible_paths: %s" % path)
+    for relative in inaccessible:
+        candidate = Path(relative)
+        if candidate.is_absolute() or ".." in candidate.parts:
+            fail("VM-share-inaccessible path escaped its owner: %s" % relative)
+        if os.name == "nt" and not (source_root / candidate).is_file():
+            fail("VM-share-inaccessible Windows source is missing: %s" % relative)
     return identity
 
 
