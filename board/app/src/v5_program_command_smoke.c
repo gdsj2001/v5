@@ -75,7 +75,7 @@ int main(void)
         v5_program_controller_destroy(&controller);
         return 6;
     }
-    if (strcmp(line, "Set Open v5_program_command_smoke.ngc\nSet Mode Auto\nSet Run 0\nSet Resume") != 0) {
+    if (strcmp(line, "Set Open v5_program_command_smoke.ngc\nSet Mode Auto\nSet Run 0") != 0) {
         v5_program_controller_destroy(&controller);
         return 13;
     }

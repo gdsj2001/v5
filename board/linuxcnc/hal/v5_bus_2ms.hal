@@ -26,9 +26,18 @@ loadrt cia402 count=5
 loadrt bitslice names=x-din,y-din,z-din,a-din,c-din personality=31,31,31,31,31
 loadrt mux2 count=1
 loadrt or2 count=1
+loadrt v5_safety_latch
 
 loadusr -W lcec_conf /opt/8ax/v5/linuxcnc/hal/ethercat-conf-2ms.xml
-loadusr -Wn v5_native_safety /usr/libexec/8ax/v5_native_safety_latch_owner.py --path /dev/shm/v5_native_safety_latch.bin --component v5_native_safety --interval-ms 5
+loadusr -Wn v5_native_hal_owner /usr/bin/v5_native_hal_owner \
+    --model=[RTCP]MODEL \
+    --rtcp-default=[RTCP]DEFAULT_ACTIVE \
+    --g53-a-y=[RTCP]G53_A_Y \
+    --g53-a-z=[RTCP]G53_A_Z \
+    --g53-b-x=[RTCP]G53_B_X \
+    --g53-b-z=[RTCP]G53_B_Z \
+    --g53-c-x=[RTCP]G53_C_X \
+    --g53-c-y=[RTCP]G53_C_Y
 loadrt lcec
 
 addf lcec.read-all servo-thread
@@ -42,6 +51,7 @@ addf y-din servo-thread
 addf z-din servo-thread
 addf a-din servo-thread
 addf c-din servo-thread
+addf v5-safety-latch.0 servo-thread
 addf or2.0 servo-thread
 addf mux2.0 servo-thread
 addf motion-command-handler servo-thread
@@ -53,8 +63,12 @@ addf cia402.3.write-all servo-thread
 addf cia402.4.write-all servo-thread
 addf lcec.write-all servo-thread
 
-net estop-loop v5_native_safety.estop-ok => iocontrol.0.emc-enable-in
-net v5-machine-enabled motion.motion-enabled => v5_native_safety.machine-enabled-in
+net v5-safety-force v5-native-hal-owner.safety-force => v5-safety-latch.0.force
+net v5-safety-reset v5-native-hal-owner.safety-reset => v5-safety-latch.0.reset
+net v5-safety-heartbeat v5-native-hal-owner.heartbeat => v5-safety-latch.0.heartbeat
+net v5-safety-estop-active v5-safety-latch.0.estop-active => v5-native-hal-owner.safety-estop-active
+net estop-loop v5-safety-latch.0.estop-ok => iocontrol.0.emc-enable-in
+net v5-machine-enabled motion.motion-enabled => v5-native-hal-owner.machine-enabled
 
 net tool-change-loop iocontrol.0.tool-change => iocontrol.0.tool-changed
 net tool-prepare-loop iocontrol.0.tool-prepare => iocontrol.0.tool-prepared
@@ -63,18 +77,17 @@ setp iocontrol.0.lube_level TRUE
 setp motion.digital-in-00 TRUE
 setp mux2.0.in0 0
 setp mux2.0.in1 1
-net v5-rtcp-ui-request or2.0.in0
-sets v5-rtcp-ui-request [RTCP]DEFAULT_ACTIVE
+net v5-rtcp-ui-request v5-native-hal-owner.rtcp-ui-request => or2.0.in0
 net v5-rtcp-gcode-request motion.digital-out-00 => or2.0.in1
 net v5-rtcp-selected or2.0.out => mux2.0.sel
-net re-switchkins-select mux2.0.out => motion.switchkins-type
+net re-switchkins-select mux2.0.out => motion.switchkins-type v5-native-hal-owner.rtcp-actual
 net re-kins-tool-offset motion.tooloffset.z => [RTCP]KINS_TOOL_OFFSET_PIN
-setp [RTCP]KINS_X_ROT_POINT_PIN [RTCP]X_ROT_POINT
-setp [RTCP]KINS_Y_ROT_POINT_PIN [RTCP]Y_ROT_POINT
-setp [RTCP]KINS_Z_ROT_POINT_PIN [RTCP]Z_ROT_POINT
-setp [RTCP]KINS_X_OFFSET_PIN [RTCP]X_OFFSET
-setp [RTCP]KINS_Y_OFFSET_PIN [RTCP]Y_OFFSET
-setp [RTCP]KINS_Z_OFFSET_PIN [RTCP]Z_OFFSET
+net v5-kins-x-rot-point v5-native-hal-owner.kins-x-rot-point => [RTCP]KINS_X_ROT_POINT_PIN
+net v5-kins-y-rot-point v5-native-hal-owner.kins-y-rot-point => [RTCP]KINS_Y_ROT_POINT_PIN
+net v5-kins-z-rot-point v5-native-hal-owner.kins-z-rot-point => [RTCP]KINS_Z_ROT_POINT_PIN
+net v5-kins-x-offset v5-native-hal-owner.kins-x-offset => [RTCP]KINS_X_OFFSET_PIN
+net v5-kins-y-offset v5-native-hal-owner.kins-y-offset => [RTCP]KINS_Y_OFFSET_PIN
+net v5-kins-z-offset v5-native-hal-owner.kins-z-offset => [RTCP]KINS_Z_OFFSET_PIN
 
 setp cia402.0.csp-mode true
 setp cia402.1.csp-mode true

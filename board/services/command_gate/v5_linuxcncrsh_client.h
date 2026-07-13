@@ -29,6 +29,12 @@ int v5_linuxcncrsh_format_line(
     const V5CommandRequest *request,
     char *out,
     size_t out_size);
+int v5_linuxcncrsh_format_start_transaction(
+    const V5CommandPrepared *prepared,
+    const V5CommandRequest *request,
+    const char *program_response,
+    char *out,
+    size_t out_size);
 int v5_linuxcncrsh_format_home_sequence(char *out, size_t out_size);
 
 int v5_linuxcncrsh_probe_machine(
@@ -85,6 +91,12 @@ V5LinuxcncrshSendStatus v5_linuxcncrsh_send_prepared(
     const V5LinuxcncrshConfig *config,
     const V5CommandPrepared *prepared,
     const V5CommandRequest *request);
+V5LinuxcncrshSendStatus v5_linuxcncrsh_send_start_transaction(
+    const V5LinuxcncrshConfig *config,
+    const V5CommandPrepared *prepared,
+    const V5CommandRequest *request,
+    char *command_line,
+    size_t command_line_size);
 
 #ifdef __cplusplus
 }

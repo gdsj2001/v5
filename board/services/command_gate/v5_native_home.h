@@ -4,6 +4,8 @@
 #include "v5_linuxcncrsh_client.h"
 #include "v5_native_motion_parameters.h"
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -15,6 +17,14 @@ typedef struct V5NativeHomeResult {
     char mode[32];
     char code[64];
 } V5NativeHomeResult;
+
+int v5_native_home_format_increment(
+    const V5NativeMotionAxisParameters *axis,
+    double delta,
+    char *line,
+    size_t line_size);
+
+int v5_native_home_joint_needs_sync(int homed_status_available, int homed);
 
 V5LinuxcncrshSendStatus v5_native_home_send(
     const V5LinuxcncrshConfig *config,

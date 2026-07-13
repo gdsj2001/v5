@@ -20,7 +20,6 @@ MAX_ACTIOND_RESULT_BYTES = 65536
 MAX_ACTIOND_EVENT_BYTES = 8192
 SERVICE_RESTART_TIMEOUTS: Dict[str, float] = {
     "v5-linuxcnc-command-gate": 35.0,
-    "v5-rtcp-status-publisher": 12.0,
     "v5-wcs-status-publisher": 20.0,
     "v5-state-publisher": 12.0,
     "v5-ui-relay": 15.0,
@@ -31,6 +30,5 @@ CANONICAL_CLEAN_RESTART_SERVICES = [
     "v5-settings-actiond",
     "v5-state-publisher",
     "v5-wcs-status-publisher",
-    "v5-rtcp-status-publisher",
     "v5-linuxcnc-command-gate",
 ]

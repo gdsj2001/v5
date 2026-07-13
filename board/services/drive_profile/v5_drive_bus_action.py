@@ -21,12 +21,9 @@ from v5_drive_bus_contract import (
 from v5_drive_result import (
     write_json,
     compact_sdo_io,
-    compact_write_result,
     compact_recovery_result,
-    compact_read_item,
     compact_health,
     compact_readback,
-    compact_activation_restart,
     compact_error_detail,
     compact_target_result,
     compact_precheck_result,
@@ -96,9 +93,9 @@ from v5_drive_health import (
     evaluate_drive_health,
     recover_slave_mailbox,
     readback_with_retry,
-    software_reset_mailbox_interrupted,
-    drive_activation_restart,
+    set_drive_batch_readback,
     summarize_reset_recovery_cycle,
+    fault_reset_readback_with_recovery,
     factory_reset_readback_with_recovery,
     assert_drive_write_safety,
 )
@@ -184,6 +181,7 @@ def run_factory_reset(timeout_s: float) -> Dict[str, Any]:
             display_updates.append({"axis": str(target.get("axis") or ""), "position": target.get("position"), "write_status": "复位失败"})
             item.update({"ok": False, "code": exc.code, "message_cn": exc.message_cn, "detail": compact_error_detail(exc.detail)})
         target_results.append(item)
+
     persist = persist_settings_runtime(runtime) if write_executed else {}
     display_writeback = write_drive_parameter_display_rows(display_updates) if display_updates else {}
     failures = [item for item in target_results if not item.get("ok")]
@@ -215,17 +213,18 @@ def run_fault_reset(timeout_s: float) -> Dict[str, Any]:
     target_results: List[Dict[str, Any]] = []
     write_executed = False
     for target in targets:
-        commands = target.get("commands") if isinstance(target.get("commands"), dict) else {}
         item: Dict[str, Any] = {"axis": target.get("axis"), "position": target.get("position"), "profile_id": (target.get("profile") or {}).get("profile_id", "")}
         try:
-            write = write_command(str(target.get("position") or ""), "drive.reset_fault", commands.get("drive.reset_fault", {}))
+            recovery = fault_reset_readback_with_recovery(target, timeout_s)
             write_executed = True
+            write = recovery.get("fault_reset_write", {})
             item["fault_reset_write"] = write
+            item["fault_reset_recovery"] = recovery.get("summary", {})
             if not write.get("ok"):
                 raise DriveActionError("DRIVE_FAULT_RESET_WRITE_FAILED", "清除故障 SDO 写入失败。", write)
-            readback = readback_with_retry(target, timeout_s)
+            readback = recovery.get("readback", {})
             item["readback"] = compact_readback(readback)
-            if not readback.get("ok"):
+            if not recovery.get("ok"):
                 raise DriveActionError("DRIVE_FAULT_RESET_READBACK_FAILED", "清除故障后 statusword/error_code 未证明 fault 已清。", compact_readback(readback))
             item["ok"] = True
             item["code"] = "DRIVE_FAULT_RESET_TARGET_OK"
@@ -251,11 +250,19 @@ def run_fault_reset(timeout_s: float) -> Dict[str, Any]:
 def run_set_drive(timeout_s: float) -> Dict[str, Any]:
     try:
         targets, runtime, scan = configured_drive_targets(timeout_s)
-        prechecks = precheck_targets_for_write(targets, ["drive.set_egear", "drive.write_mode", "drive.software_reset"], timeout_s)
+        prechecks = precheck_targets_for_write(targets, ["drive.set_egear", "drive.write_mode"], timeout_s)
         planned: Dict[str, Tuple[Tuple[int, int], Dict[str, Any]]] = {}
         for target in targets:
             egear = target_egear(target)
             planned[str(target.get("position") or "")] = ((egear[0], egear[1]), egear[2])
+        mode_pre_by_position: Dict[str, Dict[str, Any]] = {}
+        for target in targets:
+            position = str(target.get("position") or "")
+            mode_pre_state = read_required_state(target, timeout_s)
+            mode_pre_by_position[position] = {
+                "ok": bool(mode_pre_state.get("ok")),
+                "mode": read_scalar_value((mode_pre_state.get("reads") or {}).get("drive.read_mode", {})),
+            }
     except DriveActionError as exc:
         return {"ok": False, "code": exc.code, "message_cn": exc.message_cn, "detail": compact_error_detail(exc.detail), "write_executed": False, "drive_write_executed": False, "motion_executed": False, "failed_stage": "precheck"}
     target_results: List[Dict[str, Any]] = []
@@ -267,76 +274,83 @@ def run_set_drive(timeout_s: float) -> Dict[str, Any]:
         egear, egear_source = planned[position]
         item: Dict[str, Any] = {"axis": target.get("axis"), "position": position, "profile_id": (target.get("profile") or {}).get("profile_id", ""), "target_egear": {"numerator": egear[0], "denominator": egear[1], "source": egear_source}, "target_mode": CANONICAL_CSP_MODE}
         try:
-            target_write_started = False
-            egear_write = write_command(position, "drive.set_egear", commands.get("drive.set_egear", {}), {"numerator": egear[0], "denominator": egear[1]})
+            egear_command = commands.get("drive.set_egear", {})
+            mode_command = commands.get("drive.write_mode", {})
+            egear_write = write_command(position, "drive.set_egear", egear_command, {"numerator": egear[0], "denominator": egear[1]})
             write_executed = True
-            target_write_started = True
             item["egear_write"] = egear_write
             if not egear_write.get("ok"):
                 raise DriveActionError("DRIVE_EGEAR_WRITE_FAILED", "设置驱动电子齿轮 SDO 写入失败。", egear_write)
-            mode_pre_state = read_required_state(target, timeout_s)
-            mode_pre = read_scalar_value((mode_pre_state.get("reads") or {}).get("drive.read_mode", {}))
-            item["mode_pre_readback"] = {
-                "ok": bool(mode_pre_state.get("ok")),
-                "mode": mode_pre,
-                "reads": {name: compact_read_item(read_item) for name, read_item in (mode_pre_state.get("reads", {}) or {}).items()},
-            }
-            mode_write = None
+            item["mode_pre_readback"] = dict(mode_pre_by_position[position])
+            mode_pre = item["mode_pre_readback"].get("mode")
             if mode_pre == CANONICAL_CSP_MODE:
                 item["mode_write_status"] = "pre_write_readback_already_at_target"
             else:
-                mode_write = write_command(position, "drive.write_mode", commands.get("drive.write_mode", {}), CANONICAL_CSP_MODE)
+                item["mode_write"] = write_command(position, "drive.write_mode", mode_command, CANONICAL_CSP_MODE)
                 write_executed = True
-                target_write_started = True
-                item["mode_write"] = mode_write
-                if not mode_write.get("ok"):
-                    item["mode_write_status"] = "download_sdo_error_needs_readback"
-            item["post_write_op_recovery"] = recover_slave_mailbox(position, timeout_s)
-            readback = readback_with_retry(target, timeout_s, expected_egear=egear, expected_mode=CANONICAL_CSP_MODE)
-            item["write_readback"] = compact_readback(readback)
-            if not readback.get("ok"):
-                raise DriveActionError("DRIVE_SET_READBACK_FAILED", "设置驱动后电子齿轮/模式/状态读回未闭合。", compact_readback(readback))
-            if mode_write is not None and not mode_write.get("ok"):
+                item["mode_write_status"] = "download_ok" if item["mode_write"].get("ok") else "download_sdo_error_needs_batch_readback"
+            item["profile_save_required"] = bool(egear_command.get("requires_save_parameters")) or bool(item.get("mode_write") and mode_command.get("requires_save_parameters"))
+            item["profile_activation_status"] = "pending_save_parameters" if item["profile_save_required"] else "profile_no_activation_required"
+            item.update({"ok": True, "code": "DRIVE_SET_TARGET_WRITTEN_PENDING_BATCH_READBACK"})
+        except DriveActionError as exc:
+            mark_drive_parameters_invalid(target["axis_cfg"], exc.code.lower(), "write_unverified_readback_failed")
+            display_updates.append({"axis": str(target.get("axis") or ""), "position": target.get("position"), "write_status": "写入失败"})
+            item.update({"ok": False, "code": exc.code, "message_cn": exc.message_cn, "detail": compact_error_detail(exc.detail)})
+        target_results.append(item)
+
+    if target_results and all(item.get("ok") for item in target_results):
+        for target, item in zip(targets, target_results):
+            if not item.get("profile_save_required"):
+                continue
+            commands = target.get("commands") if isinstance(target.get("commands"), dict) else {}
+            try:
+                command_write_supported("drive.save_parameters", commands.get("drive.save_parameters", {}))
+                item["save_parameters_write"] = write_command(
+                    str(target.get("position") or ""), "drive.save_parameters", commands.get("drive.save_parameters", {}))
+                write_executed = True
+                if not item["save_parameters_write"].get("ok"):
+                    raise DriveActionError("DRIVE_SAVE_PARAMETERS_FAILED", "驱动 profile 要求保存参数，但 save_parameters 写入失败。", item["save_parameters_write"])
+                item["profile_activation_status"] = "save_parameters_written"
+            except DriveActionError as exc:
+                mark_drive_parameters_invalid(target["axis_cfg"], exc.code.lower(), "write_unverified_readback_failed")
+                display_updates.append({"axis": str(target.get("axis") or ""), "position": target.get("position"), "write_status": "写入失败"})
+                item.update({"ok": False, "code": exc.code, "message_cn": exc.message_cn, "detail": compact_error_detail(exc.detail)})
+
+    if target_results and all(item.get("ok") for item in target_results):
+        expectations = {position: (egear, CANONICAL_CSP_MODE) for position, (egear, _source) in planned.items()}
+        batch_readback = set_drive_batch_readback(targets, timeout_s, expectations)
+        failed_positions = {str(position) for position in (batch_readback.get("failed_positions") or [])}
+        recovery_positions = {
+            str(position)
+            for cycle in (batch_readback.get("cycles") or []) if isinstance(cycle, dict)
+            for position in (cycle.get("recovery_positions") or [])
+        }
+        for target, item in zip(targets, target_results):
+            position = str(target.get("position") or "")
+            egear, egear_source = planned[position]
+            readback = batch_readback.get("readbacks", {}).get(position, {})
+            item["batch_readback_attempt_count"] = len(batch_readback.get("cycles", []))
+            item["batch_recovery_attempted"] = position in recovery_positions
+            target_ok = bool(readback.get("ok")) and position not in failed_positions
+            if not target_ok:
+                mark_drive_parameters_invalid(target["axis_cfg"], "drive_set_batch_readback_failed", "write_unverified_readback_failed")
+                display_updates.append({"axis": str(target.get("axis") or ""), "position": target.get("position"), "write_status": "写入失败"})
+                item.update({"ok": False, "code": "DRIVE_SET_BATCH_READBACK_FAILED", "message_cn": "设置驱动整批写入后的统一 fresh readback 未闭合。"})
+                continue
+            if isinstance(item.get("mode_write"), dict) and not item["mode_write"].get("ok"):
                 item["mode_write_status"] = "download_sdo_error_but_readback_matched"
-            activation = drive_activation_restart(target, timeout_s, egear, CANONICAL_CSP_MODE)
-            item["drive_activation_restart"] = {
-                "ok": True,
-                "software_reset_write": activation.get("software_reset_write"),
-                "software_reset_write_status": activation.get("software_reset_write_status"),
-                "software_reset_write_attempts": activation.get("software_reset_write_attempts"),
-                "attempt_count": activation.get("attempt_count"),
-                "initial_delay_s": activation.get("initial_delay_s"),
-                "settle_delay_s": activation.get("settle_delay_s"),
-                "cycles": activation.get("cycles"),
-                "readback": compact_readback(activation.get("readback")),
-            }
-            readback = activation.get("readback", {})
-            item["readback"] = compact_readback(readback)
             update_axis_drive_set_evidence(target["axis_cfg"], target, egear, readback, egear_source)
             health = readback.get("health", {}) if isinstance(readback.get("health"), dict) else {}
             display_updates.append(drive_display_update_from_health(str(target.get("axis") or ""), health, "已写入", target.get("position")))
-            item["ok"] = True
-            item["code"] = "DRIVE_SET_TARGET_OK"
-        except DriveActionError as exc:
-            if locals().get("target_write_started"):
-                mark_drive_parameters_invalid(target["axis_cfg"], exc.code.lower(), "write_unverified_readback_failed")
-                display_updates.append({"axis": str(target.get("axis") or ""), "position": target.get("position"), "write_status": "写入失败"})
-            if exc.code.startswith("DRIVE_ACTIVATION_RESTART") and isinstance(exc.detail, dict):
-                activation_detail = dict(exc.detail)
-                activation_detail["ok"] = False
-                item["drive_activation_restart"] = activation_detail
-            item.update({"ok": False, "code": exc.code, "message_cn": exc.message_cn, "detail": compact_error_detail(exc.detail)})
-        target_results.append(item)
+            item.update({"readback": compact_readback(readback), "code": "DRIVE_SET_TARGET_OK"})
     persist = persist_settings_runtime(runtime) if write_executed else {}
     display_writeback = write_drive_parameter_display_rows(display_updates) if display_updates else {}
     failures = [item for item in target_results if not item.get("ok")]
     ok = not failures
-    drive_restart_executed = any(isinstance(item.get("drive_activation_restart"), dict) for item in target_results)
-    drive_restart_verified = ok and bool(target_results) and all(bool((item.get("drive_activation_restart") or {}).get("ok")) for item in target_results)
     return {
         "ok": ok,
         "code": "DRIVE_SET_OK" if ok else "DRIVE_SET_PARTIAL",
-        "message_cn": "设置驱动完成，电子齿轮和 CSP 模式已写入，驱动已软件重启并读回一致；请执行保存并重启完成运行态生效。" if ok else "设置驱动未完整闭合。",
+        "message_cn": "设置驱动完成，电子齿轮和 CSP 模式已按 profile 写入并 fresh readback 一致；请执行保存并重启完成运行态生效。" if ok else "设置驱动未完整闭合。",
         "targets": target_results,
         "failures": failures,
         "prechecks": prechecks,
@@ -345,8 +359,6 @@ def run_set_drive(timeout_s: float) -> Dict[str, Any]:
         "drive_parameter_display_writeback": display_writeback,
         "write_executed": write_executed,
         "drive_write_executed": write_executed,
-        "drive_restart_executed": drive_restart_executed,
-        "drive_restart_verified": drive_restart_verified,
         "motion_executed": False,
         "restart_required": True,
         "restart_deferred": True,
@@ -355,7 +367,6 @@ def run_set_drive(timeout_s: float) -> Dict[str, Any]:
 
 def preload_resident_state() -> Dict[str, Any]:
     status: Dict[str, Any] = {"schema": "v5.drive_bus_action.resident_preload.v1"}
-    old_preload = context.resident_preload_active
     reset_resident_preload_caches()
     context.resident_preload_active = True
     try:
@@ -387,14 +398,20 @@ def preload_resident_state() -> Dict[str, Any]:
         except DriveActionError as exc:
             status["self_slave_bindings_loaded"] = False
             status["self_slave_bindings_error"] = exc.code
-    finally:
-        context.resident_preload_active = old_preload
+    except BaseException:
+        reset_resident_preload_caches()
+        context.resident_preload_active = False
+        raise
     ok = bool(status.get("settings_runtime_loaded") and status.get("drive_snapshot_loaded") and status.get("runtime_ini_loaded") and status.get("self_slave_bindings_loaded"))
     status["ok"] = ok
     status["preload_complete"] = ok
     if not ok:
+        reset_resident_preload_caches()
+        context.resident_preload_active = False
         status["code"] = "DRIVE_ACTION_RESIDENT_PRELOAD_INCOMPLETE"
         status["message_cn"] = "驱动动作常驻内存闭包未完整预载，已 fail-closed。"
+    else:
+        context.resident_preload_active = True
     return status
 
 

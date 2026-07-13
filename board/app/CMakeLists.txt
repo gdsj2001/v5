@@ -357,6 +357,7 @@ add_library(v5_command_gate_core STATIC
     ../services/command_gate/v5_native_axis_zero_position.c
     ../services/command_gate/v5_native_motion_parameters.c
     ../services/command_gate/v5_native_readback.c
+    ../services/command_gate/v5_native_hal_owner_client.c
     ../services/command_gate/v5_native_rtcp_control.c
     ../services/command_gate/v5_native_rtcp_status.c
     ../services/command_gate/v5_native_wcs_status.c
@@ -381,6 +382,7 @@ target_include_directories(v5_command_gate_core PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
     "${V5_ROOT_DIR}/services/command_gate"
     "${V5_ROOT_DIR}/services/state_publisher"
+    "${V5_ROOT_DIR}/../linuxcnc/src/hal/user_comps"
 )
 
 target_link_libraries(v5_command_gate_core PUBLIC v5_command_gate_client v5_operator_error_status)

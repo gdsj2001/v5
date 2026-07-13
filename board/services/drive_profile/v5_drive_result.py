@@ -163,44 +163,6 @@ def compact_readback(readback: Any) -> Dict[str, Any]:
     return compact
 
 
-def compact_activation_restart(item: Any) -> Dict[str, Any]:
-    if not isinstance(item, dict):
-        return {"ok": False, "code": "BAD_ACTIVATION_RESTART_RESULT"}
-    compact: Dict[str, Any] = {
-        "ok": bool(item.get("ok")),
-        "software_reset_write_status": item.get("software_reset_write_status"),
-        "attempt_count": item.get("attempt_count"),
-        "initial_delay_s": item.get("initial_delay_s"),
-        "settle_delay_s": item.get("settle_delay_s"),
-    }
-    if "code" in item:
-        compact["code"] = item.get("code")
-    if "message_cn" in item:
-        compact["message_cn"] = item.get("message_cn")
-    if isinstance(item.get("software_reset_write"), dict):
-        compact["software_reset_write"] = compact_write_result(item.get("software_reset_write"))
-    attempts = item.get("software_reset_write_attempts") if isinstance(item.get("software_reset_write_attempts"), list) else []
-    if attempts:
-        last_attempt = attempts[-1] if isinstance(attempts[-1], dict) else {}
-        compact["software_reset_write_attempt_count"] = len(attempts)
-        compact["last_software_reset_write_attempt"] = {
-            "attempt": last_attempt.get("attempt"),
-            "write": compact_write_result(last_attempt.get("write")),
-        }
-    if isinstance(item.get("readback"), dict):
-        compact["readback"] = compact_readback(item.get("readback"))
-    cycles = item.get("cycles") if isinstance(item.get("cycles"), list) else []
-    if cycles and not item.get("ok"):
-        last_cycle = cycles[-1] if isinstance(cycles[-1], dict) else {}
-        compact["cycle_count"] = len(cycles)
-        compact["last_cycle"] = {
-            "attempt": last_cycle.get("attempt"),
-            "op_recovery_ok": bool(last_cycle.get("op_recovery_ok")),
-            "readback": compact_readback(last_cycle.get("readback")),
-        }
-    return compact
-
-
 def compact_error_detail(detail: Any) -> Any:
     if isinstance(detail, dict) and ("attempts" in detail or "health" in detail):
         return compact_readback(detail)
@@ -211,12 +173,10 @@ def compact_error_detail(detail: Any) -> Any:
                 clean[key] = compact_readback(value)
             elif key in {"read", "status_read", "velocity_read"}:
                 clean[key] = compact_read_item(value)
-            elif key in {"factory_reset_write", "fault_reset_write", "egear_write", "mode_write", "software_reset_write"}:
+            elif key in {"factory_reset_write", "fault_reset_write", "egear_write", "mode_write", "save_parameters_write"}:
                 clean[key] = compact_write_result(value)
             elif key in {"post_write_op_recovery", "factory_reset_recovery", "fault_reset_after_factory_reset"}:
                 clean[key] = compact_recovery_result(value)
-            elif key == "drive_activation_restart":
-                clean[key] = compact_activation_restart(value)
             elif key == "failures" and isinstance(value, list):
                 clean[key] = [compact_target_result(item) if isinstance(item, dict) else item for item in value]
             elif isinstance(value, (str, int, float, bool)) or value is None:
@@ -243,18 +203,20 @@ def compact_target_result(item: Any) -> Dict[str, Any]:
         "profile_id",
         "target_mode",
         "mode_write_status",
+        "profile_save_required",
+        "profile_activation_status",
+        "batch_readback_attempt_count",
+        "batch_recovery_attempted",
     )
     compact = {key: item.get(key) for key in keep if key in item}
     if "target_egear" in item:
         compact["target_egear"] = item.get("target_egear")
-    for key in ("factory_reset_write", "fault_reset_write", "egear_write", "mode_write"):
+    for key in ("factory_reset_write", "fault_reset_write", "egear_write", "mode_write", "save_parameters_write"):
         if key in item:
             compact[key] = compact_write_result(item.get(key))
     for key in ("post_write_op_recovery", "factory_reset_recovery", "fault_reset_after_factory_reset"):
         if key in item:
             compact[key] = compact_recovery_result(item.get(key))
-    if "drive_activation_restart" in item:
-        compact["drive_activation_restart"] = compact_activation_restart(item.get("drive_activation_restart"))
     if "write_readback" in item:
         compact["write_readback"] = compact_readback(item.get("write_readback"))
     if "mode_pre_readback" in item and isinstance(item.get("mode_pre_readback"), dict):
@@ -323,8 +285,6 @@ def compact_action_result_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         "restart_required",
         "restart_deferred",
         "backend_restart_required",
-        "drive_restart_executed",
-        "drive_restart_verified",
         "raw_limit_live_verified",
         "raw_runtime_zero_verified",
         "memory_zero_verified",

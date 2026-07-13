@@ -23,7 +23,7 @@ NC_PATH=/opt/8ax/v5/linuxcnc/nc
 
 runtime_prepare() {
   mkdir -p "$RUN_DIR" /run/8ax_v5_product_ui /opt/8ax/v5/linuxcnc/var "$NC_PATH" /opt/8ax/v5/linuxcnc/remap_subs
-  chown petalinux:petalinux "$RUN_DIR" 2>/dev/null || true
+  chown petalinux:petalinux "$RUN_DIR" /run/8ax_v5_product_ui 2>/dev/null || true
   chown -R petalinux:petalinux /opt/8ax/v5/linuxcnc/var "$NC_PATH" /opt/8ax/v5/linuxcnc/remap_subs 2>/dev/null || true
   chmod 666 /dev/uio0 2>/dev/null || true
 }
@@ -255,6 +255,14 @@ start_backend() {
   if backend_residue_running; then
     stop_backend
   fi
+  if backend_residue_running; then
+    echo "LinuxCNC backend residue remained before native status reset" >&2
+    return 1
+  fi
+  rm -f \
+    /dev/shm/v5_native_safety_latch.bin \
+    /dev/shm/v5_native_rtcp_status.bin \
+    /dev/shm/v5_native_g53_geometry_status.bin
   : >"$LINUXCNC_LOG"
   chown petalinux:petalinux "$LINUXCNC_LOG" 2>/dev/null || true
   su petalinux -c "cd /opt/8ax/v5/linuxcnc/ini && TCLLIBPATH=/usr/lib/tcltk /usr/bin/linuxcnc -r '$LINUXCNC_INI' >>'$LINUXCNC_LOG' 2>&1" &

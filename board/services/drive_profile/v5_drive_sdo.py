@@ -11,6 +11,8 @@ import v5_drive_bus_contract as contract
 from v5_drive_bus_contract import DriveActionError, MAX_COMMAND_OUTPUT_BYTES, TYPE_MAP, finite_float
 from v5_drive_result import compact_sdo_io
 
+ETHERCAT_SLAVE_STATES = frozenset({"INIT", "PREOP", "BOOT", "SAFEOP", "OP"})
+
 def run_command(argv: List[str], timeout_s: float) -> Dict[str, Any]:
     def tail_text(value: Any) -> str:
         if isinstance(value, bytes):
@@ -31,6 +33,23 @@ def run_command(argv: List[str], timeout_s: float) -> Dict[str, Any]:
     return {"ok": proc.returncode == 0, "code": "OK" if proc.returncode == 0 else "ETHERCAT_COMMAND_FAILED", "returncode": proc.returncode, "stdout": tail_text(proc.stdout), "stderr": tail_text(proc.stderr)}
 
 
+def parse_ethercat_slave_line(line: str) -> Dict[str, str]:
+    text = str(line or "").strip()
+    parts = text.split()
+    if len(parts) < 4:
+        raise ValueError("ethercat slave row has fewer than four fields")
+    try:
+        position = str(int(parts[0]))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("ethercat slave position is invalid") from exc
+    state = parts[2].upper()
+    if state not in ETHERCAT_SLAVE_STATES:
+        raise ValueError("ethercat slave state is invalid")
+    name_start = 4 if parts[3] in {"+", "E", "-"} else 3
+    name = " ".join(parts[name_start:]).strip()
+    return {"line": text, "position": position, "state": state, "name": name}
+
+
 def run_ethercat_slaves(timeout_s: float) -> Dict[str, Any]:
     result = run_command(["ethercat", "slaves"], timeout_s)
     if result["code"] == "ETHERCAT_TOOL_MISSING":
@@ -38,19 +57,17 @@ def run_ethercat_slaves(timeout_s: float) -> Dict[str, Any]:
     if result["code"] == "ETHERCAT_COMMAND_TIMEOUT":
         return {"ok": False, "code": "ETHERCAT_SCAN_TIMEOUT", "message_cn": "扫描从站超时。", "slaves": []}
     slaves: List[Dict[str, Any]] = []
+    parse_failures: List[Dict[str, str]] = []
     for line in result["stdout"].splitlines():
         text = line.strip()
         if not text:
             continue
-        parts = text.split()
         try:
-            position = str(int(parts[0])) if parts else ""
-        except Exception:
-            position = parts[0] if parts else ""
-        name = parts[-1] if parts else ""
-        if name == "+" or name == position:
-            name = ""
-        slaves.append({"line": text, "position": position, "name": name})
+            slaves.append(parse_ethercat_slave_line(text))
+        except ValueError as exc:
+            parse_failures.append({"line": text, "error": str(exc)})
+    if result["ok"] and parse_failures:
+        return {"ok": False, "code": "ETHERCAT_SCAN_STATE_INVALID", "message_cn": "EtherCAT 从站状态解析失败，拒绝按不完整扫描结果发送命令。", "returncode": result["returncode"], "stdout": result["stdout"], "stderr": result["stderr"], "slaves": slaves, "parse_failures": parse_failures}
     if result["ok"] and not slaves:
         return {"ok": False, "code": "DRIVE_SCAN_NO_SLAVES", "message_cn": "未扫描到 EtherCAT 从站。", "returncode": result["returncode"], "stdout": result["stdout"], "stderr": result["stderr"], "slaves": []}
     return {"ok": bool(result["ok"]), "code": "DRIVE_SCAN_OK" if result["ok"] else "DRIVE_SCAN_FAILED", "message_cn": "扫描从站完成。" if result["ok"] else "扫描从站失败。", "returncode": result["returncode"], "stdout": result["stdout"], "stderr": result["stderr"], "slaves": slaves}

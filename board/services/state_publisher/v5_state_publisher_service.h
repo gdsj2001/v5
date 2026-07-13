@@ -15,7 +15,6 @@ typedef struct V5StatePublisherReport {
     unsigned int valid_mask;
     unsigned int frame_flags;
     unsigned int publish_count;
-    unsigned int rtcp_status_published;
     unsigned int interval_ms;
     const char *path;
 } V5StatePublisherReport;

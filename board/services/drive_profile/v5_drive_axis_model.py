@@ -12,6 +12,7 @@ from v5_drive_runtime_store import (
     load_settings_runtime,
     persist_axis_zero_model,
     read_runtime_ini_sections,
+    runtime_ini_joint_index,
     runtime_ini_value,
     saved_zero_counts,
 )
@@ -106,7 +107,8 @@ def final_encoder_bits(axis: str, profile: Dict[str, Any]) -> Tuple[int, Dict[st
 def target_egear_from_runtime_ini(axis: str, axis_index: int, profile: Dict[str, Any]) -> Tuple[int, int, Dict[str, Any]]:
     sections = read_runtime_ini_sections(contract.RUNTIME_SETTINGS_INI)
     axis_name = "AXIS_%s" % str(axis or "").upper()
-    joint_name = "JOINT_%d" % axis_index
+    joint_index, joint_index_source = runtime_ini_joint_index(sections, axis, axis_index)
+    joint_name = "JOINT_%d" % joint_index
     scale = runtime_ini_value(sections, [joint_name, axis_name], ["SCALE"])
     target_precision = runtime_ini_value(sections, [axis_name, joint_name], ["TARGET_PRECISION", "PRECISION", "TARGET_UNIT_PER_COUNT", "UNIT_PER_COUNT"])
     precision_source = "active_runtime_ini.target_precision"
@@ -144,7 +146,9 @@ def target_egear_from_runtime_ini(axis: str, axis_index: int, profile: Dict[str,
     evidence = {
         "source": "active_runtime_ini_formula",
         "axis": axis,
-        "axis_index": axis_index,
+        "axis_index": joint_index,
+        "joint_index_source": joint_index_source,
+        "configured_axis_index": axis_index,
         "runtime_ini": str(contract.RUNTIME_SETTINGS_INI),
         "axis_section": axis_name,
         "joint_section": joint_name,
@@ -171,7 +175,8 @@ def target_egear_from_runtime_ini(axis: str, axis_index: int, profile: Dict[str,
 def derive_counts_per_unit(axis: str, axis_cfg: Dict[str, Any], axis_index: int) -> Tuple[float, Dict[str, Any]]:
     unit = axis_unit(axis)
     sections = read_runtime_ini_sections(contract.RUNTIME_SETTINGS_INI)
-    joint_name = "JOINT_%d" % axis_index
+    joint_index, joint_index_source = runtime_ini_joint_index(sections, axis, axis_index)
+    joint_name = "JOINT_%d" % joint_index
     axis_name = "AXIS_%s" % str(axis or "").upper()
     scale = runtime_ini_value(sections, [joint_name, axis_name], ["SCALE"])
     pitch = runtime_ini_value(sections, [axis_name, joint_name], ["LEAD_PITCH_MM_PER_REV", "SCREW_PITCH_MM_PER_REV", "PITCH"])
@@ -218,6 +223,9 @@ def derive_counts_per_unit(axis: str, axis_cfg: Dict[str, Any], axis_index: int)
         "source": source,
         "runtime_ini": str(contract.RUNTIME_SETTINGS_INI),
         "joint_section": joint_name,
+        "joint_index": joint_index,
+        "joint_index_source": joint_index_source,
+        "configured_axis_index": axis_index,
         "axis_section": axis_name,
         "scale": scale,
         "pitch_mm_per_rev": pitch,

@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
 import tempfile
+import threading
+import time
 from pathlib import Path
-
-import v5_remote_ui_relay as relay
 
 
 def write_framebuffer(path: Path, width: int, height: int) -> None:
@@ -41,11 +43,94 @@ def check_cpu_usage_sampler() -> int:
     return 0
 
 
+def check_refresh_commit_boundary() -> int:
+    source_path = Path(__file__).resolve().parents[2] / "app" / "src" / "v5_lvgl_remote_display.c"
+    source = source_path.read_text(encoding="utf-8")
+    compose_start = source.index("static void compose_area")
+    commit_start = source.index("static void commit_composed_frame")
+    flush_start = source.index("static void remote_flush")
+    setup_start = source.index("int v5_lvgl_remote_display_setup")
+    compose_body = source[compose_start:commit_start]
+    commit_body = source[commit_start:flush_start]
+    flush_body = source[flush_start:setup_start]
+    if "notify_remote_dirty" in compose_body or "g_remote_fb" in compose_body:
+        print("pre-final flush still publishes output")
+        return 19
+    required_flush = ["compose_area(area, color_p);", "lv_disp_flush_is_last(driver)", "commit_composed_frame();"]
+    if any(token not in flush_body for token in required_flush):
+        print("last-flush commit boundary missing")
+        return 20
+    if not (flush_body.index(required_flush[0]) < flush_body.index(required_flush[1]) < flush_body.index(required_flush[2])):
+        print("last-flush commit boundary is out of order")
+        return 21
+    if commit_body.count("++g_frame_id;") != 1 or commit_body.count("notify_remote_dirty(") != 1:
+        print("composed refresh does not publish exactly one frame and dirty event")
+        return 22
+    if "accumulate_dirty_area(x1, y1, x2, y2);" not in compose_body:
+        print("dirty union accumulation missing")
+        return 23
+    return 0
+
+
+def check_full_frame_waits_for_commit(root: Path) -> int:
+    import fcntl
+
+    state = relay.FrameState(root / "flock", 4, 4)
+    write_framebuffer(state.framebuffer_path, state.width, state.height)
+    writer_fd = os.open(state.framebuffer_path, os.O_RDWR)
+    started = threading.Event()
+    finished = threading.Event()
+    result: list[tuple[int, bytes] | None] = []
+
+    def read_frame() -> None:
+        started.set()
+        result.append(state.full_frame())
+        finished.set()
+
+    committed = bytes((7, 11, 13, 255)) * (state.width * state.height)
+    thread = threading.Thread(target=read_frame, daemon=True)
+    try:
+        fcntl.flock(writer_fd, fcntl.LOCK_EX)
+        thread.start()
+        if not started.wait(1.0):
+            print("full frame reader did not start")
+            return 16
+        midpoint = len(committed) // 2
+        os.pwrite(writer_fd, committed[:midpoint], 0)
+        time.sleep(0.05)
+        if finished.is_set():
+            print("full frame reader observed a partial writer commit")
+            return 17
+        os.pwrite(writer_fd, committed[midpoint:], midpoint)
+        fcntl.flock(writer_fd, fcntl.LOCK_UN)
+        thread.join(1.0)
+    finally:
+        try:
+            fcntl.flock(writer_fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        os.close(writer_fd)
+    if thread.is_alive() or not result or result[0] is None or result[0][1] != committed:
+        print("full frame reader did not return the committed frame")
+        return 18
+    state.close_framebuffer_map()
+    return 0
+
+
 def main() -> int:
+    global relay
+    import v5_remote_ui_relay as relay
+
     rc = check_cpu_usage_sampler()
     if rc != 0:
         return rc
+    rc = check_refresh_commit_boundary()
+    if rc != 0:
+        return rc
     with tempfile.TemporaryDirectory(prefix="v5_remote_relay_coalesce_") as tmp:
+        rc = check_full_frame_waits_for_commit(Path(tmp))
+        if rc != 0:
+            return rc
         state = relay.FrameState(Path(tmp), 4, 4)
         write_framebuffer(state.framebuffer_path, state.width, state.height)
         state.publish_dirty({"frame_id": 2, "base_frame_id": 1, "x": 0, "y": 0, "w": 1, "h": 1})
@@ -150,4 +235,9 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--source-contract-only"]:
+        source_rc = check_refresh_commit_boundary()
+        if source_rc == 0:
+            print("v5 remote display source contract: last-flush atomic commit ok")
+        raise SystemExit(source_rc)
     raise SystemExit(main())

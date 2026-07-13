@@ -1,0 +1,50 @@
+component v5_safety_latch "V5 realtime emergency-stop latch with owner heartbeat watchdog";
+
+pin in bit force "Level-triggered emergency-stop request from the native HAL owner";
+pin in bit reset "Rising-edge reset request accepted only while the owner heartbeat is fresh";
+pin in bit heartbeat "Heartbeat toggled by the native HAL owner";
+pin out bit estop_ok = false "True only while the realtime latch is clear";
+pin out bit estop_active = true "Realtime emergency-stop actual";
+param rw u32 watchdog_cycles = 50 "Maximum unchanged heartbeat servo cycles before fail-closed";
+
+function _ nofp;
+option data v5_safety_latch_data;
+license "GPL";
+author "V5 project";
+;;
+
+#include <limits.h>
+
+typedef struct {
+    int initialized;
+    int latched;
+    int old_reset;
+    int last_heartbeat;
+    unsigned int stale_cycles;
+} v5_safety_latch_data;
+
+FUNCTION(_) {
+    if (!data.initialized) {
+        data.initialized = 1;
+        data.latched = 1;
+        data.last_heartbeat = heartbeat ? 1 : 0;
+        data.stale_cycles = watchdog_cycles + 1U;
+    }
+
+    if ((heartbeat ? 1 : 0) != data.last_heartbeat) {
+        data.last_heartbeat = heartbeat ? 1 : 0;
+        data.stale_cycles = 0U;
+    } else if (data.stale_cycles < UINT_MAX) {
+        data.stale_cycles++;
+    }
+
+    if (force || data.stale_cycles > watchdog_cycles) {
+        data.latched = 1;
+    } else if (reset && !data.old_reset) {
+        data.latched = 0;
+    }
+
+    data.old_reset = reset ? 1 : 0;
+    estop_active = data.latched ? 1 : 0;
+    estop_ok = data.latched ? 0 : 1;
+}

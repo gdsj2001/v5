@@ -10,12 +10,13 @@ FILESEXTRAPATHS_prepend := "${THISDIR}/files:"
 SRC_URI += "file://v5_linuxcnc_runtime_allowlist.tsv"
 
 V5_LINUXCNC_EXTERNAL_SOURCE ?= ""
+V5_LINUXCNC_EXTERNAL_BUILD ?= ""
 EXTERNALSRC = "${V5_LINUXCNC_EXTERNAL_SOURCE}"
-EXTERNALSRC_BUILD = "${V5_LINUXCNC_EXTERNAL_SOURCE}/src"
+EXTERNALSRC_BUILD = "${V5_LINUXCNC_EXTERNAL_BUILD}"
 PV = "2.9.7+v5"
 
 S = "${EXTERNALSRC}"
-B = "${S}/src"
+B = "${EXTERNALSRC_BUILD}"
 do_configure[file-checksums] = " \
     ${S}/v5_linuxcnc_source_identity.json:True \
     ${WORKDIR}/v5_linuxcnc_runtime_allowlist.tsv:True \
@@ -48,9 +49,13 @@ EXTRA_OECONF = " \
 "
 
 do_configure() {
-    if [ -z "${V5_LINUXCNC_EXTERNAL_SOURCE}" ] || [ ! -f ${S}/v5_linuxcnc_source_identity.json ]; then
-        bbfatal "V5 LinuxCNC external source owner is unavailable"
+    if [ -z "${V5_LINUXCNC_EXTERNAL_SOURCE}" ] || [ -z "${V5_LINUXCNC_EXTERNAL_BUILD}" ] || [ ! -f ${S}/v5_linuxcnc_source_identity.json ]; then
+        bbfatal "V5 LinuxCNC external source/build owner is unavailable"
     fi
+    case "${B}" in
+        "${S}"|"${S}"/*) bbfatal "V5 LinuxCNC build directory must remain outside the read-only source projection" ;;
+    esac
+    [ -f ${B}/autogen.sh ] || bbfatal "V5 LinuxCNC writable overlay build view is incomplete"
     grep -q 'v5_prepare_wrapped_rotary_target' ${S}/src/emc/motion/command.c || \
         bbfatal "V5 native rotary target owner missing"
     grep -q 'v5_wrapped_rotary_mask' ${S}/src/emc/motion/motion.c || \
@@ -261,6 +266,7 @@ FILES_${PN} = " \
     ${bindir}/linuxcncsvr \
     ${bindir}/milltask \
     ${bindir}/rtapi_app \
+    ${bindir}/v5_native_hal_owner \
     ${libdir}/liblinuxcnchal.so.0 \
     ${libdir}/liblinuxcncini.so.0 \
     ${libdir}/libnml.so.0 \
@@ -279,8 +285,7 @@ FILES_${PN} = " \
     ${libdir}/linuxcnc/modules/bitslice.so \
     ${libdir}/linuxcnc/modules/mux2.so \
     ${libdir}/linuxcnc/modules/or2.so \
-    ${libdir}/python3/dist-packages/_hal.so \
-    ${libdir}/python3/dist-packages/hal.py \
+    ${libdir}/linuxcnc/modules/v5_safety_latch.so \
     ${libdir}/python3/dist-packages/linuxcnc.so \
     ${datadir}/linuxcnc/linuxcnc.nml \
     ${datadir}/v5-native/linuxcnc-runtime-allowlist.tsv \

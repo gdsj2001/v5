@@ -27,7 +27,7 @@
 /usr/lib/linuxcnc/modules/bitslice.so	BUS digital-input adapter
 /usr/lib/linuxcnc/modules/mux2.so	BUS RTCP selector adapter
 /usr/lib/linuxcnc/modules/or2.so	BUS RTCP input combiner
-/usr/lib/python3/dist-packages/_hal.so	Python native HAL binding
-/usr/lib/python3/dist-packages/hal.py	Python HAL API shim
+/usr/lib/linuxcnc/modules/v5_safety_latch.so	Realtime emergency-stop latch and heartbeat watchdog
+/usr/bin/v5_native_hal_owner	Resident C HAL owner for safety RTCP and G53 geometry
 /usr/lib/python3/dist-packages/linuxcnc.so	State Publisher native status API
 /usr/share/linuxcnc/linuxcnc.nml	canonical NML channel layout

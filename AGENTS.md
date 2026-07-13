@@ -7,10 +7,13 @@ RULE_SOURCE=AGENTS.md
 ## P0_ENTRY_KERNEL
 
 HIGHEST_RULE_1:
+- 项目真实可交付结果和用户当前目标是项目内最高目标；规则、文档、门禁、identity、构建梯级和状态词只用于减少错误与证明受影响闭环，不得成为独立工作目标。与当前 owner/输入/target/风险无关的流程必须短路；若通用工具强制执行无关全树扫描、无关子系统验证或重复证明，视为工具/规则缺陷，立即改用或补出最小入口后继续推进，不得让“遵守规则”阻塞项目。
+- 日常开发默认目标是最快把当前需求落实到 canonical source 并取得最近的 focused compile/unit/package 结果；`local_verified_only` 是可正常交付并继续下一缺陷的阶段，不得自动追求最高验证等级。rootfs/image、板端部署和 operator 验收默认按相关改动批量集成，只在用户明确要求立即上板、当前任务本身是板端验收、集成里程碑或发布前执行。
 - Windows 是默认执行主机。能在 Windows 正确完成的 compile/check/codegen/package/manifest/schema/test 步骤必须留在 Windows；VM 只承担 Windows 无法提供所需 Linux ABI、PetaLinux/Yocto、ARM 交叉环境、Linux 内核行为或 vendor 能力的最小步骤。
 - 正式构建输入必须落到 Windows `D:\v5` 的唯一 canonical owner，并有固定 identity/hash/provenance。VM/BitBake 发现缺项时必须输出 inventory 绑定的机器可读报告并停止；只允许 Windows importer 下载报告中已登记、checksum/许可证齐全的包到 canonical owner，复核后再让 VM 只读消费。VM、BitBake、代理、sstate 或构建脚本不得自行联网补下载，未知输入必须 `blocked`。
 - 每份源码只允许 Windows `D:\v5` 内一个持久 owner。VM 只允许 `${VM_BUILD_ROOT}/temp_source/current` 一套由 Windows identity 派生、不可编辑的加速投影；identity 一致可跨任务复用，不一致只按文件 identity/hash 原地更新新增、修改、删除集合，未变文件必须保持 inode/mtime。禁止因总 identity 变化删除重建整棵投影、全量强制复制、第二投影、VM checkout、手工 patch、反向覆盖 Windows 或把投影当 owner。
 - 日常工作默认 `incremental-current`：Windows focused gate -> 受影响 target/recipe compile/install/package -> 必要 rootfs/manifest -> 一次 current 镜像。缺项补齐后只重跑报告登记的原失败层并保留有效 sstate/tmp/work/stamp；不得未过单包就跑最终镜像，不得无证据清 kernel/sstate/tmp/downloads/fetch stamp。空 build/downloads/sstate 的断网全量构建只用于用户明确要求、发布/灾难恢复里程碑或离线能力重新认证。
+- 日常 focused 修复只校验改动文件和当前 target 实际读取的直接输入，不运行完整源码 inventory、全仓 hash、未触碰 owner identity 或离线闭包认证。仓库中与当前 target 无关的缺项推迟到 full-current、发布或离线全量构建时统一发现并由 Windows importer 补齐；只有当前 target 实际请求的输入缺失才停止当前失败层。
 - 只保留一个 mainline、一个实现和一个 owner。确认属于退役/重复/fallback/shadow/bypass 的路径，在真实依赖迁移后同 slice 物理删除；不得改名、disabled、env gate、TODO、测试入口或备份保留。
 
 STRICT_STATUS_WORDS=[source_only, local_verified_only, board_verified, blocked]
@@ -23,7 +26,7 @@ AI_READ_SEQUENCE:
 3. 产品功能/行为先读 `功能/需求真源索引.md` 的“AI 任务阅读包”，定位唯一 `REQ-*` owner。
 4. 先读 owner 的 `AI_FAST_READ_BEGIN` 到 `AI_FAST_READ_END`；只继续读命中的 `detail_sections`。字段级实现、冲突或验收时再扩展正文。
 5. 读相关源码、当前 `git status` 和 focused diff；不得覆盖用户已有改动。
-6. 行为变化先改索引登记的 owner 正文并同步同文件快读卡，再改 source/config/tests。纯提问/审查默认只读。
+6. 用户需求、contract 或产品行为发生变化时，先改索引登记的 owner 正文并同步同文件快读卡，再改 source/config/tests。若 owner 已经正确、只是实现没有兑现现有要求，读取并引用 owner 后直接修 canonical source/config/tests，不重复改写文档或把错误现状写回需求。纯提问/审查默认只读。
 
 CONFLICT_PRIORITY:
 1. system/developer/tool safety instructions
@@ -36,7 +39,7 @@ CONFLICT_PRIORITY:
 TASK_ROUTER:
 | 任务 | 第一读取 | 第一修改 | 最低关闭 |
 | --- | --- | --- | --- |
-| 产品行为/需求 | 需求索引 -> 唯一 owner 快读卡/命中章节 | 唯一 owner | source/config + focused gates；板端行为再走板端闭环 |
+| 产品行为/需求 | 需求索引 -> 唯一 owner 快读卡/命中章节 | 需求变化先改唯一 owner；现有需求的实现缺陷直接改 canonical source | source/config + focused gates；板端行为再走板端闭环 |
 | 指定 `待做工作/*.md` | 指定 workdoc -> 需求索引 -> owner | 行为变化先改 owner | 按 owner 实施；workdoc 不替代真源 |
 | 规则/文档结构 | 本文件对应节、需求索引 | 唯一 canonical 文档 | 文档路由校验 + `git diff --check` |
 | 板端源码 | owner + Windows canonical source | Windows owner | focused -> affected target -> current artifact -> deploy -> operator path |
@@ -80,7 +83,7 @@ OFFLINE_FULL_SD:
 
 VM_BUILD_BOUNDARY:
 - `VM_SOURCE_MOUNT_ROOT=/mnt/v5-source` 必须是 Windows owner 的 live read-only mount；`VM_SOURCE_PROJECTION_ROOT=/root/v5-build/temp_source/current` 是唯一派生投影；build output 只能写到 canonical external build directories。
-- 每个 owner identity 一轮只验证一次；源码未变时跨 package/rootfs/image 复用，不重复全树 hash、重投影或 remount。identity 变化时只同步机器可读差量并保持未变文件 mtime；只有投影缺失/损坏且严格校验失败或明确空缓存离线认证才允许整棵重建。
+- 日常 focused 切片只验证当前受影响 owner 的文件级差量和 target 直接输入，不预扫其它 owner。需要完整 identity 的 full-current、发布或离线构建中，每个 owner 一轮只验证一次；源码未变时跨 package/rootfs/image 复用，不重复全树 hash、重投影或 remount。identity 变化时只同步机器可读差量并保持未变文件 mtime；只有投影缺失/损坏且严格校验失败或明确空缓存离线认证才允许整棵重建。
 - VM 可以保留一套 current image 集合方便普通复核/重写卡；新集合替换旧集合。它是产物副本，不是离线从零证明。
 - VM 不得安装/使用 WSL。VM 长期外网访问能力不算第二源码/构建 owner；允许通过正常虚拟网卡直接联网，直连受限时也允许一套常驻 Linux 代理客户端服务，但代理地址、凭据或订阅不得进入项目源码、recipe、镜像、普通文档或构建配置。
 - VM 外网只用于系统维护、非构建诊断和用户明确要求的普通联网操作。source import、Git/HTTP source acquisition、BitBake fetch、远程 sstate、configure/compile/package/rootfs/image 和离线认证仍禁止借外网补输入；正式构建前清除大小写 proxy 变量并执行 network-disabled gate。
@@ -132,6 +135,15 @@ FILE_LOCK_PROTOCOL:
 - 只在编辑和立即 focused text/syntax check 期间持有，完成即删除；不得等待 unrelated test/VM/build/deploy/handoff。
 - 锁只防同文件并发，不是 source truth；禁止 lock daemon/database/heartbeat/TTL/history/approval queue/repository-wide lock。
 
+FAST_INCREMENTAL_SLICE:
+- 先推进当前可交付闭环，再做证明该闭环所必需的最小流程。任何 gate 必须说明其失败如何影响当前 target；不能说明直接影响的 gate 本切片跳过。通用入口若强制验证未触碰的 Linux/kernel/PetaLinux/其它 owner，必须修出 target-only 路径或调用已登记的更低层入口，不得重复运行错误的大入口。
+- owner 和直接源码入口一旦明确，下一步必须是编辑或最近 focused command；同一问题在首次具体动作前最多允许两轮只读定位，不得持续扩展架构分析、全仓分类或方案比较。focused gate 通过后立即交付该阶段结果，不为追求 `board_verified` 自动新建 deploy bundle、服务、协议、镜像路径或其它基础设施；缺少更高层部署能力时诚实停在 `local_verified_only`，基础设施作为用户明确触发的独立切片处理。
+- 日常修复默认一个切片只关闭一个具体缺陷、一个 owner 链和一个最小可部署 target；用户一次提出多个问题时按依赖顺序逐个关闭、逐个验证、逐个交付，除非源码证明它们是同一不可拆原子变更。不得把多个 P0/P1、架构整理、顺手重构或文档清扫打包成几十文件的大切片。
+- 进入 VM 前冻结当前缺陷、owner、允许修改文件集和最小 build target。进入 VM 后只修改当前明确失败层直接依赖的 owner/source/config/test/build tool；新发现的独立问题留到下一切片。受影响单包未通过前禁止 rootfs/image。
+- 耗时 gate 绑定“受影响输入 identity + gate 实现 identity + 命令参数”。三者未变时复用已通过的 source identity/hash、唯一投影、文档路由、runtime policy 和上游构建层；变化时只重跑受影响 gate 及其下游，不得重复全树扫描制造进度。
+- focused gate 以当前 target 能否正确编译/安装/运行所需的最小证据为止；不得先执行完整 source-package inventory、全部 owner identity、全项目 policy 或无关许可证扫描。上述全局闭包只在 full-current、发布、灾难恢复或离线认证时执行。
+- 每次跨阶段立即更新可见 plan。活跃命令连续 120 秒没有新输出时必须检查 PID/CPU/子进程/日志/资源锁：仍活跃就报告真实阶段并继续，已退出或锁与进程不一致就立即收集失败证据、停止等待并释放锁。
+
 VM_BOARD_SINGLE_OPERATOR:
 - mount/projection refresh、VM native/ARM compile、package、board deploy/restart/operator/motion 是单 operator resource。实际操作前获取 `repo_ignored/locks/resources/vm_board.lock` 并 live-check 进程；命令结束/停止立即释放。
 - VM native 和 ARM 编译不得并发；发现活跃 lock/process 时继续本地无关工作，不启动第二构建，不 remount，不强杀/重启 active build。
@@ -144,7 +156,7 @@ MAINLINE_AND_RETIREMENT:
 - 不创建源码/文档 backup、过程文档或任务板；临时 output 进入 `repo_ignored/temp/` 或更具体 ignored evidence/scratch owner。
 
 PROGRESS_AND_BLOCKERS:
-- 有已知安全下一步就持续推进，不停在 plan、inventory、单字段、首次错误或 local gate。命令/工具失败是诊断证据，应 fix-forward。
+- 有当前最小切片内的已知安全下一步就持续推进，不停在 plan、inventory、单字段或首次错误；命令/工具失败是诊断证据，应 fix-forward。不得把“持续推进”解释成自动提高验证等级、扩建部署基础设施或追逐与当前阶段交付无关的 board/image 闭环。
 - 只有安全/破坏性审批、真实 external state、活跃 VM/board contention、无法从 owner 裁决的规则冲突或必要用户输入才暂停。
 - 同一具体 blocker 经至少 3 次有意义诊断/尝试仍无法推进，报告 attempts、缺失验证、下一接受条件和最强诚实状态；不自动写 `待做工作/遗留.md`。
 - commentary 只报告当前动作、关键发现、风险、阻塞和验证结果；省略已自行恢复的 shell quoting/regex/命令试错。
@@ -163,14 +175,15 @@ LOCAL_FIRST:
 - owner/native/SHM/parameter 变化先跑现有 `board/tools/` focused audit；工具缺口不能用猜测代替。
 
 BUILD_LADDER:
-1. 证明 Windows owner diff、source identity、VM read-only mount 和唯一 projection identity。
+1. 日常 focused 只证明 Windows 受影响 owner diff、当前 target 直接输入和 VM read-only/唯一 projection 可用；完整 source identity/inventory 留给 full-current、发布或离线构建。
 2. 构建最小受影响 target/recipe/package；失败先修该层。
-3. 只有部署内容变化才生成必要 rootfs/manifest。
-4. 只生成一套 current artifact；不清未受影响缓存。
+3. 只有用户明确要求立即上板、任务本身是板端验收、批量集成里程碑或发布，且部署内容变化时，才生成必要 rootfs/manifest。
+4. 需要 current artifact 时只生成一套；日常 source/focused/package 切片不自动生成镜像，不清未受影响缓存。
 5. 检查 ARM/Linux ELF/ABI（`file`/`readelf -h`）；host/x86/Windows artifact 不得覆盖板端。
 6. 部署 canonical artifact，走原始 UI/operator/control path，并取得 owner actual/readback。
 
 FINISH_LINE:
+以下表格定义各状态词需要的证据，不要求每个日常切片自动达到最高状态。默认先交付 `local_verified_only` 并继续项目；只有用户当前目标要求真实板端结果时才继续 `board_verified`。
 | Slice | 必须执行 | 允许的正向状态 |
 | --- | --- | --- |
 | doc/rule only | focused 文档结构/文本检查 | 文档已更新；不是板端功能通过 |

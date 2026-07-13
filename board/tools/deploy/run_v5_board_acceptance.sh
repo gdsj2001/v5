@@ -15,7 +15,7 @@ linuxcncrsh_port="${V5_LINUXCNCRSH_PORT:-5007}"
 home_dir="${HOME:?HOME is required}"
 build_root="${V5_BUILD_ROOT:-$home_dir/v5-build}"
 board_build_dir="${V5_BOARD_BUILD_DIR:-$build_root/board}"
-board_build_targets="${V5_BOARD_BUILD_TARGETS:-v5_product_runtime}"
+board_build_targets="${V5_BOARD_BUILD_TARGETS:-v5_lvgl_shell v5_state_publisher v5_touch_diagnostics v5_linuxcncrsh_probe v5_command_gate_server v5_linuxcncrsh_golden_run}"
 product_closure_verify="$repo_root/tools/deploy/verify_v5_product_source_closure.py"
 apply=0
 motion=0
@@ -72,12 +72,24 @@ if [ ! -d "$board_build_dir" ]; then
   echo "missing board build directory: $board_build_dir" >&2
   exit 6
 fi
+cmake_cache="$board_build_dir/CMakeCache.txt"
+if [ ! -r "$cmake_cache" ]; then
+  echo "missing canonical board CMake cache: $cmake_cache" >&2
+  exit 6
+fi
+cmake_c_compiler=$(sed -n 's/^CMAKE_C_COMPILER:FILEPATH=//p' "$cmake_cache" | head -n 1)
+case "$cmake_c_compiler" in
+  *arm-xilinx-linux-gnueabi-gcc) ;;
+  *)
+    echo "canonical board CMake cache is not ARM: compiler=${cmake_c_compiler:-missing}" >&2
+    exit 6
+    ;;
+esac
 
 python3 "$product_closure_verify" \
   --board-root "$repo_root" \
   --build-dir "$board_build_dir" \
   --prepare-cmake-query
-cmake -S "$repo_root" -B "$board_build_dir"
 python3 "$product_closure_verify" \
   --board-root "$repo_root" \
   --build-dir "$board_build_dir" \

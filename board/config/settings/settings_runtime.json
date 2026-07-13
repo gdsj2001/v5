@@ -1,0 +1,13 @@
+{
+  "schema": "re.v3.settings_runtime.drive_only.v1",
+  "axes": [
+    {"axis": "X"},
+    {"axis": "Y"},
+    {"axis": "Z"},
+    {"axis": "A"},
+    {"axis": "B"},
+    {"axis": "C"},
+    {"axis": "GANTRY"},
+    {"axis": "TOOLMAG"}
+  ]
+}

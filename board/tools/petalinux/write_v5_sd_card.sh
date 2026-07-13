@@ -266,17 +266,24 @@ enable_service() {
 }
 
 enable_service v5-linuxcnc-command-gate 91 19
-enable_service v5-g53-geometry-memory-owner 92 18
-enable_service v5-rtcp-status-publisher 93 17
-enable_service v5-wcs-status-publisher 94 16
-enable_service v5-state-publisher 95 15
-enable_service v5-ui-relay 96 14
-enable_service v5-settings-actiond 97 13
-enable_service v5-touch-diagnostics 98 12
+enable_service v5-wcs-status-publisher 92 18
+enable_service v5-state-publisher 93 17
+enable_service v5-ui-relay 94 16
+enable_service v5-settings-actiond 95 15
+enable_service v5-touch-diagnostics 96 14
 
 rm -f \
     "$rootfs_stage/opt/8ax/v5/config/settings/microkernel_parameter_table.tsv" \
-    "$rootfs_stage/opt/8ax/v5/gcode/golden/cc.ngc"
+    "$rootfs_stage/opt/8ax/v5/gcode/golden/cc.ngc" \
+    "$rootfs_stage/usr/libexec/8ax/v5_rtcp_status_publisher.py" \
+    "$rootfs_stage/usr/libexec/8ax/v5_g53_geometry_memory_owner.py" \
+    "$rootfs_stage/usr/libexec/8ax/v5_native_safety_latch_owner.py" \
+    "$rootfs_stage/etc/init.d/v5-rtcp-status-publisher" \
+    "$rootfs_stage/etc/init.d/v5-g53-geometry-memory-owner"
+for level in 0 1 2 3 4 5 6; do
+    rm -f "$rootfs_stage/etc/rc${level}.d"/[SK]??v5-rtcp-status-publisher
+    rm -f "$rootfs_stage/etc/rc${level}.d"/[SK]??v5-g53-geometry-memory-owner
+done
 
 install -d \
     "$rootfs_stage/opt/8ax/drive-profiles/public" \

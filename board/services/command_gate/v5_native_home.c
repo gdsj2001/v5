@@ -173,21 +173,53 @@ static int wait_axis_target(
 #endif
 }
 
+int v5_native_home_format_increment(
+    const V5NativeMotionAxisParameters *axis,
+    double delta,
+    char *line,
+    size_t line_size)
+{
+    double speed;
+    int rc;
+    if (!axis || !line || line_size == 0U ||
+        !isfinite(delta) || fabs(delta) <= V5_HOME_MOTION_TOLERANCE ||
+        !isfinite(axis->max_velocity) || axis->max_velocity <= 0.0) {
+        return 0;
+    }
+    speed = (delta < 0.0 ? -axis->max_velocity : axis->max_velocity) * 60.0;
+    rc = snprintf(
+        line,
+        line_size,
+        "Set Jog_Incr %u %.6f %.6f",
+        axis->status_slot,
+        speed,
+        fabs(delta));
+    return rc > 0 && (size_t)rc < line_size;
+}
+
 static int send_increment(
     const V5LinuxcncrshConfig *config,
     const V5NativeMotionAxisParameters *axis,
     double delta)
 {
     char line[128];
-    double speed;
-    int rc;
-    if (!axis || !isfinite(delta) || fabs(delta) <= V5_HOME_MOTION_TOLERANCE) {
-        return 0;
-    }
-    speed = delta < 0.0 ? -axis->max_velocity : axis->max_velocity;
-    rc = snprintf(line, sizeof(line), "Set Jog_Incr %u %.6f %.6f", axis->status_slot, speed, fabs(delta));
-    return rc > 0 && (size_t)rc < sizeof(line) &&
+    return v5_native_home_format_increment(axis, delta, line, sizeof(line)) &&
            v5_linuxcncrsh_send_line(config, line) == V5_LINUXCNCRSH_SEND_SENT;
+}
+
+static void stop_increment(
+    const V5LinuxcncrshConfig *config,
+    const V5NativeMotionAxisParameters *axis)
+{
+    char line[64];
+    int rc;
+    if (!axis) {
+        return;
+    }
+    rc = snprintf(line, sizeof(line), "Set Jog_Stop %u", axis->status_slot);
+    if (rc > 0 && (size_t)rc < sizeof(line)) {
+        (void)v5_linuxcncrsh_send_line(config, line);
+    }
 }
 
 static double proof_delta(const V5NativeMotionAxisParameters *axis, double current)
@@ -257,18 +289,41 @@ static int wait_joint_homed(
 #endif
 }
 
+int v5_native_home_joint_needs_sync(int homed_status_available, int homed)
+{
+    if (!homed_status_available) {
+        return -1;
+    }
+    return homed ? 0 : 1;
+}
+
 static int sync_homed_in_configured_order(
     const V5LinuxcncrshConfig *config,
     const V5NativeMotionParameters *parameters)
 {
+    int needs_sync[V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT] = {0, 0, 0, 0, 0, 0};
     int previous_sequence = -1;
     unsigned int completed = 0U;
+    unsigned int slot;
     if (!parameters || !parameters->loaded) {
         return 0;
     }
+    for (slot = 0U; slot < parameters->active_axis_count; ++slot) {
+        const V5NativeMotionAxisParameters *axis = axis_for_slot(parameters, slot);
+        int homed = 0;
+        int homed_status_available;
+        if (!axis) {
+            return 0;
+        }
+        homed_status_available = v5_linuxcncrsh_get_joint_homed(
+            config, axis->status_slot, &homed);
+        needs_sync[slot] = v5_native_home_joint_needs_sync(homed_status_available, homed);
+        if (needs_sync[slot] < 0) {
+            return 0;
+        }
+    }
     while (completed < parameters->active_axis_count) {
         int next_sequence = INT_MAX;
-        unsigned int slot;
         for (slot = 0U; slot < parameters->active_axis_count; ++slot) {
             const V5NativeMotionAxisParameters *axis = axis_for_slot(parameters, slot);
             if (!axis || axis->home_sequence < 0) {
@@ -285,7 +340,7 @@ static int sync_homed_in_configured_order(
             const V5NativeMotionAxisParameters *axis = axis_for_slot(parameters, slot);
             char line[64];
             int rc;
-            if (!axis || axis->home_sequence != next_sequence) {
+            if (!axis || axis->home_sequence != next_sequence || !needs_sync[slot]) {
                 continue;
             }
             rc = snprintf(line, sizeof(line), "Set Home %u", axis->status_slot);
@@ -297,7 +352,7 @@ static int sync_homed_in_configured_order(
         for (slot = 0U; slot < parameters->active_axis_count; ++slot) {
             const V5NativeMotionAxisParameters *axis = axis_for_slot(parameters, slot);
             if (axis && axis->home_sequence == next_sequence) {
-                if (!wait_joint_homed(config, axis->status_slot, 100U)) {
+                if (needs_sync[slot] && !wait_joint_homed(config, axis->status_slot, 100U)) {
                     return 0;
                 }
                 ++completed;
@@ -341,9 +396,12 @@ static V5LinuxcncrshSendStatus send_bus_home(
     for (slot = 0U; slot < parameters->active_axis_count; ++slot) {
         const V5NativeMotionAxisParameters *axis = axis_for_slot(parameters, slot);
         double delta = axis ? proof_delta(axis, start[slot]) : 0.0;
-        if (!axis || delta == 0.0 ||
-            !send_increment(config, axis, delta) ||
-            !wait_axis_target(config, axis, start[slot], start[slot] + delta, &moved[slot])) {
+        if (!axis || delta == 0.0 || !send_increment(config, axis, delta)) {
+            result_code(result, "BUS_HOME_PROOF_MOVE_NOT_CONFIRMED");
+            return V5_LINUXCNCRSH_SEND_IO_ERROR;
+        }
+        if (!wait_axis_target(config, axis, start[slot], start[slot] + delta, &moved[slot])) {
+            stop_increment(config, axis);
             result_code(result, "BUS_HOME_PROOF_MOVE_NOT_CONFIRMED");
             return V5_LINUXCNCRSH_SEND_IO_ERROR;
         }
@@ -355,9 +413,12 @@ static V5LinuxcncrshSendStatus send_bus_home(
     for (slot = 0U; slot < parameters->active_axis_count; ++slot) {
         const V5NativeMotionAxisParameters *axis = axis_for_slot(parameters, slot);
         double target = axis ? axis->bus_home_reference : 0.0;
-        if (!axis ||
-            !send_increment(config, axis, target - current[slot]) ||
-            !wait_axis_target(config, axis, current[slot], target, &moved[slot])) {
+        if (!axis || !send_increment(config, axis, target - current[slot])) {
+            result_code(result, "BUS_HOME_ZERO_MOVE_NOT_CONFIRMED");
+            return V5_LINUXCNCRSH_SEND_IO_ERROR;
+        }
+        if (!wait_axis_target(config, axis, current[slot], target, &moved[slot])) {
+            stop_increment(config, axis);
             result_code(result, "BUS_HOME_ZERO_MOVE_NOT_CONFIRMED");
             return V5_LINUXCNCRSH_SEND_IO_ERROR;
         }

@@ -242,13 +242,23 @@ static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5Command
             linuxcncrsh_unlock();
             return;
         }
-        if (!v5_linuxcncrsh_format_line(&prepared, &request, response->command_line, sizeof(response->command_line))) {
-            v5_jog_watchdog_complete_request(&g_jog_watchdog, &request, V5_COMMAND_GATE_SEND_INVALID);
-            response->send_status = V5_COMMAND_GATE_SEND_INVALID;
-            linuxcncrsh_unlock();
-            return;
+        if (request.kind == V5_COMMAND_START) {
+            status = v5_linuxcncrsh_send_start_transaction(
+                &g_linuxcncrsh_config,
+                &prepared,
+                &request,
+                response->command_line,
+                sizeof(response->command_line));
+        } else {
+            if (!v5_linuxcncrsh_format_line(
+                    &prepared, &request, response->command_line, sizeof(response->command_line))) {
+                v5_jog_watchdog_complete_request(&g_jog_watchdog, &request, V5_COMMAND_GATE_SEND_INVALID);
+                response->send_status = V5_COMMAND_GATE_SEND_INVALID;
+                linuxcncrsh_unlock();
+                return;
+            }
+            status = v5_linuxcncrsh_send_line(&g_linuxcncrsh_config, response->command_line);
         }
-        status = v5_linuxcncrsh_send_line(&g_linuxcncrsh_config, response->command_line);
         v5_jog_watchdog_complete_request(&g_jog_watchdog, &request, status);
         if (request.kind == V5_COMMAND_JOG_INCREMENT ||
             request.kind == V5_COMMAND_JOG_CONTINUOUS ||

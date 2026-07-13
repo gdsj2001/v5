@@ -29,6 +29,7 @@ SELF_PARAMETER_TABLE_DEPLOY_ROW = {
 }
 BOARD_OWNER_DEPLOY_ROWS = {
     "config/settings/drive_parameter_table.tsv": ("runtime_seed", "/opt/8ax/v5/config/settings/drive_parameter_table.tsv", "0644"),
+    "config/settings/settings_runtime.json": ("runtime_seed", "/opt/8ax/phase0_bus5/settings_runtime.json", "0644"),
     "linuxcnc/ini/v5_bus.ini": ("linuxcnc", "/opt/8ax/v5/linuxcnc/ini/v5_bus.ini", "0644"),
     "linuxcnc/runtime/var/linuxcnc.var": ("runtime_seed", "/opt/8ax/v5/linuxcnc/var/linuxcnc.var", "0644"),
     "linuxcnc/runtime/var/tool.tbl": ("runtime_seed", "/opt/8ax/v5/linuxcnc/var/tool.tbl", "0644"),
@@ -235,6 +236,30 @@ def check_remote_relay_access_control() -> int:
     return rc
 
 
+def check_settings_actiond_socket_policy() -> int:
+    actiond_path = ROOT / "services" / "drive_profile" / "v5_settings_actiond.py"
+    if not actiond_path.is_file():
+        print(f"SETTINGS_ACTIOND_SOCKET_OWNER_MISSING: {actiond_path}", file=sys.stderr)
+        return 1
+    actiond = actiond_path.read_text(encoding="utf-8", errors="strict")
+    for token in (
+        'SOCKET_OWNER_NAME = "root"',
+        'SOCKET_GROUP_NAME = "petalinux"',
+        "pwd.getpwnam(SOCKET_OWNER_NAME).pw_uid",
+        "grp.getgrnam(SOCKET_GROUP_NAME).gr_gid",
+        "os.chown(SOCKET_PATH, owner_uid, group_gid)",
+        "os.chmod(SOCKET_PATH, 0o660)",
+    ):
+        if token not in actiond:
+            print(f"SETTINGS_ACTIOND_SOCKET_POLICY_MISSING: {token}", file=sys.stderr)
+            return 1
+    for forbidden in ("os.chmod(SOCKET_PATH, 0o666)", "os.chmod(SOCKET_PATH, 0o777)"):
+        if forbidden in actiond:
+            print(f"SETTINGS_ACTIOND_WORLD_WRITABLE_SOCKET_PRESENT: {forbidden}", file=sys.stderr)
+            return 1
+    return 0
+
+
 def check_linuxcnc_rtapi_affinity_owner() -> int:
     init = ROOT / "services" / "command_gate" / "init.d" / "v5-linuxcnc-command-gate"
     ui_init = ROOT / "services" / "ui" / "init.d" / "v5-ui-relay"
@@ -266,23 +291,40 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         if token not in text:
             print(f"LINUXCNC_RTAPI_AFFINITY_OWNER_MISSING: {init.relative_to(ROOT)} lacks {token}", file=sys.stderr)
             rc = 1
+    status_reset_tokens = (
+        "LinuxCNC backend residue remained before native status reset",
+        "/dev/shm/v5_native_safety_latch.bin",
+        "/dev/shm/v5_native_rtcp_status.bin",
+        "/dev/shm/v5_native_g53_geometry_status.bin",
+    )
+    for token in status_reset_tokens:
+        if token not in text:
+            print(f"LINUXCNC_NATIVE_STATUS_RESET_MISSING: {init.relative_to(ROOT)} lacks {token}", file=sys.stderr)
+            rc = 1
+    status_reset_index = text.find("/dev/shm/v5_native_safety_latch.bin")
+    backend_start_index = text.find('su petalinux -c "cd /opt/8ax/v5/linuxcnc/ini')
+    if status_reset_index < 0 or backend_start_index < 0 or status_reset_index >= backend_start_index:
+        print("LINUXCNC_NATIVE_STATUS_RESET_ORDER_INVALID", file=sys.stderr)
+        rc = 1
     for token in ("ensure_machine_on_at_boot", "--machine-on"):
         if token in text:
             print(f"LINUXCNC_MACHINE_ON_EARLY_INIT_SURVIVOR: {init.relative_to(ROOT)} contains {token}", file=sys.stderr)
             rc = 1
     ui_text = ui_init.read_text(encoding="utf-8", errors="ignore")
-    required_ui = (
-        "wait_boot_inputs_ready",
-        "drive_faults_clear",
-        "wait_drive_faults_clear_for_machine_on",
-        "joint.$joint.amp-fault-in",
-        "ensure_machine_on_after_microkernel_ready",
-        "--machine-on",
-        "Machine On confirmed after microkernel ready",
-    )
+    required_ui = ("wait_boot_inputs_ready", "boot_stage ui_ready")
     for token in required_ui:
         if token not in ui_text:
             print(f"LINUXCNC_MACHINE_ON_UI_INIT_CONTRACT_MISSING: {ui_init.relative_to(ROOT)} lacks {token}", file=sys.stderr)
+            rc = 1
+    for token in (
+        "drive_faults_clear",
+        "wait_drive_faults_clear_for_machine_on",
+        "ensure_machine_on_after_microkernel_ready",
+        "--machine-on",
+        "machine_on_ready",
+    ):
+        if token in ui_text:
+            print(f"LINUXCNC_UI_INIT_AUTO_MACHINE_ON_PRESENT: {ui_init.relative_to(ROOT)} contains {token}", file=sys.stderr)
             rc = 1
     probe_text = probe.read_text(encoding="utf-8", errors="ignore")
     required_probe = (
@@ -405,7 +447,20 @@ def check_rotary_native_target_policy() -> int:
         required_hal = (
             "loadrt [RTCP]KINS_MODULE coordinates=[RTCP]KINS_COORDINATES sparm=identityfirst",
             "motion.tooloffset.z => [RTCP]KINS_TOOL_OFFSET_PIN",
-            "setp [RTCP]KINS_X_ROT_POINT_PIN [RTCP]X_ROT_POINT",
+            "loadusr -Wn v5_native_hal_owner /usr/bin/v5_native_hal_owner",
+            "--model=[RTCP]MODEL",
+            "--g53-a-y=[RTCP]G53_A_Y",
+            "--g53-a-z=[RTCP]G53_A_Z",
+            "--g53-b-x=[RTCP]G53_B_X",
+            "--g53-b-z=[RTCP]G53_B_Z",
+            "--g53-c-x=[RTCP]G53_C_X",
+            "--g53-c-y=[RTCP]G53_C_Y",
+            "v5-native-hal-owner.kins-x-rot-point => [RTCP]KINS_X_ROT_POINT_PIN",
+            "v5-native-hal-owner.kins-y-rot-point => [RTCP]KINS_Y_ROT_POINT_PIN",
+            "v5-native-hal-owner.kins-z-rot-point => [RTCP]KINS_Z_ROT_POINT_PIN",
+            "v5-native-hal-owner.kins-x-offset => [RTCP]KINS_X_OFFSET_PIN",
+            "v5-native-hal-owner.kins-y-offset => [RTCP]KINS_Y_OFFSET_PIN",
+            "v5-native-hal-owner.kins-z-offset => [RTCP]KINS_Z_OFFSET_PIN",
         )
         for token in required_hal:
             if token not in hal_text:
@@ -516,7 +571,10 @@ def check_linuxcnc_source_rebuild_policy() -> int:
         return 1
     for required in (
         'V5_LINUXCNC_EXTERNAL_SOURCE ?= ""',
+        'V5_LINUXCNC_EXTERNAL_BUILD ?= ""',
         'EXTERNALSRC = "${V5_LINUXCNC_EXTERNAL_SOURCE}"',
+        'EXTERNALSRC_BUILD = "${V5_LINUXCNC_EXTERNAL_BUILD}"',
+        'B = "${EXTERNALSRC_BUILD}"',
         'do_configure[file-checksums] = "',
         'do_configure[nostamp] = "1"',
         '${S}/v5_linuxcnc_source_identity.json:True',
@@ -535,7 +593,14 @@ def check_linuxcnc_source_rebuild_policy() -> int:
         if required not in recipe:
             print(f"LINUXCNC_REBUILD_EXTERNAL_SOURCE_GATE_MISSING: {required}", file=sys.stderr)
             return 1
-    for forbidden in ("git://", "SRCREV", "0001-v5-native-rotary-nearest-target.patch", "/home/"):
+    for forbidden in (
+        "git://",
+        "SRCREV",
+        "0001-v5-native-rotary-nearest-target.patch",
+        "/home/",
+        'EXTERNALSRC_BUILD = "${V5_LINUXCNC_EXTERNAL_SOURCE}/src"',
+        'B = "${S}/src"',
+    ):
         if forbidden in recipe:
             print(f"LINUXCNC_REBUILD_RETIRED_PATH: {forbidden}", file=sys.stderr)
             return 1
@@ -671,10 +736,12 @@ def check_linuxcnc_source_rebuild_policy() -> int:
     for token in (
         "findmnt -n -o FSTYPE,OPTIONS -T",
         "mount -t overlay overlay",
-        'lowerdir=$source_root,upperdir=$overlay_upper,workdir=$overlay_work',
+        'lowerdir=$linuxcnc_projection,upperdir=$overlay_upper,workdir=$overlay_work',
         'ln -s "$integration_root/yocto/linuxcnc-prebuilt.bb"',
         'ln -s "$runtime_allowlist"',
-        'V5_LINUXCNC_EXTERNAL_SOURCE="$overlay_merged"',
+        'BB_ENV_EXTRAWHITE="${BB_ENV_EXTRAWHITE:-} V5_LINUXCNC_EXTERNAL_SOURCE V5_LINUXCNC_EXTERNAL_BUILD"',
+        'V5_LINUXCNC_EXTERNAL_SOURCE="$linuxcnc_projection"',
+        'V5_LINUXCNC_EXTERNAL_BUILD="$linuxcnc_external_build"',
         "build_mode=focused",
         'run_petalinux_build "-c linuxcnc-prebuilt -x listtasks"',
         'run_bitbake_direct "linuxcnc-prebuilt -c package"',
@@ -693,8 +760,50 @@ def check_linuxcnc_source_rebuild_policy() -> int:
         if token not in build_script:
             print(f"LINUXCNC_REBUILD_READONLY_OWNER_GATE_MISSING: {token}", file=sys.stderr)
             return 1
+
+    package_only_marker = (
+        '\nif [ "$package_only" -eq 1 ]; then\n'
+        '    if [ ! -x "$petalinux_root/components/yocto/layers/core/bitbake/bin/bitbake" ]'
+    )
+    package_only_start = build_script.find(package_only_marker)
+    package_only_end = build_script.find(
+        '\nfi\n\nverify_rootfs_package_selection', package_only_start
+    )
+    if package_only_start < 0 or package_only_end < 0:
+        print("LINUXCNC_PACKAGE_ONLY_BRANCH_MISSING", file=sys.stderr)
+        return 1
+    package_only_body = build_script[package_only_start:package_only_end]
+    package_task = 'run_bitbake_direct "linuxcnc-prebuilt -c package -f"'
+    if package_only_body.count(package_task) != 1:
+        print("LINUXCNC_PACKAGE_ONLY_SINGLE_DAG_MISSING", file=sys.stderr)
+        return 1
+    for forbidden in (
+        'linuxcnc-prebuilt -c compile -f',
+        'linuxcnc-prebuilt -c install -f',
+        'petalinux-image-minimal',
+        'verify_windows_source_packages',
+        'verify_rootfs_package_selection',
+        'audit_minimal_runtime',
+    ):
+        if forbidden in package_only_body:
+            print(
+                f"LINUXCNC_PACKAGE_ONLY_EXPANDED_PATH_PRESENT: {forbidden}",
+                file=sys.stderr,
+            )
+            return 1
+    for required in (
+        '--package-only) build_mode=package-only; package_only=1',
+        '--sync-registered-delta "$linuxcnc_projection"',
+        'V5_LINUXCNC_PACKAGE_ONLY_OK package_root=$package_root',
+    ):
+        if required not in build_script:
+            print(f"LINUXCNC_PACKAGE_ONLY_FAST_PATH_MISSING: {required}", file=sys.stderr)
+            return 1
     if "sync_v5_linuxcnc_recipe_to_petalinux" in build_script:
         print("LINUXCNC_REBUILD_RETIRED_SYNC_CALL_PRESENT", file=sys.stderr)
+        return 1
+    if 'V5_LINUXCNC_EXTERNAL_SOURCE="$overlay_merged"' in build_script:
+        print("LINUXCNC_REBUILD_WRITABLE_VIEW_USED_AS_SOURCE", file=sys.stderr)
         return 1
     if '-c linuxcnc-prebuilt -x clean' in build_script:
         print("LINUXCNC_MINIMAL_FOCUSED_OUTPUT_CLEAN_PRESENT", file=sys.stderr)
@@ -902,7 +1011,7 @@ def check_cc_golden_model_specific_motion() -> int:
     acceptance = ROOT / "tools" / "deploy" / "run_v5_board_acceptance.sh"
     manifest = ROOT / "config" / "deploy" / "v5_runtime_deploy_manifest.tsv"
     hal = ROOT / "linuxcnc" / "hal" / "v5_bus_2ms.hal"
-    rtcp_publisher = ROOT / "services" / "state_publisher" / "v5_rtcp_status_publisher.py"
+    native_hal_owner = ROOT.parent / "linuxcnc" / "src" / "hal" / "user_comps" / "v5_native_hal_owner.comp"
     rc = 0
     if legacy_program.exists():
         print("CC_GOLDEN_LEGACY_PROGRAM_SURVIVOR: gcode/golden/cc.ngc", file=sys.stderr)
@@ -925,8 +1034,8 @@ def check_cc_golden_model_specific_motion() -> int:
     if not hal.exists():
         print("CC_GOLDEN_RTCP_HAL_MISSING: linuxcnc/hal/v5_bus_2ms.hal", file=sys.stderr)
         return 1
-    if not rtcp_publisher.exists():
-        print("CC_GOLDEN_RTCP_PUBLISHER_MISSING: services/state_publisher/v5_rtcp_status_publisher.py", file=sys.stderr)
+    if not native_hal_owner.exists():
+        print("CC_GOLDEN_NATIVE_HAL_OWNER_MISSING: linuxcnc/src/hal/user_comps/v5_native_hal_owner.comp", file=sys.stderr)
         return 1
     runner_text = runner.read_text(encoding="utf-8", errors="ignore")
     forbidden_runner = (
@@ -975,30 +1084,50 @@ def check_cc_golden_model_specific_motion() -> int:
     hal_text = hal.read_text(encoding="utf-8", errors="ignore")
     required_hal = (
         "loadrt or2 count=1",
+        "loadrt v5_safety_latch",
+        "loadusr -Wn v5_native_hal_owner /usr/bin/v5_native_hal_owner",
         "addf or2.0 servo-thread",
+        "addf v5-safety-latch.0 servo-thread",
+        "v5-safety-force v5-native-hal-owner.safety-force => v5-safety-latch.0.force",
         "v5-rtcp-ui-request",
         "v5-rtcp-gcode-request motion.digital-out-00 => or2.0.in1",
         "v5-rtcp-selected or2.0.out => mux2.0.sel",
         "re-switchkins-select mux2.0.out => motion.switchkins-type",
+        "v5-kins-x-rot-point v5-native-hal-owner.kins-x-rot-point",
+        "v5-kins-x-offset v5-native-hal-owner.kins-x-offset",
     )
     for token in required_hal:
         if token not in hal_text:
             print(f"CC_GOLDEN_RTCP_HAL_CONTRACT_MISSING: {hal.relative_to(ROOT)} lacks {token}", file=sys.stderr)
             rc = 1
 
-    publisher_text = rtcp_publisher.read_text(encoding="utf-8", errors="ignore")
-    if "v5-rtcp-ui-request" not in publisher_text:
-        print(
-            f"CC_GOLDEN_RTCP_UI_LATCH_SIGNAL_MISSING: {rtcp_publisher.relative_to(ROOT)} lacks v5-rtcp-ui-request",
-            file=sys.stderr,
-        )
-        rc = 1
-    if "set_p('mux2.0.sel'" in publisher_text or 'set_p("mux2.0.sel"' in publisher_text:
-        print(
-            f"CC_GOLDEN_RTCP_DIRECT_MUX_WRITE_SURVIVOR: {rtcp_publisher.relative_to(ROOT)} still writes mux2.0.sel",
-            file=sys.stderr,
-        )
-        rc = 1
+    owner_text = native_hal_owner.read_text(encoding="utf-8", errors="ignore")
+    required_owner = (
+        "pin out bit safety_force;",
+        "pin out bit safety_reset;",
+        "pin out bit heartbeat;",
+        "pin out bit rtcp_ui_request;",
+        "pin in float rtcp_actual;",
+        "V5_NATIVE_HAL_OWNER_SOCKET_PATH",
+        "V5_NATIVE_HAL_OWNER_OP_ESTOP_FORCE",
+        "V5_NATIVE_HAL_OWNER_OP_ESTOP_RESET",
+        "V5_NATIVE_HAL_OWNER_OP_RTCP_SET",
+    )
+    for token in required_owner:
+        if token not in owner_text:
+            print(
+                f"CC_GOLDEN_NATIVE_HAL_OWNER_CONTRACT_MISSING: {native_hal_owner.relative_to(ROOT.parent)} lacks {token}",
+                file=sys.stderr,
+            )
+            rc = 1
+    for retired in (
+        ROOT / "services" / "state_publisher" / "v5_rtcp_status_publisher.py",
+        ROOT / "services" / "microkernel" / "v5_g53_geometry_memory_owner.py",
+        ROOT / "services" / "microkernel" / "v5_native_safety_latch_owner.py",
+    ):
+        if retired.exists():
+            print(f"CC_GOLDEN_RETIRED_PYTHON_HAL_OWNER_SURVIVOR: {retired.relative_to(ROOT)}", file=sys.stderr)
+            rc = 1
     return rc
 
 
@@ -1216,7 +1345,9 @@ def check_product_runtime_closure_policy() -> int:
             return 1
     acceptance = acceptance_path.read_text(encoding="utf-8", errors="strict")
     for token in (
-        'V5_BOARD_BUILD_TARGETS:-v5_product_runtime',
+        'V5_BOARD_BUILD_TARGETS:-v5_lvgl_shell v5_state_publisher v5_touch_diagnostics v5_linuxcncrsh_probe v5_command_gate_server v5_linuxcncrsh_golden_run',
+        "CMAKE_C_COMPILER:FILEPATH=",
+        "arm-xilinx-linux-gnueabi-gcc",
         "verify_v5_product_source_closure.py",
         "--prepare-cmake-query",
         "--validate-shell",
@@ -1240,6 +1371,7 @@ def main() -> int:
         check_cpu_policy() |
         check_linuxcnc_rtapi_affinity_owner() |
         check_settings_runtime_schema_guard() |
+        check_settings_actiond_socket_policy() |
         check_remote_relay_access_control() |
         check_cc_golden_model_specific_motion() |
         check_rotary_native_target_policy() |

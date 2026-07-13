@@ -13,6 +13,7 @@ from v5_drive_parameter_table import (
 from v5_drive_runtime_store import load_settings_runtime
 from v5_drive_sdo import (
     parse_slave_identity,
+    parse_slave_position_token,
     read_command,
     read_resident_snapshot,
     run_ethercat_slaves,

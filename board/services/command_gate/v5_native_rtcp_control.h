@@ -11,26 +11,6 @@ extern "C" {
 #define V5_NATIVE_RTCP_CONTROL_SEND_SENT 1
 #define V5_NATIVE_RTCP_CONTROL_SEND_IO_ERROR -2
 
-#define V5_NATIVE_RTCP_CONTROL_LATCH_MAGIC 0x56355254u
-#define V5_NATIVE_RTCP_CONTROL_LATCH_VERSION 1u
-#define V5_NATIVE_RTCP_CONTROL_LATCH_PATH_ENV "V5_NATIVE_RTCP_CONTROL_LATCH_PATH"
-#define V5_NATIVE_RTCP_CONTROL_LATCH_DEFAULT_PATH "/dev/shm/v5_native_rtcp_control_latch.bin"
-
-#define V5_NATIVE_RTCP_CONTROL_STATUS_UNKNOWN 0u
-#define V5_NATIVE_RTCP_CONTROL_STATUS_OK 1u
-#define V5_NATIVE_RTCP_CONTROL_STATUS_FAILED 2u
-
-typedef struct V5NativeRtcpControlLatchFrame {
-    uint32_t magic;
-    uint32_t version;
-    volatile uint32_t request_epoch;
-    volatile uint32_t ack_epoch;
-    volatile uint32_t target_active;
-    volatile uint32_t actual_known;
-    volatile uint32_t actual_active;
-    volatile uint32_t status_code;
-} V5NativeRtcpControlLatchFrame;
-
 typedef struct V5NativeRtcpControlResult {
     int target_active;
     int actual_known;

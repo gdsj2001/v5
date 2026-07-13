@@ -20,23 +20,27 @@ overlay_root="$build_root/linuxcnc-overlay"
 overlay_upper="$overlay_root/upper"
 overlay_work="$overlay_root/work"
 overlay_merged="$overlay_root/merged"
+linuxcnc_external_build="$overlay_merged/src"
 source_projection_root=${VM_SOURCE_PROJECTION_ROOT:-$build_root/temp_source/current}
 linuxcnc_projection="$source_projection_root/linuxcnc"
 linuxcnc_projection_state="$source_projection_root/.linuxcnc-source-identity"
+linuxcnc_rsync_excludes="$build_root/linuxcnc-projection-rsync-excludes.txt"
 recipe_target=""
 artifact_stage=""
 rootfs_gate_marker=""
 petalinux_overlay_active=0
 build_mode=focused
 clean_kernel=0
+package_only=0
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --focused) build_mode=focused ;;
         --full) build_mode=full ;;
+        --package-only) build_mode=package-only; package_only=1 ;;
         --clean-kernel) clean_kernel=1 ;;
         *)
-            echo "usage: V5_PETALINUX_BUILD_USER=<non-root-user> $0 [--focused|--full] [--clean-kernel]" >&2
+            echo "usage: V5_PETALINUX_BUILD_USER=<non-root-user> $0 [--package-only|--focused|--full] [--clean-kernel]" >&2
             exit 2
             ;;
     esac
@@ -52,6 +56,7 @@ downloads_root="$build_root/petalinux/cache/downloads"
 source_projection_root=${VM_SOURCE_PROJECTION_ROOT:-$build_root/temp_source/current}
 linuxcnc_projection="$source_projection_root/linuxcnc"
 linuxcnc_projection_state="$source_projection_root/.linuxcnc-source-identity"
+linuxcnc_rsync_excludes="$build_root/linuxcnc-projection-rsync-excludes.txt"
 missing_source_report="$build_root/petalinux/v5-missing-source-inputs.json"
 
 command -v findmnt >/dev/null 2>&1 || {
@@ -151,7 +156,9 @@ cleanup() {
     if mountpoint -q "$overlay_merged"; then
         umount "$overlay_merged" || true
     fi
-    case "$overlay_root" in "$build_root"/*) rm -rf "$overlay_root" ;; esac
+    if [ "$package_only" -eq 0 ]; then
+        case "$overlay_root" in "$build_root"/*) rm -rf "$overlay_root" ;; esac
+    fi
     case "$recipe_target" in
         "$petalinux_root"/project-spec/meta-user/recipes-apps/linuxcnc-prebuilt)
             rm -rf "$recipe_target"
@@ -166,11 +173,92 @@ cleanup() {
     if [ "$petalinux_overlay_active" -eq 1 ]; then
         run_petalinux_overlay clean >/dev/null 2>&1 || true
         petalinux_overlay_active=0
+    elif [ "$package_only" -eq 1 ] && mountpoint -q "$petalinux_root"; then
+        umount "$petalinux_root" || true
     fi
 }
 trap cleanup EXIT HUP INT TERM
 
 ensure_build_memory
+if [ "$package_only" -eq 1 ]; then
+    petalinux_source="$project_root/board/petalinux"
+    petalinux_state_root="$build_root/petalinux/overlay"
+    petalinux_upper="$petalinux_state_root/upper"
+    petalinux_work="$petalinux_state_root/work"
+    mkdir -p \
+        "$petalinux_upper" "$petalinux_work" "$petalinux_root" \
+        "$build_root/petalinux/output/tmp" "$downloads_root"
+    mountpoint -q "$petalinux_root" && {
+        echo "package-only PetaLinux build view is already mounted: $petalinux_root" >&2
+        exit 12
+    }
+    mount -t overlay v5-petalinux-package-only \
+        -o "lowerdir=$petalinux_source,upperdir=$petalinux_upper,workdir=$petalinux_work" \
+        "$petalinux_root"
+    build_group=$(id -gn "$build_user")
+    chown "$build_user:$build_group" \
+        "$petalinux_upper" "$petalinux_work" "$petalinux_root" \
+        "$build_root/petalinux/output" "$build_root/petalinux/output/tmp" "$downloads_root"
+    project_config="$petalinux_root/project-spec/configs/config"
+    layer_conf="$petalinux_root/project-spec/meta-user/conf/layer.conf"
+    [ -f "$project_config" ] && [ -f "$layer_conf" ] || {
+        echo "package-only PetaLinux build view is incomplete" >&2
+        exit 12
+    }
+    sed -i \
+        "s|^CONFIG_TMP_DIR_LOCATION=.*|CONFIG_TMP_DIR_LOCATION=\"$build_root/petalinux/output/tmp\"|" \
+        "$project_config"
+    sed -i '/^V5_PROJECT_SOURCE_ROOT = /d' "$layer_conf"
+    printf '\nV5_PROJECT_SOURCE_ROOT = "%s"\n' "$project_root" >> "$layer_conf"
+    chown "$build_user:$build_group" "$project_config" "$layer_conf"
+
+    [ -f "$linuxcnc_projection/v5_linuxcnc_source_identity.json" ] && \
+        [ -f "$linuxcnc_projection_state" ] || {
+        echo "package-only requires an existing verified LinuxCNC projection" >&2
+        exit 12
+    }
+    source_identity=$(sha256sum "$source_root/v5_linuxcnc_source_identity.json" | awk '{print $1}')
+    source_hash=$(awk -F'"' '/"content_sha256"/ { print $4; exit }' \
+        "$source_root/v5_linuxcnc_source_identity.json")
+    old_identity=$(sha256sum "$linuxcnc_projection/v5_linuxcnc_source_identity.json" | awk '{print $1}')
+    old_hash=$(awk -F'"' '/"content_sha256"/ { print $4; exit }' \
+        "$linuxcnc_projection/v5_linuxcnc_source_identity.json")
+    projected_identity=$(cat "$linuxcnc_projection_state")
+    [ "$projected_identity" = "$old_identity:$old_hash" ] || {
+        echo "package-only projection state does not match its last verified identity" >&2
+        exit 12
+    }
+    if [ "$projected_identity" != "$source_identity:$source_hash" ]; then
+        python3 "$script_dir/verify_v5_linuxcnc_source.py" \
+            --project-root "$project_root" \
+            --source-root "$source_root" \
+            --sync-registered-delta "$linuxcnc_projection"
+        printf '%s\n' "$source_identity:$source_hash" > "$linuxcnc_projection_state.new"
+        mv "$linuxcnc_projection_state.new" "$linuxcnc_projection_state"
+        echo "V5_LINUXCNC_PROJECTION_DELTA_UPDATED identity=$source_identity content=$source_hash"
+    else
+        echo "V5_LINUXCNC_PROJECTION_REUSED identity=$source_identity content=$source_hash"
+    fi
+
+    mountpoint -q "$overlay_merged" && {
+        echo "package-only LinuxCNC build view is already mounted: $overlay_merged" >&2
+        exit 12
+    }
+    mkdir -p "$overlay_upper" "$overlay_work" "$overlay_merged"
+    chown "$build_user:$build_group" "$overlay_root" "$overlay_upper" "$overlay_work" "$overlay_merged"
+    mount -t overlay v5-linuxcnc-package-only \
+        -o "lowerdir=$linuxcnc_projection,upperdir=$overlay_upper,workdir=$overlay_work" \
+        "$overlay_merged"
+    chown "$build_user:$build_group" "$overlay_merged"
+    [ -f "$linuxcnc_external_build/autogen.sh" ] || {
+        echo "package-only LinuxCNC build view is incomplete: $linuxcnc_external_build" >&2
+        exit 12
+    }
+    recipe_target="$petalinux_root/project-spec/meta-user/recipes-apps/linuxcnc-prebuilt"
+    mkdir -p "$recipe_target/files"
+    ln -sf "$integration_root/yocto/linuxcnc-prebuilt.bb" "$recipe_target/linuxcnc-prebuilt.bb"
+    ln -sf "$runtime_allowlist" "$recipe_target/files/v5_linuxcnc_runtime_allowlist.tsv"
+else
 cleanup
 mkdir -p "$downloads_root"
 chown "$build_user":"$(id -gn "$build_user")" "$downloads_root"
@@ -212,7 +300,13 @@ if [ "$projected_identity" = "$source_projection_key" ] && \
    [ -f "$linuxcnc_projection/v5_linuxcnc_source_identity.json" ]; then
     echo "V5_LINUXCNC_PROJECTION_REUSED identity=$source_identity content=$source_hash"
 else
+    python3 "$script_dir/verify_v5_linuxcnc_source.py" \
+        --project-root "$project_root" \
+        --source-root "$source_root" \
+        --allow-flattened-symlinks \
+        --write-rsync-excludes "$linuxcnc_rsync_excludes" >/dev/null
     rsync -a --checksum --delete --exclude '.git/' \
+        --exclude-from "$linuxcnc_rsync_excludes" \
         "$source_root/" "$linuxcnc_projection/"
     python3 "$script_dir/verify_v5_linuxcnc_source.py" \
         --project-root "$project_root" \
@@ -235,11 +329,22 @@ mount -t overlay overlay \
     -o "lowerdir=$linuxcnc_projection,upperdir=$overlay_upper,workdir=$overlay_work" \
     "$overlay_merged"
 chown "$build_user":"$(id -gn "$build_user")" "$overlay_merged"
+case "$linuxcnc_external_build" in
+    "$linuxcnc_projection"|"$linuxcnc_projection"/*)
+        echo "LinuxCNC external build directory must remain outside the read-only projection" >&2
+        exit 12
+        ;;
+esac
+[ -f "$linuxcnc_external_build/autogen.sh" ] || {
+    echo "LinuxCNC writable overlay build view is incomplete: $linuxcnc_external_build" >&2
+    exit 12
+}
 python3 "$script_dir/verify_v5_linuxcnc_source.py" \
     --project-root "$project_root" \
     --source-root "$linuxcnc_projection"
 ln -s "$integration_root/yocto/linuxcnc-prebuilt.bb" "$recipe_target/linuxcnc-prebuilt.bb"
 ln -s "$runtime_allowlist" "$recipe_target/files/v5_linuxcnc_runtime_allowlist.tsv"
+fi
 
 run_petalinux_build() {
     task_args=$1
@@ -254,8 +359,9 @@ run_petalinux_build() {
         PATH="$PATH" \
         SHELL=/bin/bash \
         TERM="${TERM:-dumb}" \
-        BB_ENV_EXTRAWHITE="${BB_ENV_EXTRAWHITE:-} V5_LINUXCNC_EXTERNAL_SOURCE" \
-        V5_LINUXCNC_EXTERNAL_SOURCE="$overlay_merged" \
+        BB_ENV_EXTRAWHITE="${BB_ENV_EXTRAWHITE:-} V5_LINUXCNC_EXTERNAL_SOURCE V5_LINUXCNC_EXTERNAL_BUILD" \
+        V5_LINUXCNC_EXTERNAL_SOURCE="$linuxcnc_projection" \
+        V5_LINUXCNC_EXTERNAL_BUILD="$linuxcnc_external_build" \
         sh -c "cd '$petalinux_root' && petalinux-build $task_args"
 }
 
@@ -277,8 +383,9 @@ run_bitbake_direct() {
         PATH="$(dirname "$bitbake_bin"):$PATH" \
         SHELL=/bin/bash \
         TERM="${TERM:-dumb}" \
-        BB_ENV_EXTRAWHITE="${BB_ENV_EXTRAWHITE:-} V5_LINUXCNC_EXTERNAL_SOURCE" \
-        V5_LINUXCNC_EXTERNAL_SOURCE="$overlay_merged" \
+        BB_ENV_EXTRAWHITE="${BB_ENV_EXTRAWHITE:-} V5_LINUXCNC_EXTERNAL_SOURCE V5_LINUXCNC_EXTERNAL_BUILD" \
+        V5_LINUXCNC_EXTERNAL_SOURCE="$linuxcnc_projection" \
+        V5_LINUXCNC_EXTERNAL_BUILD="$linuxcnc_external_build" \
         sh -c "cd '$petalinux_root/build' && bitbake $task_args"
 }
 
@@ -406,6 +513,33 @@ verify_rootfs_package_selection() {
     fi
     echo "V5_ROOTFS_PACKAGE_WHITELIST_OK"
 }
+
+if [ "$package_only" -eq 1 ]; then
+    if [ ! -x "$petalinux_root/components/yocto/layers/core/bitbake/bin/bitbake" ] || \
+       [ ! -f "$petalinux_root/build/conf/local.conf" ]; then
+        run_petalinux_build "-c linuxcnc-prebuilt -x listtasks"
+    fi
+    configure_download_cache
+    configure_offline_bitbake
+    run_bitbake_direct "linuxcnc-prebuilt -c package -f"
+    echo "V5_LINUXCNC_PACKAGE_ONLY_COMPILE_OK"
+    echo "V5_LINUXCNC_PACKAGE_ONLY_INSTALL_OK"
+    echo "V5_LINUXCNC_PACKAGE_ONLY_PACKAGE_OK"
+    work_root="$build_root/petalinux/output/tmp/work"
+    package_root=$(find "$work_root" -type d \
+        -path '*/linuxcnc-prebuilt/*/packages-split/linuxcnc-prebuilt' -print | sort | tail -n 1)
+    [ -n "$package_root" ] || {
+        echo "linuxcnc-prebuilt package-only runtime root was not found" >&2
+        exit 12
+    }
+    python3 "$minimal_runtime_verifier" \
+        --allowlist "$runtime_allowlist" \
+        --package-root "$package_root"
+    cleanup
+    trap - EXIT HUP INT TERM
+    echo "V5_LINUXCNC_PACKAGE_ONLY_OK package_root=$package_root"
+    exit 0
+fi
 
 verify_rootfs_package_selection
 verify_windows_source_packages

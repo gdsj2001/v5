@@ -56,6 +56,16 @@ check_source_manifest() {
     fi
     source_path="$(manifest_source_path "$kind" "$source")"
     if [ -e "$source_path" ]; then
+      if [ "$kind" = "binary" ]; then
+        if ! file "$source_path" | grep -q 'ELF 32-bit.*ARM'; then
+          record_fail "non-ARM deploy binary: $source_path"
+          continue
+        fi
+        if ! readelf -h "$source_path" | grep -q 'hard-float ABI'; then
+          record_fail "deploy binary is not ARM hard-float ABI: $source_path"
+          continue
+        fi
+      fi
       record_ok "source $kind $source -> $destination mode=$mode path=$source_path"
     else
       record_fail "missing source $source_path"
@@ -91,7 +101,7 @@ check_remote_target() {
     fi
   done
 
-  remote_check 'ps w 2>/dev/null | grep -E "v5_state_publisher|v5_rtcp_status_publisher|v5_g53_geometry_memory_owner|v5_wcs_status_publisher|v5_lvgl_shell|v5_remote_ui_relay|linuxcncrsh|linuxcncsvr|milltask" | grep -v grep || true' |
+  remote_check 'ps w 2>/dev/null | grep -E "v5_state_publisher|v5_native_hal_owner|v5_wcs_status_publisher|v5_lvgl_shell|v5_remote_ui_relay|linuxcncrsh|linuxcncsvr|milltask" | grep -v grep || true' |
     sed 's/^/INFO board process: /'
 
   if remote_check 'test -x /etc/init.d/v5-state-publisher'; then
@@ -99,15 +109,20 @@ check_remote_target() {
   else
     record_warn "v5-state-publisher init script not installed yet"
   fi
-  if remote_check 'test -x /etc/init.d/v5-rtcp-status-publisher'; then
-    record_ok "board init script installed: /etc/init.d/v5-rtcp-status-publisher"
+  if remote_check 'test ! -e /etc/init.d/v5-rtcp-status-publisher'; then
+    record_ok "retired init script absent: /etc/init.d/v5-rtcp-status-publisher"
   else
-    record_warn "v5-rtcp-status-publisher init script not installed yet"
+    record_ok "retired init script cleanup pending in this deploy: /etc/init.d/v5-rtcp-status-publisher"
   fi
-  if remote_check 'test -x /etc/init.d/v5-g53-geometry-memory-owner'; then
-    record_ok "board init script installed: /etc/init.d/v5-g53-geometry-memory-owner"
+  if remote_check 'test ! -e /etc/init.d/v5-g53-geometry-memory-owner'; then
+    record_ok "retired init script absent: /etc/init.d/v5-g53-geometry-memory-owner"
   else
-    record_warn "v5-g53-geometry-memory-owner init script not installed yet"
+    record_ok "retired init script cleanup pending in this deploy: /etc/init.d/v5-g53-geometry-memory-owner"
+  fi
+  if remote_check 'test -x /usr/bin/v5_native_hal_owner && test -r /usr/lib/linuxcnc/modules/v5_safety_latch.so'; then
+    record_ok "native HAL owner and realtime safety component installed"
+  else
+    record_warn "native HAL owner or realtime safety component not installed yet"
   fi
   if remote_check 'test -x /etc/init.d/v5-wcs-status-publisher'; then
     record_ok "board init script installed: /etc/init.d/v5-wcs-status-publisher"

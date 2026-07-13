@@ -707,6 +707,7 @@ install-v5-headless:
 		$(DESTDIR)$(datadir)/linuxcnc
 	$(EXE) ../bin/halcmd ../bin/inivar ../bin/io ../bin/linuxcncrsh \
 		../bin/linuxcncsvr ../bin/milltask ../bin/halcompile \
+		../bin/v5_native_hal_owner \
 		$(DESTDIR)$(bindir)
 	$(EXE) ../scripts/linuxcnc $(DESTDIR)$(bindir)
 	$(EXE) ../scripts/realtime $(DESTDIR)$(libdir)/linuxcnc

@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import json
+import grp
 import os
+import pwd
 import signal
 import socket
 import threading
@@ -28,6 +30,28 @@ from v5_settings_action_runtime import (
     v5_drive_bus_action,
 )
 from v5_settings_restart import restart_service, run_restart_handoff, service_status
+
+SOCKET_OWNER_NAME = "root"
+SOCKET_GROUP_NAME = "petalinux"
+
+
+def secure_socket_permissions() -> None:
+    try:
+        owner_uid = pwd.getpwnam(SOCKET_OWNER_NAME).pw_uid
+        group_gid = grp.getgrnam(SOCKET_GROUP_NAME).gr_gid
+    except KeyError as exc:
+        raise RuntimeError(
+            f"settings actiond socket identity is unavailable: {SOCKET_OWNER_NAME}:{SOCKET_GROUP_NAME}"
+        ) from exc
+    try:
+        os.chown(SOCKET_PATH, owner_uid, group_gid)
+        os.chmod(SOCKET_PATH, 0o660)
+    except OSError:
+        try:
+            SOCKET_PATH.unlink()
+        except FileNotFoundError:
+            pass
+        raise
 
 def lock_process_memory(process_name: str) -> None:
     try:
@@ -315,10 +339,10 @@ def serve() -> int:
     signal.signal(signal.SIGINT, lambda _signum, _frame: stop_event.set())
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
         server.bind(str(SOCKET_PATH))
-        os.chmod(SOCKET_PATH, 0o666)
+        secure_socket_permissions()
         server.listen(8)
         server.settimeout(0.5)
-        append_event({"event": "ready", "socket": str(SOCKET_PATH), "actions": sorted(ACTIONS), "drive_resident_preload": drive_resident_preload})
+        append_event({"event": "ready", "socket": str(SOCKET_PATH), "socket_owner": SOCKET_OWNER_NAME, "socket_group": SOCKET_GROUP_NAME, "socket_mode": "0660", "actions": sorted(ACTIONS), "drive_resident_preload": drive_resident_preload})
         while not stop_event.is_set():
             try:
                 conn, _addr = server.accept()

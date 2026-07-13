@@ -12,6 +12,13 @@ case "$project_root" in
   *\\board) project_root="${project_root%\\board}" ;;
 esac
 parameter_table_backup_dir="${V5_PARAMETER_TABLE_BACKUP_DIR:-$project_root/bak}"
+linuxcnc_package_root="$repo_root/linuxcnc-package-root"
+linuxcnc_bundle_allowlist="$repo_root/config/deploy/v5_linuxcnc_runtime_allowlist.tsv"
+linuxcnc_bundle_hashes="$repo_root/config/deploy/v5_linuxcnc_deploy_bundle.sha256"
+linuxcnc_bundle_enabled=0
+linuxcnc_bundle_count=0
+restart_scope_requested="${V5_RUNTIME_RESTART_SCOPE:-auto}"
+restart_scope=all
 
 if [ "${2:-}" = "--apply" ]; then
   apply=1
@@ -25,6 +32,99 @@ if [ ! -r "$manifest" ]; then
   echo "missing deploy manifest: $manifest" >&2
   exit 2
 fi
+
+verify_linuxcnc_deploy_bundle() {
+  embedded_allowlist="$linuxcnc_package_root/usr/share/v5-native/linuxcnc-runtime-allowlist.tsv"
+  runtime_hashes="$linuxcnc_package_root/usr/share/v5-native/linuxcnc-runtime-files.sha256"
+  [ -d "$linuxcnc_package_root" ] || {
+    echo "missing LinuxCNC deploy bundle: $linuxcnc_package_root" >&2
+    exit 7
+  }
+  for required in "$linuxcnc_bundle_allowlist" "$linuxcnc_bundle_hashes" "$embedded_allowlist" "$runtime_hashes"; do
+    [ -r "$required" ] || {
+      echo "missing LinuxCNC deploy bundle input: $required" >&2
+      exit 7
+    }
+  done
+  cmp -s "$linuxcnc_bundle_allowlist" "$embedded_allowlist" || {
+    echo "LinuxCNC deploy allowlist differs from the packaged owner" >&2
+    exit 7
+  }
+
+  expected="${TMPDIR:-/tmp}/v5_linuxcnc_expected.$$"
+  actual="${TMPDIR:-/tmp}/v5_linuxcnc_actual.$$"
+  hashed="${TMPDIR:-/tmp}/v5_linuxcnc_hashed.$$"
+  trap 'rm -f "$expected" "$actual" "$hashed"' 0 1 2 15
+  awk -F '\t' '
+    $0 !~ /^#/ && NF >= 1 {
+      if ($1 !~ /^\// || $1 ~ /(^|\/)\.\.?($|\/)/ || index($1, "//")) exit 2
+      print "." $1
+    }
+  ' "$linuxcnc_bundle_allowlist" >"$expected"
+  printf '%s\n' \
+    ./usr/share/v5-native/linuxcnc-runtime-allowlist.tsv \
+    ./usr/share/v5-native/linuxcnc-runtime-files.sha256 \
+    ./usr/share/v5-native/linuxcnc-source-identity.txt \
+    ./usr/share/v5-native/v5_linuxcnc_source_identity.json >>"$expected"
+  LC_ALL=C sort -u "$expected" -o "$expected"
+  expected_count=$(wc -l <"$expected")
+  (
+    cd "$linuxcnc_package_root"
+    find . -type f -print | LC_ALL=C sort
+  ) >"$actual"
+  awk '{print $2}' "$linuxcnc_bundle_hashes" | LC_ALL=C sort >"$hashed"
+  actual_count=$(wc -l <"$actual")
+  hashed_count=$(wc -l <"$hashed")
+  [ "$actual_count" -eq "$expected_count" ] || {
+    echo "unexpected LinuxCNC deploy file count: expected=$expected_count actual=$actual_count" >&2
+    exit 7
+  }
+  [ "$hashed_count" -eq "$expected_count" ] || {
+    echo "unexpected LinuxCNC deploy hash count: expected=$expected_count actual=$hashed_count" >&2
+    exit 7
+  }
+  cmp -s "$expected" "$actual" || {
+    echo "LinuxCNC deploy bundle file set differs from the allowlist" >&2
+    exit 7
+  }
+  cmp -s "$actual" "$hashed" || {
+    echo "LinuxCNC deploy hash manifest file set differs from the bundle" >&2
+    exit 7
+  }
+  (
+    cd "$linuxcnc_package_root"
+    sha256sum -c "$linuxcnc_bundle_hashes"
+    sha256sum -c ./usr/share/v5-native/linuxcnc-runtime-files.sha256
+  )
+  rm -f "$expected" "$actual" "$hashed"
+  trap - 0 1 2 15
+  linuxcnc_bundle_count=$expected_count
+  echo "V5_LINUXCNC_DEPLOY_BUNDLE_OK files=$linuxcnc_bundle_count"
+}
+
+install_linuxcnc_deploy_bundle() {
+  (
+    cd "$linuxcnc_package_root"
+    find . -type f -print | LC_ALL=C sort
+  ) | while IFS= read -r relative; do
+    source_path="$linuxcnc_package_root/${relative#./}"
+    destination="/${relative#./}"
+    temporary="$destination.v5-new.$$"
+    install -d "$(dirname "$destination")"
+    cp -p "$source_path" "$temporary"
+    chown root:root "$temporary"
+    mv -f "$temporary" "$destination"
+  done
+  while read -r digest relative extra; do
+    [ -z "${extra:-}" ] || {
+      echo "bad LinuxCNC deploy hash row: $digest $relative $extra" >&2
+      exit 7
+    }
+    destination="/${relative#./}"
+    printf '%s  %s\n' "$digest" "$destination" | sha256sum -c -
+  done <"$linuxcnc_bundle_hashes"
+  echo "V5_LINUXCNC_DEPLOY_INSTALL_OK files=$linuxcnc_bundle_count"
+}
 
 merge_runtime_seed_tsv() {
   source_path="$1"
@@ -116,6 +216,112 @@ PY
 }
 
 tab=$(printf '\t')
+if [ -d "$linuxcnc_package_root" ] || [ -e "$linuxcnc_bundle_allowlist" ] || [ -e "$linuxcnc_bundle_hashes" ]; then
+  linuxcnc_bundle_enabled=1
+  [ -d "$linuxcnc_package_root" ] && [ -r "$linuxcnc_bundle_allowlist" ] && [ -r "$linuxcnc_bundle_hashes" ] || {
+    echo "incomplete LinuxCNC deploy bundle" >&2
+    exit 7
+  }
+fi
+
+manifest_ui_only=1
+manifest_actiond_only=1
+manifest_settings_only=1
+manifest_row_count=0
+while IFS="$tab" read -r scope_kind scope_source scope_destination scope_mode scope_extra; do
+  case "$scope_kind" in
+    ''|'#'*) continue ;;
+  esac
+  manifest_row_count=$((manifest_row_count + 1))
+  case "$scope_destination" in
+    /usr/libexec/8ax/v5_lvgl_shell|\
+    /usr/libexec/8ax/v5_remote_ui_*|\
+    /usr/libexec/8ax/v5_ui_*|\
+    /etc/init.d/v5-ui-relay)
+      manifest_actiond_only=0
+      manifest_settings_only=0
+      ;;
+    /usr/libexec/8ax/drive_profile/*|\
+    /usr/libexec/8ax/auth_download/*|\
+    /etc/init.d/v5-settings-actiond)
+      manifest_ui_only=0
+      ;;
+    /opt/8ax/phase0_bus5/settings_runtime.json|\
+    /usr/libexec/8ax/v5_command_gate_server|\
+    /etc/init.d/v5-linuxcnc-command-gate)
+      manifest_ui_only=0
+      manifest_actiond_only=0
+      ;;
+    *)
+      manifest_ui_only=0
+      manifest_actiond_only=0
+      manifest_settings_only=0
+      ;;
+  esac
+done < "$manifest"
+
+case "$restart_scope_requested" in
+  auto)
+    if [ "$linuxcnc_bundle_enabled" -eq 0 ] &&
+       [ "$manifest_row_count" -gt 0 ] &&
+       [ "$manifest_ui_only" -eq 1 ]; then
+      restart_scope=ui
+    elif [ "$linuxcnc_bundle_enabled" -eq 0 ] &&
+         [ "$manifest_row_count" -gt 0 ] &&
+         [ "$manifest_actiond_only" -eq 1 ]; then
+      restart_scope=actiond
+    elif [ "$linuxcnc_bundle_enabled" -eq 0 ] &&
+         [ "$manifest_row_count" -gt 0 ] &&
+         [ "$manifest_settings_only" -eq 1 ]; then
+      restart_scope=settings
+    fi
+    ;;
+  ui)
+    if [ "$linuxcnc_bundle_enabled" -ne 0 ] ||
+       [ "$manifest_row_count" -eq 0 ] ||
+       [ "$manifest_ui_only" -ne 1 ]; then
+      echo "UI-only restart scope requires a non-empty UI-only manifest and no LinuxCNC bundle" >&2
+      exit 8
+    fi
+    restart_scope=ui
+    ;;
+  actiond)
+    if [ "$linuxcnc_bundle_enabled" -ne 0 ] ||
+       [ "$manifest_row_count" -eq 0 ] ||
+       [ "$manifest_actiond_only" -ne 1 ]; then
+      echo "Actiond-only restart scope requires a non-empty actiond-only manifest and no LinuxCNC bundle" >&2
+      exit 8
+    fi
+    restart_scope=actiond
+    ;;
+  settings)
+    if [ "$linuxcnc_bundle_enabled" -ne 0 ] ||
+       [ "$manifest_row_count" -eq 0 ] ||
+       [ "$manifest_settings_only" -ne 1 ]; then
+      echo "Settings restart scope requires a non-empty settings-only manifest and no LinuxCNC bundle" >&2
+      exit 8
+    fi
+    restart_scope=settings
+    ;;
+  all)
+    restart_scope=all
+    ;;
+  *)
+    echo "unsupported V5_RUNTIME_RESTART_SCOPE: $restart_scope_requested (expected auto, ui, actiond, settings, or all)" >&2
+    exit 8
+    ;;
+esac
+echo "V5_RUNTIME_RESTART_SCOPE scope=$restart_scope rows=$manifest_row_count ui_only=$manifest_ui_only actiond_only=$manifest_actiond_only settings_only=$manifest_settings_only"
+
+if [ "$apply" -eq 1 ] && [ "$linuxcnc_bundle_enabled" -eq 1 ]; then
+  verify_linuxcnc_deploy_bundle
+  [ -x /etc/init.d/v5-linuxcnc-command-gate ] || {
+    echo "LinuxCNC command-gate init is missing before deploy" >&2
+    exit 7
+  }
+  /etc/init.d/v5-linuxcnc-command-gate stop
+  install_linuxcnc_deploy_bundle
+fi
 while IFS="$tab" read -r kind source destination mode extra; do
   case "$kind" in
     ''|'#'*) continue ;;
@@ -175,16 +381,62 @@ enable_boot_service() {
 
 enable_boot_services() {
   enable_boot_service v5-linuxcnc-command-gate 91 19
-  enable_boot_service v5-g53-geometry-memory-owner 92 18
-  enable_boot_service v5-rtcp-status-publisher 93 17
-  enable_boot_service v5-wcs-status-publisher 94 16
-  enable_boot_service v5-state-publisher 95 15
-  enable_boot_service v5-ui-relay 96 14
-  enable_boot_service v5-settings-actiond 97 13
-  enable_boot_service v5-touch-diagnostics 98 12
+  enable_boot_service v5-wcs-status-publisher 92 18
+  enable_boot_service v5-state-publisher 93 17
+  enable_boot_service v5-ui-relay 94 16
+  enable_boot_service v5-settings-actiond 95 15
+  enable_boot_service v5-touch-diagnostics 96 14
+}
+
+retired_pid_matches_path() {
+  retired_pid="$1"
+  retired_path="$2"
+  [ -r "/proc/$retired_pid/cmdline" ] || return 1
+  tr '\000' '\n' <"/proc/$retired_pid/cmdline" | grep -Fqx "$retired_path"
+}
+
+stop_retired_runtime_path() {
+  retired_path="$1"
+  for cmdline in /proc/[0-9]*/cmdline; do
+    [ -r "$cmdline" ] || continue
+    retired_pid=${cmdline#/proc/}
+    retired_pid=${retired_pid%/cmdline}
+    retired_pid_matches_path "$retired_pid" "$retired_path" || continue
+    kill "$retired_pid" 2>/dev/null || true
+    retired_wait=0
+    while retired_pid_matches_path "$retired_pid" "$retired_path" && [ "$retired_wait" -lt 20 ]; do
+      retired_wait=$((retired_wait + 1))
+      sleep 0.1
+    done
+    if retired_pid_matches_path "$retired_pid" "$retired_path"; then
+      kill -KILL "$retired_pid" 2>/dev/null || true
+      retired_wait=0
+      while retired_pid_matches_path "$retired_pid" "$retired_path" && [ "$retired_wait" -lt 20 ]; do
+        retired_wait=$((retired_wait + 1))
+        sleep 0.1
+      done
+    fi
+    if retired_pid_matches_path "$retired_pid" "$retired_path"; then
+      echo "retired runtime process did not stop: $retired_path pid=$retired_pid" >&2
+      exit 7
+    fi
+  done
 }
 
 cleanup_retired_runtime_files() {
+  for retired_init in /etc/init.d/v5-rtcp-status-publisher /etc/init.d/v5-g53-geometry-memory-owner; do
+    if [ -x "$retired_init" ]; then
+      "$retired_init" stop
+    fi
+  done
+  for retired_path in \
+    /usr/libexec/8ax/v5_rtcp_status_publisher.py \
+    /usr/libexec/8ax/v5_g53_geometry_memory_owner.py \
+    /usr/libexec/8ax/v5_native_safety_latch_owner.py
+  do
+    stop_retired_runtime_path "$retired_path"
+  done
+  rm -f /run/8ax/v5_rtcp_status_publisher.pid /run/8ax/v5_g53_geometry_memory_owner.pid
   rm -f /run/8ax_v5_drive/settings_self_parameter_table.json
   rm -f /opt/8ax/v5/config/settings/microkernel_parameter_table.tsv
   rm -f /opt/8ax/v5/gcode/golden/cc.ngc
@@ -193,6 +445,15 @@ cleanup_retired_runtime_files() {
   rm -f /opt/8ax/tools/v5_touch_calibration/v5_touch_window_calibration.py
   rm -f /opt/8ax/tools/v5_touch_calibration/v5_touch_window_restart.py
   rm -f /opt/8ax/tools/v5_touch_calibration/v5_touch_window_runtime.py
+  rm -f /usr/libexec/8ax/v5_rtcp_status_publisher.py
+  rm -f /usr/libexec/8ax/v5_g53_geometry_memory_owner.py
+  rm -f /usr/libexec/8ax/v5_native_safety_latch_owner.py
+  rm -f /etc/init.d/v5-rtcp-status-publisher
+  rm -f /etc/init.d/v5-g53-geometry-memory-owner
+  for level in 0 1 2 3 4 5 6; do
+    rm -f "/etc/rc${level}.d"/[SK]??v5-rtcp-status-publisher
+    rm -f "/etc/rc${level}.d"/[SK]??v5-g53-geometry-memory-owner
+  done
 }
 
 install_runtime_drive_profiles() {
@@ -236,17 +497,28 @@ PY
 }
 
 if [ "$apply" -eq 1 ]; then
-  enable_boot_services
-  cleanup_retired_runtime_files
-  install_runtime_drive_profiles
-  /etc/init.d/v5-linuxcnc-command-gate restart
-  /etc/init.d/v5-g53-geometry-memory-owner restart
-  /etc/init.d/v5-rtcp-status-publisher restart
-  /etc/init.d/v5-wcs-status-publisher restart
-  /etc/init.d/v5-state-publisher restart
-  /etc/init.d/v5-ui-relay restart
-  /etc/init.d/v5-settings-actiond restart
-  /etc/init.d/v5-touch-diagnostics restart
+  if [ "$restart_scope" = "ui" ]; then
+    enable_boot_service v5-ui-relay 94 16
+    /etc/init.d/v5-ui-relay restart
+  elif [ "$restart_scope" = "actiond" ]; then
+    enable_boot_service v5-settings-actiond 95 15
+    /etc/init.d/v5-settings-actiond restart
+  elif [ "$restart_scope" = "settings" ]; then
+    enable_boot_service v5-linuxcnc-command-gate 91 19
+    enable_boot_service v5-settings-actiond 95 15
+    /etc/init.d/v5-linuxcnc-command-gate restart
+    /etc/init.d/v5-settings-actiond restart
+  else
+    enable_boot_services
+    cleanup_retired_runtime_files
+    install_runtime_drive_profiles
+    /etc/init.d/v5-linuxcnc-command-gate restart
+    /etc/init.d/v5-wcs-status-publisher restart
+    /etc/init.d/v5-state-publisher restart
+    /etc/init.d/v5-ui-relay restart
+    /etc/init.d/v5-settings-actiond restart
+    /etc/init.d/v5-touch-diagnostics restart
+  fi
 else
-  echo "dry-run only; pass --apply to install files and restart v5 init services"
+  echo "dry-run only; pass --apply to install files and restart scope=$restart_scope"
 fi

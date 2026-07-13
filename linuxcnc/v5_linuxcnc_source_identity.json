@@ -10,7 +10,7 @@
     "tree": "cbadbb8d029aefe7a8d0e3218885aaa59798337b"
   },
   "v5_source_tree": "c1f4c53315c8e614fafbe48992afa91e8aef8014",
-  "content_sha256": "3a8590dc3ba99f2e3248613770d9cd6a80f1109fd57e52263b4007ef3ad6207a",
+  "content_sha256": "3d80d3070231f9d2ba67530bf4f856fc1b59d5198523a15d2f1c9aea81034510",
   "implementation": "in_tree",
   "changed_files": [
     "scripts/linuxcnc.in",
@@ -25,6 +25,9 @@
     "src/emc/usr_intf/Submakefile",
     "src/emc/usr_intf/axis/Submakefile",
     "src/emc/usr_intf/axis/extensions/emcmodule.cc",
+    "src/hal/components/v5_safety_latch.comp",
+    "src/hal/user_comps/v5_native_hal_owner.comp",
+    "src/hal/user_comps/v5_native_hal_owner_protocol.h",
     "src/hal/utils/Submakefile"
   ],
   "migration_provenance": {
@@ -37,7 +40,8 @@
     ],
     "src/Makefile": [
       "install-software: install-kernel-dep install-v5-headless",
-      "install-v5-headless:"
+      "install-v5-headless:",
+      "../bin/v5_native_hal_owner"
     ],
     "src/configure.ac": [
       "--enable-v5-headless-runtime",
@@ -69,6 +73,24 @@
     ],
     "src/emc/usr_intf/Submakefile": [
       "ifeq ($(V5_HEADLESS_RUNTIME),1)"
+    ],
+    "src/hal/components/v5_safety_latch.comp": [
+      "component v5_safety_latch",
+      "param rw u32 watchdog_cycles = 50",
+      "if (force || data.stale_cycles > watchdog_cycles)"
+    ],
+    "src/hal/user_comps/v5_native_hal_owner.comp": [
+      "component v5_native_hal_owner",
+      "pin out bit safety_force;",
+      "pin out bit rtcp_ui_request;",
+      "V5_NATIVE_HAL_OWNER_SOCKET_PATH",
+      "chmod(address.sun_path, 0660)"
+    ],
+    "src/hal/user_comps/v5_native_hal_owner_protocol.h": [
+      "V5_NATIVE_HAL_OWNER_OP_ESTOP_FORCE",
+      "V5_NATIVE_HAL_OWNER_OP_ESTOP_RESET",
+      "V5_NATIVE_HAL_OWNER_OP_RTCP_SET",
+      "V5_NATIVE_G53_STATUS_PATH"
     ],
     "src/hal/utils/Submakefile": [
       "ifeq ($(V5_HEADLESS_RUNTIME),1)"
@@ -107,6 +129,24 @@
         "z20_wrap_public_joint_position",
         "WRAPPED_ROTARY"
       ]
+    },
+    {
+      "path": "usr/bin/v5_native_hal_owner",
+      "required_ascii": [
+        "v5_native_hal_owner",
+        "/run/8ax_v5_product_ui/v5_native_hal_owner.sock",
+        "/dev/shm/v5_native_g53_geometry_status.bin"
+      ],
+      "forbidden_ascii": []
+    },
+    {
+      "path": "usr/lib/linuxcnc/modules/v5_safety_latch.so",
+      "required_ascii": [
+        "v5_safety_latch",
+        "watchdog-cycles",
+        "estop-active"
+      ],
+      "forbidden_ascii": []
     }
   ],
   "symlink_count": 203,

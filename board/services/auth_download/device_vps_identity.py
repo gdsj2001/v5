@@ -8,10 +8,18 @@ from typing import Any, Dict
 VPS_DISTRIBUTION_ID_RE = re.compile(r"^[0-9]{6}$")
 DNA_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 LOCAL_DNA_SECRET_KEYS = {
+    "deviceDna",
+    "device_dna",
+    "dnaHash",
     "pl_dna_hash",
+    "plDnaHash",
+    "plDeviceDna",
+    "plDeviceDnaHash",
+    "pl_device_dna",
     "pl_device_dna_hash",
     "dna_hash",
     "hash",
+    "hashShort",
     "hash_short",
 }
 

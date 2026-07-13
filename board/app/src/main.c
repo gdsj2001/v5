@@ -3,6 +3,7 @@
 #include "v5_lvgl_clock.h"
 #include "v5_process_residency.h"
 #include "v5_remote_input_ipc.h"
+#include "v5_ui_shell_internal.h"
 
 #include "lvgl.h"
 
@@ -102,6 +103,9 @@ int main(int argc, char **argv)
         if (!v5_remote_input_ipc_process()) {
             fprintf(stderr, "v5 UI remote input IPC failed\n");
             return 1;
+        }
+        if (!shell_process_pending_navigation()) {
+            fprintf(stderr, "v5 UI pending navigation failed\n");
         }
         usleep(V5_UI_SHELL_LOOP_MS * 1000U);
     }

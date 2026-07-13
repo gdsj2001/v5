@@ -209,6 +209,49 @@ def materialize_symlinks(source_root, target_root, symlinks):
         os.symlink(target, path)
 
 
+def write_rsync_excludes(source_root, output_path, symlinks):
+    source_resolved = source_root.resolve()
+    output_resolved = output_path.resolve()
+    if os.path.commonpath((str(source_resolved), str(output_resolved))) == str(source_resolved):
+        fail("refusing to write rsync metadata inside the Windows source owner")
+    rows = []
+    for relative in sorted(symlinks):
+        normalized = normalized_relative(relative).as_posix()
+        if any(character in normalized for character in ("\n", "\r", "*", "?", "[")):
+            fail(f"LinuxCNC symlink path cannot be represented safely for rsync: {relative}")
+        rows.append(f"/{normalized}")
+    output_resolved.parent.mkdir(parents=True, exist_ok=True)
+    temp = output_resolved.with_name(output_resolved.name + ".new")
+    temp.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    os.replace(temp, output_resolved)
+
+
+def sync_registered_delta(source_root, target_root, identity):
+    target_identity = load_identity(target_root)
+    for key in ("upstream", "v5_source_tree", "symlinks"):
+        if target_identity.get(key) != identity.get(key):
+            fail(f"registered delta cannot cross LinuxCNC identity boundary: {key}")
+    changed = set(target_identity.get("changed_files", ())) | set(identity.get("changed_files", ()))
+    for relative in sorted(changed):
+        relative_path = normalized_relative(relative)
+        source = source_root.joinpath(*relative_path.parts)
+        target = target_root.joinpath(*relative_path.parts)
+        if source.is_file() and not source.is_symlink():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.exists() and (target.is_dir() or target.is_symlink()):
+                fail(f"registered delta target has incompatible type: {relative}")
+            shutil.copy2(source, target)
+        elif not source.exists():
+            if target.is_dir() and not target.is_symlink():
+                fail(f"registered delta refuses to remove directory: {relative}")
+            if os.path.lexists(target):
+                target.unlink()
+        else:
+            fail(f"registered delta source is not a regular file: {relative}")
+    materialize_symlinks(source_root, target_root, identity["symlinks"])
+    shutil.copy2(source_root / IDENTITY_NAME, target_root / IDENTITY_NAME)
+
+
 def validate_tokens(source_root, identity):
     for relative, tokens in identity.get("required_tokens", {}).items():
         text = (source_root / relative).read_text(encoding="utf-8", errors="strict")
@@ -281,6 +324,8 @@ def main():
     parser.add_argument("--print-source-hash", action="store_true")
     parser.add_argument("--allow-flattened-symlinks", action="store_true")
     parser.add_argument("--materialize-symlinks", type=Path)
+    parser.add_argument("--write-rsync-excludes", type=Path)
+    parser.add_argument("--sync-registered-delta", type=Path)
     parser.add_argument("--artifact-root", type=Path)
     parser.add_argument("--write-artifact-identity", type=Path)
     args = parser.parse_args()
@@ -288,6 +333,14 @@ def main():
     project_root = args.project_root.resolve()
     source_root = (args.source_root or project_root / "linuxcnc").resolve()
     identity = load_identity(source_root)
+    if args.sync_registered_delta:
+        validate_tokens(source_root, identity)
+        sync_registered_delta(source_root, args.sync_registered_delta.resolve(), identity)
+        print(
+            "V5_LINUXCNC_REGISTERED_DELTA_OK "
+            f"files={len(identity.get('changed_files', ()))} target={args.sync_registered_delta.resolve()}"
+        )
+        return 0
     actual_hash = validate_source(
         project_root,
         source_root,
@@ -297,6 +350,8 @@ def main():
     )
     if args.materialize_symlinks:
         materialize_symlinks(source_root, args.materialize_symlinks.resolve(), identity["symlinks"])
+    if args.write_rsync_excludes:
+        write_rsync_excludes(source_root, args.write_rsync_excludes, identity["symlinks"])
     artifacts = []
     if args.artifact_root:
         artifacts = validate_artifacts(identity, args.artifact_root.resolve())

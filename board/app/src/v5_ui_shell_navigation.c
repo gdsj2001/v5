@@ -2,6 +2,11 @@
 
 #include "v5_lvgl_remote_display.h"
 
+#include <stdio.h>
+
+static int g_v5_shell_navigation_pending;
+static V5MainPageActionKind g_v5_shell_pending_navigation_action;
+
 static V5ShellPageKind shell_page_for_action(V5MainPageActionKind action)
 {
     switch (action) {
@@ -146,12 +151,13 @@ static int shell_capture_current_page(void)
         return shell_sync_current_page_cache_if_dirty() > 0;
     }
     disp = lv_obj_get_disp(g_v5_shell_shell_pages[page]);
-    if (disp && disp->inv_p != 0U) {
-        lv_timer_handler();
-    }
-    if (!disp || disp->rendering_in_progress || disp->inv_p != 0U) {
+    if (!disp || disp->rendering_in_progress) {
         return 0;
     }
+    /* g_frame is the last frame already published to both local and remote
+     * outputs. A pointer release may have queued a later LVGL invalidation,
+     * but that pending work is not part of the currently visible frame and
+     * must not block the cache-first page switch. */
     if (!v5_lvgl_remote_display_cache_capture(slot)) {
         return 0;
     }
@@ -235,27 +241,33 @@ static int shell_restore_previous_page_after_failed_prepare(V5ShellPageKind prev
  * visible action; normal LVGL refresh may follow only for the dirty target
  * page, overlay, or changed cell.
  */
-void shell_navigate(void *user_data, V5MainPageActionKind action)
+static int shell_navigate_now(V5MainPageActionKind action)
 {
     unsigned long long t0;
     unsigned long long elapsed;
     int cache_ok = 0;
     V5ShellPageKind page;
     V5ShellPageKind previous_page;
-    (void)user_data;
     if (!g_v5_shell_main_page.root || !g_v5_shell_settings_page.root) {
-        return;
+        fprintf(stderr, "V5_UI_NAV_FAIL stage=roots action=%u\n", (unsigned int)action);
+        return 0;
     }
     t0 = shell_monotonic_ns();
     page = shell_page_for_action(action);
     previous_page = g_v5_shell_current_page;
     if (!shell_capture_current_page()) {
-        return;
+        fprintf(stderr,
+                "V5_UI_NAV_FAIL stage=capture_current current=%u target=%u current_dirty=%d\n",
+                (unsigned int)previous_page,
+                (unsigned int)page,
+                g_v5_shell_page_cache_dirty[previous_page]);
+        return 0;
     }
     if (page == V5_SHELL_PAGE_MDI) {
         if (action == V5_MAIN_PAGE_ACTION_NAV_MDI_EDIT) {
             if (!g_v5_shell_mdi_edit_prepared && !shell_load_current_program_for_mdi_edit()) {
-                return;
+                fprintf(stderr, "V5_UI_NAV_FAIL stage=mdi_prepare target=%u\n", (unsigned int)page);
+                return 0;
             }
             g_v5_shell_mdi_edit_prepared = 0;
         } else {
@@ -280,12 +292,39 @@ void shell_navigate(void *user_data, V5MainPageActionKind action)
             cache_ok = v5_lvgl_remote_display_cache_blit(shell_page_cache_slot(page));
         }
         if (!cache_ok) {
+            int target_dirty = g_v5_shell_page_cache_dirty[page];
+            int target_valid = v5_lvgl_remote_display_cache_valid(shell_page_cache_slot(page));
             v5_lvgl_remote_display_cache_invalidate(shell_page_cache_slot(page));
             (void)shell_restore_previous_page_after_failed_prepare(previous_page);
-            return;
+            fprintf(stderr,
+                    "V5_UI_NAV_FAIL stage=target_cache current=%u target=%u target_dirty=%d target_valid=%d\n",
+                    (unsigned int)previous_page,
+                    (unsigned int)page,
+                    target_dirty,
+                    target_valid);
+            return 0;
         }
     }
     g_v5_shell_current_page = page;
     elapsed = shell_monotonic_ns() - t0;
     shell_log_navigation_perf(shell_page_name(page), cache_ok, elapsed);
+    return 1;
+}
+
+void shell_navigate(void *user_data, V5MainPageActionKind action)
+{
+    (void)user_data;
+    g_v5_shell_pending_navigation_action = action;
+    g_v5_shell_navigation_pending = 1;
+}
+
+int shell_process_pending_navigation(void)
+{
+    V5MainPageActionKind action;
+    if (!g_v5_shell_navigation_pending) {
+        return 1;
+    }
+    action = g_v5_shell_pending_navigation_action;
+    g_v5_shell_navigation_pending = 0;
+    return shell_navigate_now(action);
 }

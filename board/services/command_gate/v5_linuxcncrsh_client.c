@@ -91,9 +91,55 @@ V5LinuxcncrshSendStatus v5_linuxcncrsh_send_prepared(
         strcmp(prepared->owner ? prepared->owner : "", "native_safety") == 0) {
         return V5_LINUXCNCRSH_SEND_INVALID;
     }
+    if (prepared && request && request->kind == V5_COMMAND_START) {
+        return v5_linuxcncrsh_send_start_transaction(
+            config, prepared, request, line, sizeof(line));
+    }
     if (!v5_linuxcncrsh_format_line(prepared, request, line, sizeof(line))) {
         return V5_LINUXCNCRSH_SEND_INVALID;
     }
 
     return v5_linuxcncrsh_send_line(config, line);
+}
+
+V5LinuxcncrshSendStatus v5_linuxcncrsh_send_start_transaction(
+    const V5LinuxcncrshConfig *config,
+    const V5CommandPrepared *prepared,
+    const V5CommandRequest *request,
+    char *command_line,
+    size_t command_line_size)
+{
+#ifdef _WIN32
+    (void)config;
+    (void)prepared;
+    (void)request;
+    if (command_line && command_line_size > 0U) {
+        command_line[0] = '\0';
+    }
+    return V5_LINUXCNCRSH_SEND_UNAVAILABLE;
+#else
+    int fd;
+    char program_response[768];
+    if (!prepared || !request || !command_line || command_line_size == 0U ||
+        !prepared->accepted || prepared->kind != V5_COMMAND_START ||
+        request->kind != V5_COMMAND_START ||
+        !request->text_value || !request->text_value[0]) {
+        return V5_LINUXCNCRSH_SEND_INVALID;
+    }
+    command_line[0] = '\0';
+    fd = v5_linuxcncrsh_gate_connect(config);
+    if (fd < 0) {
+        return V5_LINUXCNCRSH_SEND_UNAVAILABLE;
+    }
+    if (!v5_linuxcncrsh_send_request_text(fd, "Set Enable EMCTOO", 0, 0U) ||
+        !v5_linuxcncrsh_send_request_text(
+            fd, "Get Program", program_response, sizeof(program_response)) ||
+        !v5_linuxcncrsh_format_start_transaction(
+            prepared, request, program_response, command_line, command_line_size) ||
+        !v5_linuxcncrsh_send_fifo_commands(fd, command_line)) {
+        v5_linuxcncrsh_gate_close();
+        return V5_LINUXCNCRSH_SEND_IO_ERROR;
+    }
+    return V5_LINUXCNCRSH_SEND_SENT;
+#endif
 }

@@ -40,8 +40,9 @@ check_remote_test() {
 }
 check_remote_test "v5_lvgl_shell installed executable" 'test -x /usr/libexec/8ax/v5_lvgl_shell'
 check_remote_test "v5_state_publisher installed executable" 'test -x /usr/libexec/8ax/v5_state_publisher'
-check_remote_test "v5_rtcp_status_publisher installed executable" 'test -x /usr/libexec/8ax/v5_rtcp_status_publisher.py'
-check_remote_test "v5_g53_geometry_memory_owner installed executable" 'test -x /usr/libexec/8ax/v5_g53_geometry_memory_owner.py'
+check_remote_test "native HAL owner installed executable" 'test -x /usr/bin/v5_native_hal_owner'
+check_remote_test "realtime safety latch installed module" 'test -r /usr/lib/linuxcnc/modules/v5_safety_latch.so'
+check_remote_test "retired Python HAL owners absent" 'test ! -e /usr/libexec/8ax/v5_rtcp_status_publisher.py && test ! -e /usr/libexec/8ax/v5_g53_geometry_memory_owner.py && test ! -e /usr/libexec/8ax/v5_native_safety_latch_owner.py'
 check_remote_test "v5_wcs_status_publisher installed executable" 'test -x /usr/libexec/8ax/v5_wcs_status_publisher.py'
 check_remote_test "native operator error mapper installed" 'test -r /usr/libexec/8ax/v5_native_operator_error_map.py'
 check_remote_test "native operator error complete map installed" 'test -r /opt/8ax/v5/config/ui/v5_native_operator_error_map.tsv && test "$(grep -vc "^#" /opt/8ax/v5/config/ui/v5_native_operator_error_map.tsv)" -eq 556'
@@ -53,8 +54,7 @@ check_remote_test "v5 remote ui relay installed executable" 'test -x /usr/libexe
 check_remote_test "v5 UI boot ready helper installed executable" 'test -x /usr/libexec/8ax/v5_ui_boot_ready.py'
 check_remote_test "v5 UI cache queue contract installed module" 'test -r /usr/libexec/8ax/v5_ui_cache_queue_contract.py'
 check_remote_test "state publisher init installed" 'test -x /etc/init.d/v5-state-publisher'
-check_remote_test "rtcp status publisher init installed" 'test -x /etc/init.d/v5-rtcp-status-publisher'
-check_remote_test "g53 geometry memory owner init installed" 'test -x /etc/init.d/v5-g53-geometry-memory-owner'
+check_remote_test "retired Python HAL owner init scripts absent" 'test ! -e /etc/init.d/v5-rtcp-status-publisher && test ! -e /etc/init.d/v5-g53-geometry-memory-owner'
 check_remote_test "wcs status publisher init installed" 'test -x /etc/init.d/v5-wcs-status-publisher'
 check_remote_test "linuxcnc command gate init installed" 'test -x /etc/init.d/v5-linuxcnc-command-gate'
 check_remote_test "v5 ui relay init installed" 'test -x /etc/init.d/v5-ui-relay'
@@ -76,42 +76,28 @@ else
 fi
 rm -f /tmp/v5_verify_init_status.out
 
-if remote '/etc/init.d/v5-rtcp-status-publisher status' >/tmp/v5_rtcp_status_publisher_status.out 2>&1; then
-  ok "v5-rtcp-status-publisher init status running"
-  sed 's/^/INFO rtcp status publisher init: /' /tmp/v5_rtcp_status_publisher_status.out
-else
-  fail_msg "v5-rtcp-status-publisher init status running"
-  sed 's/^/INFO rtcp status publisher init: /' /tmp/v5_rtcp_status_publisher_status.out
-fi
-rm -f /tmp/v5_rtcp_status_publisher_status.out
+check_remote_test "native HAL owner socket is private to petalinux group" 'test -S /run/8ax_v5_product_ui/v5_native_hal_owner.sock && test "$(stat -c %a /run/8ax_v5_product_ui/v5_native_hal_owner.sock)" = 660 && test "$(stat -c %G /run/8ax_v5_product_ui/v5_native_hal_owner.sock)" = petalinux'
 
-if remote 'PYTHONPATH=/usr/lib/python3/dist-packages /usr/libexec/8ax/v5_rtcp_status_publisher.py --once >/tmp/v5_rtcp_status_publisher_once.out 2>&1 && test -s /dev/shm/v5_native_rtcp_status.bin' >/dev/null 2>&1; then
-  ok "rtcp status publisher one-shot samples LinuxCNC/HAL native switchkins actual"
-  remote 'tail -n 3 /tmp/v5_rtcp_status_publisher_once.out 2>/dev/null || true' | sed 's/^/INFO rtcp status publisher: /'
+rtcp_block_check='import functools,struct,sys,time; p="/dev/shm/v5_native_rtcp_status.bin"; fmt=struct.Struct("<IIIIIIQII"); raw=open(p,"rb").read(fmt.size); v=fmt.unpack(raw); crc=functools.reduce(lambda h,b:((h^b)*16777619)&0xffffffff,raw[:32],2166136261); age=time.monotonic_ns()-v[6]; sys.exit(0 if v[0]==0x56525443 and v[1]==1 and v[2]==fmt.size and v[3]==1 and v[6]>0 and 0<=age<=1000000000 and v[7]==crc else 1)'
+rtcp_block_info='import struct,time; p="/dev/shm/v5_native_rtcp_status.bin"; fmt=struct.Struct("<IIIIIIQII"); v=fmt.unpack(open(p,"rb").read(fmt.size)); print("rtcp_block version=%d valid=%d active=%d age_ms=%.3f" % (v[1],v[3],v[4],(time.monotonic_ns()-v[6])/1000000.0))'
+if remote "test -s /dev/shm/v5_native_rtcp_status.bin && /usr/bin/python3 -c '$rtcp_block_check'" >/dev/null 2>&1; then
+  ok "native HAL owner publishes fresh RTCP actual status"
+  remote "/usr/bin/python3 -c '$rtcp_block_info'" | sed 's/^/INFO native HAL owner: /'
 else
-  fail_msg "rtcp status publisher one-shot samples LinuxCNC/HAL native switchkins actual"
-  remote 'tail -n 10 /tmp/v5_rtcp_status_publisher_once.out 2>/dev/null || true' | sed 's/^/INFO rtcp status publisher: /'
+  fail_msg "native HAL owner publishes fresh RTCP actual status"
+  remote 'ls -l /dev/shm/v5_native_rtcp_status.bin 2>/dev/null || true' | sed 's/^/INFO native HAL owner: /'
 fi
 
 check_remote_test "retired /run RTCP v3 snapshot absent" 'test ! -e /run/8ax_v5_product_ui/v3_native_rtcp_status.bin'
 
-if remote '/etc/init.d/v5-g53-geometry-memory-owner status' >/tmp/v5_g53_geometry_memory_owner_status.out 2>&1; then
-  ok "v5-g53-geometry-memory-owner init status running"
-  sed 's/^/INFO g53 geometry memory owner init: /' /tmp/v5_g53_geometry_memory_owner_status.out
-else
-  fail_msg "v5-g53-geometry-memory-owner init status running"
-  sed 's/^/INFO g53 geometry memory owner init: /' /tmp/v5_g53_geometry_memory_owner_status.out
-fi
-rm -f /tmp/v5_g53_geometry_memory_owner_status.out
-
-g53_block_check='import configparser,math,struct,sys; ini="/opt/8ax/v5/linuxcnc/ini/v5_bus.ini"; cp=configparser.ConfigParser(); cp.optionxform=str; cp.read(ini, encoding="utf-8"); exp=[0.0,cp.getfloat("RTCP","G53_A_Y"),cp.getfloat("RTCP","G53_A_Z"),cp.getfloat("RTCP","G53_B_X"),0.0,cp.getfloat("RTCP","G53_B_Z"),cp.getfloat("RTCP","G53_C_X"),cp.getfloat("RTCP","G53_C_Y"),0.0]; model=cp.get("RTCP","MODEL",fallback=cp.get("RTCP","MOTION_MODEL",fallback="")).strip(); p="/dev/shm/v5_native_g53_geometry_status.bin"; fmt=struct.Struct("<IIIIIIIIQ"+("d"*9)+"32sII"); v=fmt.unpack(open(p,"rb").read(fmt.size)); got=list(v[9:18]); got_model=v[18].split(b"\0",1)[0].decode("utf-8","replace"); sys.exit(0 if v[1]==2 and v[3]==1 and v[4]==3 and v[5]==3 and v[6] and got_model==model and all(math.isfinite(x) for x in got) and all(abs(a-b)<1e-9 for a,b in zip(got,exp)) else 1)'
+g53_block_check='import configparser,functools,math,struct,sys,time; ini="/opt/8ax/v5/linuxcnc/ini/v5_bus.ini"; cp=configparser.ConfigParser(); cp.optionxform=str; cp.read(ini, encoding="utf-8"); exp=[0.0,cp.getfloat("RTCP","G53_A_Y"),cp.getfloat("RTCP","G53_A_Z"),cp.getfloat("RTCP","G53_B_X"),0.0,cp.getfloat("RTCP","G53_B_Z"),cp.getfloat("RTCP","G53_C_X"),cp.getfloat("RTCP","G53_C_Y"),0.0]; model=cp.get("RTCP","MODEL",fallback=cp.get("RTCP","MOTION_MODEL",fallback="")).strip(); p="/dev/shm/v5_native_g53_geometry_status.bin"; fmt=struct.Struct("<IIIIIIIIQ"+("d"*9)+"32sII"); raw=open(p,"rb").read(fmt.size); v=fmt.unpack(raw); got=list(v[9:18]); got_model=v[18].split(b"\0",1)[0].decode("utf-8","replace"); crc=functools.reduce(lambda h,b:((h^b)*16777619)&0xffffffff,raw[:144],2166136261); age=time.monotonic_ns()-v[8]; sys.exit(0 if v[0]==0x56354753 and v[1]==2 and v[2]==fmt.size and v[3]==1 and v[4]==3 and v[5]==3 and v[6] and v[8]>0 and 0<=age<=1000000000 and v[19]==crc and got_model==model and all(math.isfinite(x) for x in got) and all(abs(a-b)<1e-9 for a,b in zip(got,exp)) else 1)'
 g53_block_info='import struct; p="/dev/shm/v5_native_g53_geometry_status.bin"; fmt=struct.Struct("<IIIIIIIIQ"+("d"*9)+"32sII"); v=fmt.unpack(open(p,"rb").read(fmt.size)); c=list(v[9:18]); model=v[18].split(b"\0",1)[0].decode("utf-8","replace"); print("g53_block version=%d valid=%d centers=%dx%d epoch=%d model=%s A=%.3f,%.3f,%.3f C=%.3f,%.3f,%.3f" % (v[1],v[3],v[4],v[5],v[6],model,c[0],c[1],c[2],c[6],c[7],c[8]))'
-if remote "/usr/libexec/8ax/v5_g53_geometry_memory_owner.py --once --path /dev/shm/v5_native_g53_geometry_status.bin --ini /opt/8ax/v5/linuxcnc/ini/v5_bus.ini >/tmp/v5_g53_geometry_memory_owner_once.out 2>&1 && test -s /dev/shm/v5_native_g53_geometry_status.bin && /usr/bin/python3 -c '$g53_block_check'" >/dev/null 2>&1; then
-  ok "g53 geometry memory owner one-shot loads RTCP G53 into native memory"
-  remote "tail -n 3 /tmp/v5_g53_geometry_memory_owner_once.out 2>/dev/null || true; /usr/bin/python3 -c '$g53_block_info' 2>/dev/null || true" | sed 's/^/INFO g53 geometry memory owner: /'
+if remote "test -s /dev/shm/v5_native_g53_geometry_status.bin && /usr/bin/python3 -c '$g53_block_check'" >/dev/null 2>&1; then
+  ok "native HAL owner publishes fresh mapped G53 geometry"
+  remote "/usr/bin/python3 -c '$g53_block_info' 2>/dev/null || true" | sed 's/^/INFO native HAL owner: /'
 else
-  fail_msg "g53 geometry memory owner one-shot loads RTCP G53 into native memory"
-  remote 'tail -n 10 /tmp/v5_g53_geometry_memory_owner_once.out 2>/dev/null || true; ls -l /dev/shm/v5_native_g53_geometry_status.bin 2>/dev/null || true' | sed 's/^/INFO g53 geometry memory owner: /'
+  fail_msg "native HAL owner publishes fresh mapped G53 geometry"
+  remote 'ls -l /dev/shm/v5_native_g53_geometry_status.bin 2>/dev/null || true' | sed 's/^/INFO native HAL owner: /'
 fi
 
 if remote '/etc/init.d/v5-wcs-status-publisher status' >/tmp/v5_wcs_status_publisher_status.out 2>&1; then
@@ -253,7 +239,7 @@ else
   warn_msg "input event devices not visible; touch evidence still missing"
 fi
 
-remote 'ps w 2>/dev/null | grep -E "v5_state_publisher|v5_rtcp_status_publisher|v5_g53_geometry_memory_owner|v5_wcs_status_publisher|v5_lvgl_shell|v5_remote_ui_relay|linuxcncrsh|linuxcncsvr|milltask" | grep -v grep || true' |
+remote 'ps w 2>/dev/null | grep -E "v5_state_publisher|v5_native_hal_owner|v5_wcs_status_publisher|v5_lvgl_shell|v5_remote_ui_relay|linuxcncrsh|linuxcncsvr|milltask" | grep -v grep || true' |
   sed 's/^/INFO process: /'
 
 if [ "$fail" -ne 0 ]; then

@@ -1,11 +1,8 @@
 #include "v5_state_publisher_service.h"
 
 #include "v5_native_sample.h"
-#include "v5_native_rtcp_status.h"
-
 #include <signal.h>
 #include <stdint.h>
-#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -34,19 +31,6 @@ static uint64_t v5_state_publisher_epoch_ns(void)
 }
 
 
-static int v5_state_publisher_publish_rtcp_status_block(void)
-{
-    V5NativeReadback readback;
-
-    mkdir("/run/8ax_v5_product_ui", 0755);
-    v5_native_readback_init(&readback);
-    if (v5_native_rtcp_status_read(0, V5_NATIVE_RTCP_STATUS_DEFAULT_MAX_AGE_MS, &readback) &&
-        v5_native_readback_rtcp_known(&readback)) {
-        return 1;
-    }
-    return v5_native_rtcp_status_write(0, 0, 0);
-}
-
 static void v5_state_publisher_sleep_ms(unsigned int interval_ms)
 {
     struct timespec delay;
@@ -74,7 +58,6 @@ int v5_state_publisher_build_frame(V5StatusShmFrame *frame, V5StatePublisherRepo
     frame->status_epoch = v5_state_publisher_epoch_ns();
 
     if (report) {
-        report->rtcp_status_published = (unsigned int)v5_state_publisher_publish_rtcp_status_block();
         report->sample_available = available;
         report->valid_mask = frame->typed_valid_mask;
         report->frame_flags = frame->flags;

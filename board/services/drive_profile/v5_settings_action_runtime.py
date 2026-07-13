@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import threading
 import time
@@ -22,6 +23,7 @@ if AUTH_MODULE_DIR.is_dir() and str(AUTH_MODULE_DIR) not in sys.path:
     sys.path.insert(0, str(AUTH_MODULE_DIR))
 
 import v5_drive_bus_action
+from v5_drive_result import compact_action_result_payload
 import v5_device_authorization_download
 import v5_device_dna_register
 import v5_drive_profile_download
@@ -279,4 +281,6 @@ def execute_action(action: str, request: Optional[Dict[str, Any]] = None) -> Dic
             "axis": axis_hint,
         }
         write_json(result_path, result)
+    if spec.get("handler") == "drive" and isinstance(result, dict):
+        result = compact_action_result_payload(result)
     return result

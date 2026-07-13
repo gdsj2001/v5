@@ -1,9 +1,6 @@
 # kind	source	destination	mode
 binary	build/board/app/v5_lvgl_shell	/usr/libexec/8ax/v5_lvgl_shell	0755
 binary	build/board/app/v5_state_publisher	/usr/libexec/8ax/v5_state_publisher	0755
-script	services/state_publisher/v5_rtcp_status_publisher.py	/usr/libexec/8ax/v5_rtcp_status_publisher.py	0755
-script	services/microkernel/v5_g53_geometry_memory_owner.py	/usr/libexec/8ax/v5_g53_geometry_memory_owner.py	0755
-script	services/microkernel/v5_native_safety_latch_owner.py	/usr/libexec/8ax/v5_native_safety_latch_owner.py	0755
 script	services/state_publisher/v5_wcs_status_publisher.py	/usr/libexec/8ax/v5_wcs_status_publisher.py	0755
 module	services/state_publisher/v5_machine_status_projection.py	/usr/libexec/8ax/v5_machine_status_projection.py	0644
 module	services/state_publisher/v5_wcs_status_codec.py	/usr/libexec/8ax/v5_wcs_status_codec.py	0644
@@ -19,8 +16,6 @@ module	services/ui/v5_remote_ui_contract.py	/usr/libexec/8ax/v5_remote_ui_contra
 module	services/ui/v5_remote_ui_protocol.py	/usr/libexec/8ax/v5_remote_ui_protocol.py	0644
 module	services/ui/v5_remote_ui_state.py	/usr/libexec/8ax/v5_remote_ui_state.py	0644
 module	services/ui/v5_remote_ui_support.py	/usr/libexec/8ax/v5_remote_ui_support.py	0644
-init	services/state_publisher/init.d/v5-rtcp-status-publisher	/etc/init.d/v5-rtcp-status-publisher	0755
-init	services/microkernel/init.d/v5-g53-geometry-memory-owner	/etc/init.d/v5-g53-geometry-memory-owner	0755
 init	services/state_publisher/init.d/v5-wcs-status-publisher	/etc/init.d/v5-wcs-status-publisher	0755
 init	services/state_publisher/init.d/v5-state-publisher	/etc/init.d/v5-state-publisher	0755
 init	services/command_gate/init.d/v5-linuxcnc-command-gate	/etc/init.d/v5-linuxcnc-command-gate	0755
@@ -41,6 +36,7 @@ config	config/safe_ui/re_touch_calibration.json	/opt/8ax/safe_ui/re_touch_calibr
 config	config/auth/device_auth_public.pem	/etc/6x-cnc/device_auth_public.pem	0644
 runtime_seed_merge	config/settings/self_parameter_table.tsv	/opt/8ax/v5/config/settings/self_parameter_table.tsv	0644
 runtime_seed	config/settings/drive_parameter_table.tsv	/opt/8ax/v5/config/settings/drive_parameter_table.tsv	0644
+runtime_seed	config/settings/settings_runtime.json	/opt/8ax/phase0_bus5/settings_runtime.json	0644
 gcode	gcode/golden/cc-ac.ngc	/opt/8ax/v5/gcode/golden/cc-ac.ngc	0644
 gcode	gcode/golden/cc-bc.ngc	/opt/8ax/v5/gcode/golden/cc-bc.ngc	0644
 script	services/auth_download/v5_device_dna_register.py	/usr/libexec/8ax/auth_download/v5_device_dna_register.py	0755

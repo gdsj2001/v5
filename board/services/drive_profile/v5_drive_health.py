@@ -10,14 +10,14 @@ from v5_drive_bus_contract import (
     STATUSWORD_OPERATION_ENABLED_BIT,
 )
 from v5_drive_result import compact_read_item, compact_readback, compact_sdo_io
-from v5_drive_sdo import read_command, run_command, write_command
+from v5_drive_sdo import read_command, run_command, run_ethercat_slaves, write_command
 
-DRIVE_ACTIVATION_RESTART_ATTEMPTS = 8
-DRIVE_ACTIVATION_RESTART_WRITE_ATTEMPTS = 3
-DRIVE_ACTIVATION_RESTART_INITIAL_DELAY_S = 2.0
-DRIVE_ACTIVATION_RESTART_DELAY_S = 1.0
+SET_DRIVE_BATCH_READBACK_ATTEMPTS = 2
+SET_DRIVE_BATCH_RECOVERY_DELAY_S = 0.25
 FACTORY_RESET_STABILIZE_ATTEMPTS = 8
 FACTORY_RESET_STABILIZE_DELAY_S = 2.0
+FAULT_RESET_RECOVERY_ATTEMPTS = 3
+FAULT_RESET_RECOVERY_DELAY_S = 0.25
 
 def read_scalar_value(read_item: Dict[str, Any]) -> int | None:
     upload = read_item.get("upload") if isinstance(read_item.get("upload"), dict) else {}
@@ -124,7 +124,8 @@ def readback_with_retry(target: Dict[str, Any],
                         attempts: int = 3) -> Dict[str, Any]:
     attempt_results: List[Dict[str, Any]] = []
     recovery: Dict[str, Any] | None = None
-    for attempt in range(1, max(1, attempts) + 1):
+    max_attempts = max(1, attempts)
+    for attempt in range(1, max_attempts + 1):
         state = read_required_state(target, timeout_s)
         health = evaluate_drive_health(state.get("reads", {}), expected_egear, expected_mode)
         compact_reads = {name: compact_read_item(item) for name, item in (state.get("reads", {}) or {}).items()}
@@ -132,93 +133,67 @@ def readback_with_retry(target: Dict[str, Any],
         attempt_results.append(attempt_payload)
         if bool(state.get("ok")) and bool(health.get("ok")):
             return {"ok": True, "attempts": attempt_results, "health": health}
-        if attempt == 1:
+        if attempt == 1 and attempt < max_attempts:
             recovery = recover_slave_mailbox(str(target.get("position") or ""), timeout_s)
         time.sleep(0.25)
     last_health = attempt_results[-1].get("health", {}) if attempt_results else {}
     return {"ok": False, "attempts": attempt_results, "health": last_health, "mailbox_recovery": recovery}
 
 
-def software_reset_mailbox_interrupted(write_result: Dict[str, Any]) -> bool:
-    operations = write_result.get("operations") if isinstance(write_result.get("operations"), list) else []
-    for operation in operations:
-        if not isinstance(operation, dict):
-            continue
-        tail = str(operation.get("stderr_tail") or "")
-        if "Input/output error" in tail:
-            return True
-    return False
+def recover_failed_target_set_mailbox(targets: List[Dict[str, Any]], timeout_s: float) -> Dict[str, Any]:
+    operations: List[Dict[str, Any]] = []
+    for state in ("PREOP", "OP"):
+        for target in targets:
+            position = str(target.get("position") or "")
+            op = run_command(["ethercat", "state", "-p", position, state], min(timeout_s, 5.0))
+            op.update({"requested_state": state, "position": position})
+            compact = compact_sdo_io(op)
+            compact.update({"requested_state": state, "position": position})
+            operations.append(compact)
+        time.sleep(0.35)
+    return {"ok": bool(operations) and all(bool(op.get("ok")) for op in operations), "operations": operations}
 
 
-def drive_activation_restart(target: Dict[str, Any],
+def set_drive_batch_readback(targets: List[Dict[str, Any]],
                              timeout_s: float,
-                             expected_egear: Tuple[int, int],
-                             expected_mode: int) -> Dict[str, Any]:
-    position = str(target.get("position") or "")
-    commands = target.get("commands") if isinstance(target.get("commands"), dict) else {}
-    reset_write: Dict[str, Any] = {"ok": False, "code": "DRIVE_ACTIVATION_RESTART_NOT_ATTEMPTED"}
-    write_attempts: List[Dict[str, Any]] = []
-    reset_write_status = ""
-    for attempt in range(1, DRIVE_ACTIVATION_RESTART_WRITE_ATTEMPTS + 1):
-        if attempt > 1:
-            recover_slave_mailbox(position, timeout_s)
-            time.sleep(DRIVE_ACTIVATION_RESTART_DELAY_S)
-        reset_write = write_command(position, "drive.software_reset", commands.get("drive.software_reset", {}))
-        write_attempts.append({"attempt": attempt, "write": reset_write})
-        if reset_write.get("ok"):
-            reset_write_status = "download_ok"
-            break
-        if software_reset_mailbox_interrupted(reset_write):
-            reset_write_status = "download_sdo_error_needs_post_reset_readback"
-            break
-    if not reset_write.get("ok") and not reset_write_status:
-        raise DriveActionError(
-            "DRIVE_ACTIVATION_RESTART_WRITE_FAILED",
-            "驱动软件重启 SDO 写入失败，新电子齿轮未证明生效。",
-            {"software_reset_write": reset_write, "software_reset_write_attempts": write_attempts},
-        )
-
-    time.sleep(DRIVE_ACTIVATION_RESTART_INITIAL_DELAY_S)
+                             expectations: Dict[str, Tuple[Tuple[int, int], int]]) -> Dict[str, Any]:
     cycles: List[Dict[str, Any]] = []
-    last_readback: Dict[str, Any] = {"ok": False, "health": {}}
-    for attempt in range(1, DRIVE_ACTIVATION_RESTART_ATTEMPTS + 1):
-        if attempt > 1:
-            time.sleep(DRIVE_ACTIVATION_RESTART_DELAY_S)
-        op_recovery = recover_slave_mailbox(position, timeout_s)
-        readback = readback_with_retry(target, timeout_s, expected_egear=expected_egear, expected_mode=expected_mode, attempts=1)
-        last_readback = readback
-        cycles.append({
-            "attempt": attempt,
-            "op_recovery_ok": bool(op_recovery.get("ok")),
-            "readback": compact_readback(readback),
-        })
-        if readback.get("ok"):
-            return {
-                "ok": True,
-                "software_reset_write": reset_write,
-                "software_reset_write_status": "download_ok" if reset_write.get("ok") else "download_sdo_error_but_post_reset_readback_matched",
-                "software_reset_write_attempts": write_attempts,
-                "attempt_count": attempt,
-                "initial_delay_s": DRIVE_ACTIVATION_RESTART_INITIAL_DELAY_S,
-                "settle_delay_s": DRIVE_ACTIVATION_RESTART_DELAY_S,
-                "cycles": cycles,
-                "readback": readback,
-            }
-
-    raise DriveActionError(
-        "DRIVE_ACTIVATION_RESTART_READBACK_FAILED",
-        "驱动软件重启后电子齿轮/模式/状态读回未闭合，新电子齿轮未证明生效。",
-        {
-            "software_reset_write": reset_write,
-            "software_reset_write_status": reset_write_status,
-            "software_reset_write_attempts": write_attempts,
-            "attempt_count": len(cycles),
-            "initial_delay_s": DRIVE_ACTIVATION_RESTART_INITIAL_DELAY_S,
-            "settle_delay_s": DRIVE_ACTIVATION_RESTART_DELAY_S,
-            "cycles": cycles,
-            "readback": compact_readback(last_readback),
-        },
-    )
+    final_readbacks: Dict[str, Dict[str, Any]] = {}
+    final_failed_positions: List[str] = []
+    for attempt in range(1, SET_DRIVE_BATCH_READBACK_ATTEMPTS + 1):
+        scan = run_ethercat_slaves(min(timeout_s, 5.0))
+        if not scan.get("ok"):
+            return {"ok": False, "code": str(scan.get("code") or "DRIVE_SCAN_FAILED"), "scan": scan, "cycles": cycles, "readbacks": final_readbacks, "failed_positions": [str(target.get("position") or "") for target in targets]}
+        states = {str(item.get("position") or ""): str(item.get("state") or "").upper() for item in (scan.get("slaves") or []) if isinstance(item, dict)}
+        readbacks: Dict[str, Dict[str, Any]] = {}
+        actual_fault = False
+        failed_targets: List[Dict[str, Any]] = []
+        for target in targets:
+            position = str(target.get("position") or "")
+            expected_egear, expected_mode = expectations[position]
+            readback = readback_with_retry(target, timeout_s, expected_egear, expected_mode, attempts=1)
+            readbacks[position] = readback
+            failure_codes = {str(item.get("code") or "") for item in (readback.get("health", {}).get("failures") or []) if isinstance(item, dict)}
+            actual_fault = actual_fault or bool(failure_codes & {"DRIVE_STATUSWORD_FAULT_BIT_SET", "DRIVE_ERROR_CODE_NONZERO", "DRIVE_AUX_ERROR_CODE_NONZERO"})
+            if states.get(position) != "OP" or not readback.get("ok"):
+                failed_targets.append(target)
+        final_readbacks = readbacks
+        final_failed_positions = [str(target.get("position") or "") for target in failed_targets]
+        all_readback_ok = bool(readbacks) and all(bool(item.get("ok")) for item in readbacks.values())
+        cycle: Dict[str, Any] = {"attempt": attempt, "all_targets_op": all(states.get(str(target.get("position") or "")) == "OP" for target in targets), "all_readback_ok": all_readback_ok, "actual_fault": actual_fault}
+        cycles.append(cycle)
+        if not failed_targets and all_readback_ok:
+            return {"ok": True, "code": "DRIVE_SET_BATCH_READBACK_OK", "cycles": cycles, "readbacks": final_readbacks, "failed_positions": []}
+        if actual_fault:
+            break
+        if failed_targets and attempt < SET_DRIVE_BATCH_READBACK_ATTEMPTS:
+            recovery = recover_failed_target_set_mailbox(failed_targets, timeout_s)
+            cycle["recovery_ok"] = bool(recovery.get("ok"))
+            cycle["recovery_positions"] = [str(target.get("position") or "") for target in failed_targets]
+            if not recovery.get("ok"):
+                break
+            time.sleep(SET_DRIVE_BATCH_RECOVERY_DELAY_S)
+    return {"ok": False, "code": "DRIVE_SET_BATCH_READBACK_FAILED", "cycles": cycles, "readbacks": final_readbacks, "failed_positions": final_failed_positions}
 
 
 def summarize_reset_recovery_cycle(attempt: int,
@@ -241,6 +216,41 @@ def summarize_reset_recovery_cycle(attempt: int,
     if isinstance(op_recovery, dict):
         payload["op_recovery_ok"] = bool(op_recovery.get("ok"))
     return payload
+
+
+def fault_reset_readback_with_recovery(target: Dict[str, Any],
+                                       timeout_s: float,
+                                       expected_egear: Tuple[int, int] | None = None,
+                                       expected_mode: int | None = None) -> Dict[str, Any]:
+    commands = target.get("commands") if isinstance(target.get("commands"), dict) else {}
+    reset_command = commands.get("drive.reset_fault", {})
+    position = str(target.get("position") or "")
+    cycles: List[Dict[str, Any]] = []
+    last_write: Dict[str, Any] = {"ok": False, "code": "DRIVE_FAULT_RESET_NOT_ATTEMPTED"}
+    last_readback: Dict[str, Any] = {"ok": False, "health": {}}
+    for attempt in range(1, FAULT_RESET_RECOVERY_ATTEMPTS + 1):
+        last_write = write_command(position, "drive.reset_fault", reset_command)
+        last_readback = readback_with_retry(
+            target, timeout_s, expected_egear, expected_mode, attempts=1) if last_write.get("ok") else {"ok": False, "health": {}}
+        op_recovery: Dict[str, Any] | None = None
+        if not last_readback.get("ok") and attempt < FAULT_RESET_RECOVERY_ATTEMPTS:
+            op_recovery = recover_slave_mailbox(position, timeout_s)
+        cycles.append(summarize_reset_recovery_cycle(attempt, last_readback, last_write, op_recovery))
+        if last_readback.get("ok"):
+            return {
+                "ok": True,
+                "fault_reset_write": last_write,
+                "readback": last_readback,
+                "summary": {"ok": True, "attempt_count": attempt, "settle_delay_s": FAULT_RESET_RECOVERY_DELAY_S, "cycles": cycles},
+            }
+        if attempt < FAULT_RESET_RECOVERY_ATTEMPTS:
+            time.sleep(FAULT_RESET_RECOVERY_DELAY_S)
+    return {
+        "ok": False,
+        "fault_reset_write": last_write,
+        "readback": last_readback,
+        "summary": {"ok": False, "attempt_count": len(cycles), "settle_delay_s": FAULT_RESET_RECOVERY_DELAY_S, "cycles": cycles},
+    }
 
 
 def factory_reset_readback_with_recovery(target: Dict[str, Any], timeout_s: float) -> Dict[str, Any]:

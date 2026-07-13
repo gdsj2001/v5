@@ -2,8 +2,7 @@
 """Register the board PL Device DNA through the factory VPS endpoint.
 
 The UI never displays or stores the full DNA in logs. This script reads the
-live hardware DNA, posts it as the protected request header expected by the
-8AX VPS API, and stores only the signed device authorization file.
+live hardware DNA and submits it with the device public key to the 8AX VPS API.
 """
 
 from __future__ import annotations
@@ -32,7 +31,6 @@ REQUEST_STATUS_EPOCH: Optional[int] = None
 STALE_EPOCH_MAX_AGE_NS = 0
 DEFAULT_CHOSEN_DIR = "/proc/device-tree/chosen"
 DEFAULT_VPS_ENDPOINTS_CONFIG = "/etc/6x-cnc/vps_endpoints.json"
-DEFAULT_FACTORY_TOKEN_FILE = "/etc/6x-cnc/factory_device_register_token"
 DEFAULT_REGISTER_STATUS_PATH = "/opt/8ax/drive-profiles/device_register_status.json"
 DEFAULT_DEVICE_AUTH_FILE = "/etc/6x-cnc/device_authorization.json"
 DEFAULT_DEVICE_AUTH_PUBLIC_KEY_FILE = "/etc/6x-cnc/device_auth_public.pem"
@@ -93,12 +91,6 @@ def raise_if_cancelled(job_token: Any) -> None:
 def load_json(path: str) -> Dict[str, Any]:
     return json.loads(Path(path).read_text(encoding="utf-8-sig"))
 
-def read_text(path: str) -> str:
-    try:
-        return Path(path).read_text(encoding="utf-8-sig").strip()
-    except Exception:
-        return ""
-
 def normalize_base_url(value: Any) -> str:
     text = str(value or "").strip()
     if not text or not re.match(r"^https?://", text, re.IGNORECASE):
@@ -154,7 +146,7 @@ def resolve_api_base_urls(args: argparse.Namespace) -> List[str]:
         raise DnaRegisterError("DNA_REGISTER_ENDPOINT_MISSING", "VPS endpoint 配置里没有 api_base_urls")
     return result
 
-def http_post_json(url: str, token: str, timeout: float, payload: Dict[str, Any], dna: str) -> Dict[str, Any]:
+def http_post_json(url: str, timeout: float, payload: Dict[str, Any], dna: str) -> Dict[str, Any]:
     headers = {
         "Accept": "application/json",
         "Content-Type": "application/json; charset=utf-8",
@@ -162,8 +154,6 @@ def http_post_json(url: str, token: str, timeout: float, payload: Dict[str, Any]
         "X-8AX-Device-DNA": dna,
         "X-8AX-License-Anchor": dna,
     }
-    if token:
-        headers["Authorization"] = "Bearer " + token
     data = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     req = urllib.request.Request(url, data=data, headers=headers, method="POST")
     with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -197,9 +187,6 @@ def register_device_dna(args: argparse.Namespace, job_token: Any = None) -> Dict
     dna_report = read_live_dna()
     dna = dna_report["value"]
     dna_hash = dna_hash_hex(dna)
-    token = args.token or os.environ.get("RE_V5_FACTORY_DEVICE_REGISTER_TOKEN", "") or read_text(args.factory_token_file)
-    if not token:
-        raise DnaRegisterError("DNA_REGISTER_TOKEN_MISSING", "厂家 DNA 登记 token 缺失")
     raise_if_cancelled(job_token)
     server_urls = resolve_api_base_urls(args)
     key_info = prepare_device_keypair(args, create=True)
@@ -213,14 +200,16 @@ def register_device_dna(args: argparse.Namespace, job_token: Any = None) -> Dict
         "client_time": now_utc(),
     }
     errors: List[str] = []
+    authoritative_failure = False
     for server_url in server_urls:
         raise_if_cancelled(job_token)
         url = "%s/api/v1/factory/devices/register-dna" % server_url
         try:
-            response = http_post_json(url, token, args.timeout, request_payload, dna)
+            response = http_post_json(url, args.timeout, request_payload, dna)
             raise_if_cancelled(job_token)
             ok = bool(response.get("success", response.get("ok", False)))
             if not ok:
+                authoritative_failure = True
                 errors.append("%s:%s" % (url, redact_text(response.get("message", "server returned not ok"), dna)))
                 continue
             auth_status: Dict[str, Any]
@@ -240,6 +229,7 @@ def register_device_dna(args: argparse.Namespace, job_token: Any = None) -> Dict
                 }
             vps_id_raw = response.get("vpsDistributionId")
             if not isinstance(vps_id_raw, str) or not re.fullmatch(r"[0-9]{6}", vps_id_raw):
+                authoritative_failure = True
                 errors.append("%s:VPS did not return canonical 6-digit vpsDistributionId" % url)
                 continue
             vps_id = vps_id_raw
@@ -284,65 +274,67 @@ def register_device_dna(args: argparse.Namespace, job_token: Any = None) -> Dict
         except Exception as exc:
             errors.append(redact_text("%s:%s" % (url, exc), dna))
 
-    try:
-        raise_if_cancelled(job_token)
-        auth_status = existing_authorization_status(args, dna, key_info)
-        identity = require_registered_identity(args.register_status_path, dna_hash)
-        auth_status.update(identity)
-        result = {
-            "ok": True,
-            "code": "DNA_REGISTER_ALREADY_VALID",
-            "schema": "re-v5-device-dna-register-v1",
-            "generated_at": now_utc(),
-            "message_cn": "本机已有有效 DNA 登记凭证；本次 VPS 重登未完成或无需重复",
-            "server_attempted": True,
-            "server_errors": errors[-4:],
-            **identity,
-            "license_anchor": {
-                "source": dna_report.get("source", ""),
-                "type": dna_report.get("type", ""),
-                "value_stored_locally": False,
-                "hash": dna_hash,
-                "hash_short": dna_hash[:8],
-            },
-            "device_public_key": {
-                "path": args.device_public_key_file,
-                "sha256": key_info["public_key_sha256"],
-            },
-            "device_authorization": auth_status,
-        }
-        write_device_auth_latch(result, args.auth_latch_status_path)
-        public_result = local_result(result)
-        atomic_write_json(Path(args.register_status_path), public_result)
-        return public_result
-    except Exception as exc:
-        result = {
-            "ok": False,
-            "code": "DNA_REGISTER_FAILED",
-            "schema": "re-v5-device-dna-register-v1",
-            "generated_at": now_utc(),
-            "message_cn": "本机 DNA 登记失败：请检查网络、VPS 接口、厂家 token 和本地授权文件",
-            "server_attempted": True,
-            "server_errors": errors[-4:],
-            "local_auth_error": redact_text(exc, dna),
-            "license_anchor": {
-                "source": dna_report.get("source", ""),
-                "type": dna_report.get("type", ""),
-                "value_stored_locally": False,
-                "hash": dna_hash,
-                "hash_short": dna_hash[:8],
-            },
-        }
-        public_result = local_result(result)
-        atomic_write_json(Path(args.register_status_path), public_result)
-        return public_result
+    local_error = "VPS rejected registration or returned an invalid registration response"
+    if not authoritative_failure:
+        try:
+            raise_if_cancelled(job_token)
+            auth_status = existing_authorization_status(args, dna, key_info)
+            identity = require_registered_identity(args.register_status_path, dna_hash)
+            auth_status.update(identity)
+            result = {
+                "ok": True,
+                "code": "DNA_REGISTER_ALREADY_VALID",
+                "schema": "re-v5-device-dna-register-v1",
+                "generated_at": now_utc(),
+                "message_cn": "本机已有有效 DNA 登记凭证；本次 VPS 重登未完成或无需重复",
+                "server_attempted": True,
+                "server_errors": errors[-4:],
+                **identity,
+                "license_anchor": {
+                    "source": dna_report.get("source", ""),
+                    "type": dna_report.get("type", ""),
+                    "value_stored_locally": False,
+                    "hash": dna_hash,
+                    "hash_short": dna_hash[:8],
+                },
+                "device_public_key": {
+                    "path": args.device_public_key_file,
+                    "sha256": key_info["public_key_sha256"],
+                },
+                "device_authorization": auth_status,
+            }
+            write_device_auth_latch(result, args.auth_latch_status_path)
+            public_result = local_result(result)
+            atomic_write_json(Path(args.register_status_path), public_result)
+            return public_result
+        except Exception as exc:
+            local_error = redact_text(exc, dna)
+
+    result = {
+        "ok": False,
+        "code": "DNA_REGISTER_FAILED",
+        "schema": "re-v5-device-dna-register-v1",
+        "generated_at": now_utc(),
+        "message_cn": "本机 DNA 登记失败：请检查网络、VPS 接口、公钥校验和本地登记状态",
+        "server_attempted": True,
+        "server_errors": errors[-4:],
+        "local_auth_error": local_error,
+        "license_anchor": {
+            "source": dna_report.get("source", ""),
+            "type": dna_report.get("type", ""),
+            "value_stored_locally": False,
+            "hash": dna_hash,
+            "hash_short": dna_hash[:8],
+        },
+    }
+    public_result = local_result(result)
+    atomic_write_json(Path(args.register_status_path), public_result)
+    return public_result
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Register RE v5 board PL Device DNA.")
     parser.add_argument("--vps-endpoints-config", default=os.environ.get("RE_V5_VPS_ENDPOINTS_CONFIG", DEFAULT_VPS_ENDPOINTS_CONFIG))
     parser.add_argument("--server-url", default="")
-    parser.add_argument("--token", default="")
-    parser.add_argument("--factory-token-file", default=os.environ.get("RE_V5_FACTORY_DEVICE_REGISTER_TOKEN_FILE", DEFAULT_FACTORY_TOKEN_FILE))
     parser.add_argument("--register-status-path", default=os.environ.get("RE_V5_DEVICE_DNA_REGISTER_STATUS_PATH", DEFAULT_REGISTER_STATUS_PATH))
     parser.add_argument("--auth-latch-status-path", default=os.environ.get("RE_V5_DEVICE_AUTH_LATCH_STATUS", DEFAULT_AUTH_LATCH_STATUS_PATH))
     parser.add_argument("--device-auth-file", default=os.environ.get("RE_V5_DEVICE_AUTH_FILE", DEFAULT_DEVICE_AUTH_FILE))

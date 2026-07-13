@@ -1,0 +1,463 @@
+component v5_native_hal_owner "V5 resident C HAL owner for safety, RTCP and G53 geometry";
+license "GPL";
+option userspace yes;
+option userinit;
+option singleton yes;
+
+pin out bit safety_force;
+pin out bit safety_reset;
+pin out bit heartbeat;
+pin in bit safety_estop_active;
+pin in bit machine_enabled;
+pin out bit rtcp_ui_request;
+pin in float rtcp_actual;
+pin out float kins_x_rot_point;
+pin out float kins_y_rot_point;
+pin out float kins_z_rot_point;
+pin out float kins_x_offset;
+pin out float kins_y_offset;
+pin out float kins_z_offset;
+;;
+
+#include <errno.h>
+#include <fcntl.h>
+#include <grp.h>
+#include <math.h>
+#include <poll.h>
+#include <signal.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/mman.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/time.h>
+#include <sys/un.h>
+#include <time.h>
+#include <unistd.h>
+
+static int read_safety_estop_active_pin(void)
+{
+    return safety_estop_active ? 1 : 0;
+}
+
+static int read_machine_enabled_pin(void)
+{
+    return machine_enabled ? 1 : 0;
+}
+
+#undef safety_estop_active
+#undef machine_enabled
+
+#include "hal/user_comps/v5_native_hal_owner_protocol.h"
+
+typedef struct OwnerConfig {
+    char model[V5_NATIVE_G53_MODEL_CAP];
+    double g53_a_y;
+    double g53_a_z;
+    double g53_b_x;
+    double g53_b_z;
+    double g53_c_x;
+    double g53_c_y;
+    int rtcp_default;
+} OwnerConfig;
+
+static OwnerConfig g_config;
+static volatile sig_atomic_t g_stop;
+static gid_t g_product_gid;
+static int g_safety_known;
+static int g_rtcp_known;
+static int g_boot_reset_started;
+static int g_boot_reset_done;
+static uint64_t g_hal_ready_ns;
+static uint64_t g_reset_started_ns;
+static uint64_t g_last_heartbeat_ns;
+static uint64_t g_last_publish_ns;
+
+static uint64_t monotonic_ns(void)
+{
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
+        return 0U;
+    }
+    return ((uint64_t)now.tv_sec * 1000000000ULL) + (uint64_t)now.tv_nsec;
+}
+
+static uint32_t fnv1a(const void *data, size_t size)
+{
+    const unsigned char *bytes = (const unsigned char *)data;
+    uint32_t value = 2166136261U;
+    size_t i;
+    for (i = 0U; i < size; ++i) {
+        value ^= bytes[i];
+        value *= 16777619U;
+    }
+    return value;
+}
+
+static int write_full(int fd, const void *buffer, size_t size)
+{
+    const unsigned char *cursor = (const unsigned char *)buffer;
+    while (size > 0U) {
+        ssize_t written = write(fd, cursor, size);
+        if (written < 0 && errno == EINTR) {
+            continue;
+        }
+        if (written <= 0) {
+            return 0;
+        }
+        cursor += (size_t)written;
+        size -= (size_t)written;
+    }
+    return 1;
+}
+
+static int read_full(int fd, void *buffer, size_t size)
+{
+    unsigned char *cursor = (unsigned char *)buffer;
+    while (size > 0U) {
+        ssize_t received = read(fd, cursor, size);
+        if (received < 0 && errno == EINTR) {
+            continue;
+        }
+        if (received <= 0) {
+            return 0;
+        }
+        cursor += (size_t)received;
+        size -= (size_t)received;
+    }
+    return 1;
+}
+
+static int write_block_atomic(const char *path, const void *data, size_t size)
+{
+    char temp[256];
+    int fd;
+    snprintf(temp, sizeof(temp), "%s.tmp.%ld", path, (long)getpid());
+    unlink(temp);
+    fd = open(temp, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0660);
+    if (fd < 0) {
+        return 0;
+    }
+    if (!write_full(fd, data, size) || fchmod(fd, 0660) != 0 || fchown(fd, (uid_t)-1, g_product_gid) != 0) {
+        close(fd);
+        unlink(temp);
+        return 0;
+    }
+    if (close(fd) != 0 || rename(temp, path) != 0) {
+        unlink(temp);
+        return 0;
+    }
+    return 1;
+}
+
+static void publish_status(void)
+{
+    V5NativeSafetyStatusBlock safety;
+    V5NativeRtcpStatusBlockWire rtcp;
+    V5NativeG53StatusBlockWire geometry;
+    uint64_t now = monotonic_ns();
+
+    memset(&safety, 0, sizeof(safety));
+    safety.magic = V5_NATIVE_SAFETY_STATUS_MAGIC;
+    safety.version = V5_NATIVE_SAFETY_STATUS_VERSION;
+    safety.size = (uint32_t)sizeof(safety);
+    safety.valid = g_safety_known ? 1U : 0U;
+    safety.monotonic_ns = now;
+    safety.safety_estop_known = g_safety_known ? 1U : 0U;
+    safety.safety_estop_active = read_safety_estop_active_pin() ? 1U : 0U;
+    safety.machine_enable_known = g_safety_known ? 1U : 0U;
+    safety.machine_enabled = read_machine_enabled_pin() ? 1U : 0U;
+    safety.crc32 = fnv1a(&safety, offsetof(V5NativeSafetyStatusBlock, crc32));
+    (void)write_block_atomic(V5_NATIVE_SAFETY_STATUS_PATH, &safety, sizeof(safety));
+
+    memset(&rtcp, 0, sizeof(rtcp));
+    rtcp.magic = V5_NATIVE_RTCP_STATUS_MAGIC;
+    rtcp.version = V5_NATIVE_RTCP_STATUS_VERSION;
+    rtcp.size = (uint32_t)sizeof(rtcp);
+    rtcp.valid = g_rtcp_known ? 1U : 0U;
+    rtcp.active = rtcp_actual >= 0.5 ? 1U : 0U;
+    rtcp.monotonic_ns = now;
+    rtcp.crc32 = fnv1a(&rtcp, offsetof(V5NativeRtcpStatusBlockWire, crc32));
+    (void)write_block_atomic(V5_NATIVE_RTCP_STATUS_PATH, &rtcp, sizeof(rtcp));
+
+    memset(&geometry, 0, sizeof(geometry));
+    geometry.magic = V5_NATIVE_G53_STATUS_MAGIC;
+    geometry.version = V5_NATIVE_G53_STATUS_VERSION;
+    geometry.size = (uint32_t)sizeof(geometry);
+    geometry.valid = 1U;
+    geometry.center_count = V5_NATIVE_G53_CENTER_COUNT;
+    geometry.axis_count = V5_NATIVE_G53_AXIS_COUNT;
+    geometry.monotonic_ns = now;
+    geometry.centers[0][1] = g_config.g53_a_y;
+    geometry.centers[0][2] = g_config.g53_a_z;
+    geometry.centers[1][0] = g_config.g53_b_x;
+    geometry.centers[1][2] = g_config.g53_b_z;
+    geometry.centers[2][0] = g_config.g53_c_x;
+    geometry.centers[2][1] = g_config.g53_c_y;
+    geometry.epoch = fnv1a(geometry.centers, sizeof(geometry.centers));
+    if (!geometry.epoch) {
+        geometry.epoch = 1U;
+    }
+    snprintf(geometry.motion_model, sizeof(geometry.motion_model), "%s", g_config.model);
+    geometry.crc32 = fnv1a(&geometry, offsetof(V5NativeG53StatusBlockWire, crc32));
+    (void)write_block_atomic(V5_NATIVE_G53_STATUS_PATH, &geometry, sizeof(geometry));
+}
+
+static void owner_tick(void)
+{
+    uint64_t now = monotonic_ns();
+    if (!g_last_heartbeat_ns || now - g_last_heartbeat_ns >= 20000000ULL) {
+        heartbeat = !heartbeat;
+        g_last_heartbeat_ns = now;
+    }
+    if (!g_safety_known && read_safety_estop_active_pin()) {
+        g_safety_known = 1;
+        g_hal_ready_ns = now;
+    }
+    if (g_safety_known && !g_rtcp_known && now - g_hal_ready_ns >= 5000000ULL) {
+        g_rtcp_known = 1;
+    }
+    if (g_safety_known && !g_boot_reset_started && now - g_hal_ready_ns >= 25000000ULL) {
+        safety_reset = 1;
+        g_boot_reset_started = 1;
+        g_reset_started_ns = now;
+    } else if (g_boot_reset_started && !g_boot_reset_done && now - g_reset_started_ns >= 5000000ULL) {
+        safety_reset = 0;
+        g_boot_reset_done = 1;
+    }
+    if (!g_last_publish_ns || now - g_last_publish_ns >= 50000000ULL) {
+        publish_status();
+        g_last_publish_ns = now;
+    }
+}
+
+static void fill_response(const V5NativeHalOwnerRequest *request, V5NativeHalOwnerResponse *response)
+{
+    memset(response, 0, sizeof(*response));
+    response->magic = V5_NATIVE_HAL_OWNER_MAGIC;
+    response->version = V5_NATIVE_HAL_OWNER_VERSION;
+    response->size = (uint32_t)sizeof(*response);
+    response->operation = request->operation;
+    response->request_id = request->request_id;
+    response->safety_estop_known = g_safety_known ? 1U : 0U;
+    response->safety_estop_active = read_safety_estop_active_pin() ? 1U : 0U;
+    response->machine_enable_known = g_safety_known ? 1U : 0U;
+    response->machine_enabled = read_machine_enabled_pin() ? 1U : 0U;
+    response->rtcp_actual_known = g_rtcp_known ? 1U : 0U;
+    response->rtcp_actual_active = rtcp_actual >= 0.5 ? 1U : 0U;
+}
+
+static int wait_actual(unsigned int operation, unsigned int target, unsigned int timeout_ms)
+{
+    uint64_t deadline = monotonic_ns() + ((uint64_t)timeout_ms * 1000000ULL);
+    while (!g_stop && monotonic_ns() < deadline) {
+        owner_tick();
+        if (operation == V5_NATIVE_HAL_OWNER_OP_ESTOP_FORCE && read_safety_estop_active_pin()) {
+            return 1;
+        }
+        if (operation == V5_NATIVE_HAL_OWNER_OP_ESTOP_RESET && !read_safety_estop_active_pin()) {
+            return 1;
+        }
+        if (operation == V5_NATIVE_HAL_OWNER_OP_RTCP_SET && g_rtcp_known && (rtcp_actual >= 0.5) == (target != 0U)) {
+            return 1;
+        }
+        usleep(500U);
+    }
+    return 0;
+}
+
+static void process_request(const V5NativeHalOwnerRequest *request, V5NativeHalOwnerResponse *response)
+{
+    int confirmed = 0;
+    fill_response(request, response);
+    if (request->operation == V5_NATIVE_HAL_OWNER_OP_STATUS) {
+        response->status = V5_NATIVE_HAL_OWNER_STATUS_OK;
+        snprintf(response->code, sizeof(response->code), "%s", "NATIVE_HAL_OWNER_STATUS_OK");
+        return;
+    }
+    if (request->operation == V5_NATIVE_HAL_OWNER_OP_ESTOP_FORCE) {
+        g_boot_reset_done = 1;
+        safety_reset = 0;
+        safety_force = 1;
+        confirmed = wait_actual(request->operation, 1U, 90U);
+        if (confirmed) {
+            safety_force = 0;
+        }
+    } else if (request->operation == V5_NATIVE_HAL_OWNER_OP_ESTOP_RESET) {
+        g_boot_reset_started = 1;
+        g_boot_reset_done = 1;
+        safety_force = 0;
+        safety_reset = 0;
+        usleep(500U);
+        safety_reset = 1;
+        confirmed = wait_actual(request->operation, 0U, 100U);
+        safety_reset = 0;
+    } else if (request->operation == V5_NATIVE_HAL_OWNER_OP_RTCP_SET && request->target <= 1U) {
+        rtcp_ui_request = request->target ? 1 : 0;
+        confirmed = wait_actual(request->operation, request->target, 500U);
+    } else {
+        response->status = V5_NATIVE_HAL_OWNER_STATUS_BAD_REQUEST;
+        snprintf(response->code, sizeof(response->code), "%s", "NATIVE_HAL_OWNER_BAD_REQUEST");
+        return;
+    }
+    publish_status();
+    fill_response(request, response);
+    response->status = confirmed ? V5_NATIVE_HAL_OWNER_STATUS_OK : V5_NATIVE_HAL_OWNER_STATUS_NOT_CONFIRMED;
+    if (request->operation == V5_NATIVE_HAL_OWNER_OP_ESTOP_FORCE) {
+        snprintf(response->code, sizeof(response->code), "%s", confirmed ? "NATIVE_SAFETY_ESTOP_FORCE_OK" : "NATIVE_SAFETY_ESTOP_FORCE_NOT_CONFIRMED");
+    } else if (request->operation == V5_NATIVE_HAL_OWNER_OP_ESTOP_RESET) {
+        snprintf(response->code, sizeof(response->code), "%s", confirmed ? "NATIVE_SAFETY_ESTOP_RESET_LATCH_OK" : "NATIVE_SAFETY_ESTOP_RESET_LATCH_NOT_CONFIRMED");
+    } else {
+        snprintf(response->code, sizeof(response->code), "%s", confirmed ? (request->target ? "NATIVE_RTCP_CONTROL_ON_OK" : "NATIVE_RTCP_CONTROL_OFF_OK") : "NATIVE_RTCP_CONTROL_NOT_CONFIRMED");
+    }
+}
+
+static const char *arg_value(int argc, char **argv, const char *name)
+{
+    int i;
+    size_t length = strlen(name);
+    for (i = 1; i < argc; ++i) {
+        if (strncmp(argv[i], name, length) == 0 && argv[i][length] == '=') {
+            return argv[i] + length + 1U;
+        }
+        if (strcmp(argv[i], name) == 0 && i + 1 < argc) {
+            return argv[i + 1];
+        }
+    }
+    return 0;
+}
+
+static double required_double(int argc, char **argv, const char *name)
+{
+    const char *text = arg_value(argc, argv, name);
+    char *end = 0;
+    double value;
+    if (!text) {
+        fprintf(stderr, "v5_native_hal_owner missing %s\n", name);
+        exit(2);
+    }
+    value = strtod(text, &end);
+    if (!end || *end || !isfinite(value)) {
+        fprintf(stderr, "v5_native_hal_owner invalid %s=%s\n", name, text);
+        exit(2);
+    }
+    return value;
+}
+
+static void userinit(int argc, char **argv)
+{
+    const char *model = arg_value(argc, argv, "--model");
+    const char *rtcp_default = arg_value(argc, argv, "--rtcp-default");
+    if (!model || (strcmp(model, "XYZAC_TRT") != 0 && strcmp(model, "XYZBC_TRT") != 0)) {
+        fprintf(stderr, "v5_native_hal_owner invalid --model\n");
+        exit(2);
+    }
+    snprintf(g_config.model, sizeof(g_config.model), "%s", model);
+    g_config.rtcp_default = rtcp_default && strcmp(rtcp_default, "1") == 0;
+    g_config.g53_a_y = required_double(argc, argv, "--g53-a-y");
+    g_config.g53_a_z = required_double(argc, argv, "--g53-a-z");
+    g_config.g53_b_x = required_double(argc, argv, "--g53-b-x");
+    g_config.g53_b_z = required_double(argc, argv, "--g53-b-z");
+    g_config.g53_c_x = required_double(argc, argv, "--g53-c-x");
+    g_config.g53_c_y = required_double(argc, argv, "--g53-c-y");
+}
+
+static void on_signal(int signo)
+{
+    (void)signo;
+    g_stop = 1;
+}
+
+static int prepare_socket(void)
+{
+    struct sockaddr_un address;
+    int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (fd < 0) {
+        return -1;
+    }
+    memset(&address, 0, sizeof(address));
+    address.sun_family = AF_UNIX;
+    snprintf(address.sun_path, sizeof(address.sun_path), "%s", V5_NATIVE_HAL_OWNER_SOCKET_PATH);
+    unlink(address.sun_path);
+    if (bind(fd, (const struct sockaddr *)&address, sizeof(address)) != 0 ||
+        chmod(address.sun_path, 0660) != 0 || chown(address.sun_path, (uid_t)-1, g_product_gid) != 0 ||
+        listen(fd, 8) != 0) {
+        close(fd);
+        unlink(address.sun_path);
+        return -1;
+    }
+    return fd;
+}
+
+void user_mainloop(void)
+{
+    struct group *group = getgrnam("petalinux");
+    struct pollfd poll_fd;
+    int server_fd;
+    if (!group || mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
+        fprintf(stderr, "v5_native_hal_owner group/mlock initialization failed errno=%d\n", errno);
+        return;
+    }
+    g_product_gid = group->gr_gid;
+    signal(SIGTERM, on_signal);
+    signal(SIGINT, on_signal);
+    safety_force = 0;
+    safety_reset = 0;
+    heartbeat = 0;
+    rtcp_ui_request = g_config.rtcp_default ? 1 : 0;
+    kins_x_rot_point = g_config.g53_c_x;
+    kins_y_rot_point = g_config.g53_c_y;
+    kins_z_rot_point = 0.0;
+    if (strcmp(g_config.model, "XYZAC_TRT") == 0) {
+        kins_x_offset = 0.0;
+        kins_y_offset = g_config.g53_a_y - g_config.g53_c_y;
+        kins_z_offset = g_config.g53_a_z;
+    } else {
+        kins_x_offset = g_config.g53_b_x - g_config.g53_c_x;
+        kins_y_offset = 0.0;
+        kins_z_offset = g_config.g53_b_z;
+    }
+    server_fd = prepare_socket();
+    if (server_fd < 0) {
+        fprintf(stderr, "v5_native_hal_owner socket initialization failed errno=%d\n", errno);
+        return;
+    }
+    poll_fd.fd = server_fd;
+    poll_fd.events = POLLIN;
+    while (!g_stop) {
+        int ready;
+        owner_tick();
+        ready = poll(&poll_fd, 1U, 2);
+        if (ready > 0 && (poll_fd.revents & POLLIN)) {
+            int client = accept(server_fd, 0, 0);
+            if (client >= 0) {
+                int descriptor_flags = fcntl(client, F_GETFD);
+                struct timeval timeout = {0, 20000};
+                V5NativeHalOwnerRequest request;
+                V5NativeHalOwnerResponse response;
+                if (descriptor_flags < 0 || fcntl(client, F_SETFD, descriptor_flags | FD_CLOEXEC) != 0) {
+                    close(client);
+                    continue;
+                }
+                (void)setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+                if (read_full(client, &request, sizeof(request)) &&
+                    request.magic == V5_NATIVE_HAL_OWNER_MAGIC &&
+                    request.version == V5_NATIVE_HAL_OWNER_VERSION &&
+                    request.size == (uint32_t)sizeof(request)) {
+                    process_request(&request, &response);
+                    (void)write_full(client, &response, sizeof(response));
+                }
+                close(client);
+            }
+        }
+    }
+    safety_reset = 0;
+    safety_force = 1;
+    usleep(5000U);
+    publish_status();
+    close(server_fd);
+    unlink(V5_NATIVE_HAL_OWNER_SOCKET_PATH);
+}

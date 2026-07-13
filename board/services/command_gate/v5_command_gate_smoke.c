@@ -1,5 +1,6 @@
 #include "v5_command_gate.h"
 #include "v5_linuxcncrsh_client.h"
+#include "v5_native_home.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -10,6 +11,7 @@ int main(void)
     V5CommandPrepared prepared;
     V5LinuxcncrshConfig config;
     V5LinuxcncrshSendStatus send_status;
+    V5NativeMotionAxisParameters axis;
     char line[384];
     static const V5CommandKind home_required[] = {
         V5_COMMAND_START,
@@ -63,8 +65,56 @@ int main(void)
     config.timeout_ms = 50U;
     send_status = v5_linuxcncrsh_send_prepared(&config, &prepared, &request);
 
-    if (strcmp(line, "Set Open /opt/8ax/v5/gcode/golden/cc-ac.ngc\nSet Mode Auto\nSet Run 0\nSet Resume") != 0) {
+    if (strcmp(line, "Set Open /opt/8ax/v5/gcode/golden/cc-ac.ngc\nSet Mode Auto\nSet Run 0") != 0) {
         return 4;
+    }
+    if (!v5_linuxcncrsh_format_start_transaction(
+            &prepared,
+            &request,
+            "Get Program\nPROGRAM /opt/8ax/v5/gcode/golden/cc-ac.ngc\n",
+            line,
+            sizeof(line)) ||
+        strcmp(line, "Set Mode Auto\nSet Run 0") != 0) {
+        return 5;
+    }
+    if (!v5_linuxcncrsh_format_start_transaction(
+            &prepared,
+            &request,
+            "Get Program\nPROGRAM NONE\n",
+            line,
+            sizeof(line)) ||
+        strcmp(line, "Set Open /opt/8ax/v5/gcode/golden/cc-ac.ngc\nSet Mode Auto\nSet Run 0") != 0) {
+        return 6;
+    }
+    if (!v5_linuxcncrsh_format_start_transaction(
+            &prepared,
+            &request,
+            "Get Program\nPROGRAM /opt/8ax/v5/gcode/golden/cc-bc.ngc\n",
+            line,
+            sizeof(line)) ||
+        strcmp(line, "Set Open /opt/8ax/v5/gcode/golden/cc-ac.ngc\nSet Mode Auto\nSet Run 0") != 0) {
+        return 7;
+    }
+    if (v5_linuxcncrsh_format_start_transaction(
+            &prepared, &request, "Get Program\n", line, sizeof(line))) {
+        return 8;
+    }
+    memset(&axis, 0, sizeof(axis));
+    axis.status_slot = 4U;
+    axis.max_velocity = 833.333333333;
+    if (!v5_native_home_format_increment(&axis, -3599.971, line, sizeof(line)) ||
+        strcmp(line, "Set Jog_Incr 4 -50000.000000 3599.971000") != 0) {
+        return 9;
+    }
+    if (!v5_native_home_format_increment(&axis, 1.0, line, sizeof(line)) ||
+        strcmp(line, "Set Jog_Incr 4 50000.000000 1.000000") != 0) {
+        return 12;
+    }
+    if (v5_native_home_joint_needs_sync(1, 1) != 0 ||
+        v5_native_home_joint_needs_sync(1, 0) != 1 ||
+        v5_native_home_joint_needs_sync(0, 0) != -1 ||
+        v5_native_home_joint_needs_sync(0, 1) != -1) {
+        return 13;
     }
 
     printf(

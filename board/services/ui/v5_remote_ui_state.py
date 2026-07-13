@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ctypes
+import errno
 import json
 import mmap
 import os
@@ -21,6 +23,20 @@ from v5_remote_ui_contract import (
     FramePayload,
     PayloadViews,
 )
+
+LOCK_SH = 1
+LOCK_EX = 2
+LOCK_UN = 8
+_LIBC = ctypes.CDLL(None, use_errno=True)
+_LIBC.flock.argtypes = (ctypes.c_int, ctypes.c_int)
+_LIBC.flock.restype = ctypes.c_int
+
+
+def flock(fd: int, operation: int) -> None:
+    while _LIBC.flock(fd, operation) != 0:
+        error_number = ctypes.get_errno()
+        if error_number != errno.EINTR:
+            raise OSError(error_number, os.strerror(error_number))
 
 class FrameState:
     def __init__(self, run_dir: Path, width: int, height: int, ready_path: Path | None = None):
@@ -67,6 +83,7 @@ class FrameState:
             "input_rejected": 0,
         }
         self._framebuffer_mmap: mmap.mmap | None = None
+        self._framebuffer_fd: int | None = None
         self._framebuffer_key: tuple[int, int, int] | None = None
         self._ready_path = ready_path or (run_dir / "ui_ready.json")
         self._ready_lock = threading.Lock()
@@ -136,6 +153,12 @@ class FrameState:
             except OSError:
                 pass
         self._framebuffer_mmap = None
+        if self._framebuffer_fd is not None:
+            try:
+                os.close(self._framebuffer_fd)
+            except OSError:
+                pass
+        self._framebuffer_fd = None
         self._framebuffer_key = None
 
     def framebuffer_map(self) -> mmap.mmap | None:
@@ -148,7 +171,7 @@ class FrameState:
             self.close_framebuffer_map()
             return None
         key = (int(st.st_dev), int(st.st_ino), int(st.st_size))
-        if self._framebuffer_mmap is not None and self._framebuffer_key == key:
+        if self._framebuffer_mmap is not None and self._framebuffer_fd is not None and self._framebuffer_key == key:
             return self._framebuffer_mmap
         self.close_framebuffer_map()
         try:
@@ -160,17 +183,30 @@ class FrameState:
         except OSError:
             os.close(fd)
             return None
-        os.close(fd)
         self._framebuffer_mmap = mapped
+        self._framebuffer_fd = fd
         self._framebuffer_key = key
         self.mark_metric("framebuffer_mmap_refreshes")
         return mapped
 
     def full_frame(self) -> tuple[int, bytes] | None:
         mapped = self.framebuffer_map()
-        if mapped is None:
+        fd = self._framebuffer_fd
+        if mapped is None or fd is None:
             return None
-        data = mapped[:self.frame_size]
+        locked = False
+        try:
+            flock(fd, LOCK_SH)
+            locked = True
+            data = mapped[:self.frame_size]
+        except OSError:
+            return None
+        finally:
+            if locked:
+                try:
+                    flock(fd, LOCK_UN)
+                except OSError:
+                    pass
         if len(data) != self.frame_size:
             return None
         with self.condition:

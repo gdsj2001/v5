@@ -103,6 +103,7 @@ extern unsigned long long g_v5_shell_ui_estop_last_refresh_ns;
 extern unsigned long long g_v5_shell_ui_slow_last_refresh_ns;
 
 void shell_navigate(void *user_data, V5MainPageActionKind action);
+int shell_process_pending_navigation(void);
 const char *shell_page_name(V5ShellPageKind page);
 unsigned int shell_page_cache_slot(V5ShellPageKind page);
 void shell_show_page_objects(V5ShellPageKind page);

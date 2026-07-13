@@ -31,6 +31,11 @@ home_dir="${HOME:?HOME is required}"
 build_root="${V5_BUILD_ROOT:-$home_dir/v5-build}"
 temp_dir="${V5_DEPLOY_TEMP_DIR:-$build_root/temp}"
 board_build_dir="${V5_BOARD_BUILD_DIR:-$build_root/board}"
+linuxcnc_allowlist="$repo_root/linuxcnc/yocto/files/v5_linuxcnc_runtime_allowlist.tsv"
+linuxcnc_verifier="$repo_root/tools/linuxcnc/verify_v5_linuxcnc_minimal_runtime.py"
+linuxcnc_package_root="${V5_LINUXCNC_PACKAGE_ROOT:-}"
+linuxcnc_bundle_enabled=0
+linuxcnc_expected_count=0
 
 manifest_source_path() {
   kind="$1"
@@ -77,6 +82,27 @@ if [ ! -r "$manifest" ]; then
   exit 2
 fi
 
+if [ -n "$linuxcnc_package_root" ]; then
+  linuxcnc_bundle_enabled=1
+  if [ ! -d "$linuxcnc_package_root" ]; then
+    echo "explicit LinuxCNC package root is missing: $linuxcnc_package_root" >&2
+    exit 6
+  fi
+  if [ ! -r "$linuxcnc_allowlist" ] || [ ! -r "$linuxcnc_verifier" ]; then
+    echo "LinuxCNC deploy verifier inputs are missing" >&2
+    exit 6
+  fi
+  python3 "$linuxcnc_verifier" \
+    --allowlist "$linuxcnc_allowlist" \
+    --package-root "$linuxcnc_package_root"
+  if find "$linuxcnc_package_root" -type l -print -quit | grep -q .; then
+    echo "LinuxCNC deploy bundle does not allow symlinks" >&2
+    exit 6
+  fi
+  linuxcnc_allowlist_count=$(awk -F '\t' '$0 !~ /^#/ && NF >= 1 {count++} END {print count + 0}' "$linuxcnc_allowlist")
+  linuxcnc_expected_count=$((linuxcnc_allowlist_count + 4))
+fi
+
 V5_BOARD_BUILD_DIR="$board_build_dir" "$repo_root/tools/deploy/precheck_v5_board.sh" "$manifest"
 
 tab=$(printf '\t')
@@ -100,6 +126,11 @@ if [ "$apply" -eq 0 ]; then
   echo "  board: ${board_ssh:-<set V5_BOARD_SSH>} port=$board_ssh_port"
   echo "  source: $repo_root"
   echo "  build: $board_build_dir"
+  if [ "$linuxcnc_bundle_enabled" -eq 1 ]; then
+    echo "  linuxcnc package: $linuxcnc_package_root files=$linuxcnc_expected_count"
+  else
+    echo "  linuxcnc package: disabled (runtime-only fast path)"
+  fi
   echo "  local temp: $temp_dir"
   echo "  staging: $remote_root"
   echo "  manifest: $manifest"
@@ -126,6 +157,22 @@ rm -rf "$bundle_dir"
 install -d "$bundle_dir/tools/deploy" "$bundle_dir/config/deploy"
 cp -p "$repo_root/tools/deploy/install_v5_runtime.sh" "$bundle_dir/tools/deploy/install_v5_runtime.sh"
 cp -p "$manifest" "$bundle_dir/config/deploy/v5_runtime_deploy_manifest.tsv"
+if [ "$linuxcnc_bundle_enabled" -eq 1 ]; then
+  cp -p "$linuxcnc_allowlist" "$bundle_dir/config/deploy/v5_linuxcnc_runtime_allowlist.tsv"
+  install -d "$bundle_dir/linuxcnc-package-root"
+  cp -a "$linuxcnc_package_root/." "$bundle_dir/linuxcnc-package-root/"
+  (
+    cd "$bundle_dir/linuxcnc-package-root"
+    find . -type f -print | LC_ALL=C sort | while IFS= read -r runtime_file; do
+      sha256sum "$runtime_file"
+    done
+  ) >"$bundle_dir/config/deploy/v5_linuxcnc_deploy_bundle.sha256"
+  linuxcnc_bundle_count=$(wc -l <"$bundle_dir/config/deploy/v5_linuxcnc_deploy_bundle.sha256")
+  if [ "$linuxcnc_bundle_count" -ne "$linuxcnc_expected_count" ]; then
+    echo "unexpected LinuxCNC deploy bundle size: expected=$linuxcnc_expected_count actual=$linuxcnc_bundle_count" >&2
+    exit 6
+  fi
+fi
 tab=$(printf '\t')
 while IFS="$tab" read -r kind source destination mode extra; do
   case "$kind" in
@@ -140,3 +187,4 @@ scp $scp_legacy_protocol_opt -q $board_ssh_legacy_rsa_opts $board_ssh_key_opts -
 rm -f "$archive"
 remote_sh "tar -m -C '$remote_root' -xf '$remote_root/v5_runtime_deploy.tar' && rm -f '$remote_root/v5_runtime_deploy.tar'"
 remote_sh "V5_REPO_ROOT='$remote_root' '$remote_root/tools/deploy/install_v5_runtime.sh' --apply"
+remote_sh "rm -rf '$remote_root'"

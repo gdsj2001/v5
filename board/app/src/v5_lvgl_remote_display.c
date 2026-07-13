@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -50,6 +51,11 @@ static int g_remote_dirty_fd = -1;
 static unsigned long long g_frame_id;
 static int g_output_suppressed = 1;
 static int g_physical_framebuffer_claimed;
+static int g_pending_dirty_valid;
+static int g_pending_dirty_x1;
+static int g_pending_dirty_y1;
+static int g_pending_dirty_x2;
+static int g_pending_dirty_y2;
 
 static int read_u32_file(const char *path, unsigned int *out)
 {
@@ -138,6 +144,18 @@ static size_t remote_frame_size(void)
     return (size_t)g_width * (size_t)g_height * 4U;
 }
 
+static int lock_framebuffer_fd(int fd, int operation)
+{
+    int rc;
+    if (fd < 0) {
+        return 0;
+    }
+    do {
+        rc = flock(fd, operation);
+    } while (rc != 0 && errno == EINTR);
+    return rc == 0;
+}
+
 static int ensure_remote_framebuffer(void)
 {
     size_t size = remote_frame_size();
@@ -176,8 +194,9 @@ static int ensure_remote_framebuffer(void)
     g_remote_fb_fd = fd;
     g_remote_fb = mapped;
     g_remote_fb_size = size;
-    if (!g_output_suppressed) {
+    if (!g_output_suppressed && lock_framebuffer_fd(g_remote_fb_fd, LOCK_EX)) {
         memcpy(g_remote_fb, g_frame, size);
+        (void)lock_framebuffer_fd(g_remote_fb_fd, LOCK_UN);
     }
     return 1;
 }
@@ -266,7 +285,31 @@ static void copy_row_to_fb(unsigned int x, unsigned int y, const unsigned char *
     }
 }
 
-static void copy_area_to_outputs(const lv_area_t *area, const lv_color_t *color_p)
+static void accumulate_dirty_area(int x1, int y1, int x2, int y2)
+{
+    if (!g_pending_dirty_valid) {
+        g_pending_dirty_x1 = x1;
+        g_pending_dirty_y1 = y1;
+        g_pending_dirty_x2 = x2;
+        g_pending_dirty_y2 = y2;
+        g_pending_dirty_valid = 1;
+        return;
+    }
+    if (x1 < g_pending_dirty_x1) {
+        g_pending_dirty_x1 = x1;
+    }
+    if (y1 < g_pending_dirty_y1) {
+        g_pending_dirty_y1 = y1;
+    }
+    if (x2 > g_pending_dirty_x2) {
+        g_pending_dirty_x2 = x2;
+    }
+    if (y2 > g_pending_dirty_y2) {
+        g_pending_dirty_y2 = y2;
+    }
+}
+
+static void compose_area(const lv_area_t *area, const lv_color_t *color_p)
 {
     int src_w;
     int x1;
@@ -274,9 +317,6 @@ static void copy_area_to_outputs(const lv_area_t *area, const lv_color_t *color_
     int y1;
     int y2;
     int y;
-    unsigned int visible_w;
-    unsigned int visible_h;
-    unsigned long long base_frame_id;
     if (!area || !color_p || !g_display_ready) {
         return;
     }
@@ -291,41 +331,58 @@ static void copy_area_to_outputs(const lv_area_t *area, const lv_color_t *color_
     if (x1 > x2 || y1 > y2) {
         return;
     }
-    if (!g_output_suppressed) {
-        (void)ensure_remote_framebuffer();
-        base_frame_id = g_frame_id;
-        ++g_frame_id;
-    } else {
-        base_frame_id = g_frame_id;
-    }
     for (y = y1; y <= y2; ++y) {
         const lv_color_t *src_row = color_p + (size_t)(y - area->y1) * (size_t)src_w;
         const unsigned char *src_bytes;
         unsigned char *frame_row;
-        unsigned char *remote_row;
         unsigned int pixels = (unsigned int)(x2 - x1 + 1);
         src_row += x1 - area->x1;
         src_bytes = (const unsigned char *)src_row;
         frame_row = &g_frame[((unsigned int)y * g_width + (unsigned int)x1) * 4U];
         memcpy(frame_row, src_bytes, (size_t)pixels * 4U);
-        if (!g_output_suppressed && g_remote_fb) {
-            remote_row = &g_remote_fb[((unsigned int)y * g_width + (unsigned int)x1) * 4U];
-            memcpy(remote_row, src_bytes, (size_t)pixels * 4U);
-        }
-        if (!g_output_suppressed) {
-            copy_row_to_fb((unsigned int)x1, (unsigned int)y, src_bytes, pixels);
-        }
     }
-    visible_w = (unsigned int)(x2 - x1 + 1);
-    visible_h = (unsigned int)(y2 - y1 + 1);
     if (!g_output_suppressed) {
-        notify_remote_dirty(base_frame_id, g_frame_id, (unsigned int)x1, (unsigned int)y1, visible_w, visible_h);
+        accumulate_dirty_area(x1, y1, x2, y2);
     }
+}
+
+static void commit_composed_frame(void)
+{
+    int y;
+    unsigned int x;
+    unsigned int width;
+    unsigned int height;
+    unsigned long long base_frame_id;
+    if (g_output_suppressed || !g_pending_dirty_valid) {
+        g_pending_dirty_valid = 0;
+        return;
+    }
+    x = (unsigned int)g_pending_dirty_x1;
+    width = (unsigned int)(g_pending_dirty_x2 - g_pending_dirty_x1 + 1);
+    height = (unsigned int)(g_pending_dirty_y2 - g_pending_dirty_y1 + 1);
+    if (!ensure_remote_framebuffer() || !g_remote_fb || !lock_framebuffer_fd(g_remote_fb_fd, LOCK_EX)) {
+        g_pending_dirty_valid = 0;
+        return;
+    }
+    for (y = g_pending_dirty_y1; y <= g_pending_dirty_y2; ++y) {
+        const unsigned char *frame_row = &g_frame[((unsigned int)y * g_width + x) * 4U];
+        unsigned char *remote_row = &g_remote_fb[((unsigned int)y * g_width + x) * 4U];
+        copy_row_to_fb(x, (unsigned int)y, frame_row, width);
+        memcpy(remote_row, frame_row, (size_t)width * 4U);
+    }
+    base_frame_id = g_frame_id;
+    ++g_frame_id;
+    notify_remote_dirty(base_frame_id, g_frame_id, x, (unsigned int)g_pending_dirty_y1, width, height);
+    (void)lock_framebuffer_fd(g_remote_fb_fd, LOCK_UN);
+    g_pending_dirty_valid = 0;
 }
 
 static void remote_flush(lv_disp_drv_t *driver, const lv_area_t *area, lv_color_t *color_p)
 {
-    copy_area_to_outputs(area, color_p);
+    compose_area(area, color_p);
+    if (lv_disp_flush_is_last(driver)) {
+        commit_composed_frame();
+    }
     lv_disp_flush_ready(driver);
 }
 
@@ -434,14 +491,16 @@ int v5_lvgl_remote_display_publish_current_frame(void)
         return 0;
     }
     frame_size = remote_frame_size();
-    copy_full_frame_to_fb(g_frame);
-    (void)ensure_remote_framebuffer();
-    if (g_remote_fb) {
-        memcpy(g_remote_fb, g_frame, frame_size);
+    if (!ensure_remote_framebuffer() || !g_remote_fb || !lock_framebuffer_fd(g_remote_fb_fd, LOCK_EX)) {
+        return 0;
     }
+    copy_full_frame_to_fb(g_frame);
+    memcpy(g_remote_fb, g_frame, frame_size);
+    g_pending_dirty_valid = 0;
     base_frame_id = g_frame_id;
     ++g_frame_id;
     notify_remote_dirty(base_frame_id, g_frame_id, 0U, 0U, g_width, g_height);
+    (void)lock_framebuffer_fd(g_remote_fb_fd, LOCK_UN);
     return 1;
 }
 
@@ -466,6 +525,9 @@ int v5_lvgl_remote_display_set_output_suppressed(int suppressed)
 {
     int previous = g_output_suppressed;
     g_output_suppressed = suppressed ? 1 : 0;
+    if (g_output_suppressed) {
+        g_pending_dirty_valid = 0;
+    }
     return previous;
 }
 

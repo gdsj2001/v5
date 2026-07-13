@@ -21,7 +21,6 @@ import pwd
 PIDFILES = {
     "v5_command_gate": "/run/8ax/v5_command_gate.pid",
     "v5_state_publisher": "/run/8ax/v5_state_publisher.pid",
-    "v5_rtcp_status_publisher": "/run/8ax/v5_rtcp_status_publisher.pid",
     "v5_wcs_status_publisher": "/run/8ax/v5_wcs_status_publisher.pid",
     "v5_ui_relay": "/run/8ax/v5_ui_relay.pid",
     "v5_lvgl_shell": "/run/8ax/v5_ui_shell.pid",
@@ -35,6 +34,7 @@ SANDBOX_AUDIT_PATHS = (
     ("status_shm", "/dev/shm/v3_status_shm"),
     ("product_run_dir", "/run/8ax_v5_product_ui"),
     ("command_gate_socket", "/run/8ax_v5_product_ui/v5_command_gate.sock"),
+    ("native_hal_owner_socket", "/run/8ax_v5_product_ui/v5_native_hal_owner.sock"),
     ("settings_actiond_socket", "/run/8ax_v5_product_ui/settings_actiond.sock"),
 )
 

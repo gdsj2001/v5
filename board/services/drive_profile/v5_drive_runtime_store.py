@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -184,11 +185,27 @@ def runtime_ini_value(sections: Dict[str, Dict[str, str]], names: List[str], key
     return None
 
 
-def load_settings_runtime() -> Dict[str, Any]:
-    if context.settings_runtime_cache is not None:
-        return context.settings_runtime_cache
-    if not context.resident_preload_active:
-        raise DriveActionError("SETTINGS_RUNTIME_RESIDENT_NOT_PRELOADED", "settings_runtime drive-only resident owner 未在启动阶段载入内存，动作热路径拒绝读盘。", str(contract.SETTINGS_RUNTIME_JSON))
+def runtime_ini_joint_index(
+        sections: Dict[str, Dict[str, str]], axis: str, configured_axis_index: int) -> Tuple[int, str]:
+    axis_name = str(axis or "").strip().upper()
+    raw_coordinates = str(sections.get("TRAJ", {}).get("COORDINATES") or "")
+    coordinates = re.findall(r"[XYZABCUVW]", raw_coordinates.upper())
+    matches = [index for index, letter in enumerate(coordinates) if letter == axis_name]
+    if not coordinates or len(matches) != 1:
+        raise DriveActionError(
+            "RUNTIME_INI_JOINT_MAPPING_INVALID",
+            "active runtime INI 的 TRAJ/COORDINATES 无法唯一映射当前轴，拒绝使用设置表行号代替 joint index。",
+            {
+                "axis": axis_name,
+                "coordinates": raw_coordinates,
+                "matches": matches,
+                "configured_axis_index": configured_axis_index,
+            },
+        )
+    return matches[0], "active_runtime_ini.TRAJ.COORDINATES"
+
+
+def _read_settings_runtime_owner() -> Dict[str, Any]:
     if not contract.SETTINGS_RUNTIME_JSON.is_file():
         raise DriveActionError("SETTINGS_AXIS_ZERO_RUNTIME_MISSING", "settings_runtime resident owner 未加载，不能校验设0。", str(contract.SETTINGS_RUNTIME_JSON))
     try:
@@ -199,6 +216,15 @@ def load_settings_runtime() -> Dict[str, Any]:
     axes = payload.get("axes") if isinstance(payload, dict) else None
     if not isinstance(axes, list):
         raise DriveActionError("SETTINGS_AXIS_ZERO_AXES_MISSING", "settings_runtime resident owner 缺少 axes，不能校验设0。", payload)
+    return payload
+
+
+def load_settings_runtime() -> Dict[str, Any]:
+    if context.settings_runtime_cache is not None:
+        return context.settings_runtime_cache
+    if not context.resident_preload_active:
+        raise DriveActionError("SETTINGS_RUNTIME_RESIDENT_NOT_PRELOADED", "settings_runtime drive-only resident owner 未在启动阶段载入内存，动作热路径拒绝读盘。", str(contract.SETTINGS_RUNTIME_JSON))
+    payload = _read_settings_runtime_owner()
     context.settings_runtime_cache = payload
     return payload
 
@@ -241,7 +267,9 @@ def update_runtime_ini_raw_limits(axis: str, axis_index: int, old_zero_physical:
     lines = original.splitlines()
     section = ""
     axis_section = "AXIS_%s" % str(axis or "").upper()
-    joint_section = "JOINT_%d" % axis_index
+    sections = read_runtime_ini_sections(contract.RUNTIME_SETTINGS_INI)
+    joint_index, joint_index_source = runtime_ini_joint_index(sections, axis, axis_index)
+    joint_section = "JOINT_%d" % joint_index
     values: Dict[str, Dict[str, float]] = {axis_section: {}, joint_section: {}}
     for raw in lines:
         stripped = raw.strip()
@@ -303,6 +331,9 @@ def update_runtime_ini_raw_limits(axis: str, axis_index: int, old_zero_physical:
         "runtime_ini": str(contract.RUNTIME_SETTINGS_INI),
         "axis_section": axis_section,
         "joint_section": joint_section,
+        "joint_index": joint_index,
+        "joint_index_source": joint_index_source,
+        "configured_axis_index": axis_index,
         "old_zero_physical": old_zero_physical,
         "new_zero_physical": new_zero_physical,
         "ui_min_limit_distance": min_distance,
@@ -320,12 +351,22 @@ def persist_axis_zero_model(runtime: Dict[str, Any],
                             counts_per_unit: float,
                             scale_evidence: Dict[str, Any],
                             read_evidence: Dict[str, Any]) -> Dict[str, Any]:
-    axis_cfg, _ = find_runtime_axis(runtime, axis)
-    zero_model = axis_cfg.get("zero_model") if isinstance(axis_cfg.get("zero_model"), dict) else {}
-    old_counts = saved_zero_counts(axis_cfg)
-    old_zero_physical = finite_float(zero_model.get("raw_zero_position"))
-    if old_zero_physical is None:
-        old_zero_physical = old_counts / counts_per_unit
+    if not context.resident_preload_active:
+        raise DriveActionError("SETTINGS_RUNTIME_RESIDENT_NOT_PRELOADED", "settings_runtime drive-only resident owner 未在启动阶段载入内存，设0保存拒绝写盘。", str(contract.SETTINGS_RUNTIME_JSON))
+    owner_runtime = _read_settings_runtime_owner()
+    axis_cfg, _ = find_runtime_axis(owner_runtime, axis)
+    prior_zero_model = axis_cfg.get("zero_model")
+    zero_model = prior_zero_model if isinstance(prior_zero_model, dict) else {}
+    if prior_zero_model is None:
+        old_counts = 0.0
+        old_zero_physical = 0.0
+        old_zero_source = "runtime_ini_initial_origin"
+    else:
+        old_counts = saved_zero_counts(axis_cfg)
+        old_zero_physical = finite_float(zero_model.get("raw_zero_position"))
+        if old_zero_physical is None:
+            old_zero_physical = old_counts / counts_per_unit
+        old_zero_source = "existing_zero_model"
     new_zero_physical = current_counts / counts_per_unit
     raw_limit_save = update_runtime_ini_raw_limits(axis, axis_index, old_zero_physical, new_zero_physical)
     new_zero_model = dict(zero_model)
@@ -363,7 +404,7 @@ def persist_axis_zero_model(runtime: Dict[str, Any],
         "written_at": now_utc(),
         "settings_runtime_json": str(contract.SETTINGS_RUNTIME_JSON),
     }
-    runtime_for_write = sanitize_settings_runtime_drive_only(runtime)
+    runtime_for_write = sanitize_settings_runtime_drive_only(owner_runtime)
     write_json(contract.SETTINGS_RUNTIME_JSON, runtime_for_write)
     runtime.clear()
     runtime.update(runtime_for_write)
@@ -378,6 +419,7 @@ def persist_axis_zero_model(runtime: Dict[str, Any],
         "readback_counts": reread_counts,
         "old_zero_counts": old_counts,
         "old_zero_physical": old_zero_physical,
+        "old_zero_source": old_zero_source,
         "new_zero_physical": new_zero_physical,
         "raw_limit_save": raw_limit_save,
     }

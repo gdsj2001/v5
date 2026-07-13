@@ -1,5 +1,4 @@
 #include "v5_state_publisher_service.h"
-#include "v5_native_rtcp_status.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,7 +27,6 @@ int main(int argc, char **argv)
     int unlink_after = 0;
     int i;
     V5StatusShmFrame readback;
-    V5NativeReadback rtcp_readback;
     V5StatePublisherReport report = {0};
 
     for (i = 1; i < argc; ++i) {
@@ -57,27 +55,16 @@ int main(int argc, char **argv)
     if (!v5_status_shm_read_from_path(path, &readback)) {
         return 3;
     }
-    if (!report.rtcp_status_published) {
-        fprintf(stderr, "rtcp status block was not published\n");
-        return 4;
-    }
     if (!report.sample_available && readback.typed_valid_mask != 0U) {
         fprintf(stderr, "unavailable native sample must not publish valid default values: mask=0x%08x\n", readback.typed_valid_mask);
-        return 6;
-    }
-    v5_native_readback_init(&rtcp_readback);
-    if (v5_native_rtcp_status_read(0, V5_NATIVE_RTCP_STATUS_DEFAULT_MAX_AGE_MS, &rtcp_readback) ||
-        v5_native_readback_rtcp_known(&rtcp_readback)) {
-        fprintf(stderr, "invalid rtcp status block was accepted as actual\n");
-        return 5;
+        return 4;
     }
     printf(
-        "v5 state publisher shm: version=%u valid_mask=0x%08x flags=0x%08x sample_available=%d rtcp_status_published=%u frames=%u interval_ms=%u bytes=%u path=%s\n",
+        "v5 state publisher shm: version=%u valid_mask=0x%08x flags=0x%08x sample_available=%d frames=%u interval_ms=%u bytes=%u path=%s\n",
         readback.version,
         readback.typed_valid_mask,
         readback.flags,
         report.sample_available,
-        report.rtcp_status_published,
         report.publish_count,
         report.interval_ms,
         readback.total_size,

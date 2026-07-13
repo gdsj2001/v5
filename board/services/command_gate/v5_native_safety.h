@@ -1,8 +1,9 @@
 #ifndef V5_NATIVE_SAFETY_H
 #define V5_NATIVE_SAFETY_H
 
+#include "v5_native_hal_owner_protocol.h"
+
 #include <stddef.h>
-#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -12,23 +13,13 @@ extern "C" {
 #define V5_NATIVE_SAFETY_SEND_SENT 1
 #define V5_NATIVE_SAFETY_SEND_IO_ERROR -2
 
-#define V5_NATIVE_SAFETY_LATCH_MAGIC 0x56355346u
-#define V5_NATIVE_SAFETY_LATCH_VERSION 1u
+#define V5_NATIVE_SAFETY_LATCH_MAGIC V5_NATIVE_SAFETY_STATUS_MAGIC
+#define V5_NATIVE_SAFETY_LATCH_VERSION V5_NATIVE_SAFETY_STATUS_VERSION
 #define V5_NATIVE_SAFETY_LATCH_PATH_ENV "V5_NATIVE_SAFETY_LATCH_PATH"
-#define V5_NATIVE_SAFETY_LATCH_DEFAULT_PATH "/dev/shm/v5_native_safety_latch.bin"
+#define V5_NATIVE_SAFETY_LATCH_DEFAULT_PATH V5_NATIVE_SAFETY_STATUS_PATH
+#define V5_NATIVE_SAFETY_LATCH_MAX_AGE_MS 1000U
 
-typedef struct V5NativeSafetyLatchFrame {
-    uint32_t magic;
-    uint32_t version;
-    volatile uint32_t estop_force_epoch;
-    volatile uint32_t estop_force_ack_epoch;
-    volatile uint32_t estop_reset_epoch;
-    volatile uint32_t estop_reset_ack_epoch;
-    volatile uint32_t safety_estop_known;
-    volatile uint32_t safety_estop_active;
-    volatile uint32_t machine_enable_known;
-    volatile uint32_t machine_enabled;
-} V5NativeSafetyLatchFrame;
+typedef V5NativeSafetyStatusBlock V5NativeSafetyLatchFrame;
 
 typedef struct V5NativeSafetyResult {
     int safety_estop_known;
