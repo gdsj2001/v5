@@ -81,8 +81,8 @@ VM_BUILD_BOUNDARY:
 - `VM_SOURCE_MOUNT_ROOT=/mnt/v5-source` 必须是 Windows owner 的 live read-only mount；`VM_SOURCE_PROJECTION_ROOT=/root/v5-build/temp_source/current` 是唯一派生投影；build output 只能写到 canonical external build directories。
 - 每个 owner identity 一轮只验证一次；源码未变时跨 package/rootfs/image 复用，不重复全树 hash、重投影或 remount。
 - VM 可以保留一套 current image 集合方便普通复核/重写卡；新集合替换旧集合。它是产物副本，不是离线从零证明。
-- VM 不得安装/使用 WSL 或第二常驻代理。非构建 OS maintenance/diagnostic 可在一个 SSH 命令内临时借用正在运行的 Windows proxy，host/port 运行时发现；不得持久化到 environment/profile/systemd/Git/BitBake/recipe。
-- source import、Git/HTTP source acquisition、BitBake fetch、sstate、configure/compile/package/rootfs/image 和离线认证禁止使用代理；正式构建前清除大小写 proxy 变量并执行 network-disabled gate。
+- VM 不得安装/使用 WSL。VM 长期外网访问能力不算第二源码/构建 owner；允许通过正常虚拟网卡直接联网，直连受限时也允许一套常驻 Linux 代理客户端服务，但代理地址、凭据或订阅不得进入项目源码、recipe、镜像、普通文档或构建配置。
+- VM 外网只用于系统维护、非构建诊断和用户明确要求的普通联网操作。source import、Git/HTTP source acquisition、BitBake fetch、远程 sstate、configure/compile/package/rootfs/image 和离线认证仍禁止借外网补输入；正式构建前清除大小写 proxy 变量并执行 network-disabled gate。
 
 BOARD_AND_QSPI_BOUNDARY:
 - 禁止用 SSH/SCP/sed/tee/vi/nano/重定向直接修改板端产品文件来实现修复；板端访问只用于 inspection/log/runtime probe/safe recovery 和部署由 Windows source 构建的 artifact。
