@@ -12,6 +12,9 @@ int main(void)
     V5LinuxcncrshConfig config;
     V5LinuxcncrshSendStatus send_status;
     V5NativeMotionAxisParameters axis;
+    double still_previous[5] = {0.0, 10.0, -20.0, 45.0, 359.999};
+    double still_current[5] = {0.0005, 9.9995, -20.0005, 45.0005, 359.9995};
+    double moving_current[5] = {0.0, 10.0, -19.998, 45.0, 359.999};
     char line[384];
     static const V5CommandKind home_required[] = {
         V5_COMMAND_START,
@@ -115,6 +118,11 @@ int main(void)
         v5_native_home_joint_needs_sync(0, 0) != -1 ||
         v5_native_home_joint_needs_sync(0, 1) != -1) {
         return 13;
+    }
+    if (!v5_native_home_positions_still(still_previous, still_current, 5U) ||
+        v5_native_home_positions_still(still_previous, moving_current, 5U) ||
+        v5_native_home_positions_still(still_previous, still_current, 0U)) {
+        return 14;
     }
 
     printf(

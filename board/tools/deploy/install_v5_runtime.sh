@@ -505,8 +505,12 @@ if [ "$apply" -eq 1 ]; then
     /etc/init.d/v5-settings-actiond restart
   elif [ "$restart_scope" = "settings" ]; then
     enable_boot_service v5-linuxcnc-command-gate 91 19
+    enable_boot_service v5-wcs-status-publisher 92 18
+    enable_boot_service v5-state-publisher 93 17
     enable_boot_service v5-settings-actiond 95 15
     /etc/init.d/v5-linuxcnc-command-gate restart
+    /etc/init.d/v5-wcs-status-publisher restart
+    /etc/init.d/v5-state-publisher restart
     /etc/init.d/v5-settings-actiond restart
   else
     enable_boot_services

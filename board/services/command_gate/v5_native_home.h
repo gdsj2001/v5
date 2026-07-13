@@ -26,6 +26,11 @@ int v5_native_home_format_increment(
 
 int v5_native_home_joint_needs_sync(int homed_status_available, int homed);
 
+int v5_native_home_positions_still(
+    const double *previous,
+    const double *current,
+    unsigned int axis_count);
+
 V5LinuxcncrshSendStatus v5_native_home_send(
     const V5LinuxcncrshConfig *config,
     const V5NativeMotionParameters *parameters,

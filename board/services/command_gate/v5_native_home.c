@@ -15,6 +15,8 @@
 #define V5_HOME_AXIS_WAIT_ATTEMPTS 240U
 #define V5_HOME_PULSE_WAIT_ATTEMPTS 2200U
 #define V5_HOME_WAIT_US 50000U
+#define V5_HOME_STILLNESS_SAMPLE_COUNT 3U
+#define V5_HOME_STILLNESS_WAIT_US 100000U
 
 static void result_init(V5NativeHomeResult *result)
 {
@@ -84,6 +86,55 @@ static int read_all_positions(
         }
     }
     return 1;
+}
+
+int v5_native_home_positions_still(
+    const double *previous,
+    const double *current,
+    unsigned int axis_count)
+{
+    unsigned int axis;
+    if (!previous || !current || axis_count == 0U ||
+        axis_count > V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT) {
+        return 0;
+    }
+    for (axis = 0U; axis < axis_count; ++axis) {
+        if (!isfinite(previous[axis]) || !isfinite(current[axis]) ||
+            fabs(current[axis] - previous[axis]) > V5_HOME_MOTION_TOLERANCE) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int active_axes_still(
+    const V5LinuxcncrshConfig *config,
+    const V5NativeMotionParameters *parameters)
+{
+#ifdef _WIN32
+    (void)config;
+    (void)parameters;
+    return -1;
+#else
+    double previous[V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT];
+    double current[V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT];
+    unsigned int sample;
+    if (!read_all_positions(config, parameters, previous)) {
+        return -1;
+    }
+    for (sample = 0U; sample < V5_HOME_STILLNESS_SAMPLE_COUNT; ++sample) {
+        usleep(V5_HOME_STILLNESS_WAIT_US);
+        if (!read_all_positions(config, parameters, current)) {
+            return -1;
+        }
+        if (!v5_native_home_positions_still(
+                previous, current, parameters->active_axis_count)) {
+            return 0;
+        }
+        memcpy(previous, current, sizeof(previous));
+    }
+    return 1;
+#endif
 }
 
 static int wait_machine_enabled(const V5LinuxcncrshConfig *config)
@@ -543,6 +594,7 @@ V5LinuxcncrshSendStatus v5_native_home_send(
     const V5NativeMotionParameters *parameters,
     V5NativeHomeResult *result)
 {
+    int stillness;
     result_init(result);
     if (!config || !parameters || !parameters->loaded ||
         parameters->active_axis_count == 0U || !wait_machine_enabled(config)) {
@@ -551,6 +603,15 @@ V5LinuxcncrshSendStatus v5_native_home_send(
     }
     if (result) {
         snprintf(result->mode, sizeof(result->mode), "%s", v5_native_driver_mode_text(parameters->driver_mode));
+    }
+    stillness = active_axes_still(config, parameters);
+    if (stillness < 0) {
+        result_code(result, "HOME_STILLNESS_UNAVAILABLE");
+        return V5_LINUXCNCRSH_SEND_IO_ERROR;
+    }
+    if (!stillness) {
+        result_code(result, "HOME_AXES_MOVING");
+        return V5_LINUXCNCRSH_SEND_INVALID;
     }
     if (v5_linuxcncrsh_send_line(config, "Set Abort") != V5_LINUXCNCRSH_SEND_SENT) {
         result_code(result, "HOME_ABORT_NOT_CONFIRMED");
