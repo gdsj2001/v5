@@ -1,10 +1,10 @@
 {
   "schema": "v5.settings.runtime.v1",
   "axes": [
-    {"axis": "X", "zero_model": {"zero_counts": 1000, "counts_per_unit": 100, "raw_zero_position": 10}},
-    {"axis": "Y", "zero_model": {"zero_counts": 2000, "counts_per_unit": 100, "raw_zero_position": 20}},
-    {"axis": "Z", "zero_model": {"zero_counts": 3000, "counts_per_unit": 100, "raw_zero_position": 30}},
-    {"axis": "A", "zero_model": {"zero_counts": 4000, "counts_per_unit": 100, "raw_zero_position": 40}},
-    {"axis": "C", "zero_model": {"zero_counts": 5000, "counts_per_unit": 100, "raw_zero_position": 50}}
+    {"axis": "X", "zero_model": {"zero_counts": 1000, "counts_per_unit": 100, "raw_zero_position": 10, "slave_position": 0}},
+    {"axis": "Y", "zero_model": {"zero_counts": 2000, "counts_per_unit": 100, "raw_zero_position": 20, "slave_position": 1}},
+    {"axis": "Z", "zero_model": {"zero_counts": 3000, "counts_per_unit": 100, "raw_zero_position": 30, "slave_position": 2}},
+    {"axis": "A", "zero_model": {"zero_counts": 4000, "counts_per_unit": 100, "raw_zero_position": 40, "slave_position": 3}},
+    {"axis": "C", "zero_model": {"zero_counts": 5000, "counts_per_unit": 100, "raw_zero_position": 50, "slave_position": 4}}
   ]
 }

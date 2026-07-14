@@ -10,12 +10,14 @@
     "tree": "cbadbb8d029aefe7a8d0e3218885aaa59798337b"
   },
   "v5_source_tree": "c1f4c53315c8e614fafbe48992afa91e8aef8014",
-  "content_sha256": "3d80d3070231f9d2ba67530bf4f856fc1b59d5198523a15d2f1c9aea81034510",
+  "content_sha256": "3c058850c4f9c63b1489cfb78e5191548b2ab962561492e644c35e28937571c4",
   "implementation": "in_tree",
   "changed_files": [
     "scripts/linuxcnc.in",
     "src/Makefile",
     "src/configure.ac",
+    "src/emc/ini/iniaxis.cc",
+    "src/emc/ini/inijoint.cc",
     "src/emc/motion/command.c",
     "src/emc/motion/control.c",
     "src/emc/motion/mot_priv.h",
@@ -46,6 +48,14 @@
     "src/configure.ac": [
       "--enable-v5-headless-runtime",
       "V5_HEADLESS_RUNTIME"
+    ],
+    "src/emc/ini/iniaxis.cc": [
+      "if (limit == 0.0)",
+      "zero disables this direction"
+    ],
+    "src/emc/ini/inijoint.cc": [
+      "if (limit == 0.0)",
+      "zero disables this direction"
     ],
     "src/emc/motion/command.c": [
       "v5_prepare_wrapped_rotary_target",

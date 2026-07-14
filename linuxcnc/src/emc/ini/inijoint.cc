@@ -130,6 +130,9 @@ static int loadJoint(int joint, EmcIniFile *jointIniFile)
         // set min position limit
         limit = -1e99;	                // default
         jointIniFile->Find(&limit, "MIN_LIMIT", jointString);
+        if (limit == 0.0) {
+            limit = -1e99;              // V5 UI/runtime owner: zero disables this direction
+        }
         if (0 != emcJointSetMinPositionLimit(joint, limit)) {
              return -1;
         }
@@ -138,6 +141,9 @@ static int loadJoint(int joint, EmcIniFile *jointIniFile)
         // set max position limit
         limit = 1e99;	                // default
         jointIniFile->Find(&limit, "MAX_LIMIT", jointString);
+        if (limit == 0.0) {
+            limit = 1e99;               // V5 UI/runtime owner: zero disables this direction
+        }
         if (0 != emcJointSetMaxPositionLimit(joint, limit)) {
             return -1;
         }
@@ -271,4 +277,3 @@ int iniJoint(int joint, const char *filename)
 
     return 0;
 }
-

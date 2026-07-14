@@ -52,16 +52,28 @@ internal sealed partial class MainForm : Form
         var version = new Label
         {
             Text = $"版本 {ClientInfo.Version} / {ClientInfo.Build}",
-            AutoSize = true,
-            Anchor = AnchorStyles.Right,
+            Dock = DockStyle.Fill,
+            AutoEllipsis = true,
             TextAlign = ContentAlignment.MiddleRight,
         };
 
-        var titleRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2 };
+        var remoteSsh = new Button
+        {
+            Text = "远程连接",
+            Dock = DockStyle.Fill,
+            MinimumSize = new Size(0, 34),
+        };
+        remoteSsh.Click += async (_, _) => await RunGuarded(ConnectSelectedDeviceSshAsync);
+
+        var titleRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3 };
         titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 300));
+        // Keep the original 300 px title-right budget so the header does not
+        // push the existing form/action buttons beyond the window edge.
+        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 112));
+        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 188));
         titleRow.Controls.Add(title, 0, 0);
-        titleRow.Controls.Add(version, 1, 0);
+        titleRow.Controls.Add(remoteSsh, 1, 0);
+        titleRow.Controls.Add(version, 2, 0);
         panel.Controls.Add(titleRow, 0, 0);
 
         _serverUrl = new TextBox { Dock = DockStyle.Fill };

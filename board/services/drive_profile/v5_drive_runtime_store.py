@@ -288,13 +288,17 @@ def update_runtime_ini_raw_limits(axis: str, axis_index: int, old_zero_physical:
         raise DriveActionError("SETTINGS_AXIS_ZERO_RAW_LIMIT_MISSING", "runtime INI 缺少当前 raw limit，不能按新零位重算。", {"axis_section": axis_section, "joint_section": joint_section})
     raw_min_current = limit_source["MIN_LIMIT"]
     raw_max_current = limit_source["MAX_LIMIT"]
-    if old_zero_physical < raw_min_current or old_zero_physical > raw_max_current:
+    min_limit_disabled = raw_min_current == 0.0
+    max_limit_disabled = raw_max_current == 0.0
+    if ((not min_limit_disabled and old_zero_physical < raw_min_current) or
+            (not max_limit_disabled and old_zero_physical > raw_max_current)):
         raise DriveActionError("SETTINGS_AXIS_ZERO_OLD_ZERO_OUTSIDE_RAW_LIMIT", "旧零位证据落在当前 raw 限位区间外，不能继续滚动重算限位。", {"old_zero_physical": old_zero_physical, "raw_min_limit": raw_min_current, "raw_max_limit": raw_max_current, "runtime_ini": str(contract.RUNTIME_SETTINGS_INI)})
-    min_distance = raw_min_current - old_zero_physical
-    max_distance = raw_max_current - old_zero_physical
-    new_min = new_zero_physical + min_distance
-    new_max = new_zero_physical + max_distance
-    if not (math.isfinite(new_min) and math.isfinite(new_max) and new_min < new_max):
+    min_distance = 0.0 if min_limit_disabled else raw_min_current - old_zero_physical
+    max_distance = 0.0 if max_limit_disabled else raw_max_current - old_zero_physical
+    new_min = 0.0 if min_limit_disabled else new_zero_physical + min_distance
+    new_max = 0.0 if max_limit_disabled else new_zero_physical + max_distance
+    if not (math.isfinite(new_min) and math.isfinite(new_max) and
+            (min_limit_disabled or max_limit_disabled or new_min < new_max)):
         raise DriveActionError("SETTINGS_AXIS_ZERO_RAW_LIMIT_INVALID", "按新零位重算 raw limit 后区间非法，未写入。", {"new_min": new_min, "new_max": new_max})
     out = []
     section = ""
@@ -351,6 +355,20 @@ def persist_axis_zero_model(runtime: Dict[str, Any],
                             counts_per_unit: float,
                             scale_evidence: Dict[str, Any],
                             read_evidence: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        slave_position = int(str(read_evidence.get("position") or "").strip())
+    except (TypeError, ValueError):
+        raise DriveActionError(
+            "SETTINGS_AXIS_ZERO_SLAVE_POSITION_MISSING",
+            "设0证据缺少本次轴参数映射对应的从站位置，拒绝保存零点。",
+            {"axis": axis, "position": read_evidence.get("position")},
+        )
+    if slave_position < 0:
+        raise DriveActionError(
+            "SETTINGS_AXIS_ZERO_SLAVE_POSITION_INVALID",
+            "设0证据中的从站位置非法，拒绝保存零点。",
+            {"axis": axis, "position": slave_position},
+        )
     if not context.resident_preload_active:
         raise DriveActionError("SETTINGS_RUNTIME_RESIDENT_NOT_PRELOADED", "settings_runtime drive-only resident owner 未在启动阶段载入内存，设0保存拒绝写盘。", str(contract.SETTINGS_RUNTIME_JSON))
     owner_runtime = _read_settings_runtime_owner()
@@ -393,6 +411,7 @@ def persist_axis_zero_model(runtime: Dict[str, Any],
         "raw_zero_position": new_zero_physical,
         "raw_zero_formula": "zero_counts / active_runtime_ini.SCALE",
         "counts_per_unit": counts_per_unit,
+        "slave_position": slave_position,
         "unit": axis_unit(axis),
         "scale_chain": drive_only_scale_evidence(scale_evidence),
         "drive_position": drive_position,
@@ -421,6 +440,7 @@ def persist_axis_zero_model(runtime: Dict[str, Any],
         "old_zero_physical": old_zero_physical,
         "old_zero_source": old_zero_source,
         "new_zero_physical": new_zero_physical,
+        "slave_position": slave_position,
         "raw_limit_save": raw_limit_save,
     }
 

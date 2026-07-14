@@ -1,8 +1,10 @@
 #include "v5_native_motion_parameters.h"
+#include "v5_native_home_mapping.h"
 #include "v5_parameter_owner_map.h"
 #include "v5_settings_apply_internal.h"
 
 #include <ctype.h>
+#include <float.h>
 #include <limits.h>
 #include <math.h>
 #include <stdio.h>
@@ -172,10 +174,10 @@ static void parse_axis_value(
         axis->max_acceleration = parsed;
         axis->valid_mask |= V5_MOTION_VALUE_ACCELERATION;
     } else if (strcmp(key, "MIN_LIMIT") == 0) {
-        axis->min_limit = parsed;
+        axis->min_limit = parsed == 0.0 ? -DBL_MAX : parsed;
         axis->valid_mask |= V5_MOTION_VALUE_MIN_LIMIT;
     } else if (strcmp(key, "MAX_LIMIT") == 0) {
-        axis->max_limit = parsed;
+        axis->max_limit = parsed == 0.0 ? DBL_MAX : parsed;
         axis->valid_mask |= V5_MOTION_VALUE_MAX_LIMIT;
     }
 }
@@ -226,67 +228,6 @@ static int parameters_complete(const V5NativeMotionParameters *parameters)
             return 0;
         }
     }
-    return 1;
-}
-
-static int load_bus_zero_evidence(
-    const char *settings_runtime_json_path,
-    V5NativeMotionParameters *parameters,
-    char *code,
-    size_t code_cap)
-{
-    char *json;
-    unsigned int i;
-    if (!settings_runtime_json_path || !settings_runtime_json_path[0]) {
-        set_code(code, code_cap, "BUS_HOME_SETTINGS_RUNTIME_REQUIRED");
-        return 0;
-    }
-    json = v5_settings_apply_read_text_file_limited(settings_runtime_json_path);
-    if (!json) {
-        set_code(code, code_cap, "BUS_HOME_SETTINGS_RUNTIME_UNAVAILABLE");
-        return 0;
-    }
-    for (i = 0U; i < V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT; ++i) {
-        V5NativeMotionAxisParameters *axis = &parameters->axes[i];
-        const char *axis_start;
-        const char *axis_end;
-        const char *zero_start;
-        const char *zero_end;
-        char axis_name[2] = {axis->axis, '\0'};
-        double expected;
-        double tolerance;
-        if (!axis->active) {
-            continue;
-        }
-        if (!v5_settings_apply_runtime_axis_object(json, axis_name, &axis_start, &axis_end) ||
-            !v5_settings_apply_json_object_for_key(
-                axis_start, axis_end, "zero_model", &zero_start, &zero_end) ||
-            !v5_settings_apply_json_number_value(
-                zero_start, zero_end, "zero_counts", &axis->bus_zero_counts) ||
-            !v5_settings_apply_json_number_value(
-                zero_start, zero_end, "counts_per_unit", &axis->bus_counts_per_unit) ||
-            !v5_settings_apply_json_number_value(
-                zero_start, zero_end, "raw_zero_position", &axis->bus_home_reference) ||
-            !isfinite(axis->bus_zero_counts) ||
-            !isfinite(axis->bus_counts_per_unit) || axis->bus_counts_per_unit == 0.0 ||
-            !isfinite(axis->bus_home_reference)) {
-            free(json);
-            set_code(code, code_cap, "BUS_HOME_ZERO_EVIDENCE_MISSING");
-            return 0;
-        }
-        expected = axis->bus_zero_counts / axis->bus_counts_per_unit;
-        tolerance = fmax(1.0, fabs(expected)) * 1.0e-9;
-        if (fabs(expected - axis->bus_home_reference) > tolerance) {
-            free(json);
-            set_code(code, code_cap, "BUS_HOME_ZERO_EVIDENCE_MISMATCH");
-            return 0;
-        }
-        axis->bus_zero_evidence_known = 1;
-    }
-    free(json);
-    snprintf(parameters->pulse_contract_status, sizeof(parameters->pulse_contract_status), "%s", "not_applicable");
-    parameters->runtime_owner_loaded = 1;
-    set_code(code, code_cap, "BUS_HOME_RUNTIME_OWNER_LOADED");
     return 1;
 }
 
@@ -359,6 +300,7 @@ static int load_pulse_contract(
 }
 
 int v5_native_motion_parameters_load_runtime_owner(
+    const char *settings_project_root,
     const char *settings_runtime_json_path,
     const char *pulse_contract_path,
     V5NativeMotionParameters *parameters,
@@ -370,8 +312,9 @@ int v5_native_motion_parameters_load_runtime_owner(
         return 0;
     }
     if (parameters->driver_mode == V5_NATIVE_DRIVER_MODE_BUS) {
-        return load_bus_zero_evidence(
-            settings_runtime_json_path, parameters, code, code_cap);
+        return v5_native_home_runtime_owner_load_bus(
+            settings_project_root, settings_runtime_json_path,
+            parameters, code, code_cap);
     }
     if (parameters->driver_mode == V5_NATIVE_DRIVER_MODE_PULSE) {
         return load_pulse_contract(

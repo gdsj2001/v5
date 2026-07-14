@@ -24,6 +24,8 @@ int v5_native_home_format_increment(
     char *line,
     size_t line_size);
 
+double v5_native_home_target_delta(char axis, double current, double target);
+
 int v5_native_home_joint_needs_sync(int homed_status_available, int homed);
 
 int v5_native_home_positions_still(

@@ -8,6 +8,7 @@ manifest="${1:-$repo_root/config/deploy/v5_runtime_deploy_manifest.tsv}"
 board_ssh="${V5_BOARD_SSH:-}"
 board_ssh_port="${V5_BOARD_SSH_PORT:-22}"
 strict_remote="${V5_PRECHECK_STRICT_REMOTE:-0}"
+precheck_scope="${V5_PRECHECK_SCOPE:-full}"
 home_dir="${HOME:?HOME is required}"
 build_root="${V5_BUILD_ROOT:-$home_dir/v5-build}"
 board_build_dir="${V5_BOARD_BUILD_DIR:-$build_root/board}"
@@ -147,6 +148,10 @@ check_remote_target() {
 }
 
 check_no_old_source_names() {
+  if [ "$precheck_scope" = "manifest" ]; then
+    record_ok "focused manifest precheck skips unrelated retired-name full-tree scan"
+    return
+  fi
   old_major=3
   old_pulse="v${old_major}_pulse"
   old_icon_base="v5_reb""_icons"
@@ -158,6 +163,14 @@ check_no_old_source_names() {
     record_ok "retired pulse and unused icon files absent"
   fi
 }
+
+case "$precheck_scope" in
+  full|manifest) ;;
+  *)
+    echo "unsupported V5_PRECHECK_SCOPE: $precheck_scope (expected full or manifest)" >&2
+    exit 2
+    ;;
+esac
 
 check_source_manifest
 check_no_old_source_names

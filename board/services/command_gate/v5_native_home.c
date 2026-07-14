@@ -70,6 +70,18 @@ static double target_error(char axis, double current, double target)
     return error;
 }
 
+double v5_native_home_target_delta(char axis, double current, double target)
+{
+    double delta = target - current;
+    if (!isfinite(delta)) {
+        return NAN;
+    }
+    if (rotary_axis(axis)) {
+        delta = remainder(delta, 360.0);
+    }
+    return delta == 0.0 ? 0.0 : delta;
+}
+
 static const V5NativeMotionAxisParameters *axis_for_slot(
     const V5NativeMotionParameters *parameters,
     unsigned int slot)
@@ -233,6 +245,47 @@ static int wait_axis_target(
             } else {
                 stable = 0U;
             }
+        }
+        usleep(V5_HOME_WAIT_US);
+    }
+    return 0;
+#endif
+}
+
+static int wait_all_axis_home_positions(
+    const V5LinuxcncrshConfig *config,
+    const V5NativeMotionParameters *parameters)
+{
+#ifdef _WIN32
+    (void)config;
+    (void)parameters;
+    return 0;
+#else
+    unsigned int attempt;
+    unsigned int stable = 0U;
+    if (!parameters || !parameters->loaded) {
+        return 0;
+    }
+    for (attempt = 0U; attempt < V5_HOME_AXIS_WAIT_ATTEMPTS; ++attempt) {
+        unsigned int slot;
+        int all_at_home = 1;
+        for (slot = 0U; slot < parameters->active_axis_count; ++slot) {
+            const V5NativeMotionAxisParameters *axis = axis_for_slot(parameters, slot);
+            double position;
+            if (!axis ||
+                !v5_linuxcncrsh_get_axis_position(config, axis->axis, 0, &position) ||
+                target_error(axis->axis, position, 0.0) > V5_HOME_TARGET_TOLERANCE) {
+                all_at_home = 0;
+                break;
+            }
+        }
+        if (all_at_home) {
+            ++stable;
+            if (stable >= 3U) {
+                return 1;
+            }
+        } else {
+            stable = 0U;
         }
         usleep(V5_HOME_WAIT_US);
     }
@@ -480,11 +533,13 @@ static V5LinuxcncrshSendStatus send_bus_home(
     for (slot = 0U; slot < parameters->active_axis_count; ++slot) {
         const V5NativeMotionAxisParameters *axis = axis_for_slot(parameters, slot);
         double target = axis ? axis->bus_home_reference : 0.0;
-        if (!axis || !send_increment(config, axis, target - current[slot])) {
+        double delta = axis ? v5_native_home_target_delta(axis->axis, current[slot], target) : NAN;
+        double motion_target = current[slot] + delta;
+        if (!axis || !isfinite(delta) || !send_increment(config, axis, delta)) {
             result_code(result, "BUS_HOME_ZERO_MOVE_NOT_CONFIRMED");
             return V5_LINUXCNCRSH_SEND_IO_ERROR;
         }
-        if (!wait_axis_target(config, axis, current[slot], target, &moved[slot])) {
+        if (!wait_axis_target(config, axis, current[slot], motion_target, &moved[slot])) {
             stop_increment(config, axis);
             result_code(result, "BUS_HOME_ZERO_MOVE_NOT_CONFIRMED");
             return V5_LINUXCNCRSH_SEND_IO_ERROR;
@@ -495,7 +550,7 @@ static V5LinuxcncrshSendStatus send_bus_home(
         double position;
         if (!axis || !moved[slot] ||
             !v5_linuxcncrsh_get_joint_position(config, axis->status_slot, &position) ||
-            fabs(position - axis->bus_home_reference) > V5_HOME_TARGET_TOLERANCE) {
+            target_error(axis->axis, position, axis->bus_home_reference) > V5_HOME_TARGET_TOLERANCE) {
             result_code(result, "BUS_HOME_REAL_MOVE_READBACK_FAILED");
             return V5_LINUXCNCRSH_SEND_IO_ERROR;
         }
@@ -511,14 +566,9 @@ static V5LinuxcncrshSendStatus send_bus_home(
         result_code(result, "BUS_HOME_TELEOP_RESTORE_FAILED");
         return V5_LINUXCNCRSH_SEND_IO_ERROR;
     }
-    for (slot = 0U; slot < parameters->active_axis_count; ++slot) {
-        const V5NativeMotionAxisParameters *axis = axis_for_slot(parameters, slot);
-        double position;
-        if (!axis || !v5_linuxcncrsh_get_axis_position(config, axis->axis, 0, &position) ||
-            target_error(axis->axis, position, 0.0) > V5_HOME_TARGET_TOLERANCE) {
-            result_code(result, "BUS_HOME_AXIS_ZERO_READBACK_FAILED");
-            return V5_LINUXCNCRSH_SEND_IO_ERROR;
-        }
+    if (!wait_all_axis_home_positions(config, parameters)) {
+        result_code(result, "BUS_HOME_AXIS_ZERO_READBACK_FAILED");
+        return V5_LINUXCNCRSH_SEND_IO_ERROR;
     }
     if (result) {
         result->movement_confirmed = 1;

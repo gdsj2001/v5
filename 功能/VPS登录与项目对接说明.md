@@ -1,18 +1,18 @@
 # VPS 登录与项目对接说明
 
-引用需求真源：`REQ-DOC-SINGLE-SOURCE`、`REQ-DRIVE-PROFILE-AUTH-CHAIN`、`REQ-NATIVE-OWNER-FIRST`、`REQ-LINUXCNC-COMMAND-GATE`、`REQ-SETTINGS-RUNTIME-DRIVE-ONLY`、`REQ-PARAM-MEMORY-LIGHTWEIGHT-SAVE`、`REQ-SHM-DISPLAY-PROJECTION`、`REQ-WCS-NATIVE-OWNER`。
+引用需求真源：`REQ-DOC-SINGLE-SOURCE`、`REQ-DRIVE-PROFILE-AUTH-CHAIN`、`REQ-REMOTE-SSH-MAINTENANCE`、`REQ-NATIVE-OWNER-FIRST`、`REQ-LINUXCNC-COMMAND-GATE`、`REQ-SETTINGS-RUNTIME-DRIVE-ONLY`、`REQ-PARAM-MEMORY-LIGHTWEIGHT-SAVE`、`REQ-SHM-DISPLAY-PROJECTION`、`REQ-WCS-NATIVE-OWNER`。
 
 ## AI 阅读入口
 
 <!-- AI_FAST_READ_BEGIN -->
-owner_reqs: [REQ-DRIVE-PROFILE-AUTH-CHAIN]
-read_when: [VPS 登录, 授权, private/public 下载, drive profile, OTA package, remote relay]
-truth: [授权身份 -> package/profile identity -> 板端校验/加载 -> runtime readback]
-forbidden: [public fallback 冒充授权, 客户分叉产品代码, 未验 hash 的下载, SSH/FIFO 控制旁路]
-readback: [license/entitlement, package/profile hash/version, 板端加载 identity, relay health]
-impact: [dealer/factory client, VPS API, drive mapping, OTA, settings actiond, runtime manifest]
-acceptance: [身份与产物 hash 闭合；板端加载相同 identity 后才可声称生效]
-detail_sections: [2. Remote Relay 健康, 3. 板端诊断、G-code 上传与 OTA 升级入口, 6. VPS 登录, 7. VPS 数据, 9. 核对项, 10. 禁止事项]
+owner_reqs: [REQ-DRIVE-PROFILE-AUTH-CHAIN, REQ-REMOTE-SSH-MAINTENANCE]
+read_when: [VPS 登录, 授权, private/public 下载, drive profile, OTA package, remote relay, 厂家远程 SSH]
+truth: [授权身份 -> package/profile 或 remote SSH tunnel identity -> 板端校验/加载或 VPS loopback readback -> consumer]
+forbidden: [public fallback 冒充授权, 客户分叉产品代码, 未验 hash 的下载, 访问记录 IP 冒充 SSH 地址, 公网常开 SSH, SSH/FIFO 产品控制旁路]
+readback: [license/entitlement, package/profile hash/version, 板端加载 identity, relay health, remote SSH device/port/online/host-key]
+impact: [dealer/factory client, VPS API/sshd, board remote SSH agent, drive mapping, OTA, settings actiond, runtime manifest]
+acceptance: [身份与产物 hash 闭合；远程 SSH 必须证明选中设备 -> 唯一 loopback 端口 -> 板端 SSH 主机身份与命令回读]
+detail_sections: [2. Remote Relay 健康, 3. 板端诊断、G-code 上传与 OTA 升级入口, 4. 厂家远程 SSH 维护通道, 6. VPS 登录, 7. VPS 数据, 9. 核对项, 10. 禁止事项]
 <!-- AI_FAST_READ_END -->
 
 - 启动内存/热路径通用规则：见 `REQ-PARAM-MEMORY-LIGHTWEIGHT-SAVE` / `功能/0-1开机参数入内存.md`，本文只保留本功能特有边界。
@@ -92,6 +92,29 @@ OTA 升级按钮规则：
 Windows 客户端不得为这些按钮新增 SSH、shell、SFTP、直接读写 `/run`、直接调用 LinuxCNC/HAL 或远程点击替代路径。
 
 WinRemote 远程画面只允许使用板端 `remote_ui_relay` 的 HTTP 首帧初始化和 `WS /remote/stream` dirty-rect 流。`WS /remote/stream` 无法连接、升级失败或运行中断开时，客户端必须记录 `relay_stream_unavailable` 并进入重连/失败状态，不得降级为低频 HTTP 全帧轮询、旧 `/dev/fb0` 抓屏、SSH/SFTP 文件读取、FIFO 或其它显示 fallback；远程输入仍只允许 `WS /remote/input`。
+
+## 4. 厂家远程 SSH 维护通道
+
+`REQ-REMOTE-SSH-MAINTENANCE` 只提供厂家维护 shell，不是产品按钮、远程画面、运动控制、设置保存、部署真源或 operator path。厂家控制台标题栏必须在版本文字左侧显示 `远程连接` 按钮；点击时只使用设备表当前选中行的 6 位 `vpsDistributionId`，未选中、未授权、授权缺少 `remote_ssh_tunnel`、隧道未登记或 VPS loopback 端口不在线时必须明确失败，禁止回退到 `IP访问记录` 中的来源公网 IP。
+
+正式链路：
+
+```text
+board authorized agent -> outbound SSH -> VPS restricted tunnel user
+  -> VPS 127.0.0.1:<per-device-port> -> board 127.0.0.1:22
+Factory Client 远程连接 -> system ssh + ProxyJump vps3
+  -> VPS loopback per-device port -> board Dropbear host key -> interactive maintenance shell
+```
+
+身份与端口规则：
+
+- 板端只允许复用本机 `/etc/6x-cnc/device_private_key.pem` 发起隧道认证；私钥不得上传、复制进 Factory Client/VPS、写入日志或打进通用镜像。VPS 从已登记设备公钥生成 SSH authorized key，并用设备签名 challenge 把 tunnel key、当前 DNA、6 位 ID 和 `remote_ssh_tunnel` 权限绑定。
+- Factory Client 新生成的设备授权必须同时包含 `drive_profile_download` 和 `remote_ssh_tunnel`；板端授权缺少后者时 agent 不启动隧道。授权吊销、设备删除或设备公钥变化后旧 tunnel key/端口必须失效。
+- VPS 为每台设备冻结一个唯一端口，监听地址只能是 `127.0.0.1`；tunnel 用户禁止密码、PTY、shell、agent/X11/local forwarding，只允许该设备 authorized key 对登记端口执行 remote forwarding。不得设置 `GatewayPorts yes`，不得把分配端口暴露到公网。
+- 板端出站 SSH 必须校验仓库登记的 VPS host key；host key 不匹配时 fail-closed。连接使用 keepalive 和受控重连，状态写入 `/run/8ax_v5_remote_ssh/status.json` 只作诊断，不成为授权或在线真值；VPS 对 loopback 端口的实际 TCP probe 才是 Factory Client 的 online readback。
+- Factory Client 调用厂家鉴权 API读取选中设备的 `assignedPort/online`，只在 `online=true` 时启动 Windows 系统 `ssh.exe`，使用 `ProxyJump vps3` 和按设备 ID 隔离的 `HostKeyAlias`。客户端不得保存设备密码、自动接受板端 host key、把端口或访问 IP 当作设备身份。
+
+验收必须从标题区 `远程连接` 原始按钮开始，证明：选中设备 ID 与 API 返回一致、VPS 分配端口唯一且仅 loopback 监听、SSH 展示/校验对应板端 host key，并通过隧道读取同一板端的 `uname -m` 和 6 位登记 ID。通过 SSH 直接改板端产品文件、补发产品控制命令或替代正式部署/operator 证据仍然禁止。
 
 
 
@@ -244,6 +267,7 @@ OTA package 规则：
 | 驱动 profile 下载/上传 | 当前板端下载真源为 `board/services/auth_download/v5_drive_profile_download.py`、`board/services/drive_profile/v5_settings_actiond.py`、`v5_drive_bus_action.py` 及同目录拆分模块；发布输入以当前 Factory Client/VPS admin API 和 `board/config/drive-profiles/*` 的 intended remote path 为准 |
 | Windows Remote 客户端 | `8ax-win/src/8ax.WinRemote/MainWindow.xaml` 是布局；relay 会话、frame、指针、程序和 OTA 分别在 `MainWindow.RelaySession.cs`、`MainWindow.RelayFrame.cs`、`MainWindow.Pointer.cs`、`MainWindow.Programs.cs`、`MainWindow.OtaUpgrade.cs`，`MainWindow.xaml.cs` 只保留窗口总入口 |
 | Factory Client 管理界面 | `8ax-factory-client-source/8ax.FactoryClient/MainForm.cs` 是总入口；布局、设备、经销商和升级已拆到 `MainForm.Layout.cs`、`MainForm.Devices.cs`、`MainForm.Dealers.cs`、`MainForm.Upgrades.cs`；OTA 发布面板在 `OtaPublishPanel.cs`，VPS API 在 `8ax-factory-client-source/vps-admin-api/` |
+| 厂家远程 SSH | Windows 按钮与启动器在 `8ax-factory-client-source/8ax.FactoryClient/MainForm.RemoteSsh.cs`；设备登记/状态 API 与端口/key owner 在 `8ax-factory-client-source/vps-auth-gateway/remote_ssh_gateway.py`；板端 agent 在 `board/services/remote_ssh/`，由 canonical runtime manifest 部署 |
 | Dealer Client 管理界面 | `8ax-dealer-client-source/8ax.DealerClient/MainForm.cs` 是总入口，操作实现已拆到 `MainForm.Actions.cs` |
 | 板端 OTA relay/action/client | Windows 操作入口当前在 `8ax-win/src/8ax.WinRemote/MainWindow.OtaUpgrade.cs`，VPS 发布端在 `8ax-factory-client-source/vps-admin-api/vps_ota_admin_api.py`；板端实现仍按当前 v5 代码和 `待做工作/板端升级.md` 推进，未实现前必须 fail-closed，不得把 Windows/VPS 文件写成板端 owner |
 
@@ -259,11 +283,14 @@ OTA package 规则：
 - OTA private/public manifest 解析、`selected_scope`、选择 reason、package SHA256/签名和板端 staging hash 一致。
 - 板端 relay `/remote/info`、WS frame、input granted、frame applied 证据齐全。
 - 板端一次性诊断 `/run/8ax_v5_product_ui/remote_time_sync_status.json` 能说明时间同步来源和结果，但不作为 ready、heartbeat 或控制真源。
+- 远程 SSH 需核对选中设备授权含 `remote_ssh_tunnel`、VPS 端口只监听 `127.0.0.1`、restricted tunnel key 的 `permitlisten` 与分配端口一致、Factory Client 按钮启动的板端 host key 和登记 ID 回读一致。
 
 ## 10. 禁止事项
 
 - 在仓库写 token、私钥、设备授权密钥、DNA 原文或 Authorization/Cookie。
 - 用 SSH、shell、SFTP、临时 JSON 或远程点击绕过正式 UI/operator 路径。
+- 把 `IP访问记录` 的公网来源地址直接当成设备 SSH 地址，或开放永久公网板端/反向 SSH 端口。
+- 在 Factory Client、VPS、仓库、日志或通用镜像中保存设备私钥、SSH 密码，或多个设备共用同一设备私钥。
 - 把 profile public fallback 写成 private 授权成功。
 - 有当前 DNA private OTA 包时继续下载 public OTA 包，或用 public 包替代 private 包失败。
 - 让资源指标、时间同步、诊断接口参与业务控制。

@@ -43,6 +43,14 @@ do_v5_linux_projection() {
         bbfatal "BitBake work projection was not cleared by do_unpack"
     cp -a --reflink=auto ${V5_SOURCE_PROJECTION_ROOT}/. \
         ${WORKDIR}/v5-owner-projection/
+    [ ! -e "${V5_SOURCE_PROJECTION_ROOT}/linux/kernel/.git" ] || \
+        bbfatal "persistent Linux projection contains forbidden Git metadata"
+    python3 ${V5_PROJECT_SOURCE_ROOT}/board/tools/petalinux/project_v5_linux_source.py \
+        --project-root ${V5_PROJECT_SOURCE_ROOT} \
+        --build-root ${V5_VM_BUILD_ROOT} \
+        --output-root ${WORKDIR}/v5-owner-projection \
+        --persistent-projection-root ${V5_SOURCE_PROJECTION_ROOT} \
+        --initialize-kernel-build-git
 }
 do_v5_linux_projection[dirs] = "${WORKDIR}"
 do_v5_linux_projection[file-checksums] = " \

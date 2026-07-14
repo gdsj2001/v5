@@ -17,6 +17,9 @@ typedef struct V5SettingsPage {
     lv_obj_t *buttons[V5_SETTINGS_PAGE_BUTTON_COUNT];
     V5MainPageActionKind button_actions[V5_SETTINGS_PAGE_BUTTON_COUNT];
     unsigned int button_count;
+    lv_obj_t *save_return_button;
+    lv_obj_t *save_return_label;
+    int restart_pending;
     lv_obj_t *status_label;
     lv_obj_t *machine_code_label;
     lv_obj_t *motion_model_dropdown;

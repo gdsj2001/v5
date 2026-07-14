@@ -82,6 +82,9 @@ static int loadAxis(int axis, EmcIniFile *axisIniFile)
         // set min position limit
         limit = -1e99;	                // default
         axisIniFile->Find(&limit, "MIN_LIMIT", axisString);
+        if (limit == 0.0) {
+            limit = -1e99;              // V5 UI/runtime owner: zero disables this direction
+        }
         if (0 != emcAxisSetMinPositionLimit(axis, limit)) {
             if (emc_debug & EMC_DEBUG_CONFIG) {
                 rcs_print_error("bad return from emcAxisSetMinPositionLimit\n");
@@ -93,6 +96,9 @@ static int loadAxis(int axis, EmcIniFile *axisIniFile)
         // set max position limit
         limit = 1e99;	                // default
         axisIniFile->Find(&limit, "MAX_LIMIT", axisString);
+        if (limit == 0.0) {
+            limit = 1e99;               // V5 UI/runtime owner: zero disables this direction
+        }
         if (0 != emcAxisSetMaxPositionLimit(axis, limit)) {
             if (emc_debug & EMC_DEBUG_CONFIG) {
                 rcs_print_error("bad return from emcAxisSetMaxPositionLimit\n");

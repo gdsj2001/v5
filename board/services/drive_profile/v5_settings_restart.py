@@ -7,6 +7,11 @@ from typing import Any, Dict
 
 from v5_settings_action_contract import CANONICAL_CLEAN_RESTART_SERVICES, RUN_DIR
 
+
+def now_utc() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
 def service_status(name: str, timeout_s: float = 4.0) -> Dict[str, Any]:
     script = Path('/etc/init.d') / name
     if not script.exists():
@@ -118,6 +123,7 @@ else
 fi
 """ % (str(handoff_log), service_list), encoding="utf-8")
     handoff_script.chmod(0o755)
+    detail = ""
     try:
         # This is the cancellable pre-commit window. After Popen succeeds the
         # detached handoff owns the reboot and the action becomes terminal.
@@ -134,8 +140,8 @@ fi
     except Exception as exc:
         ok = False
         code = "SETTINGS_SAVE_RESTART_HANDOFF_SPAWN_FAILED"
-        append_event({"event": "clean_restart_spawn_failed", "action": action, "ok": False, "detail": "%s: %s" % (type(exc).__name__, exc)})
-    return {
+        detail = "%s: %s" % (type(exc).__name__, exc)
+    result = {
         "schema": "v5.settings_action_result.v1",
         "generated_at": now_utc(),
         "action": action,
@@ -146,9 +152,12 @@ fi
         "display_message_cn": "保存并重启已进入开发板干净重启流程。" if ok else "保存并重启 handoff 启动失败。",
         "write_executed": False,
         "motion_executed": False,
-        "restart_executed": True,
-        "clean_restart_equivalent": "board_reboot",
+        "restart_executed": ok,
+        "clean_restart_equivalent": "board_reboot" if ok else "",
         "handoff_script": str(handoff_script),
         "handoff_log": str(handoff_log),
         "stop_order": CANONICAL_CLEAN_RESTART_SERVICES,
     }
+    if detail:
+        result["detail"] = detail
+    return result

@@ -227,6 +227,7 @@ fi
 manifest_ui_only=1
 manifest_actiond_only=1
 manifest_settings_only=1
+manifest_drive_profiles=0
 manifest_row_count=0
 while IFS="$tab" read -r scope_kind scope_source scope_destination scope_mode scope_extra; do
   case "$scope_kind" in
@@ -245,6 +246,10 @@ while IFS="$tab" read -r scope_kind scope_source scope_destination scope_mode sc
     /usr/libexec/8ax/auth_download/*|\
     /etc/init.d/v5-settings-actiond)
       manifest_ui_only=0
+      ;;
+    /opt/8ax/v5/config/drive-profiles/*)
+      manifest_ui_only=0
+      manifest_drive_profiles=1
       ;;
     /opt/8ax/phase0_bus5/settings_runtime.json|\
     /usr/libexec/8ax/v5_command_gate_server|\
@@ -386,6 +391,7 @@ enable_boot_services() {
   enable_boot_service v5-ui-relay 94 16
   enable_boot_service v5-settings-actiond 95 15
   enable_boot_service v5-touch-diagnostics 96 14
+  enable_boot_service v5-remote-ssh 97 13
 }
 
 retired_pid_matches_path() {
@@ -502,12 +508,14 @@ if [ "$apply" -eq 1 ]; then
     /etc/init.d/v5-ui-relay restart
   elif [ "$restart_scope" = "actiond" ]; then
     enable_boot_service v5-settings-actiond 95 15
+    [ "$manifest_drive_profiles" -eq 0 ] || install_runtime_drive_profiles
     /etc/init.d/v5-settings-actiond restart
   elif [ "$restart_scope" = "settings" ]; then
     enable_boot_service v5-linuxcnc-command-gate 91 19
     enable_boot_service v5-wcs-status-publisher 92 18
     enable_boot_service v5-state-publisher 93 17
     enable_boot_service v5-settings-actiond 95 15
+    [ "$manifest_drive_profiles" -eq 0 ] || install_runtime_drive_profiles
     /etc/init.d/v5-linuxcnc-command-gate restart
     /etc/init.d/v5-wcs-status-publisher restart
     /etc/init.d/v5-state-publisher restart
@@ -522,6 +530,7 @@ if [ "$apply" -eq 1 ]; then
     /etc/init.d/v5-ui-relay restart
     /etc/init.d/v5-settings-actiond restart
     /etc/init.d/v5-touch-diagnostics restart
+    /etc/init.d/v5-remote-ssh restart
   fi
 else
   echo "dry-run only; pass --apply to install files and restart scope=$restart_scope"

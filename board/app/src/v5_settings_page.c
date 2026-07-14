@@ -108,7 +108,9 @@ int v5_settings_page_create(V5SettingsPage *page, lv_obj_t *parent)
     v5_settings_page_make_button(page, "清除故障", 830, 236, 82, 34, 20, 62, 91, V5_MAIN_PAGE_ACTION_SETTINGS_FAULT_RESET);
     v5_settings_page_make_button(page, "设置驱动", 914, 236, 82, 34, 39, 113, 164, V5_MAIN_PAGE_ACTION_SETTINGS_SET_DRIVE);
     v5_settings_page_make_button(page, "登记本机码", 806, 8, 94, 34, 20, 62, 91, V5_MAIN_PAGE_ACTION_SETTINGS_DNA_REGISTER);
-    v5_settings_page_make_button(page, "保存并重启", 902, 8, 92, 34, 74, 91, 111, V5_MAIN_PAGE_ACTION_SETTINGS_SAVE_RETURN);
+    page->save_return_label = v5_settings_page_make_button(
+        page, "返回主页", 902, 8, 92, 34, 74, 91, 111, V5_MAIN_PAGE_ACTION_NAV_MAIN);
+    page->save_return_button = page->save_return_label ? lv_obj_get_parent(page->save_return_label) : 0;
     v5_settings_page_popup_create(page);
     return page->button_count == V5_SETTINGS_PAGE_BUTTON_COUNT;
 }
@@ -199,6 +201,16 @@ int v5_settings_page_trigger_action(V5SettingsPage *page, V5MainPageActionKind a
     }
     memset(out, 0, sizeof(*out));
     out->action = action;
+    if (action == V5_MAIN_PAGE_ACTION_NAV_MAIN) {
+        if (!v5_main_page_action_prepare(action, 0, 0, 0, 0.0, out)) {
+            return 0;
+        }
+        page->last_action = *out;
+        if (page->navigation_cb) {
+            page->navigation_cb(page->navigation_user_data, V5_MAIN_PAGE_ACTION_NAV_MAIN);
+        }
+        return 1;
+    }
     if (v5_settings_action_start(action, &action_result)) {
         out->prepared = 1;
         out->local_only = 0;

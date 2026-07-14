@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -78,7 +79,25 @@ class ProjectionIncrementalTest(unittest.TestCase):
         subprocess.run(["git", "-C", str(self.project)] + list(arguments), check=True)
 
     def project_now(self):
-        return projection.project_and_verify(self.project, self.build, self.output)
+        result = projection.project_and_verify(self.project, self.build, self.output)
+        self.assertFalse((self.output / "linux/kernel/.git").exists())
+        return result
+
+    def test_git_metadata_exists_only_in_generated_build_copy(self):
+        self.project_now()
+        work_projection = self.build / "petalinux/output/tmp/work/v5-owner-projection"
+        shutil.copytree(self.output, work_projection, symlinks=True)
+
+        projection.initialize_kernel_build_git(work_projection, self.build, self.output)
+
+        self.assertFalse((self.output / "linux/kernel/.git").exists())
+        build_git = work_projection / "linux/kernel/.git"
+        self.assertTrue(build_git.is_dir())
+        subprocess.run(
+            ["git", "-C", str(work_projection / "linux/kernel"), "rev-parse", "--verify", "HEAD"],
+            check=True,
+            stdout=subprocess.PIPE,
+        )
 
     def test_changed_file_does_not_rewrite_unaffected_files(self):
         self.project_now()

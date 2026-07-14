@@ -41,6 +41,7 @@ static V5LinuxcncrshConfig g_linuxcncrsh_config = {"127.0.0.1", 5007U, "EMC", "v
 static char g_host[64] = "127.0.0.1";
 static char g_password[64] = "EMC";
 static char g_ini_path[256];
+static char g_settings_project_root[256] = "/opt/8ax/v5";
 static char g_settings_runtime_path[256] = "/opt/8ax/phase0_bus5/settings_runtime.json";
 static char g_pulse_contract_path[256] = "/opt/8ax/v5/linuxcnc/components/step_ip_v1_5.contract.json";
 static char g_socket_path[sizeof(((struct sockaddr_un *)0)->sun_path)] = V5_COMMAND_GATE_SOCKET_PATH;
@@ -418,6 +419,9 @@ static void parse_args(int argc, char **argv)
             g_linuxcncrsh_config.timeout_ms = (unsigned int)atoi(argv[++i]);
         } else if (strcmp(argv[i], "--ini") == 0 && i + 1 < argc) {
             v5_command_gate_response_copy_text(g_ini_path, sizeof(g_ini_path), argv[++i]);
+        } else if (strcmp(argv[i], "--settings-project-root") == 0 && i + 1 < argc) {
+            v5_command_gate_response_copy_text(
+                g_settings_project_root, sizeof(g_settings_project_root), argv[++i]);
         } else if (strcmp(argv[i], "--settings-runtime") == 0 && i + 1 < argc) {
             v5_command_gate_response_copy_text(
                 g_settings_runtime_path, sizeof(g_settings_runtime_path), argv[++i]);
@@ -449,6 +453,7 @@ int main(int argc, char **argv)
         return 5;
     }
     if (!v5_native_motion_parameters_load_runtime_owner(
+            g_settings_project_root,
             g_settings_runtime_path,
             g_pulse_contract_path,
             &g_motion_parameters,

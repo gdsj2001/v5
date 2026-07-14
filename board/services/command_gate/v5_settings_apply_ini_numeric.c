@@ -153,7 +153,8 @@ int v5_settings_apply_ini_write_scale_and_limits(
     int touched_scale = 0;
     int n;
 
-    if (!path || !axis_section || !joint_section || !isfinite(raw_min) || !isfinite(raw_max) || raw_min >= raw_max) {
+    if (!path || !axis_section || !joint_section || !isfinite(raw_min) || !isfinite(raw_max) ||
+        (raw_min != 0.0 && raw_max != 0.0 && raw_min >= raw_max)) {
         return 0;
     }
     if (write_scale && (!isfinite(scale) || scale <= 0.0)) {

@@ -273,6 +273,10 @@ def validate_contract(project_root, source_root):
             "board/tools/petalinux/verify_v5_linux_source.py:True",
             "addtask v5_linux_projection after do_unpack before do_kernel_checkout do_kernel_metadata do_symlink_kernsrc",
             "project_v5_linux_source.py",
+            '--output-root ${WORKDIR}/v5-owner-projection',
+            '--persistent-projection-root ${V5_SOURCE_PROJECTION_ROOT}',
+            "--initialize-kernel-build-git",
+            "persistent Linux projection contains forbidden Git metadata",
         ),
         (
             "do_kernel_metadata_append",
@@ -288,7 +292,7 @@ def validate_contract(project_root, source_root):
         project_root,
         "board/tools/petalinux/project_v5_linux_source.py",
         (
-            "def initialize_kernel_git(output_root):",
+            "def initialize_kernel_build_git(build_projection_root, build_root, persistent_projection_root):",
             "def vm_share_inaccessible_paths(project_root):",
             'environment.pop(name, None)',
             '["git", "init", "-q"]',
@@ -301,12 +305,15 @@ def validate_contract(project_root, source_root):
             "def apply_projection_delta(",
             "V5_LINUX_PROJECTION_DELTA",
             "write_projection_state(output_root, desired_entries)",
-            'if not clean_after:',
-            'initialize_kernel_git(output_root)',
+            "V5_LINUX_PROJECTION_GIT_REMOVED",
+            'parser.add_argument("--initialize-kernel-build-git", action="store_true")',
+            "kernel build Git metadata must stay outside the persistent projection",
             'V5_LINUX_KERNEL_BUILD_GIT_OK',
         ),
         (
             "if output_root.exists():\n        shutil.rmtree(output_root)",
+            "initialize_kernel_git(output_root)",
+            "allow_build_git=True",
         ),
     )
     require_tokens(

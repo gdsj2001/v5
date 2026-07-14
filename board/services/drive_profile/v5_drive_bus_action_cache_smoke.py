@@ -108,10 +108,11 @@ def main() -> int:
             25000.0,
             10000.0,
             {"source": "active_runtime_ini.SCALE", "counts_per_unit": 10000.0},
-            {"read": {"value": 25000.0}, "profile_id": "smoke"},
+            {"position": "0", "read": {"value": 25000.0}, "profile_id": "smoke"},
         )
         first_limits = first_zero.get("raw_limit_save", {})
         if (first_zero.get("old_zero_source") != "runtime_ini_initial_origin" or
+                first_zero.get("slave_position") != 0 or
                 first_zero.get("old_zero_counts") != 0.0 or
                 abs(float(first_limits.get("raw_min_limit", 0.0)) - (-497.5)) > 1.0e-9 or
                 abs(float(first_limits.get("raw_max_limit", 0.0)) - 502.5) > 1.0e-9):
@@ -124,14 +125,15 @@ def main() -> int:
             1000.0,
             10000.0,
             {"source": "active_runtime_ini.SCALE", "counts_per_unit": 10000.0},
-            {"read": {"value": 1000.0}, "profile_id": "smoke"},
+            {"position": "1", "read": {"value": 1000.0}, "profile_id": "smoke"},
         )
         merged_runtime = json.loads(contract.SETTINGS_RUNTIME_JSON.read_text(encoding="utf-8"))
         merged_x, _ = runtime_store.find_runtime_axis(merged_runtime, "X")
         merged_y, _ = runtime_store.find_runtime_axis(merged_runtime, "Y")
         if (runtime_store.saved_zero_counts(merged_x) != 25000.0 or
                 runtime_store.saved_zero_counts(merged_y) != 1000.0 or
-                y_zero.get("old_zero_source") != "runtime_ini_initial_origin"):
+                y_zero.get("old_zero_source") != "runtime_ini_initial_origin" or
+                y_zero.get("slave_position") != 1):
             print("stale fork axis-zero overwrote a prior axis", merged_runtime, y_zero)
             return 13
         second_zero = runtime_store.persist_axis_zero_model(
@@ -141,7 +143,7 @@ def main() -> int:
             40000.0,
             10000.0,
             {"source": "active_runtime_ini.SCALE", "counts_per_unit": 10000.0},
-            {"read": {"value": 40000.0}, "profile_id": "smoke"},
+            {"position": "0", "read": {"value": 40000.0}, "profile_id": "smoke"},
         )
         second_limits = second_zero.get("raw_limit_save", {})
         if (second_zero.get("old_zero_source") != "existing_zero_model" or

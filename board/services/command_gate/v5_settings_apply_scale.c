@@ -168,6 +168,8 @@ int v5_settings_apply_scale_chain_commit(
     char *original_ini = 0;
     int precision_field;
     int write_scale = 0;
+    int min_limit_disabled;
+    int max_limit_disabled;
 
     if (result) {
         memset(result, 0, sizeof(*result));
@@ -258,17 +260,25 @@ int v5_settings_apply_scale_chain_commit(
         v5_settings_apply_scale_chain_result_code(result, "RAW_LIMIT_CURRENT_MISSING");
         return 0;
     }
-    if (old_zero < raw_min_current || old_zero > raw_max_current) {
+    min_limit_disabled = raw_min_current == 0.0;
+    max_limit_disabled = raw_max_current == 0.0;
+    if ((!min_limit_disabled && old_zero < raw_min_current) ||
+        (!max_limit_disabled && old_zero > raw_max_current)) {
         free(json);
         v5_settings_apply_scale_chain_result_code(result, "RAW_ZERO_OUTSIDE_LIMITS");
         return 0;
     }
-    min_distance = v5_settings_apply_nearest_integer(raw_min_current - old_zero);
-    max_distance = v5_settings_apply_nearest_integer(raw_max_current - old_zero);
+    min_distance = min_limit_disabled ? 0.0 :
+        v5_settings_apply_nearest_integer(raw_min_current - old_zero);
+    max_distance = max_limit_disabled ? 0.0 :
+        v5_settings_apply_nearest_integer(raw_max_current - old_zero);
     new_zero = zero_counts / effective_scale;
-    new_min = v5_settings_apply_nearest_integer(new_zero + min_distance);
-    new_max = v5_settings_apply_nearest_integer(new_zero + max_distance);
-    if (!isfinite(new_zero) || !isfinite(new_min) || !isfinite(new_max) || new_min >= new_max) {
+    new_min = min_limit_disabled ? 0.0 :
+        v5_settings_apply_nearest_integer(new_zero + min_distance);
+    new_max = max_limit_disabled ? 0.0 :
+        v5_settings_apply_nearest_integer(new_zero + max_distance);
+    if (!isfinite(new_zero) || !isfinite(new_min) || !isfinite(new_max) ||
+        (!min_limit_disabled && !max_limit_disabled && new_min >= new_max)) {
         free(json);
         v5_settings_apply_scale_chain_result_code(result, "RAW_LIMIT_RECOMPUTE_INVALID");
         return 0;

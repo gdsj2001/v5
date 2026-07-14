@@ -407,6 +407,12 @@ void v5_settings_page_status_timer_cb(lv_timer_t *timer)
             v5_settings_page_set_status_text(page, 88, 204, 255, "%s: 执行中", label);
         }
     } else if (status.ok) {
+        if ((status.restart_required || status.restart_deferred) &&
+            page->popup_action[0] &&
+            strcmp(page->popup_action, status.action) == 0 &&
+            (!page->popup_run_id[0] || strcmp(page->popup_run_id, status.run_id) == 0)) {
+            v5_settings_page_mark_restart_pending(page);
+        }
         if (page->popup_active && !page->popup_final &&
             (!page->popup_action[0] || strcmp(page->popup_action, status.action) == 0) &&
             (!page->popup_run_id[0] || strcmp(page->popup_run_id, status.run_id) == 0)) {

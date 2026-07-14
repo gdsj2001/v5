@@ -10,6 +10,21 @@
 #include <stdlib.h>
 #include <string.h>
 
+typedef struct SettingsNavigationProbe {
+    unsigned int calls;
+    V5MainPageActionKind action;
+} SettingsNavigationProbe;
+
+static void settings_navigation_probe(void *user_data, V5MainPageActionKind action)
+{
+    SettingsNavigationProbe *probe = (SettingsNavigationProbe *)user_data;
+    if (!probe) {
+        return;
+    }
+    probe->calls += 1U;
+    probe->action = action;
+}
+
 
 static long point_delta_abs(const lv_point_t *point, const V5ToolpathScreenPoint *expected)
 {
@@ -169,6 +184,7 @@ int main(void)
     lv_point_t gesture_start[2];
     lv_point_t gesture_move[2];
     V5MainPageActionReport view_report;
+    SettingsNavigationProbe settings_navigation = {0};
     int gesture_changed = 0;
 
     lv_init();
@@ -251,6 +267,28 @@ int main(void)
     }
     if (!v5_settings_page_create(&settings_page, screen)) {
         return 60;
+    }
+    v5_settings_page_set_navigation_callback(
+        &settings_page, settings_navigation_probe, &settings_navigation);
+    if (!settings_page.save_return_button || !settings_page.save_return_label ||
+        settings_page.restart_pending ||
+        strcmp(lv_label_get_text(settings_page.save_return_label), "返回主页") != 0 ||
+        settings_page.button_actions[V5_SETTINGS_PAGE_BUTTON_COUNT - 1U] != V5_MAIN_PAGE_ACTION_NAV_MAIN) {
+        return 73;
+    }
+    lv_event_send(settings_page.save_return_button, LV_EVENT_CLICKED, 0);
+    if (settings_navigation.calls != 1U ||
+        settings_navigation.action != V5_MAIN_PAGE_ACTION_NAV_MAIN ||
+        settings_page.last_action.action != V5_MAIN_PAGE_ACTION_NAV_MAIN ||
+        !settings_page.last_action.prepared || !settings_page.last_action.local_only) {
+        return 74;
+    }
+    v5_settings_page_parameter_changed_cb(&settings_page);
+    if (!settings_page.restart_pending ||
+        strcmp(lv_label_get_text(settings_page.save_return_label), "保存并重启") != 0 ||
+        settings_page.button_actions[V5_SETTINGS_PAGE_BUTTON_COUNT - 1U] !=
+            V5_MAIN_PAGE_ACTION_SETTINGS_SAVE_RETURN) {
+        return 75;
     }
     v5_settings_page_popup_show(
         &settings_page,

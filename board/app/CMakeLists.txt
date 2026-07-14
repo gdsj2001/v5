@@ -354,6 +354,7 @@ add_library(v5_command_gate_core STATIC
     ../services/state_publisher/v5_native_sample.c
     ../services/command_gate/v5_native_first_point.c
     ../services/command_gate/v5_native_home.c
+    ../services/command_gate/v5_native_home_mapping.c
     ../services/command_gate/v5_native_axis_zero_position.c
     ../services/command_gate/v5_native_motion_parameters.c
     ../services/command_gate/v5_native_readback.c

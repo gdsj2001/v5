@@ -21,6 +21,8 @@ typedef struct V5NativeMotionAxisParameters {
     char axis;
     int active;
     unsigned int status_slot;
+    unsigned int slave_position;
+    int slave_mapping_known;
     double max_velocity;
     double max_acceleration;
     double min_limit;
@@ -50,6 +52,7 @@ int v5_native_motion_parameters_load(
     char *code,
     size_t code_cap);
 int v5_native_motion_parameters_load_runtime_owner(
+    const char *settings_project_root,
     const char *settings_runtime_json_path,
     const char *pulse_contract_path,
     V5NativeMotionParameters *parameters,

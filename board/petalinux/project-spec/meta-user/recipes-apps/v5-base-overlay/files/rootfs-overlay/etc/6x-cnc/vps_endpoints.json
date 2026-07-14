@@ -1,11 +1,16 @@
 {
   "schema": "v5-vps-endpoints-v1",
-  "updated_at": "2026-05-10",
+  "updated_at": "2026-07-14",
   "api_base_urls": [
     "https://license.cjwsjzyy.xyz",
     "https://license.3dtouch.top"
   ],
   "drive_profile_static_base_urls": [
     "https://updates.cjwsjzyy.xyz/drive-profiles"
-  ]
+  ],
+  "remote_ssh": {
+    "host": "it.cjwsjzyy.xyz",
+    "port": 22,
+    "user": "8ax-tunnel"
+  }
 }

@@ -272,7 +272,14 @@ def run_set_drive(timeout_s: float) -> Dict[str, Any]:
         commands = target.get("commands") if isinstance(target.get("commands"), dict) else {}
         position = str(target.get("position") or "")
         egear, egear_source = planned[position]
-        item: Dict[str, Any] = {"axis": target.get("axis"), "position": position, "profile_id": (target.get("profile") or {}).get("profile_id", ""), "target_egear": {"numerator": egear[0], "denominator": egear[1], "source": egear_source}, "target_mode": CANONICAL_CSP_MODE}
+        item: Dict[str, Any] = {
+            "axis": target.get("axis"),
+            "position": position,
+            "axis_slave_binding_source": target.get("axis_slave_binding_source", ""),
+            "profile_id": (target.get("profile") or {}).get("profile_id", ""),
+            "target_egear": {"numerator": egear[0], "denominator": egear[1], "source": egear_source},
+            "target_mode": CANONICAL_CSP_MODE,
+        }
         try:
             egear_command = commands.get("drive.set_egear", {})
             mode_command = commands.get("drive.write_mode", {})

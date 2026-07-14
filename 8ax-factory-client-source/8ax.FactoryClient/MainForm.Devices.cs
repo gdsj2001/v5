@@ -304,7 +304,7 @@ internal sealed partial class MainForm : Form
             ["key_id"] = keyId,
             ["license_anchor_type"] = "zynq7000_pl_device_dna_57",
             ["not_before"] = notBefore,
-            ["permissions"] = new[] { "drive_profile_download" },
+            ["permissions"] = new[] { "drive_profile_download", "remote_ssh_tunnel" },
             ["pl_device_dna_hash"] = device.PlDnaHash ?? "",
             ["schema"] = "8ax-device-authorization-v1",
             ["signature_alg"] = "RSASSA-PKCS1-v1_5-SHA256",

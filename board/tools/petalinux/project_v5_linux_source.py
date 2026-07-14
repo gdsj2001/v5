@@ -251,9 +251,7 @@ def owner_overrides(project_root, output_root, owner):
 def verify_projection(output_root, print_hashes=False):
     hashes = {}
     for owner in contract.OWNERS:
-        hashes[owner["relative"]] = contract.verify_owner(
-            output_root, owner, print_hashes, allow_build_git=True
-        )
+        hashes[owner["relative"]] = contract.verify_owner(output_root, owner, print_hashes)
     contract.validate_rt_contract(output_root / "linux/realtime")
     print(
         "V5_LINUX_PROJECTION_OK kernel=%s realtime=%s"
@@ -262,8 +260,24 @@ def verify_projection(output_root, print_hashes=False):
     return hashes
 
 
-def initialize_kernel_git(output_root):
-    kernel_root = output_root / "linux/kernel"
+def initialize_kernel_build_git(build_projection_root, build_root, persistent_projection_root):
+    build_root = build_root.resolve()
+    build_projection_root = build_projection_root.resolve()
+    persistent_projection_root = persistent_projection_root.resolve()
+    if not is_within(build_projection_root, build_root):
+        fail("kernel build projection escaped the build root: %s" % build_projection_root)
+    if (
+        build_projection_root == persistent_projection_root
+        or is_within(build_projection_root, persistent_projection_root)
+        or is_within(persistent_projection_root, build_projection_root)
+    ):
+        fail("kernel build Git metadata must stay outside the persistent projection")
+    kernel_root = build_projection_root / "linux/kernel"
+    if not kernel_root.is_dir():
+        fail("kernel build projection is unavailable: %s" % kernel_root)
+    git_root = kernel_root / ".git"
+    if projected_path_exists(git_root):
+        remove_projected_path(git_root)
     environment = os.environ.copy()
     for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
         environment.pop(name, None)
@@ -329,7 +343,7 @@ def initialize_kernel_git(output_root):
         stderr=subprocess.PIPE,
         check=True,
     ).stdout.decode("ascii").strip()
-    print("V5_LINUX_KERNEL_BUILD_GIT_OK head=%s" % head)
+    print("V5_LINUX_KERNEL_BUILD_GIT_OK root=%s head=%s" % (kernel_root, head))
 
 
 def project_and_verify(
@@ -407,6 +421,10 @@ def project_and_verify(
                     shutil.rmtree(output_root)
                     print("V5_LINUX_PROJECTION_REPAIRED reason=untrusted-state")
         output_root.mkdir(parents=True, exist_ok=True)
+        persistent_git = output_root / "linux/kernel/.git"
+        if projected_path_exists(persistent_git):
+            remove_projected_path(persistent_git)
+            print("V5_LINUX_PROJECTION_GIT_REMOVED path=%s" % persistent_git)
         apply_projection_delta(
             project_root,
             index_path,
@@ -417,8 +435,6 @@ def project_and_verify(
             previous_entries,
         )
         hashes = verify_projection(output_root, print_hashes=print_hashes)
-        if not clean_after:
-            initialize_kernel_git(output_root)
         write_projection_state(output_root, desired_entries)
     finally:
         try:
@@ -436,10 +452,26 @@ def main():
     parser.add_argument("--project-root", type=Path, required=True)
     parser.add_argument("--build-root", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, required=True)
+    parser.add_argument("--persistent-projection-root", type=Path)
+    parser.add_argument("--initialize-kernel-build-git", action="store_true")
     parser.add_argument("--clean-after", action="store_true")
     parser.add_argument("--print-source-hashes", action="store_true")
     args = parser.parse_args()
     try:
+        if args.initialize_kernel_build_git:
+            if args.clean_after or not args.persistent_projection_root:
+                fail(
+                    "kernel build Git initialization requires --persistent-projection-root "
+                    "and forbids --clean-after"
+                )
+            initialize_kernel_build_git(
+                args.output_root,
+                args.build_root,
+                args.persistent_projection_root,
+            )
+            return 0
+        if args.persistent_projection_root:
+            fail("--persistent-projection-root is only valid with --initialize-kernel-build-git")
         project_and_verify(
             args.project_root,
             args.build_root,

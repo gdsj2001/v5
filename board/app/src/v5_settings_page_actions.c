@@ -28,12 +28,34 @@ static void write_json_text(FILE *fp, const char *text)
     fputc('"', fp);
 }
 
+void v5_settings_page_mark_restart_pending(V5SettingsPage *page)
+{
+    unsigned int i;
+    if (!page || page->restart_pending) {
+        return;
+    }
+    page->restart_pending = 1;
+    if (page->save_return_label) {
+        lv_label_set_text(page->save_return_label, "保存并重启");
+    }
+    for (i = 0U; i < page->button_count; ++i) {
+        if (page->buttons[i] == page->save_return_button) {
+            page->button_actions[i] = V5_MAIN_PAGE_ACTION_SETTINGS_SAVE_RETURN;
+            break;
+        }
+    }
+    if (page->save_return_button) {
+        lv_obj_invalidate(page->save_return_button);
+    }
+}
+
 void v5_settings_page_parameter_changed_cb(void *user_data)
 {
     V5SettingsPage *page = (V5SettingsPage *)user_data;
     if (!page) {
         return;
     }
+    v5_settings_page_mark_restart_pending(page);
     v5_settings_page_set_status_text(page, 42, 221, 128, "参数已保存，等待保存并重启");
 }
 

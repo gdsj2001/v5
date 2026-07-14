@@ -23,6 +23,7 @@ void v5_settings_page_action_visual_bind(
     V5SettingsPage *page, lv_obj_t *button, const char *action);
 void v5_settings_page_popup_create(V5SettingsPage *page);
 void v5_settings_page_status_timer_cb(lv_timer_t *timer);
+void v5_settings_page_mark_restart_pending(V5SettingsPage *page);
 void v5_settings_page_parameter_changed_cb(void *user_data);
 void v5_settings_page_axis_zero_requested_cb(
     const char *axis,

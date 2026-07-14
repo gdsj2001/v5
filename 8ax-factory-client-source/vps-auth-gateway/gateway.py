@@ -9,6 +9,7 @@ import re
 import secrets
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 from datetime import datetime, timedelta, timezone
@@ -16,8 +17,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import remote_ssh_gateway
+
 SERVICE = "8ax-auth-gateway"
-VERSION = "2026-07-13-002"
+VERSION = "2026-07-14-001"
 STARTED_AT = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 DEALER_WEB_ROOT = Path(os.environ.get("AX8_DEALER_WEB_ROOT", "/opt/8ax-auth/web/dealer/current"))
 DEALER_CLIENT_ROOT = Path(os.environ.get("AX8_DEALER_CLIENT_ROOT", "/opt/8ax-auth/storage/dealer-client"))
@@ -1161,6 +1165,16 @@ SELECT COALESCE((SELECT json_build_object('success', true, 'message', 'IP 访问
             response["authorizationDeleted"] = authorization_deleted
             response["message"] = str(response.get("message") or "")
             response["message"] += " 已同步删除授权文件。" if authorization_deleted else " 未发现授权文件。"
+            try:
+                remote_ssh_gateway.sync_authorized_keys(_psql_json)
+            except remote_ssh_gateway.RemoteSshError as exc:
+                self._json(500, {
+                    "success": False,
+                    "message": "设备登记已删除，但远程 SSH key 清理失败：%s" % exc,
+                    "targetId": response.get("targetId"),
+                    "authorizationDeleted": authorization_deleted,
+                })
+                return
         self._json(200 if response.get("success") else 400, response)
 
     def _handle_dealer_review(self, body):
@@ -1749,18 +1763,18 @@ SELECT COALESCE((
         parsed = urlparse(self.path)
         return parsed.path + (("?" + parsed.query) if parsed.query else "")
 
-    def _challenge_ready(self, nonce, device_id):
+    def _challenge_ready(self, nonce, device_id, purpose="drive_profile_download"):
         sql = """
 SELECT COALESCE((
   SELECT json_build_object('nonce', nonce, 'device_id', device_id, 'expires_at', expires_at, 'used_at', used_at)::text
   FROM device_challenges
   WHERE nonce = :'nonce'
     AND device_id = :'device_id'
-    AND purpose = 'drive_profile_download'
+    AND purpose = :'purpose'
   LIMIT 1
 ), '') AS payload;
 """
-        result = _psql_json(sql, {"nonce": nonce, "device_id": device_id})
+        result = _psql_json(sql, {"nonce": nonce, "device_id": device_id, "purpose": purpose})
         if result.returncode != 0:
             return False, "device_challenge_invalid", "device challenge lookup failed"
         line = (result.stdout or "").strip().splitlines()[-1:] or [""]
@@ -1777,7 +1791,7 @@ SELECT COALESCE((
             return False, "device_challenge_invalid", "device challenge is expired"
         return True, "", ""
 
-    def _mark_challenge_used(self, nonce, device_id, used_path):
+    def _mark_challenge_used(self, nonce, device_id, used_path, purpose="drive_profile_download"):
         sql = """
 UPDATE device_challenges
    SET used_at = now(),
@@ -1785,7 +1799,7 @@ UPDATE device_challenges
        used_request_ip = NULLIF(:'used_request_ip', '')::inet
  WHERE nonce = :'nonce'
    AND device_id = :'device_id'
-   AND purpose = 'drive_profile_download'
+   AND purpose = :'purpose'
    AND used_at IS NULL
    AND expires_at > now()
 RETURNING nonce;
@@ -1793,6 +1807,7 @@ RETURNING nonce;
         result = _psql_json(sql, {
             "nonce": nonce,
             "device_id": device_id,
+            "purpose": purpose,
             "used_path": used_path[:512],
             "used_request_ip": self._client_ip(),
         })
@@ -1800,7 +1815,7 @@ RETURNING nonce;
             return False
         return bool((result.stdout or "").strip())
 
-    def _verify_device_request_signature(self, dna, device_record, auth_claims):
+    def _verify_device_request_signature(self, dna, device_record, auth_claims, purpose="drive_profile_download"):
         device_id = str(auth_claims.get("device_id") or "").strip()
         stored_device_id = str(device_record.get("device_id") or "").strip()
         auth_pub_sha = str(auth_claims.get("device_public_key_sha256") or "").strip().lower()
@@ -1830,7 +1845,7 @@ RETURNING nonce;
         parsed_time = _parse_iso_utc(timestamp)
         if parsed_time is None or abs((_utc_now() - parsed_time).total_seconds()) > 300:
             return False, "device_request_signature_invalid", "device request timestamp is outside the allowed window"
-        ok, code, message = self._challenge_ready(nonce, device_id)
+        ok, code, message = self._challenge_ready(nonce, device_id, purpose)
         if not ok:
             return False, code, message
         request_path = self._request_path_for_signature()
@@ -1840,7 +1855,7 @@ RETURNING nonce;
             "device_id": device_id,
             "nonce": nonce,
             "pl_device_dna_hash": _pl_dna_hash(dna),
-            "purpose": "drive_profile_download",
+            "purpose": purpose,
             "request_method": self.command,
             "request_path": request_path,
             "timestamp": timestamp,
@@ -1851,7 +1866,7 @@ RETURNING nonce;
             return False, "device_request_signature_invalid", "device request signature is not valid base64url"
         if not signature_bytes or not _openssl_verify_with_public_key(public_key_pem, _canonical_json_bytes(payload_data), signature_bytes):
             return False, "device_request_signature_invalid", "device request signature verification failed"
-        if not self._mark_challenge_used(nonce, device_id, request_path):
+        if not self._mark_challenge_used(nonce, device_id, request_path, purpose):
             return False, "device_challenge_invalid", "device challenge could not be consumed"
         return True, "", ""
 
@@ -1870,7 +1885,9 @@ RETURNING nonce;
             return False
         ok, code, message, claims = _verify_device_authorization(device_auth, dna)
         if ok:
-            request_ok, request_code, request_message = self._verify_device_request_signature(dna, device_record, claims)
+            request_ok, request_code, request_message = self._verify_device_request_signature(
+                dna, device_record, claims, "drive_profile_download"
+            )
             if not request_ok:
                 self._json(403, payload(request_code or "device_request_signature_invalid", {"message": request_message or "device request signature verification failed"}))
                 return False
@@ -1878,6 +1895,77 @@ RETURNING nonce;
             self._json(403, payload(code or "device_authorization_invalid", {"message": message or "设备授权文件校验失败。"}))
             return False
         return True
+
+    def _remote_ssh_gate(self):
+        dna = self._device_dna_from_request()
+        if not dna:
+            self._json(401, payload("device_dna_missing", {"message": "远程 SSH 登记需要本机 live DNA。"}))
+            return None
+        device_record = self._device_record_by_dna(dna)
+        if not device_record:
+            self._json(403, payload("device_not_factory_registered", {"message": "远程 SSH 前必须先登记本机 DNA。"}))
+            return None
+        device_auth = self._device_authorization_from_request()
+        if device_auth is None:
+            self._json(401, payload("device_authorization_missing", {"message": "远程 SSH 缺少设备授权文件。"}))
+            return None
+        ok, code, message, claims = _verify_device_authorization(device_auth, dna)
+        if not ok:
+            self._json(403, payload(code or "device_authorization_invalid", {"message": message or "设备授权文件校验失败。"}))
+            return None
+        permissions = [str(item) for item in claims.get("permissions", [])] if isinstance(claims.get("permissions"), list) else []
+        if "remote_ssh_tunnel" not in permissions:
+            self._json(403, payload("device_authorization_permission_missing", {"message": "设备授权缺少 remote_ssh_tunnel 权限。"}))
+            return None
+        request_ok, request_code, request_message = self._verify_device_request_signature(
+            dna, device_record, claims, "remote_ssh_tunnel"
+        )
+        if not request_ok:
+            self._json(403, payload(request_code or "device_request_signature_invalid", {"message": request_message or "设备请求签名校验失败。"}))
+            return None
+        return dna, device_record, claims
+
+    def _handle_remote_ssh_register(self, body):
+        gate = self._remote_ssh_gate()
+        if gate is None:
+            return
+        _dna, device_record, claims = gate
+        try:
+            data = json.loads(body.decode("utf-8") or "{}") if body else {}
+        except Exception:
+            self._json(400, payload("bad_json", {"message": "远程 SSH 登记内容不是有效 JSON。"}))
+            return
+        device_id = str(claims.get("device_id") or "").strip()
+        requested_device_id = str(data.get("deviceId") or data.get("device_id") or device_id).strip()
+        if requested_device_id != device_id:
+            self._json(403, payload("device_request_signature_invalid", {"message": "远程 SSH 设备 ID 与授权身份不一致。"}))
+            return
+        try:
+            result = remote_ssh_gateway.register_tunnel(
+                _psql_json,
+                device_id,
+                device_record.get("device_public_key_pem"),
+                device_record.get("device_public_key_sha256"),
+                self._client_ip(),
+            )
+        except remote_ssh_gateway.RemoteSshError as exc:
+            self._json(503, payload("remote_ssh_register_failed", {"message": str(exc)}))
+            return
+        result.update({"success": True, "online": False, "message": "远程 SSH 隧道身份和端口已登记。"})
+        self._json(200, result)
+
+    def _handle_admin_remote_ssh_status(self):
+        query = parse_qs(urlparse(self.path).query)
+        device_id = str((query.get("deviceId", [""])[0] if query else "") or "").strip()
+        if not re.fullmatch(r"\d{6}", device_id):
+            self._json(400, payload("bad_device_id", {"message": "deviceId must be 6 digits"}))
+            return
+        try:
+            response = remote_ssh_gateway.tunnel_status(_psql_json, device_id)
+        except remote_ssh_gateway.RemoteSshError as exc:
+            self._json(503, payload("remote_ssh_status_failed", {"message": str(exc)}))
+            return
+        self._json(200, response)
 
     def _handle_device_challenge(self, body):
         if not _ensure_device_security_schema():
@@ -1893,7 +1981,7 @@ RETURNING nonce;
         if not re.fullmatch(r"\d{6}", device_id or ""):
             self._json(400, payload("bad_device_id", {"message": "device_id must be 6 digits"}))
             return
-        if purpose != "drive_profile_download":
+        if purpose not in ("drive_profile_download", "remote_ssh_tunnel"):
             self._json(400, payload("bad_challenge_purpose", {"message": "challenge purpose is not supported"}))
             return
         sql = """
@@ -1950,12 +2038,13 @@ WHERE device_id = :'device_id';
         expires_at = _iso_utc(_utc_now() + timedelta(minutes=5))
         insert_sql = """
 INSERT INTO device_challenges(nonce, device_id, purpose, request_ip, expires_at)
-VALUES (:'nonce', :'device_id', 'drive_profile_download', NULLIF(:'ip_address', '')::inet, :'expires_at'::timestamptz)
+VALUES (:'nonce', :'device_id', :'purpose', NULLIF(:'ip_address', '')::inet, :'expires_at'::timestamptz)
 RETURNING nonce;
 """
         inserted = _psql_json(insert_sql, {
             "nonce": nonce,
             "device_id": device_id,
+            "purpose": purpose,
             "ip_address": self._client_ip(),
             "expires_at": expires_at,
         })
@@ -1967,7 +2056,7 @@ RETURNING nonce;
             "ok": True,
             "deviceId": device_id,
             "nonce": nonce,
-            "purpose": "drive_profile_download",
+            "purpose": purpose,
             "expiresAt": expires_at,
             "signatureSchema": DEVICE_REQUEST_SIGNATURE_SCHEMA,
         }))
@@ -2278,6 +2367,10 @@ RETURNING device_id;
             if self._admin_auth_ok():
                 self._handle_admin_devices_json()
             return
+        if path == "/api/v1/admin/devices/remote-ssh":
+            if self._admin_auth_ok():
+                self._handle_admin_remote_ssh_status()
+            return
         if host.startswith(("dealer.cjwsjzyy.xyz", "dealer.3dtouch.top")) and path == "/employee-register":
             self._employee_register_page()
             return
@@ -2329,6 +2422,9 @@ RETURNING device_id;
             return
         if path == "/api/v1/device/challenge":
             self._handle_device_challenge(body)
+            return
+        if path == "/api/v1/device/remote-ssh/register":
+            self._handle_remote_ssh_register(body)
             return
         if path == "/api/v1/dealer/register":
             try:

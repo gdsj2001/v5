@@ -2,6 +2,7 @@
 #include "v5_linuxcncrsh_client.h"
 #include "v5_native_home.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -103,6 +104,7 @@ int main(void)
         return 8;
     }
     memset(&axis, 0, sizeof(axis));
+    axis.axis = 'C';
     axis.status_slot = 4U;
     axis.max_velocity = 833.333333333;
     if (!v5_native_home_format_increment(&axis, -3599.971, line, sizeof(line)) ||
@@ -112,6 +114,12 @@ int main(void)
     if (!v5_native_home_format_increment(&axis, 1.0, line, sizeof(line)) ||
         strcmp(line, "Set Jog_Incr 4 50000.000000 1.000000") != 0) {
         return 12;
+    }
+    if (fabs(v5_native_home_target_delta('C', -3599.999, 0.0) - (-0.001)) > 1.0e-6 ||
+        fabs(v5_native_home_target_delta('C', 359.999, 0.0) - 0.001) > 1.0e-6 ||
+        fabs(v5_native_home_target_delta('C', -1799.976, 0.024)) > 1.0e-6 ||
+        fabs(v5_native_home_target_delta('X', -12.5, 0.0) - 12.5) > 1.0e-9) {
+        return 16;
     }
     if (v5_native_home_joint_needs_sync(1, 1) != 0 ||
         v5_native_home_joint_needs_sync(1, 0) != 1 ||
