@@ -31,6 +31,12 @@ int v5_native_home_positions_still(
     const double *current,
     unsigned int axis_count);
 
+const char *v5_native_home_safety_reject_code(
+    int estop_known,
+    int estop_active,
+    int machine_known,
+    int machine_enabled);
+
 V5LinuxcncrshSendStatus v5_native_home_send(
     const V5LinuxcncrshConfig *config,
     const V5NativeMotionParameters *parameters,

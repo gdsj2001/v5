@@ -124,6 +124,12 @@ int main(void)
         v5_native_home_positions_still(still_previous, still_current, 0U)) {
         return 14;
     }
+    if (strcmp(v5_native_home_safety_reject_code(1, 1, 1, 0), "HOME_PRECONDITION_ESTOP") != 0 ||
+        strcmp(v5_native_home_safety_reject_code(1, 0, 1, 0), "HOME_PRECONDITION_DISABLED") != 0 ||
+        v5_native_home_safety_reject_code(1, 0, 1, 1) != 0 ||
+        v5_native_home_safety_reject_code(0, 0, 0, 0) != 0) {
+        return 15;
+    }
 
     printf(
         "v5 command gate prepared: kind=%d name=%s owner=%s accepted=%d line=%s send_status=%d\n",

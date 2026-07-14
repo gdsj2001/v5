@@ -21,8 +21,6 @@
 #include "v5_main_page_internal.h"
 #include "v5_popup_layout.h"
 
-void v5_main_page_internal_show_power_on_home_popup(V5MainPage *page, int status_known);
-
 int v5_main_page_internal_action_needs_native_readback_refresh(V5MainPageActionKind action)
 {
     switch (action) {
@@ -43,6 +41,43 @@ int v5_main_page_internal_action_needs_native_readback_refresh(V5MainPageActionK
     default:
         return 0;
     }
+}
+
+const char *v5_main_page_internal_home_safety_precondition_code(const V5MainPage *page)
+{
+    if (!page) {
+        return 0;
+    }
+    if (v5_native_readback_safety_estop_known(&page->native_readback) &&
+        page->native_readback.safety_estop_active) {
+        return "HOME_PRECONDITION_ESTOP";
+    }
+    if (v5_native_readback_machine_enable_known(&page->native_readback) &&
+        !page->native_readback.machine_enabled) {
+        return "HOME_PRECONDITION_DISABLED";
+    }
+    return 0;
+}
+
+void v5_main_page_internal_block_home_for_safety(
+    V5MainPage *page,
+    V5MainPageActionReport *report,
+    const char *readback_code)
+{
+    if (!page || !report || !readback_code) {
+        return;
+    }
+    memset(report, 0, sizeof(*report));
+    report->action = V5_MAIN_PAGE_ACTION_HOME;
+    report->local_only = 1;
+    report->send_status = V5_COMMAND_GATE_SEND_INVALID;
+    report->request.kind = V5_COMMAND_UI_LOCAL;
+    report->command.kind = V5_COMMAND_UI_LOCAL;
+    report->command.name = "home_safety_precondition";
+    report->command.owner = "native_home_precondition";
+    snprintf(report->readback_code, sizeof(report->readback_code), "%s", readback_code);
+    v5_main_page_internal_show_home_precondition_popup(page, readback_code);
+    page->last_action = *report;
 }
 
 int v5_main_page_internal_action_requires_power_on_home(
@@ -97,7 +132,9 @@ void v5_main_page_internal_block_action_for_power_on_home(
         sizeof(report->readback_code),
         "%s",
         status_known ? "POWER_ON_HOME_REQUIRED" : "POWER_ON_HOME_STATUS_UNAVAILABLE");
-    v5_main_page_internal_show_power_on_home_popup(page, status_known);
+    v5_main_page_internal_show_home_precondition_popup(
+        page,
+        status_known ? "POWER_ON_HOME_REQUIRED" : "POWER_ON_HOME_STATUS_UNAVAILABLE");
     page->last_action = *report;
 }
 
@@ -233,14 +270,12 @@ void v5_main_page_internal_create_power_on_home_popup(V5MainPage *page)
     page->power_on_home_popup_close = popup.close;
 }
 
-void v5_main_page_internal_show_power_on_home_popup(V5MainPage *page, int status_known)
+void v5_main_page_internal_show_home_precondition_popup(V5MainPage *page, const char *alias_code)
 {
     V5NativeOperatorErrorStatus operator_message;
-    const char *alias_code = status_known ?
-        "POWER_ON_HOME_REQUIRED" : "POWER_ON_HOME_STATUS_UNAVAILABLE";
     char message[384];
     int opening;
-    if (!page || !page->power_on_home_popup || !page->power_on_home_popup_message) {
+    if (!page || !alias_code || !page->power_on_home_popup || !page->power_on_home_popup_message) {
         return;
     }
     opening = lv_obj_has_flag(page->power_on_home_popup, LV_OBJ_FLAG_HIDDEN);

@@ -191,10 +191,11 @@ static void execute_prepared_command_if_enabled(V5MainPage *page, V5MainPageActi
              (int)sizeof(report->command_line) - 1, gate_result.command_line);
     snprintf(report->readback_code, sizeof(report->readback_code), "%.*s",
              (int)sizeof(report->readback_code) - 1, gate_result.readback_code);
-    if (strcmp(report->readback_code, "POWER_ON_HOME_REQUIRED") == 0) {
-        v5_main_page_internal_show_power_on_home_popup(page, 1);
-    } else if (strcmp(report->readback_code, "POWER_ON_HOME_STATUS_UNAVAILABLE") == 0) {
-        v5_main_page_internal_show_power_on_home_popup(page, 0);
+    if (strcmp(report->readback_code, "POWER_ON_HOME_REQUIRED") == 0 ||
+        strcmp(report->readback_code, "POWER_ON_HOME_STATUS_UNAVAILABLE") == 0 ||
+        strcmp(report->readback_code, "HOME_PRECONDITION_ESTOP") == 0 ||
+        strcmp(report->readback_code, "HOME_PRECONDITION_DISABLED") == 0) {
+        v5_main_page_internal_show_home_precondition_popup(page, report->readback_code);
     }
     v5_lvgl_clock_advance();
     if (home_button_transaction) {
@@ -331,6 +332,13 @@ int v5_main_page_trigger_action(V5MainPage *page, V5MainPageActionKind action, V
     }
     if (v5_main_page_internal_action_needs_native_readback_refresh(action) && page->native_readback_refresh_cb) {
         page->native_readback_refresh_cb(page->native_readback_refresh_user_data, action);
+    }
+    if (action == V5_MAIN_PAGE_ACTION_HOME) {
+        const char *safety_precondition = v5_main_page_internal_home_safety_precondition_code(page);
+        if (safety_precondition) {
+            v5_main_page_internal_block_home_for_safety(page, out, safety_precondition);
+            return 1;
+        }
     }
     if (v5_main_page_internal_action_requires_power_on_home(page, action) &&
         (!v5_native_readback_all_homed_known(&page->native_readback) ||

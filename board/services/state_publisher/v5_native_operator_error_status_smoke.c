@@ -53,6 +53,13 @@ int main(void)
         strcmp(status.title_cn, "需要回零") != 0 || strstr(status.reason_cn, "POWER_ON_HOME") != NULL) {
         return 5;
     }
+    if (!v5_native_operator_error_status_from_alias("HOME_PRECONDITION_ESTOP", &status) ||
+        status.display_mode != V5_NATIVE_OPERATOR_ERROR_DISPLAY_POPUP ||
+        strcmp(status.title_cn, "请先取消急停") != 0 ||
+        strstr(status.reason_cn, "不能执行回零") == NULL ||
+        strstr(status.next_cn, "取消急停") == NULL) {
+        return 9;
+    }
     if (v5_native_operator_error_status_from_alias("UNKNOWN_ALIAS", &status)) {
         return 6;
     }

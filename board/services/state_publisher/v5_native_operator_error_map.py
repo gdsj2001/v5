@@ -92,9 +92,10 @@ ALIAS_PRESENTATION = {
         "机器当前处于急停状态",
         GROUP_PRESENTATION["SAFETY_ENABLE"][1],
     ),
-    "HOME_PRECONDITION_ESTOP": GROUP_PRESENTATION["SAFETY_ENABLE"][:1] + (
+    "HOME_PRECONDITION_ESTOP": (
+        "请先取消急停",
         "机器当前处于急停状态，不能执行回零",
-        GROUP_PRESENTATION["SAFETY_ENABLE"][1],
+        "先点击右下角“取消急停”，确认机器已使能后重新按回零",
     ),
     "DISABLED": GROUP_PRESENTATION["SAFETY_ENABLE"][:1] + (
         "机器当前未上使能",

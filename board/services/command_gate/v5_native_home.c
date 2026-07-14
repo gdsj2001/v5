@@ -1,4 +1,5 @@
 #include "v5_native_home.h"
+#include "v5_native_safety.h"
 
 #include <limits.h>
 #include <math.h>
@@ -32,6 +33,21 @@ static void result_code(V5NativeHomeResult *result, const char *code)
     if (result) {
         snprintf(result->code, sizeof(result->code), "%s", code ? code : "HOME_FAILED");
     }
+}
+
+const char *v5_native_home_safety_reject_code(
+    int estop_known,
+    int estop_active,
+    int machine_known,
+    int machine_enabled)
+{
+    if (estop_known && estop_active) {
+        return "HOME_PRECONDITION_ESTOP";
+    }
+    if (machine_known && !machine_enabled) {
+        return "HOME_PRECONDITION_DISABLED";
+    }
+    return 0;
 }
 
 static int rotary_axis(char axis)
@@ -594,10 +610,27 @@ V5LinuxcncrshSendStatus v5_native_home_send(
     const V5NativeMotionParameters *parameters,
     V5NativeHomeResult *result)
 {
+    V5NativeSafetyResult safety;
+    const char *safety_reject_code;
     int stillness;
     result_init(result);
     if (!config || !parameters || !parameters->loaded ||
-        parameters->active_axis_count == 0U || !wait_machine_enabled(config)) {
+        parameters->active_axis_count == 0U) {
+        result_code(result, "HOME_NATIVE_PARAMETERS_OR_MACHINE_UNAVAILABLE");
+        return V5_LINUXCNCRSH_SEND_INVALID;
+    }
+    if (v5_native_safety_read_status(&safety) == V5_NATIVE_SAFETY_SEND_SENT) {
+        safety_reject_code = v5_native_home_safety_reject_code(
+            safety.safety_estop_known,
+            safety.safety_estop_active,
+            safety.machine_enable_known,
+            safety.machine_enabled);
+        if (safety_reject_code) {
+            result_code(result, safety_reject_code);
+            return V5_LINUXCNCRSH_SEND_INVALID;
+        }
+    }
+    if (!wait_machine_enabled(config)) {
         result_code(result, "HOME_NATIVE_PARAMETERS_OR_MACHINE_UNAVAILABLE");
         return V5_LINUXCNCRSH_SEND_INVALID;
     }

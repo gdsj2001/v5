@@ -49,6 +49,13 @@ void v5_main_page_internal_block_action_for_power_on_home(
     V5MainPageActionKind action,
     V5MainPageActionReport *report);
 
+void v5_main_page_internal_block_home_for_safety(
+    V5MainPage *page,
+    V5MainPageActionReport *report,
+    const char *readback_code);
+
+const char *v5_main_page_internal_home_safety_precondition_code(const V5MainPage *page);
+
 lv_coord_t v5_main_page_internal_clamp_coord(double value, lv_coord_t min_value, lv_coord_t max_value);
 
 double v5_main_page_internal_clamp_double(double value, double min_value, double max_value);
@@ -262,7 +269,7 @@ void v5_main_page_internal_set_toolpath_v3_center_dot(lv_obj_t *dot, const V5Too
 
 void v5_main_page_internal_set_toolpath_v3_dot_center(lv_obj_t *dot, const V5ToolpathScreenPoint *point, int valid);
 
-void v5_main_page_internal_show_power_on_home_popup(V5MainPage *page, int status_known);
+void v5_main_page_internal_show_home_precondition_popup(V5MainPage *page, const char *alias_code);
 
 void v5_main_page_internal_spindle_override_reset_event_cb(lv_event_t *event);
 

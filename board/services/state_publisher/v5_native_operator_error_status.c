@@ -230,8 +230,15 @@ int v5_native_operator_error_status_from_alias(
             "关闭提示，等待状态恢复并完成机械全轴回零后再操作");
         return 1;
     }
-    if (strcmp(alias_code, "ESTOP") == 0 ||
-        strcmp(alias_code, "HOME_PRECONDITION_ESTOP") == 0) {
+    if (strcmp(alias_code, "HOME_PRECONDITION_ESTOP") == 0) {
+        set_alias(
+            status,
+            "请先取消急停",
+            "机器当前处于急停状态，不能执行回零",
+            "先点击右下角“取消急停”，确认机器已使能后重新按回零");
+        return 1;
+    }
+    if (strcmp(alias_code, "ESTOP") == 0) {
         set_alias(
             status,
             "机器状态不允许动作",

@@ -103,6 +103,11 @@ def main() -> int:
     assert alias.matched and alias.title_cn == "需要回零"
     assert alias.display_mode == DISPLAY_POPUP
     assert "POWER_ON_HOME" not in alias.reason_cn
+    estop_home = translate_internal_alias("HOME_PRECONDITION_ESTOP")
+    assert estop_home.matched and estop_home.title_cn == "请先取消急停"
+    assert estop_home.display_mode == DISPLAY_POPUP
+    assert "不能执行回零" in estop_home.reason_cn
+    assert "取消急停" in estop_home.next_cn
     print(f"v5_native_operator_error_map_test PASS count={checked}")
     return 0
 

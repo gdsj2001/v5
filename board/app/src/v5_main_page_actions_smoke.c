@@ -1,4 +1,6 @@
 #include "v5_main_page.h"
+#include "v5_motion_model_registry.h"
+#include "v5_main_page_internal.h"
 #include "v5_button_visuals.h"
 #include "v5_command_gate_ipc.h"
 #include "v5_lvgl_headless.h"
@@ -392,6 +394,36 @@ static int expect_power_on_home_block(
     return lv_obj_has_flag(page->power_on_home_popup, LV_OBJ_FLAG_HIDDEN);
 }
 
+static int expect_estop_home_block(V5MainPage *page)
+{
+    V5MainPageActionReport report;
+    const char *message;
+    if (!page || !v5_main_page_trigger_action(page, V5_MAIN_PAGE_ACTION_HOME, &report)) {
+        return 0;
+    }
+    if (report.action != V5_MAIN_PAGE_ACTION_HOME || report.prepared || !report.local_only ||
+        report.executed || report.send_status != V5_COMMAND_GATE_SEND_INVALID ||
+        report.request.kind != V5_COMMAND_UI_LOCAL ||
+        !same_text(report.command.name, "home_safety_precondition") ||
+        !same_text(report.command.owner, "native_home_precondition") ||
+        report.command.accepted || !same_text(report.readback_code, "HOME_PRECONDITION_ESTOP")) {
+        return 0;
+    }
+    if (!page->power_on_home_popup || !page->power_on_home_popup_message ||
+        lv_obj_has_flag(page->power_on_home_popup, LV_OBJ_FLAG_HIDDEN)) {
+        return 0;
+    }
+    message = lv_label_get_text(page->power_on_home_popup_message);
+    if (!message || !strstr(message, "提示: 请先取消急停") ||
+        !strstr(message, "原因: 机器当前处于急停状态，不能执行回零") ||
+        !strstr(message, "下一步:") || !strstr(message, "取消急停") ||
+        strstr(message, "HOME_PRECONDITION_ESTOP")) {
+        return 0;
+    }
+    lv_event_send(page->power_on_home_popup_close, LV_EVENT_RELEASED, 0);
+    return lv_obj_has_flag(page->power_on_home_popup, LV_OBJ_FLAG_HIDDEN);
+}
+
 int main(void)
 {
     V5MainPage page;
@@ -498,6 +530,21 @@ int main(void)
         v5_native_readback_set_all_homed(&readback, 1);
         v5_main_page_set_native_readback(&page, &readback);
         v5_main_page_select_all_axes(&page);
+    }
+    {
+        V5NativeReadback readback;
+        v5_native_readback_init(&readback);
+        v5_native_readback_set_all_homed(&readback, 1);
+        v5_native_readback_set_safety_estop(&readback, 1);
+        v5_native_readback_set_machine_enabled(&readback, 0);
+        v5_main_page_set_native_readback(&page, &readback);
+        v5_main_page_select_all_axes(&page);
+        if (!expect_estop_home_block(&page)) {
+            return 73;
+        }
+        v5_native_readback_set_safety_estop(&readback, 0);
+        v5_native_readback_set_machine_enabled(&readback, 1);
+        v5_main_page_set_native_readback(&page, &readback);
     }
     v5_program_controller_init(&controller);
     v5_main_page_bind_program_controller(&page, &controller);
