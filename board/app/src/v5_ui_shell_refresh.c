@@ -102,8 +102,16 @@ static int shell_status_display_equal(const V5UiStatusView *before, const V5UiSt
         !shell_axis_values_equal(before->mcs, after->mcs, 1000.0)) {
         return 0;
     }
+    if ((changed_mask & V5_STATUS_VALID_MCS) != 0U &&
+        !shell_axis_values_equal(before->raw_mcs, after->raw_mcs, 1000.0)) {
+        return 0;
+    }
     if ((changed_mask & V5_STATUS_VALID_CMD_MCS) != 0U &&
         !shell_axis_values_equal(before->cmd_mcs, after->cmd_mcs, 1000.0)) {
+        return 0;
+    }
+    if ((changed_mask & V5_STATUS_VALID_CMD_MCS) != 0U &&
+        !shell_axis_values_equal(before->raw_cmd_mcs, after->raw_cmd_mcs, 1000.0)) {
         return 0;
     }
     if ((changed_mask & V5_STATUS_VALID_TRAJECTORY) != 0U && !shell_trajectory_equal(before, after)) {

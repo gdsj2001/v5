@@ -22,6 +22,30 @@ static int finite_value(double value)
     return isfinite(value);
 }
 
+double v5_ui_status_view_rotary_phase_deg(double value)
+{
+    double phase;
+    if (!isfinite(value)) {
+        return value;
+    }
+    phase = fmod(value, 360.0);
+    if (phase < 0.0) {
+        phase += 360.0;
+    }
+    if (phase >= 360.0 || phase == 0.0) {
+        return 0.0;
+    }
+    return phase;
+}
+
+static void normalize_rotary_display_slots(double axis[V5_STATUS_AXIS_COUNT])
+{
+    unsigned int i;
+    for (i = 3U; i < V5_STATUS_AXIS_COUNT; ++i) {
+        axis[i] = v5_ui_status_view_rotary_phase_deg(axis[i]);
+    }
+}
+
 void v5_ui_status_view_init(V5UiStatusView *view)
 {
     if (!view) {
@@ -37,6 +61,8 @@ void v5_ui_status_view_clear_dynamic(V5UiStatusView *view)
         return;
     }
     view->valid_mask &= ~(V5_STATUS_VALID_MCS | V5_STATUS_VALID_CMD_MCS | V5_STATUS_VALID_TRAJECTORY);
+    memset(view->raw_mcs, 0, sizeof(view->raw_mcs));
+    memset(view->raw_cmd_mcs, 0, sizeof(view->raw_cmd_mcs));
     memset(view->mcs, 0, sizeof(view->mcs));
     memset(view->cmd_mcs, 0, sizeof(view->cmd_mcs));
     memset(view->trajectory, 0, sizeof(view->trajectory));
@@ -62,12 +88,16 @@ int v5_ui_status_view_from_frame(V5UiStatusView *view, const V5StatusShmFrame *f
     view->frame_flags = frame->flags;
     view->status_epoch = frame->status_epoch;
     if ((frame->typed_valid_mask & V5_STATUS_VALID_MCS) && finite_axis(frame->mcs)) {
+        memcpy(view->raw_mcs, frame->mcs, sizeof(view->raw_mcs));
         memcpy(view->mcs, frame->mcs, sizeof(view->mcs));
+        normalize_rotary_display_slots(view->mcs);
     } else {
         view->valid_mask &= ~V5_STATUS_VALID_MCS;
     }
     if ((frame->typed_valid_mask & V5_STATUS_VALID_CMD_MCS) && finite_axis(frame->cmd_mcs)) {
+        memcpy(view->raw_cmd_mcs, frame->cmd_mcs, sizeof(view->raw_cmd_mcs));
         memcpy(view->cmd_mcs, frame->cmd_mcs, sizeof(view->cmd_mcs));
+        normalize_rotary_display_slots(view->cmd_mcs);
     } else {
         view->valid_mask &= ~V5_STATUS_VALID_CMD_MCS;
     }

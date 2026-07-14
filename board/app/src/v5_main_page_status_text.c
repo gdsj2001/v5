@@ -152,6 +152,9 @@ void v5_main_page_internal_format_main_page_wcs_coordinate(char *out, size_t out
     }
 
     value = status->mcs[axis] - active_offsets[axis];
+    if (axis >= 3U) {
+        value = v5_ui_status_view_rotary_phase_deg(value);
+    }
     if (value > -0.0005 && value < 0.0005) {
         value = 0.0;
     }

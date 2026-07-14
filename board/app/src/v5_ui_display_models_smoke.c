@@ -24,6 +24,10 @@ static int build_status(V5UiStatusView *status)
         frame.mcs[i] = (double)i + 1.25;
         frame.cmd_mcs[i] = (double)i + 1.00;
     }
+    frame.mcs[3] = -720.25;
+    frame.mcs[4] = -3599.999;
+    frame.cmd_mcs[3] = 720.0;
+    frame.cmd_mcs[4] = 360.25;
     frame.trajectory_count = 3u;
     frame.trajectory[0].axis[0] = 0.0;
     frame.trajectory[0].axis[1] = 0.0;
@@ -68,6 +72,23 @@ int main(void)
     }
     if (strcmp(panel.feed_override_text, "110.0%") != 0) {
         return 5;
+    }
+    if (fabs(status.raw_mcs[3] + 720.25) > 1.0e-9 ||
+        fabs(status.raw_mcs[4] + 3599.999) > 1.0e-9 ||
+        fabs(status.mcs[3] - 359.75) > 1.0e-9 ||
+        fabs(status.mcs[4] - 0.001) > 1.0e-9 ||
+        fabs(status.cmd_mcs[3]) > 1.0e-9 ||
+        fabs(status.cmd_mcs[4] - 0.25) > 1.0e-9) {
+        return 11;
+    }
+    if (strcmp(panel.lines[3].mcs_text, "+00359.750") != 0 ||
+        strcmp(panel.lines[4].mcs_text, "+00000.001") != 0 ||
+        v5_ui_status_view_rotary_phase_deg(360.0) != 0.0 ||
+        v5_ui_status_view_rotary_phase_deg(-360.0) != 0.0 ||
+        v5_ui_status_view_rotary_phase_deg(720.0) != 0.0 ||
+        fabs(v5_ui_status_view_rotary_phase_deg(status.mcs[4] - 1.0) - 359.001) > 1.0e-9 ||
+        fabs(v5_ui_status_view_rotary_phase_deg(359.999) - 359.999) > 1.0e-9) {
+        return 12;
     }
 
     v5_toolpath_display_from_status(&status, V5_TOOLPATH_DISPLAY_XY, 200.0, 100.0, &display);

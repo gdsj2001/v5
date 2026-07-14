@@ -80,7 +80,7 @@ void v5_coordinate_panel_from_status(const V5UiStatusView *status, V5CoordinateP
             text_unavailable(panel->lines[i].cmd_text, sizeof(panel->lines[i].cmd_text));
         }
         if (mcs_valid && cmd_valid) {
-            text_value(panel->lines[i].following_error_text, sizeof(panel->lines[i].following_error_text), status->mcs[i] - status->cmd_mcs[i]);
+            text_value(panel->lines[i].following_error_text, sizeof(panel->lines[i].following_error_text), status->raw_mcs[i] - status->raw_cmd_mcs[i]);
         } else {
             text_unavailable(panel->lines[i].following_error_text, sizeof(panel->lines[i].following_error_text));
         }

@@ -594,6 +594,10 @@ target_include_directories(v5_ui_display_models_smoke PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 
+if(NOT WIN32)
+    target_link_libraries(v5_ui_display_models_smoke PRIVATE m)
+endif()
+
 add_executable(v5_ui_shm_refresh_smoke
     src/v5_ui_shm_refresh_smoke.c
     src/v5_ui_model.c
@@ -607,6 +611,9 @@ target_include_directories(v5_ui_shm_refresh_smoke PRIVATE
 )
 
 target_link_libraries(v5_ui_shm_refresh_smoke PRIVATE v5_status_shm_projection)
+if(NOT WIN32)
+    target_link_libraries(v5_ui_shm_refresh_smoke PRIVATE m)
+endif()
 
 add_executable(v5_command_gate_smoke
     ../services/command_gate/v5_command_gate_smoke.c

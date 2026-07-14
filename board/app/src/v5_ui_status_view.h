@@ -9,6 +9,9 @@ typedef struct V5UiStatusView {
     uint32_t valid_mask;
     uint32_t frame_flags;
     uint64_t status_epoch;
+    double raw_mcs[V5_STATUS_AXIS_COUNT];
+    double raw_cmd_mcs[V5_STATUS_AXIS_COUNT];
+    /* Display coordinates: rotary slots are folded to [0, 360), raw evidence stays above. */
     double mcs[V5_STATUS_AXIS_COUNT];
     double cmd_mcs[V5_STATUS_AXIS_COUNT];
     V5StatusPoint trajectory[V5_STATUS_TRAJECTORY_POINT_COUNT];
@@ -21,6 +24,7 @@ typedef struct V5UiStatusView {
 
 void v5_ui_status_view_init(V5UiStatusView *view);
 int v5_ui_status_view_from_frame(V5UiStatusView *view, const V5StatusShmFrame *frame);
+double v5_ui_status_view_rotary_phase_deg(double value);
 void v5_ui_status_view_clear_dynamic(V5UiStatusView *view);
 int v5_ui_status_view_has_dynamic(const V5UiStatusView *view);
 
