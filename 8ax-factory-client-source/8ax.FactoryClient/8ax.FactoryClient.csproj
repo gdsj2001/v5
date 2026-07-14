@@ -11,9 +11,9 @@
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <AssemblyName>8ax.FactoryClient</AssemblyName>
     <CodePage>65001</CodePage>
-    <Version>0.1.13</Version>
-    <FileVersion>0.1.13.1</FileVersion>
-    <AssemblyVersion>0.1.13.1</AssemblyVersion>
+    <Version>0.1.14</Version>
+    <FileVersion>0.1.14.2</FileVersion>
+    <AssemblyVersion>0.1.14.2</AssemblyVersion>
   </PropertyGroup>
 
 </Project>

@@ -16,7 +16,8 @@
 #define V5_MOTION_VALUE_MIN_LIMIT 0x04U
 #define V5_MOTION_VALUE_MAX_LIMIT 0x08U
 #define V5_MOTION_VALUE_HOME_SEQUENCE 0x10U
-#define V5_MOTION_VALUE_ALL 0x1fU
+#define V5_MOTION_VALUE_SCALE 0x20U
+#define V5_MOTION_VALUE_ALL 0x3fU
 
 static const char k_axes[V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT] = {'X', 'Y', 'Z', 'A', 'B', 'C'};
 
@@ -191,11 +192,16 @@ static void parse_joint_value(
     char *end = 0;
     unsigned long joint;
     unsigned int i;
-    int home_sequence;
-    if (!parameters || !section || strncmp(section, "JOINT_", 6U) != 0 ||
-        strcmp(key, "HOME_SEQUENCE") != 0 || !parse_int(value, &home_sequence)) {
+    int home_sequence = 0;
+    double scale = 0.0;
+    int is_home_sequence;
+    int is_scale;
+    if (!parameters || !section || strncmp(section, "JOINT_", 6U) != 0) {
         return;
     }
+    is_home_sequence = strcmp(key, "HOME_SEQUENCE") == 0 && parse_int(value, &home_sequence);
+    is_scale = strcmp(key, "SCALE") == 0 && parse_double(value, &scale) && isfinite(scale) && scale != 0.0;
+    if (!is_home_sequence && !is_scale) return;
     joint = strtoul(section + 6, &end, 10);
     if (end == section + 6 || *end || joint >= V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT) {
         return;
@@ -203,8 +209,13 @@ static void parse_joint_value(
     for (i = 0U; i < V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT; ++i) {
         V5NativeMotionAxisParameters *axis = &parameters->axes[i];
         if (axis->active && axis->status_slot == (unsigned int)joint) {
-            axis->home_sequence = home_sequence;
-            axis->valid_mask |= V5_MOTION_VALUE_HOME_SEQUENCE;
+            if (is_home_sequence) {
+                axis->home_sequence = home_sequence;
+                axis->valid_mask |= V5_MOTION_VALUE_HOME_SEQUENCE;
+            } else {
+                axis->arrival_tolerance_units = 1.0 / fabs(scale);
+                axis->valid_mask |= V5_MOTION_VALUE_SCALE;
+            }
             return;
         }
     }
@@ -224,7 +235,7 @@ static int parameters_complete(const V5NativeMotionParameters *parameters)
         }
         if (axis->valid_mask != V5_MOTION_VALUE_ALL || axis->max_velocity <= 0.0 ||
             axis->max_acceleration <= 0.0 || axis->min_limit >= axis->max_limit ||
-            axis->home_sequence < 0) {
+            axis->home_sequence < 0 || axis->arrival_tolerance_units <= 0.0) {
             return 0;
         }
     }

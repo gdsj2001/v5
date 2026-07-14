@@ -2,8 +2,8 @@ namespace EightAxis.FactoryClient;
 
 internal static class ClientInfo
 {
-    public const string Version = "0.1.13";
-    public const string Build = "2026.07.14.001";
+    public const string Version = "0.1.14";
+    public const string Build = "2026.07.14.002";
 }
 
 internal sealed record HealthResponse(
@@ -121,18 +121,6 @@ internal sealed record DeviceIpAccessRecord(
     string? Ip,
     string? Status,
     string? Path);
-
-internal sealed record RemoteSshStatusResponse(
-    bool Success,
-    string DeviceId,
-    bool Registered,
-    bool Online,
-    int? AssignedPort,
-    string? VpsHost,
-    int? VpsPort,
-    string? TunnelUser,
-    DateTimeOffset? UpdatedAt,
-    string? Message);
 
 internal sealed record DeleteRequest(
     string TargetType,

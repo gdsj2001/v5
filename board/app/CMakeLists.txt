@@ -84,11 +84,13 @@ add_executable(v5_lvgl_shell
     src/v5_main_page_toolpath_program.c
     src/v5_main_page_program_preview.c
     src/v5_main_page_input.c
+    src/v5_main_page_override.c
     src/v5_main_page_action_guard.c
     src/v5_main_page_button_state.c
     src/v5_main_page_view.c
     src/v5_main_page_program_state.c
     src/v5_main_page_action_execute.c
+    src/v5_main_page_home_transaction.c
     src/v5_settings_page.c
     src/v5_settings_page_support.c
     src/v5_settings_page_status.c
@@ -153,11 +155,13 @@ add_executable(v5_program_page_double_click_smoke
     src/v5_main_page_toolpath_program.c
     src/v5_main_page_program_preview.c
     src/v5_main_page_input.c
+    src/v5_main_page_override.c
     src/v5_main_page_action_guard.c
     src/v5_main_page_button_state.c
     src/v5_main_page_view.c
     src/v5_main_page_program_state.c
     src/v5_main_page_action_execute.c
+    src/v5_main_page_home_transaction.c
     src/v5_settings_page.c
     src/v5_settings_page_support.c
     src/v5_settings_page_status.c
@@ -354,6 +358,7 @@ add_library(v5_command_gate_core STATIC
     ../services/state_publisher/v5_native_sample.c
     ../services/command_gate/v5_native_first_point.c
     ../services/command_gate/v5_native_home.c
+    ../services/command_gate/v5_native_home_runtime_owner.c
     ../services/command_gate/v5_native_home_mapping.c
     ../services/command_gate/v5_native_axis_zero_position.c
     ../services/command_gate/v5_native_motion_parameters.c
@@ -463,11 +468,13 @@ add_executable(v5_main_page_actions_smoke
     src/v5_main_page_toolpath_program.c
     src/v5_main_page_program_preview.c
     src/v5_main_page_input.c
+    src/v5_main_page_override.c
     src/v5_main_page_action_guard.c
     src/v5_main_page_button_state.c
     src/v5_main_page_view.c
     src/v5_main_page_program_state.c
     src/v5_main_page_action_execute.c
+    src/v5_main_page_home_transaction.c
     src/v5_remote_metrics.c
     src/v5_settings_page.c
     src/v5_settings_page_support.c
@@ -510,9 +517,10 @@ target_include_directories(v5_main_page_actions_smoke PRIVATE
 target_compile_definitions(v5_main_page_actions_smoke PRIVATE
     LV_CONF_INCLUDE_SIMPLE
     LV_LVGL_H_INCLUDE_SIMPLE
+    V5_MAIN_PAGE_HOME_TRANSACTION_TEST_HOOKS
 )
 
-target_link_libraries(v5_main_page_actions_smoke PRIVATE lvgl v5_button_visuals v5_lvgl_clock v5_program_commands v5_command_gate_core v5_microkernel_contract m)
+target_link_libraries(v5_main_page_actions_smoke PRIVATE lvgl v5_button_visuals v5_lvgl_clock v5_program_commands v5_command_gate_core v5_microkernel_contract Threads::Threads m)
 
 add_executable(v5_main_page_smoke
     src/lv_font_zh_16.c
@@ -531,11 +539,13 @@ add_executable(v5_main_page_smoke
     src/v5_main_page_toolpath_program.c
     src/v5_main_page_program_preview.c
     src/v5_main_page_input.c
+    src/v5_main_page_override.c
     src/v5_main_page_action_guard.c
     src/v5_main_page_button_state.c
     src/v5_main_page_view.c
     src/v5_main_page_program_state.c
     src/v5_main_page_action_execute.c
+    src/v5_main_page_home_transaction.c
     src/v5_remote_metrics.c
     src/v5_settings_page.c
     src/v5_settings_page_support.c
@@ -580,7 +590,7 @@ target_compile_definitions(v5_main_page_smoke PRIVATE
     LV_LVGL_H_INCLUDE_SIMPLE
 )
 
-target_link_libraries(v5_main_page_smoke PRIVATE lvgl v5_button_visuals v5_lvgl_clock v5_program_commands v5_command_gate_core v5_microkernel_contract m)
+target_link_libraries(v5_main_page_smoke PRIVATE lvgl v5_button_visuals v5_lvgl_clock v5_program_commands v5_command_gate_core v5_microkernel_contract Threads::Threads m)
 
 add_executable(v5_ui_display_models_smoke
     src/v5_ui_display_models_smoke.c
@@ -784,7 +794,7 @@ target_compile_definitions(v5_program_page_double_click_smoke PRIVATE
     V5_UI_SHELL_TEST_HOOKS
 )
 
-target_link_libraries(v5_program_page_double_click_smoke PRIVATE lvgl v5_button_visuals v5_lvgl_clock v5_status_shm_projection v5_microkernel_contract v5_program_commands v5_command_gate_core m)
+target_link_libraries(v5_program_page_double_click_smoke PRIVATE lvgl v5_button_visuals v5_lvgl_clock v5_status_shm_projection v5_microkernel_contract v5_program_commands v5_command_gate_core Threads::Threads m)
 
 target_include_directories(v5_lvgl_shell PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -802,7 +812,7 @@ target_compile_definitions(v5_lvgl_shell PRIVATE
     _CRT_SECURE_NO_WARNINGS
 )
 
-target_link_libraries(v5_lvgl_shell PRIVATE lvgl v5_button_visuals v5_lvgl_clock v5_status_shm_projection v5_microkernel_contract v5_program_commands v5_command_gate_client m)
+target_link_libraries(v5_lvgl_shell PRIVATE lvgl v5_button_visuals v5_lvgl_clock v5_status_shm_projection v5_microkernel_contract v5_program_commands v5_command_gate_client Threads::Threads m)
 
 # The deploy manifest is the single product-runtime inventory.  Derive the
 # aggregate ARM build target from every binary row so build, deploy and SD-card

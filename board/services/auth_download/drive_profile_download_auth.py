@@ -198,19 +198,13 @@ def describe_http_error(exc: urllib.error.HTTPError) -> Tuple[str, str, str]:
         detail += ":%s" % message
     return "", message, detail
 
-def request_device_challenge(
-    server_url: str,
-    timeout: float,
-    device_id: str,
-    dna_hash: str,
-    purpose: str = "drive_profile_download",
-) -> Dict[str, Any]:
+def request_device_challenge(server_url: str, timeout: float, device_id: str, dna_hash: str) -> Dict[str, Any]:
     url = "%s/api/v1/device/challenge" % server_url.rstrip("/")
     payload = {
         "device_id": device_id,
         "vps_distribution_id": device_id,
         "vpsDistributionId": device_id,
-        "purpose": purpose,
+        "purpose": "drive_profile_download",
         "pl_device_dna_hash": dna_hash,
         "pl_dna_hash": dna_hash,
         "client_time": now_utc(),
@@ -251,20 +245,9 @@ class DeviceRequestSigner:
         if self.device_public_key_sha256 != self.key_info["public_key_sha256"].lower():
             raise DeviceGateError(DEVICE_AUTHORIZATION_INVALID_CODE, DEVICE_GATE_MESSAGES[DEVICE_AUTHORIZATION_INVALID_CODE])
 
-    def headers_for_url(
-        self,
-        url: str,
-        method: str = "GET",
-        purpose: str = "drive_profile_download",
-    ) -> Dict[str, str]:
+    def headers_for_url(self, url: str, method: str = "GET") -> Dict[str, str]:
         request_path = request_path_for_url(url)
-        challenge = request_device_challenge(
-            resolve_challenge_base_url(self.args, url),
-            self.args.timeout,
-            self.device_id,
-            self.dna_hash,
-            purpose,
-        )
+        challenge = request_device_challenge(resolve_challenge_base_url(self.args, url), self.args.timeout, self.device_id, self.dna_hash)
         nonce = str(challenge.get("nonce") or "").strip()
         timestamp = str(challenge.get("time") or "").strip() or now_utc()
         payload_data = {
@@ -273,7 +256,7 @@ class DeviceRequestSigner:
             "device_id": self.device_id,
             "nonce": nonce,
             "pl_device_dna_hash": self.dna_hash,
-            "purpose": purpose,
+            "purpose": "drive_profile_download",
             "request_method": method.upper(),
             "request_path": request_path,
             "timestamp": timestamp,

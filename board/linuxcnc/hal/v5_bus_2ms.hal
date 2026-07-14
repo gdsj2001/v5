@@ -26,6 +26,8 @@ loadrt cia402 count=5
 loadrt bitslice names=x-din,y-din,z-din,a-din,c-din personality=31,31,31,31,31
 loadrt mux2 count=1
 loadrt or2 count=1
+loadrt not count=1
+loadrt and2 count=1
 loadrt v5_safety_latch
 
 loadusr -W lcec_conf /opt/8ax/v5/linuxcnc/hal/ethercat-conf-2ms.xml
@@ -53,6 +55,8 @@ addf a-din servo-thread
 addf c-din servo-thread
 addf v5-safety-latch.0 servo-thread
 addf or2.0 servo-thread
+addf not.0 servo-thread
+addf and2.0 servo-thread
 addf mux2.0 servo-thread
 addf motion-command-handler servo-thread
 addf motion-controller servo-thread
@@ -79,8 +83,26 @@ setp mux2.0.in0 0
 setp mux2.0.in1 1
 net v5-rtcp-ui-request v5-native-hal-owner.rtcp-ui-request => or2.0.in0
 net v5-rtcp-gcode-request motion.digital-out-00 => or2.0.in1
-net v5-rtcp-selected or2.0.out => mux2.0.sel
+net v5-rtcp-force-off v5-native-hal-owner.rtcp-force-off => not.0.in
+net v5-rtcp-allow not.0.out => and2.0.in1
+net v5-rtcp-requested or2.0.out => and2.0.in0
+net v5-rtcp-selected and2.0.out => mux2.0.sel
 net re-switchkins-select mux2.0.out => motion.switchkins-type v5-native-hal-owner.rtcp-actual
+net v5-wcheckpoint-a-logical motion.v5-wcheckpoint-a-logical-counts => v5-native-hal-owner.wcheckpoint-a-logical-counts
+net v5-wcheckpoint-a-base motion.v5-wcheckpoint-a-base-counts => v5-native-hal-owner.wcheckpoint-a-base-counts
+net v5-wcheckpoint-a-runtime motion.v5-wcheckpoint-a-runtime-counts => v5-native-hal-owner.wcheckpoint-a-runtime-counts
+net v5-wcheckpoint-a-generation motion.v5-wcheckpoint-a-generation => v5-native-hal-owner.wcheckpoint-a-generation
+net v5-wcheckpoint-a-valid motion.v5-wcheckpoint-a-valid => v5-native-hal-owner.wcheckpoint-a-valid
+net v5-wcheckpoint-b-logical motion.v5-wcheckpoint-b-logical-counts => v5-native-hal-owner.wcheckpoint-b-logical-counts
+net v5-wcheckpoint-b-base motion.v5-wcheckpoint-b-base-counts => v5-native-hal-owner.wcheckpoint-b-base-counts
+net v5-wcheckpoint-b-runtime motion.v5-wcheckpoint-b-runtime-counts => v5-native-hal-owner.wcheckpoint-b-runtime-counts
+net v5-wcheckpoint-b-generation motion.v5-wcheckpoint-b-generation => v5-native-hal-owner.wcheckpoint-b-generation
+net v5-wcheckpoint-b-valid motion.v5-wcheckpoint-b-valid => v5-native-hal-owner.wcheckpoint-b-valid
+net v5-wcheckpoint-c-logical motion.v5-wcheckpoint-c-logical-counts => v5-native-hal-owner.wcheckpoint-c-logical-counts
+net v5-wcheckpoint-c-base motion.v5-wcheckpoint-c-base-counts => v5-native-hal-owner.wcheckpoint-c-base-counts
+net v5-wcheckpoint-c-runtime motion.v5-wcheckpoint-c-runtime-counts => v5-native-hal-owner.wcheckpoint-c-runtime-counts
+net v5-wcheckpoint-c-generation motion.v5-wcheckpoint-c-generation => v5-native-hal-owner.wcheckpoint-c-generation
+net v5-wcheckpoint-c-valid motion.v5-wcheckpoint-c-valid => v5-native-hal-owner.wcheckpoint-c-valid
 net re-kins-tool-offset motion.tooloffset.z => [RTCP]KINS_TOOL_OFFSET_PIN
 net v5-kins-x-rot-point v5-native-hal-owner.kins-x-rot-point => [RTCP]KINS_X_ROT_POINT_PIN
 net v5-kins-y-rot-point v5-native-hal-owner.kins-y-rot-point => [RTCP]KINS_Y_ROT_POINT_PIN

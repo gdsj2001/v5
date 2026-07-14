@@ -13,7 +13,7 @@ extern "C" {
 
 #define V5_COMMAND_GATE_SOCKET_PATH "/run/8ax_v5_product_ui/v5_command_gate.sock"
 #define V5_COMMAND_GATE_IPC_MAGIC 0x56354347u
-#define V5_COMMAND_GATE_IPC_VERSION 1u
+#define V5_COMMAND_GATE_IPC_VERSION 2u
 #define V5_COMMAND_GATE_TEXT_CAP 512u
 #define V5_COMMAND_GATE_SECONDARY_TEXT_CAP 128u
 #define V5_COMMAND_GATE_MODE_CAP 64u
@@ -33,6 +33,7 @@ typedef enum V5CommandGateIpcOp {
     V5_COMMAND_GATE_IPC_OP_EXECUTE = 1,
     V5_COMMAND_GATE_IPC_OP_PROBE_SAFETY = 2,
     V5_COMMAND_GATE_IPC_OP_SETTINGS_AXIS_COMMIT = 3,
+    V5_COMMAND_GATE_IPC_OP_PROBE_HOME_STATUS = 4,
 } V5CommandGateIpcOp;
 
 typedef struct V5CommandGateIpcRequestFrame {
@@ -44,6 +45,9 @@ typedef struct V5CommandGateIpcRequestFrame {
     int32_t index_value;
     int32_t enabled_value;
     uint32_t axis_mask;
+    uint64_t home_run_id;
+    uint32_t home_generation;
+    uint32_t home_reserved;
     double axis_value;
     double increment_value;
     double point_axis[V5_COMMAND_AXIS_COUNT];
@@ -86,7 +90,40 @@ typedef struct V5CommandGateIpcResponseFrame {
     double settings_raw_max_limit;
     char settings_readback_value[64];
     char settings_scale_chain_code[64];
+    uint64_t home_run_id;
+    uint32_t home_generation;
+    uint32_t home_phase;
+    uint32_t home_failure_phase;
+    uint32_t home_current_axis_mask;
+    int32_t home_active;
+    int32_t home_terminal;
+    int32_t home_cancelled;
+    int32_t home_detail_valid;
+    double home_actual;
+    double home_target;
+    double home_tolerance;
+    char home_mode[8];
+    char home_current_axes[16];
+    char home_direct_reason[64];
 } V5CommandGateIpcResponseFrame;
+
+typedef struct V5CommandGateHomeStatus {
+    unsigned long long run_id;
+    unsigned int generation;
+    unsigned int phase;
+    unsigned int failure_phase;
+    unsigned int current_axis_mask;
+    int active;
+    int terminal;
+    int cancelled;
+    int detail_valid;
+    double actual;
+    double target;
+    double tolerance;
+    char mode[8];
+    char current_axes[16];
+    char direct_reason[64];
+} V5CommandGateHomeStatus;
 
 typedef struct V5CommandGateResult {
     int send_status;
@@ -106,6 +143,18 @@ int v5_command_gate_send_prepared(
     const V5CommandPrepared *prepared,
     const V5CommandRequest *request,
     V5CommandGateResult *result,
+    unsigned int timeout_ms);
+int v5_command_gate_send_prepared_home(
+    const V5CommandPrepared *prepared,
+    const V5CommandRequest *request,
+    V5CommandGateResult *result,
+    unsigned int timeout_ms,
+    unsigned long long run_id,
+    unsigned int generation);
+int v5_command_gate_probe_home_status(
+    unsigned long long run_id,
+    unsigned int generation,
+    V5CommandGateHomeStatus *status,
     unsigned int timeout_ms);
 int v5_command_gate_probe_safety(V5CommandGateResult *result, unsigned int timeout_ms);
 int v5_command_gate_settings_axis_commit(

@@ -8,6 +8,7 @@
 #include "v5_lvgl_touch_input.h"
 #include "v5_boot_closure.h"
 #include "v5_main_page.h"
+#include "v5_main_page_home_transaction.h"
 #include "v5_native_rtcp_status.h"
 #include "v5_native_wcs_status.h"
 #include "v5_native_g53_geometry_status.h"
@@ -107,10 +108,18 @@ void shell_update_top_status_label(void)
 {
     unsigned long long now;
     int changed = 0;
+    V5CommandGateHomeStatus home_status;
+    char home_text[128];
     if (!g_v5_shell_top_status_label) {
         return;
     }
     shell_set_text_color_if_changed(g_v5_shell_top_status_label, lv_color_make(255, 86, 86), 0);
+    if (v5_main_page_home_transaction_status(&home_status) &&
+        v5_main_page_home_transaction_format_status_cn(&home_status, home_text, sizeof(home_text))) {
+        changed = shell_set_label_text_if_changed(g_v5_shell_top_status_label, home_text);
+        if (changed) shell_mark_all_page_caches_dirty();
+        return;
+    }
     now = shell_monotonic_ns();
     if (g_v5_shell_operator_error_status.display_mode ==
             V5_NATIVE_OPERATOR_ERROR_DISPLAY_TOP_STATUS &&

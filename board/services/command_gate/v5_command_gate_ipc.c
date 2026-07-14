@@ -16,8 +16,6 @@
 #define MSG_NOSIGNAL 0
 #endif
 
-static int g_gate_fd = -1;
-
 void v5_command_gate_result_init(V5CommandGateResult *result)
 {
     if (!result) {
@@ -87,14 +85,6 @@ static void settings_result_from_frame(
 }
 
 #ifndef _WIN32
-static void gate_close(void)
-{
-    if (g_gate_fd >= 0) {
-        close(g_gate_fd);
-    }
-    g_gate_fd = -1;
-}
-
 static int set_socket_timeout(int fd, unsigned int timeout_ms)
 {
     struct timeval tv;
@@ -145,10 +135,6 @@ static int gate_connect(unsigned int timeout_ms)
 {
     struct sockaddr_un addr;
     int fd;
-    if (g_gate_fd >= 0) {
-        (void)set_socket_timeout(g_gate_fd, timeout_ms);
-        return g_gate_fd;
-    }
     fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (fd < 0) {
         return -1;
@@ -161,8 +147,7 @@ static int gate_connect(unsigned int timeout_ms)
         close(fd);
         return -1;
     }
-    g_gate_fd = fd;
-    return g_gate_fd;
+    return fd;
 }
 
 static int transact_response(
@@ -185,10 +170,10 @@ static int transact_response(
             response->magic == V5_COMMAND_GATE_IPC_MAGIC &&
             response->version == V5_COMMAND_GATE_IPC_VERSION &&
             response->size == (uint32_t)sizeof(*response)) {
-            gate_close();
+            close(fd);
             return 1;
         }
-        gate_close();
+        close(fd);
     }
     return 0;
 }
@@ -250,6 +235,83 @@ int v5_command_gate_send_prepared(
     copy_cstr(frame.secondary_text_value, sizeof(frame.secondary_text_value), request->secondary_text_value);
     copy_cstr(frame.mode_value, sizeof(frame.mode_value), request->mode_value);
     return transact(&frame, result, timeout_ms);
+#endif
+}
+
+int v5_command_gate_send_prepared_home(
+    const V5CommandPrepared *prepared,
+    const V5CommandRequest *request,
+    V5CommandGateResult *result,
+    unsigned int timeout_ms,
+    unsigned long long run_id,
+    unsigned int generation)
+{
+#ifdef _WIN32
+    (void)prepared; (void)request; (void)timeout_ms; (void)run_id; (void)generation;
+    v5_command_gate_result_init(result);
+    return 0;
+#else
+    V5CommandGateIpcRequestFrame frame;
+    unsigned int i;
+    v5_command_gate_result_init(result);
+    if (!prepared || !prepared->accepted || !request || !run_id || !generation ||
+        (request->kind != V5_COMMAND_HOME && request->kind != V5_COMMAND_AXIS_ZERO_POSITION)) {
+        if (result) result->send_status = V5_COMMAND_GATE_SEND_INVALID;
+        return 0;
+    }
+    init_request_frame(&frame, V5_COMMAND_GATE_IPC_OP_EXECUTE);
+    frame.kind = (int32_t)request->kind;
+    frame.index_value = (int32_t)request->index_value;
+    frame.enabled_value = (int32_t)request->enabled_value;
+    frame.axis_mask = request->axis_mask;
+    frame.home_run_id = (uint64_t)run_id;
+    frame.home_generation = generation;
+    frame.axis_value = request->axis_value;
+    frame.increment_value = request->increment_value;
+    for (i = 0U; i < V5_COMMAND_AXIS_COUNT; ++i) frame.point_axis[i] = request->point_axis[i];
+    copy_cstr(frame.text_value, sizeof(frame.text_value), request->text_value);
+    copy_cstr(frame.secondary_text_value, sizeof(frame.secondary_text_value), request->secondary_text_value);
+    copy_cstr(frame.mode_value, sizeof(frame.mode_value), request->mode_value);
+    return transact(&frame, result, timeout_ms);
+#endif
+}
+
+int v5_command_gate_probe_home_status(
+    unsigned long long run_id,
+    unsigned int generation,
+    V5CommandGateHomeStatus *status,
+    unsigned int timeout_ms)
+{
+#ifdef _WIN32
+    (void)run_id; (void)generation; (void)timeout_ms;
+    if (status) memset(status, 0, sizeof(*status));
+    return 0;
+#else
+    V5CommandGateIpcRequestFrame frame;
+    V5CommandGateIpcResponseFrame response;
+    if (!status || !run_id || !generation) return 0;
+    memset(status, 0, sizeof(*status));
+    init_request_frame(&frame, V5_COMMAND_GATE_IPC_OP_PROBE_HOME_STATUS);
+    frame.home_run_id = (uint64_t)run_id;
+    frame.home_generation = generation;
+    if (!transact_response(&frame, &response, timeout_ms) ||
+        response.home_run_id != (uint64_t)run_id || response.home_generation != generation) return 0;
+    status->run_id = (unsigned long long)response.home_run_id;
+    status->generation = response.home_generation;
+    status->phase = response.home_phase;
+    status->failure_phase = response.home_failure_phase;
+    status->current_axis_mask = response.home_current_axis_mask;
+    status->active = response.home_active;
+    status->terminal = response.home_terminal;
+    status->cancelled = response.home_cancelled;
+    status->detail_valid = response.home_detail_valid;
+    status->actual = response.home_actual;
+    status->target = response.home_target;
+    status->tolerance = response.home_tolerance;
+    copy_cstr(status->mode, sizeof(status->mode), response.home_mode);
+    copy_cstr(status->current_axes, sizeof(status->current_axes), response.home_current_axes);
+    copy_cstr(status->direct_reason, sizeof(status->direct_reason), response.home_direct_reason);
+    return 1;
 #endif
 }
 

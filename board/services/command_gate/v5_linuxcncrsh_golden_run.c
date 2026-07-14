@@ -202,7 +202,7 @@ static int run_home_precondition(
     V5NativeHomeResult result;
     V5LinuxcncrshSendStatus status;
 
-    status = v5_native_home_send(config, parameters, &result);
+    status = v5_native_home_send(config, parameters, &result, 1ULL, 1U, 0, 0);
     if (status != V5_LINUXCNCRSH_SEND_SENT) {
         fprintf(stderr, "home precondition failed status=%d mode=%s code=%s\n",
                 (int)status, result.mode, result.code);

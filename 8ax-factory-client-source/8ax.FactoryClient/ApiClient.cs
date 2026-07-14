@@ -46,12 +46,6 @@ internal sealed class ApiClient : IDisposable
         return await GetAsync<DeviceListResponse>("/api/v1/admin/devices", cancellationToken, auth: true);
     }
 
-    public async Task<ApiResult<RemoteSshStatusResponse>> GetRemoteSshStatusAsync(string deviceId, CancellationToken cancellationToken)
-    {
-        var id = Uri.EscapeDataString((deviceId ?? "").Trim());
-        return await GetAsync<RemoteSshStatusResponse>("/api/v1/admin/devices/remote-ssh?deviceId=" + id, cancellationToken, auth: true);
-    }
-
     public async Task<ApiResult<CommonActionResponse>> ReviewUpgradeRequestAsync(UpgradeRequestReviewRequest request, CancellationToken cancellationToken)
     {
         return await PostAsync<UpgradeRequestReviewRequest, CommonActionResponse>("/api/v1/admin/upgrade-requests/review", request, cancellationToken, auth: true);

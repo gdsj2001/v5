@@ -3,6 +3,7 @@
 
 #include "v5_app.h"
 #include "v5_main_page.h"
+#include "v5_command_gate_ipc.h"
 #include "v5_native_operator_error_status.h"
 #include "v5_settings_page.h"
 #include "v5_ui_model.h"
@@ -157,6 +158,7 @@ void shell_create_top_status_layer(lv_obj_t *screen);
 void shell_create_operator_error_popup(lv_obj_t *screen);
 
 void shell_show_operator_error_popup(const V5NativeOperatorErrorStatus *status);
+void shell_show_home_failure_popup(const V5CommandGateHomeStatus *status);
 
 void shell_hide_operator_error_popup(void);
 

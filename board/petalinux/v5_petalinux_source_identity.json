@@ -9,7 +9,7 @@
     "environment_setup": "source <petalinux-install-root>/settings.sh",
     "license_boundary": "AMD/Xilinx EULA; installer is an external prerequisite and is not redistributed"
   },
-  "content_sha256": "e576f2dc8cd51803a666b84cb76c12a79acecc931371979dedabb069480b98b7",
+  "content_sha256": "fdf56d137c7f65a238d4f22152906094fcc3df55f52ee29bcb29d5621244f3b5",
   "file_count": 75,
   "linux_owner": {
     "kernel_content_sha256": "c5fe1f7e4a0d211e2486d2539918b777db534f261a2b54f4bcd8a6ac1215c235",

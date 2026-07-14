@@ -61,6 +61,10 @@ typedef struct V5MainPage {
     lv_obj_t *linear_velocity_label;
     lv_obj_t *feed_override_label;
     lv_obj_t *spindle_override_label;
+    lv_obj_t *feed_override_slider;
+    lv_obj_t *spindle_override_slider;
+    lv_obj_t *feed_override_reset_hit;
+    lv_obj_t *spindle_override_reset_hit;
     lv_obj_t *cpu0_label;
     lv_obj_t *cpu1_label;
     lv_obj_t *toolpath_clip_layer;
@@ -105,6 +109,11 @@ typedef struct V5MainPage {
     V5ProgramController *program_controller;
     V5NativeReadback native_readback;
     int command_execution_enabled;
+    int override_syncing_from_status;
+    int feed_override_drag_active;
+    int spindle_override_drag_active;
+    uint32_t feed_override_last_send_tick;
+    uint32_t spindle_override_last_send_tick;
     int home_transaction_active;
     lv_timer_t *selection_idle_timer;
     lv_timer_t *jog_hold_timer;
@@ -205,6 +214,11 @@ void v5_main_page_select_all_axes(V5MainPage *page);
 int v5_main_page_select_axis(V5MainPage *page, V5MainPageSelectionSpace space, char axis);
 void v5_main_page_refresh_program_status(V5MainPage *page);
 int v5_main_page_trigger_action(V5MainPage *page, V5MainPageActionKind action, V5MainPageActionReport *report);
+int v5_main_page_trigger_override(
+    V5MainPage *page,
+    int spindle,
+    int percent,
+    V5MainPageActionReport *report);
 
 #ifdef __cplusplus
 }

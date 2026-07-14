@@ -199,6 +199,42 @@ int main(void)
     if (!v5_main_page_create(&page, screen)) {
         return 2;
     }
+    if (!page.spindle_override_slider || !page.feed_override_slider ||
+        !page.spindle_override_reset_hit || !page.feed_override_reset_hit ||
+        lv_slider_get_min_value(page.spindle_override_slider) != 0 ||
+        lv_slider_get_max_value(page.spindle_override_slider) != 200 ||
+        lv_slider_get_value(page.spindle_override_slider) != 100 ||
+        lv_slider_get_value(page.feed_override_slider) != 100) {
+        return 70;
+    }
+    lv_slider_set_value(page.feed_override_slider, 135, LV_ANIM_OFF);
+    lv_event_send(page.feed_override_slider, LV_EVENT_PRESSED, 0);
+    if (page.last_action.action != V5_MAIN_PAGE_ACTION_FEED_OVERRIDE_SET ||
+        page.last_action.request.kind != V5_COMMAND_FEED_OVERRIDE_SET ||
+        page.last_action.request.index_value != 135) {
+        return 71;
+    }
+    lv_slider_set_value(page.feed_override_slider, 140, LV_ANIM_OFF);
+    lv_event_send(page.feed_override_slider, LV_EVENT_VALUE_CHANGED, 0);
+    if (page.last_action.request.index_value != 135) {
+        return 75;
+    }
+    lv_event_send(page.feed_override_slider, LV_EVENT_RELEASED, 0);
+    if (page.last_action.request.index_value != 140) {
+        return 76;
+    }
+    lv_event_send(page.spindle_override_reset_hit, LV_EVENT_CLICKED, 0);
+    if (page.last_action.action != V5_MAIN_PAGE_ACTION_SPINDLE_OVERRIDE_SET ||
+        page.last_action.request.kind != V5_COMMAND_SPINDLE_OVERRIDE_SET ||
+        page.last_action.request.index_value != 100) {
+        return 72;
+    }
+    lv_event_send(page.feed_override_reset_hit, LV_EVENT_CLICKED, 0);
+    if (page.last_action.action != V5_MAIN_PAGE_ACTION_FEED_OVERRIDE_SET ||
+        page.last_action.request.kind != V5_COMMAND_FEED_OVERRIDE_SET ||
+        page.last_action.request.index_value != 100) {
+        return 77;
+    }
     if (lv_obj_get_style_line_width(page.trajectory_line, 0) != 2 ||
         lv_obj_get_style_line_width(page.toolpath_line_segments[1], 0) != 2) {
         return 33;
@@ -246,6 +282,10 @@ int main(void)
         !lv_obj_has_flag(page.toolpath_a_axis_line, LV_OBJ_FLAG_HIDDEN) ||
         !lv_obj_has_flag(page.toolpath_c_axis_line, LV_OBJ_FLAG_HIDDEN)) {
         return 20;
+    }
+    if (!lv_obj_has_state(page.spindle_override_slider, LV_STATE_DISABLED) ||
+        !lv_obj_has_state(page.feed_override_slider, LV_STATE_DISABLED)) {
+        return 73;
     }
     v5_program_controller_init(&controller);
     v5_native_readback_init(&readback);
@@ -347,6 +387,12 @@ int main(void)
     }
     if (!v5_main_page_apply_status(&page, &status)) {
         return 4;
+    }
+    if (lv_obj_has_state(page.spindle_override_slider, LV_STATE_DISABLED) ||
+        lv_obj_has_state(page.feed_override_slider, LV_STATE_DISABLED) ||
+        lv_slider_get_value(page.spindle_override_slider) != 90 ||
+        lv_slider_get_value(page.feed_override_slider) != 100) {
+        return 74;
     }
     {
         const double a_rad = status.mcs[3] * 3.14159265358979323846 / 180.0;

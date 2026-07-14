@@ -7,11 +7,11 @@
 <!-- AI_FAST_READ_BEGIN -->
 owner_reqs: [REQ-DRIVE-PROFILE-AUTH-CHAIN, REQ-REMOTE-SSH-MAINTENANCE]
 read_when: [VPS 登录, 授权, private/public 下载, drive profile, OTA package, remote relay, 厂家远程 SSH]
-truth: [授权身份 -> package/profile 或 remote SSH tunnel identity -> 板端校验/加载或 VPS loopback readback -> consumer]
-forbidden: [public fallback 冒充授权, 客户分叉产品代码, 未验 hash 的下载, 访问记录 IP 冒充 SSH 地址, 公网常开 SSH, SSH/FIFO 产品控制旁路]
-readback: [license/entitlement, package/profile hash/version, 板端加载 identity, relay health, remote SSH device/port/online/host-key]
-impact: [dealer/factory client, VPS API/sshd, board remote SSH agent, drive mapping, OTA, settings actiond, runtime manifest]
-acceptance: [身份与产物 hash 闭合；远程 SSH 必须证明选中设备 -> 唯一 loopback 端口 -> 板端 SSH 主机身份与命令回读]
+truth: [授权身份 -> package/profile 或 IP访问记录选择 -> 板端校验/加载或 system SSH host-key readback -> consumer]
+forbidden: [public fallback 冒充授权, 客户分叉产品代码, 未验 hash 的下载, 未选择/无效 IP 启动 SSH, 自动接受 host key, SSH/FIFO 产品控制旁路]
+readback: [license/entitlement, package/profile hash/version, 板端加载 identity, relay health, selected access IP, SSH host-key/device readback]
+impact: [dealer/factory client, IP访问记录弹窗, drive mapping, OTA, settings actiond]
+acceptance: [身份与产物 hash 闭合；远程 SSH 必须证明当前设备弹窗 -> 选中或最近 IP -> 板端 SSH 主机身份与命令回读]
 detail_sections: [2. Remote Relay 健康, 3. 板端诊断、G-code 上传与 OTA 升级入口, 4. 厂家远程 SSH 维护通道, 6. VPS 登录, 7. VPS 数据, 9. 核对项, 10. 禁止事项]
 <!-- AI_FAST_READ_END -->
 
@@ -95,26 +95,24 @@ WinRemote 远程画面只允许使用板端 `remote_ui_relay` 的 HTTP 首帧初
 
 ## 4. 厂家远程 SSH 维护通道
 
-`REQ-REMOTE-SSH-MAINTENANCE` 只提供厂家维护 shell，不是产品按钮、远程画面、运动控制、设置保存、部署真源或 operator path。厂家控制台标题栏必须在版本文字左侧显示 `远程连接` 按钮；点击时只使用设备表当前选中行的 6 位 `vpsDistributionId`，未选中、未授权、授权缺少 `remote_ssh_tunnel`、隧道未登记或 VPS loopback 端口不在线时必须明确失败，禁止回退到 `IP访问记录` 中的来源公网 IP。
+`REQ-REMOTE-SSH-MAINTENANCE` 只提供厂家维护 shell，不是产品运动控制、设置保存、部署真源或 operator path。厂家控制台标题栏不得放置 `远程连接`；按钮必须位于当前设备的 `IP访问记录` 弹窗底部右侧，并显示本次将连接的 IP。弹窗初始目标取该设备最近一条有效 IP；用户在 `明细` 或 `IP分布` 中选择另一条有效 IP 后，按钮必须同步切换到该 IP。没有有效 IP、选中值不是合法 IP 或 Windows 系统 SSH 缺失时必须明确失败，不得静默选择其它设备或其它地址。
 
 正式链路：
 
 ```text
-board authorized agent -> outbound SSH -> VPS restricted tunnel user
-  -> VPS 127.0.0.1:<per-device-port> -> board 127.0.0.1:22
-Factory Client 远程连接 -> system ssh + ProxyJump vps3
-  -> VPS loopback per-device port -> board Dropbear host key -> interactive maintenance shell
+Factory Client 设备行 -> IP访问记录弹窗 -> selected/latest valid IP
+  -> Windows system ssh root@<selected-ip>:22
+  -> board Dropbear host key -> interactive maintenance shell
 ```
 
-身份与端口规则：
+身份与地址规则：
 
-- 板端只允许复用本机 `/etc/6x-cnc/device_private_key.pem` 发起隧道认证；私钥不得上传、复制进 Factory Client/VPS、写入日志或打进通用镜像。VPS 从已登记设备公钥生成 SSH authorized key，并用设备签名 challenge 把 tunnel key、当前 DNA、6 位 ID 和 `remote_ssh_tunnel` 权限绑定。
-- Factory Client 新生成的设备授权必须同时包含 `drive_profile_download` 和 `remote_ssh_tunnel`；板端授权缺少后者时 agent 不启动隧道。授权吊销、设备删除或设备公钥变化后旧 tunnel key/端口必须失效。
-- VPS 为每台设备冻结一个唯一端口，监听地址只能是 `127.0.0.1`；tunnel 用户禁止密码、PTY、shell、agent/X11/local forwarding，只允许该设备 authorized key 对登记端口执行 remote forwarding。不得设置 `GatewayPorts yes`，不得把分配端口暴露到公网。
-- 板端出站 SSH 必须校验仓库登记的 VPS host key；host key 不匹配时 fail-closed。连接使用 keepalive 和受控重连，状态写入 `/run/8ax_v5_remote_ssh/status.json` 只作诊断，不成为授权或在线真值；VPS 对 loopback 端口的实际 TCP probe 才是 Factory Client 的 online readback。
-- Factory Client 调用厂家鉴权 API读取选中设备的 `assignedPort/online`，只在 `online=true` 时启动 Windows 系统 `ssh.exe`，使用 `ProxyJump vps3` 和按设备 ID 隔离的 `HostKeyAlias`。客户端不得保存设备密码、自动接受板端 host key、把端口或访问 IP 当作设备身份。
+- `IP访问记录` 仍是服务器观察到的请求来源；按钮按用户明确选择直连该地址，但 IP 本身不构成设备身份或在线证明。若地址受 NAT、防火墙或运营商网络限制，系统 SSH 的连接失败必须原样可见，不得回退到另一 IP、VPS 隧道或共享代理。
+- Factory Client 只启动 Windows 系统 `ssh.exe`，固定目标账号 `root`、端口 `22`、`StrictHostKeyChecking=ask`，并按 6 位设备 ID 使用独立 `HostKeyAlias`。客户端不得保存设备密码、私钥或自动接受板端 host key。
+- 当前设备 ID、弹窗显示的目标 IP 和最终 SSH host key 必须同时可见；首次连接由人工核对 host key，已记录 host key 变化时必须由系统 SSH fail-closed。
+- SSH 只允许厂家维护 shell；通过 SSH 直接修改板端产品文件、补发产品控制命令或替代正式 source/build/deploy/operator 证据仍然禁止。
 
-验收必须从标题区 `远程连接` 原始按钮开始，证明：选中设备 ID 与 API 返回一致、VPS 分配端口唯一且仅 loopback 监听、SSH 展示/校验对应板端 host key，并通过隧道读取同一板端的 `uname -m` 和 6 位登记 ID。通过 SSH 直接改板端产品文件、补发产品控制命令或替代正式部署/operator 证据仍然禁止。
+验收必须从设备表的 `IP访问记录` 原始入口开始，证明：弹窗属于当前设备、按钮初始显示最近有效 IP、选择 `明细`/`IP分布` 中另一 IP 后按钮同步更新，点击后系统 SSH 只连接该 IP，并读取同一板端的 `uname -m` 和 6 位登记 ID。只看到终端启动、TCP 连接或 IP 相同不能代替板端身份回读。
 
 
 
@@ -283,13 +281,13 @@ OTA package 规则：
 - OTA private/public manifest 解析、`selected_scope`、选择 reason、package SHA256/签名和板端 staging hash 一致。
 - 板端 relay `/remote/info`、WS frame、input granted、frame applied 证据齐全。
 - 板端一次性诊断 `/run/8ax_v5_product_ui/remote_time_sync_status.json` 能说明时间同步来源和结果，但不作为 ready、heartbeat 或控制真源。
-- 远程 SSH 需核对选中设备授权含 `remote_ssh_tunnel`、VPS 端口只监听 `127.0.0.1`、restricted tunnel key 的 `permitlisten` 与分配端口一致、Factory Client 按钮启动的板端 host key 和登记 ID 回读一致。
+- 远程 SSH 需核对按钮只出现在当前设备的 `IP访问记录` 弹窗、目标 IP 随最近记录或用户选择更新、系统 SSH 严格校验板端 host key，并且登记 ID 回读一致。
 
 ## 10. 禁止事项
 
 - 在仓库写 token、私钥、设备授权密钥、DNA 原文或 Authorization/Cookie。
 - 用 SSH、shell、SFTP、临时 JSON 或远程点击绕过正式 UI/operator 路径。
-- 把 `IP访问记录` 的公网来源地址直接当成设备 SSH 地址，或开放永久公网板端/反向 SSH 端口。
+- 在标题栏保留第二个远程连接入口、无有效 IP 时猜测地址、选择失败后回退其它 IP，或自动接受 SSH host key。
 - 在 Factory Client、VPS、仓库、日志或通用镜像中保存设备私钥、SSH 密码，或多个设备共用同一设备私钥。
 - 把 profile public fallback 写成 private 授权成功。
 - 有当前 DNA private OTA 包时继续下载 public OTA 包，或用 public 包替代 private 包失败。

@@ -204,7 +204,18 @@ void v5_main_page_internal_make_divider(lv_obj_t *parent, int x, int y, int w, i
 
 lv_obj_t *v5_main_page_internal_make_label_ex(lv_obj_t *parent, int x, int y, int w, int h, const char *text, uint8_t r, uint8_t g, uint8_t b, lv_text_align_t align);
 
-void v5_main_page_internal_make_override_reset_hit(V5MainPage *page, int x, int y, int w, int h, lv_event_cb_t cb);
+lv_obj_t *v5_main_page_internal_make_override_reset_hit(V5MainPage *page, int x, int y, int w, int h, lv_event_cb_t cb);
+
+lv_obj_t *v5_main_page_internal_create_override_slider(
+    V5MainPage *page,
+    int spindle,
+    int x,
+    int y,
+    int width);
+
+void v5_main_page_internal_sync_override_sliders(
+    V5MainPage *page,
+    const V5UiStatusView *status);
 
 lv_obj_t *v5_main_page_internal_make_panel(lv_obj_t *parent, int x, int y, int w, int h, uint8_t r, uint8_t g, uint8_t b);
 

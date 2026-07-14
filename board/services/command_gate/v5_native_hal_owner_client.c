@@ -24,6 +24,24 @@ static void response_init(V5NativeHalOwnerResponse *response, unsigned int opera
     snprintf(response->code, sizeof(response->code), "%s", "NATIVE_HAL_OWNER_NOT_ATTEMPTED");
 }
 
+int v5_native_hal_owner_request_target(
+    unsigned int operation,
+    unsigned int target,
+    unsigned int *wire_target)
+{
+    if (!wire_target) {
+        return 0;
+    }
+    if (operation == V5_NATIVE_HAL_OWNER_OP_WCHECKPOINT_STATUS) {
+        if (target > 2U) return 0;
+        *wire_target = target;
+        return 1;
+    }
+    if (target > 1U) return 0;
+    *wire_target = target;
+    return 1;
+}
+
 #ifndef _WIN32
 static uint64_t next_request_id(void)
 {
@@ -81,9 +99,14 @@ int v5_native_hal_owner_exchange(
     struct sockaddr_un address;
     struct timeval timeout;
     int fd;
+    unsigned int wire_target;
 
     response_init(response, operation);
     if (!response) {
+        return V5_NATIVE_HAL_OWNER_CLIENT_IO_ERROR;
+    }
+    if (!v5_native_hal_owner_request_target(operation, target, &wire_target)) {
+        snprintf(response->code, sizeof(response->code), "%s", "NATIVE_HAL_OWNER_TARGET_INVALID");
         return V5_NATIVE_HAL_OWNER_CLIENT_IO_ERROR;
     }
     memset(&request, 0, sizeof(request));
@@ -92,7 +115,7 @@ int v5_native_hal_owner_exchange(
     request.size = (uint32_t)sizeof(request);
     request.operation = operation;
     request.request_id = next_request_id();
-    request.target = target ? 1U : 0U;
+    request.target = wire_target;
 
     fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
     if (fd < 0) {

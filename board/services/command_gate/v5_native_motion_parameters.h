@@ -30,6 +30,7 @@ typedef struct V5NativeMotionAxisParameters {
     double bus_zero_counts;
     double bus_counts_per_unit;
     double bus_home_reference;
+    double arrival_tolerance_units;
     int home_sequence;
     int bus_zero_evidence_known;
     unsigned int valid_mask;

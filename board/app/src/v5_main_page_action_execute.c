@@ -1,6 +1,8 @@
 #include "v5_main_page.h"
+#include "v5_main_page_home_transaction.h"
 
 #include "v5_command_gate_ipc.h"
+#include "v5_command_override.h"
 #include "v5_button_visuals.h"
 #include "v5_native_wcs_status.h"
 #include "v5_native_operator_error_status.h"
@@ -173,13 +175,11 @@ static void execute_prepared_command_if_enabled(V5MainPage *page, V5MainPageActi
     home_button_transaction = report->action == V5_MAIN_PAGE_ACTION_HOME &&
         (report->request.kind == V5_COMMAND_HOME || report->request.kind == V5_COMMAND_AXIS_ZERO_POSITION);
     if (home_button_transaction) {
-        v5_main_page_internal_set_home_transaction_active(page, 1, 1);
+        (void)v5_main_page_home_transaction_start(page, report, gate_timeout_ms);
+        return;
     }
     if (!v5_command_gate_send_prepared(&report->command, &report->request, &gate_result, gate_timeout_ms)) {
         v5_lvgl_clock_advance();
-        if (home_button_transaction) {
-            v5_main_page_internal_set_home_transaction_active(page, 0, 1);
-        }
         report->send_status = gate_result.send_status;
         return;
     }
@@ -198,10 +198,6 @@ static void execute_prepared_command_if_enabled(V5MainPage *page, V5MainPageActi
         v5_main_page_internal_show_home_precondition_popup(page, report->readback_code);
     }
     v5_lvgl_clock_advance();
-    if (home_button_transaction) {
-        v5_main_page_internal_set_home_transaction_active(page, 0, 1);
-    }
-
     if (report->executed &&
         (report->request.kind == V5_COMMAND_WCS_SELECT || report->request.kind == V5_COMMAND_WORK_ZERO)) {
         report->executed = main_page_confirm_wcs_readback_after_send(page, report);
@@ -364,6 +360,42 @@ int v5_main_page_trigger_action(V5MainPage *page, V5MainPageActionKind action, V
     if (!page->selection.all_axes && action_keeps_axis_selection_active(action)) {
         v5_main_page_internal_reset_selection_idle_timer(page);
     }
+    page->last_action = *out;
+    return 1;
+}
+
+int v5_main_page_trigger_override(
+    V5MainPage *page,
+    int spindle,
+    int percent,
+    V5MainPageActionReport *report)
+{
+    V5MainPageActionReport local_report;
+    V5MainPageActionReport *out = report ? report : &local_report;
+    V5CommandPrepared prepared;
+    V5CommandRequest request;
+    int ok;
+
+    if (!page) {
+        return 0;
+    }
+    memset(out, 0, sizeof(*out));
+    memset(&prepared, 0, sizeof(prepared));
+    memset(&request, 0, sizeof(request));
+    out->action = spindle
+        ? V5_MAIN_PAGE_ACTION_SPINDLE_OVERRIDE_SET
+        : V5_MAIN_PAGE_ACTION_FEED_OVERRIDE_SET;
+    ok = spindle
+        ? v5_command_spindle_override_prepare(percent, &prepared, &request)
+        : v5_command_feed_override_prepare(percent, &prepared, &request);
+    if (!ok) {
+        page->last_action = *out;
+        return 0;
+    }
+    out->prepared = 1;
+    out->request = request;
+    out->command = prepared;
+    execute_prepared_command_if_enabled(page, out);
     page->last_action = *out;
     return 1;
 }

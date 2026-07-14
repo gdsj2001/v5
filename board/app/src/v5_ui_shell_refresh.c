@@ -8,6 +8,7 @@
 #include "v5_lvgl_touch_input.h"
 #include "v5_boot_closure.h"
 #include "v5_main_page.h"
+#include "v5_main_page_home_transaction.h"
 #include "v5_native_rtcp_status.h"
 #include "v5_native_wcs_status.h"
 #include "v5_native_g53_geometry_status.h"
@@ -164,6 +165,15 @@ int v5_ui_shell_refresh_once(void)
 
     if (!g_v5_shell_ui_ready || !g_v5_shell_main_page.root) {
         return 0;
+    }
+    if (v5_main_page_home_transaction_poll(&g_v5_shell_main_page)) {
+        V5CommandGateHomeStatus home_status;
+        shell_update_top_status_label();
+        if (v5_main_page_home_transaction_status(&home_status)) {
+            shell_show_home_failure_popup(&home_status);
+        }
+    } else if (v5_main_page_home_transaction_active()) {
+        shell_update_top_status_label();
     }
     now = shell_monotonic_ns();
     if (shell_refresh_due(now, &g_v5_shell_ui_dynamic_last_refresh_ns, V5_UI_DYNAMIC_REFRESH_NS)) {

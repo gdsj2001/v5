@@ -7,6 +7,7 @@
 #include "v5_native_axis_zero_position.h"
 #include "v5_native_first_point.h"
 #include "v5_native_home.h"
+#include "v5_native_home_runtime_owner.h"
 #include "v5_native_motion_parameters.h"
 #include "v5_native_rtcp_control.h"
 #include "v5_native_safety.h"
@@ -47,6 +48,51 @@ static char g_pulse_contract_path[256] = "/opt/8ax/v5/linuxcnc/components/step_i
 static char g_socket_path[sizeof(((struct sockaddr_un *)0)->sun_path)] = V5_COMMAND_GATE_SOCKET_PATH;
 static V5NativeMotionParameters g_motion_parameters;
 static V5JogWatchdog g_jog_watchdog;
+
+static void publish_home_progress(const V5NativeHomeProgress *progress, void *user_data)
+{
+    (void)user_data;
+    v5_native_home_runtime_publish(progress);
+}
+
+static int begin_home_runtime(
+    const V5CommandGateIpcRequestFrame *frame,
+    const char *kind,
+    V5CommandGateIpcResponseFrame *response)
+{
+    if (!frame || !frame->home_run_id || !frame->home_generation ||
+        !v5_native_home_runtime_begin(
+            (unsigned long long)frame->home_run_id, frame->home_generation, kind)) {
+        response->send_status = V5_COMMAND_GATE_SEND_INVALID;
+        v5_command_gate_response_copy_text(response->readback_code, sizeof(response->readback_code), "HOME_TRANSACTION_INVALID_OR_ACTIVE");
+        return 0;
+    }
+    return 1;
+}
+
+static void copy_home_status(
+    V5CommandGateIpcResponseFrame *response,
+    const V5NativeHomeRuntimeState *state)
+{
+    const V5NativeHomeProgress *p;
+    if (!response || !state) return;
+    p = &state->progress;
+    response->home_run_id = (uint64_t)p->run_id;
+    response->home_generation = p->generation;
+    response->home_phase = p->phase;
+    response->home_failure_phase = p->failure_phase;
+    response->home_current_axis_mask = p->current_axis_mask;
+    response->home_active = state->active;
+    response->home_terminal = p->terminal;
+    response->home_cancelled = p->cancelled;
+    response->home_detail_valid = p->detail_valid;
+    response->home_actual = p->actual;
+    response->home_target = p->target;
+    response->home_tolerance = p->tolerance;
+    v5_command_gate_response_copy_text(response->home_mode, sizeof(response->home_mode), p->mode);
+    v5_command_gate_response_copy_text(response->home_current_axes, sizeof(response->home_current_axes), p->current_axes);
+    v5_command_gate_response_copy_text(response->home_direct_reason, sizeof(response->home_direct_reason), p->direct_reason);
+}
 
 static void on_signal(int signo)
 {
@@ -191,6 +237,10 @@ static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5Command
     } else if (request.kind == V5_COMMAND_AXIS_ZERO_POSITION &&
                strcmp(prepared.owner, "native_axis_zero_position") == 0) {
         V5NativeAxisZeroPositionResult native_result;
+        if (!begin_home_runtime(frame, request.mode_value, response)) {
+            linuxcncrsh_unlock();
+            return;
+        }
         if (!v5_native_axis_zero_position_format_report(
                 &prepared, &request, response->command_line, sizeof(response->command_line))) {
             response->send_status = V5_COMMAND_GATE_SEND_INVALID;
@@ -202,7 +252,17 @@ static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5Command
             &g_motion_parameters,
             &prepared,
             &request,
-            &native_result);
+            &native_result,
+            (unsigned long long)frame->home_run_id,
+            frame->home_generation,
+            publish_home_progress,
+            0);
+        v5_native_home_runtime_finish(
+            (unsigned long long)frame->home_run_id,
+            frame->home_generation,
+            status == V5_LINUXCNCRSH_SEND_SENT ? V5_NATIVE_HOME_PHASE_COMPLETE : V5_NATIVE_HOME_PHASE_FAILED,
+            native_result.code,
+            0);
         v5_command_gate_response_copy_text(response->readback_code, sizeof(response->readback_code), native_result.code);
     } else if (request.kind == V5_COMMAND_WORK_ZERO && strcmp(prepared.owner, "native_work_zero") == 0) {
         V5NativeWorkZeroResult native_result;
@@ -221,13 +281,27 @@ static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5Command
         v5_command_gate_response_copy_text(response->readback_code, sizeof(response->readback_code), native_result.code);
     } else if (request.kind == V5_COMMAND_HOME && strcmp(prepared.owner, "native_home_mode_gate") == 0) {
         V5NativeHomeResult native_result;
+        if (!begin_home_runtime(frame, "all", response)) {
+            linuxcncrsh_unlock();
+            return;
+        }
         snprintf(
             response->command_line,
             sizeof(response->command_line),
             "native_home_mode_gate %s real Home",
             v5_native_driver_mode_text(g_motion_parameters.driver_mode));
         status = v5_native_home_send(
-            &g_linuxcncrsh_config, &g_motion_parameters, &native_result);
+            &g_linuxcncrsh_config, &g_motion_parameters, &native_result,
+            (unsigned long long)frame->home_run_id,
+            frame->home_generation,
+            publish_home_progress,
+            0);
+        v5_native_home_runtime_finish(
+            (unsigned long long)frame->home_run_id,
+            frame->home_generation,
+            status == V5_LINUXCNCRSH_SEND_SENT ? V5_NATIVE_HOME_PHASE_COMPLETE : V5_NATIVE_HOME_PHASE_FAILED,
+            native_result.code,
+            0);
         v5_command_gate_response_copy_text(
             response->readback_code,
             sizeof(response->readback_code),
@@ -337,6 +411,22 @@ static void handle_frame(const V5CommandGateIpcRequestFrame *request, V5CommandG
         v5_command_gate_response_fill_safety(response);
         response->send_status = (response->safety_estop_known || response->machine_enable_known) ? V5_COMMAND_GATE_SEND_SENT : V5_COMMAND_GATE_SEND_UNAVAILABLE;
         response->executed = 0;
+        return;
+    }
+    if (request->op == V5_COMMAND_GATE_IPC_OP_PROBE_HOME_STATUS) {
+        V5NativeHomeRuntimeState state;
+        if (!request->home_run_id || !request->home_generation ||
+            !v5_native_home_runtime_snapshot(
+                (unsigned long long)request->home_run_id,
+                request->home_generation,
+                &state)) {
+            response->send_status = V5_COMMAND_GATE_SEND_UNAVAILABLE;
+            v5_command_gate_response_copy_text(response->readback_code, sizeof(response->readback_code), "HOME_STATUS_NOT_FOUND");
+            return;
+        }
+        copy_home_status(response, &state);
+        response->send_status = V5_COMMAND_GATE_SEND_SENT;
+        v5_command_gate_response_copy_text(response->readback_code, sizeof(response->readback_code), "HOME_STATUS_OK");
         return;
     }
     if (request->op == V5_COMMAND_GATE_IPC_OP_EXECUTE) {

@@ -4,11 +4,94 @@
 #include "v5_button_visuals.h"
 #include "v5_command_gate_ipc.h"
 #include "v5_lvgl_headless.h"
+#include "v5_main_page_home_transaction.h"
+#include "v5_native_home.h"
 
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
+#include <time.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <unistd.h>
+#endif
+
+static volatile int g_home_hook_terminal;
+
+static void smoke_sleep_us(unsigned int delay_us)
+{
+#ifdef _WIN32
+    Sleep((delay_us + 999U) / 1000U);
+#else
+    usleep(delay_us);
+#endif
+}
+
+static unsigned long long smoke_now_ms(void)
+{
+#ifdef _WIN32
+    return (unsigned long long)GetTickCount64();
+#else
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return ((unsigned long long)now.tv_sec * 1000ULL) + (unsigned long long)(now.tv_nsec / 1000000ULL);
+#endif
+}
+
+static int home_send_hook(
+    const V5CommandPrepared *prepared,
+    const V5CommandRequest *request,
+    V5CommandGateResult *result,
+    unsigned int timeout_ms)
+{
+    (void)prepared; (void)request; (void)timeout_ms;
+#ifdef _WIN32
+    Sleep(25U);
+#else
+    smoke_sleep_us(25000U);
+#endif
+    v5_command_gate_result_init(result);
+    result->send_status = V5_COMMAND_GATE_SEND_SENT;
+    result->executed = 1;
+    snprintf(result->readback_code, sizeof(result->readback_code), "%s", "BUS_HOME_REAL_MOVE_CONFIRMED");
+    g_home_hook_terminal = 1;
+    return 1;
+}
+
+static int home_progress_hook(
+    unsigned long long run_id,
+    unsigned int generation,
+    V5CommandGateHomeStatus *status,
+    unsigned int timeout_ms)
+{
+    (void)timeout_ms;
+    memset(status, 0, sizeof(*status));
+    status->run_id = run_id;
+    status->generation = generation;
+    status->phase = g_home_hook_terminal ? V5_NATIVE_HOME_PHASE_COMPLETE : V5_NATIVE_HOME_PHASE_ZERO_RETURN;
+    status->current_axis_mask = 1U << 5;
+    status->active = g_home_hook_terminal ? 0 : 1;
+    status->terminal = g_home_hook_terminal ? 1 : 0;
+    snprintf(status->mode, sizeof(status->mode), "%s", "all");
+    snprintf(status->current_axes, sizeof(status->current_axes), "%s", "C");
+    snprintf(status->direct_reason, sizeof(status->direct_reason), "%s", g_home_hook_terminal ? "HOME_OK" : "HOME_ZERO_RETURN");
+    return 1;
+}
+
+static int wait_home_transaction(V5MainPage *page)
+{
+    unsigned int attempt;
+    for (attempt = 0U; attempt < 500U; ++attempt) {
+        if (v5_main_page_home_transaction_poll(page)) return 1;
+#ifdef _WIN32
+        Sleep(1U);
+#else
+        smoke_sleep_us(1000U);
+#endif
+    }
+    return 0;
+}
 
 static int same_text(const char *left, const char *right)
 {
@@ -69,26 +152,58 @@ static int expect_command(V5MainPage *page, V5MainPageActionKind action, const c
     return same_text(report.command.name, name) && same_text(report.command.owner, owner) && report.command.accepted;
 }
 
+static int expect_override(
+    V5MainPage *page,
+    int spindle,
+    int percent,
+    const char *name)
+{
+    V5MainPageActionReport report;
+    V5MainPageActionKind expected_action = spindle
+        ? V5_MAIN_PAGE_ACTION_SPINDLE_OVERRIDE_SET
+        : V5_MAIN_PAGE_ACTION_FEED_OVERRIDE_SET;
+    V5CommandKind expected_kind = spindle
+        ? V5_COMMAND_SPINDLE_OVERRIDE_SET
+        : V5_COMMAND_FEED_OVERRIDE_SET;
+    if (!v5_main_page_trigger_override(page, spindle, percent, &report)) {
+        return 0;
+    }
+    return report.action == expected_action &&
+           report.prepared && !report.local_only && !report.executed &&
+           report.request.kind == expected_kind &&
+           report.request.index_value == percent &&
+           same_text(report.command.name, name) &&
+           same_text(report.command.owner, "native_linuxcncrsh") &&
+           report.command.accepted;
+}
+
 
 static int expect_home_native_gate(V5MainPage *page)
 {
     V5MainPageActionReport report;
+    unsigned long long started = smoke_now_ms();
+    g_home_hook_terminal = 0;
     if (!v5_main_page_trigger_action(page, V5_MAIN_PAGE_ACTION_HOME, &report)) {
         return 0;
     }
     if (report.action != V5_MAIN_PAGE_ACTION_HOME || !report.prepared || report.local_only || report.executed) {
         return 0;
     }
-    return same_text(report.command.name, "home") &&
-           same_text(report.command.owner, "native_home_mode_gate") &&
-           report.command.accepted &&
-           !report.command_line[0] &&
-           report.send_status == 0;
+    if (smoke_now_ms() > started + 15ULL ||
+        !same_text(report.command.name, "home") ||
+        !same_text(report.command.owner, "native_home_mode_gate") ||
+        !report.command.accepted || report.command_line[0] ||
+        report.send_status != V5_COMMAND_GATE_SEND_SENT || !report.pending_readback ||
+        !wait_home_transaction(page)) return 0;
+    return page->last_action.executed &&
+           same_text(page->last_action.readback_code, "BUS_HOME_REAL_MOVE_CONFIRMED") &&
+           !v5_main_page_home_transaction_active();
 }
 
 static int expect_axis_zero_position(V5MainPage *page, char axis, const char *space)
 {
     V5MainPageActionReport report;
+    g_home_hook_terminal = 0;
     if (!v5_main_page_trigger_action(page, V5_MAIN_PAGE_ACTION_HOME, &report)) {
         return 0;
     }
@@ -103,7 +218,9 @@ static int expect_axis_zero_position(V5MainPage *page, char axis, const char *sp
            report.request.text_value[1] == '\0' &&
            same_text(report.request.mode_value, space) &&
            !report.command_line[0] &&
-           report.send_status == 0;
+           report.send_status == V5_COMMAND_GATE_SEND_SENT &&
+           report.pending_readback &&
+           wait_home_transaction(page);
 }
 
 
@@ -440,6 +557,8 @@ int main(void)
     if (!v5_main_page_create(&page, screen)) {
         return 2;
     }
+    v5_main_page_home_transaction_set_send_hook(home_send_hook);
+    v5_main_page_home_transaction_set_progress_hook(home_progress_hook);
     if (page.button_count != V5_MAIN_PAGE_BUTTON_COUNT) {
         return 3;
     }
@@ -663,9 +782,13 @@ int main(void)
         }
     }
 
-    if (!expect_command_line(&page, V5_MAIN_PAGE_ACTION_FEED_OVERRIDE_100, "feed_override_set", "native_linuxcncrsh", "Set Feed_Override 100") ||
-        !expect_command_line(&page, V5_MAIN_PAGE_ACTION_SPINDLE_OVERRIDE_100, "spindle_override_set", "native_linuxcncrsh", "Set Spindle_Override 100")) {
+    if (!expect_override(&page, 0, 120, "feed_override_set") ||
+        !expect_override(&page, 1, 80, "spindle_override_set")) {
         return 21;
+    }
+    if (v5_main_page_trigger_override(&page, 0, -1, 0) ||
+        v5_main_page_trigger_override(&page, 1, 201, 0)) {
+        return 65;
     }
     {
         V5NativeReadback readback;

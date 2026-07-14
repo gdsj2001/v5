@@ -2,7 +2,6 @@
 
 #include "v5_command_first_point.h"
 #include "v5_command_motion.h"
-#include "v5_command_override.h"
 #include "v5_command_rtcp.h"
 #include "v5_command_safety.h"
 #include "v5_command_start.h"
@@ -88,10 +87,10 @@ const char *v5_main_page_action_label(V5MainPageActionKind action)
         return "G92 Clear";
     case V5_MAIN_PAGE_ACTION_RTCP_TOGGLE:
         return "RTCP";
-    case V5_MAIN_PAGE_ACTION_FEED_OVERRIDE_100:
-        return "F 100%";
-    case V5_MAIN_PAGE_ACTION_SPINDLE_OVERRIDE_100:
-        return "S 100%";
+    case V5_MAIN_PAGE_ACTION_FEED_OVERRIDE_SET:
+        return "Feed Override";
+    case V5_MAIN_PAGE_ACTION_SPINDLE_OVERRIDE_SET:
+        return "Spindle Override";
     case V5_MAIN_PAGE_ACTION_JOG_STEP_1:
         return "X1";
     case V5_MAIN_PAGE_ACTION_JOG_STEP_10:
@@ -306,12 +305,6 @@ int v5_main_page_action_prepare(
             break;
         case V5_MAIN_PAGE_ACTION_RTCP_TOGGLE:
             ok = v5_command_rtcp_toggle_prepare(native_readback, &prepared, &request);
-            break;
-        case V5_MAIN_PAGE_ACTION_FEED_OVERRIDE_100:
-            ok = v5_command_feed_override_prepare(100, &prepared, &request);
-            break;
-        case V5_MAIN_PAGE_ACTION_SPINDLE_OVERRIDE_100:
-            ok = v5_command_spindle_override_prepare(100, &prepared, &request);
             break;
         case V5_MAIN_PAGE_ACTION_JOG_STEP_1:
             return v5_main_page_local_action_prepare(action, "jog_step", 0.001, report);

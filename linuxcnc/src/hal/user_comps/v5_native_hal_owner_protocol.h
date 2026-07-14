@@ -5,14 +5,16 @@
 
 #define V5_NATIVE_HAL_OWNER_SOCKET_PATH "/run/8ax_v5_product_ui/v5_native_hal_owner.sock"
 #define V5_NATIVE_HAL_OWNER_MAGIC 0x5635484fu
-#define V5_NATIVE_HAL_OWNER_VERSION 1u
+#define V5_NATIVE_HAL_OWNER_VERSION 2u
 #define V5_NATIVE_HAL_OWNER_CODE_CAP 64u
 
 enum V5NativeHalOwnerOperation {
     V5_NATIVE_HAL_OWNER_OP_STATUS = 1,
     V5_NATIVE_HAL_OWNER_OP_ESTOP_FORCE = 2,
     V5_NATIVE_HAL_OWNER_OP_ESTOP_RESET = 3,
-    V5_NATIVE_HAL_OWNER_OP_RTCP_SET = 4
+    V5_NATIVE_HAL_OWNER_OP_RTCP_SET = 4,
+    V5_NATIVE_HAL_OWNER_OP_RTCP_FORCE_OFF = 5,
+    V5_NATIVE_HAL_OWNER_OP_WCHECKPOINT_STATUS = 6
 };
 
 enum V5NativeHalOwnerStatus {
@@ -45,6 +47,11 @@ typedef struct V5NativeHalOwnerResponse {
     uint32_t machine_enabled;
     uint32_t rtcp_actual_known;
     uint32_t rtcp_actual_active;
+    uint32_t wcheckpoint_valid;
+    uint32_t wcheckpoint_generation;
+    double wcheckpoint_logical_counts;
+    double wcheckpoint_base_counts;
+    double wcheckpoint_runtime_counts;
     uint32_t reserved;
     char code[V5_NATIVE_HAL_OWNER_CODE_CAP];
 } V5NativeHalOwnerResponse;

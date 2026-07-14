@@ -57,10 +57,6 @@ module	services/auth_download/drive_profile_download_install.py	/usr/libexec/8ax
 module	services/auth_download/drive_profile_download_ipv4.py	/usr/libexec/8ax/auth_download/drive_profile_download_ipv4.py	0644
 module	services/auth_download/drive_profile_download_status.py	/usr/libexec/8ax/auth_download/drive_profile_download_status.py	0644
 module	services/auth_download/drive_profile_download_transport.py	/usr/libexec/8ax/auth_download/drive_profile_download_transport.py	0644
-script	services/remote_ssh/v5_remote_ssh_tunnel.py	/usr/libexec/8ax/remote_ssh/v5_remote_ssh_tunnel.py	0755
-init	services/remote_ssh/init.d/v5-remote-ssh	/etc/init.d/v5-remote-ssh	0755
-config	config/auth/vps_remote_ssh_known_hosts	/etc/6x-cnc/vps_remote_ssh_known_hosts	0644
-config	petalinux/project-spec/meta-user/recipes-apps/v5-base-overlay/files/rootfs-overlay/etc/6x-cnc/vps_endpoints.json	/etc/6x-cnc/vps_endpoints.json	0644
 script	services/drive_profile/v5_drive_bus_action.py	/usr/libexec/8ax/drive_profile/v5_drive_bus_action.py	0755
 module	services/drive_profile/v5_drive_axis_model.py	/usr/libexec/8ax/drive_profile/v5_drive_axis_model.py	0644
 module	services/drive_profile/v5_drive_bus_context.py	/usr/libexec/8ax/drive_profile/v5_drive_bus_context.py	0644

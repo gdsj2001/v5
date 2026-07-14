@@ -2,6 +2,8 @@
 
 #include "v5_native_readback.h"
 #include "v5_native_wcs_status.h"
+#include "v5_native_home_runtime_owner.h"
+#include "v5_native_safety.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -76,7 +78,10 @@ static int wait_position(
     double before,
     double target,
     int *moved,
-    double *position_out)
+    double *position_out,
+    V5NativeHomeProgress *progress,
+    V5NativeHomeProgressCallback progress_cb,
+    void *progress_user_data)
 {
 #ifdef _WIN32
     (void)config;
@@ -86,12 +91,28 @@ static int wait_position(
     (void)target;
     (void)moved;
     (void)position_out;
+    (void)progress;
+    (void)progress_cb;
+    (void)progress_user_data;
     return 0;
 #else
     unsigned int attempt;
     unsigned int stable = 0U;
     for (attempt = 0U; attempt < V5_AXIS_ZERO_WAIT_ATTEMPTS; ++attempt) {
+        V5NativeSafetyResult safety;
         double current;
+        if (v5_native_safety_read_status(&safety) == V5_NATIVE_SAFETY_SEND_SENT &&
+            safety.safety_estop_known && safety.safety_estop_active) {
+            (void)v5_linuxcncrsh_send_line(config, "Set Abort");
+            if (progress) {
+                progress->phase = V5_NATIVE_HOME_PHASE_CANCELLED;
+                progress->terminal = 1;
+                progress->cancelled = 1;
+                snprintf(progress->direct_reason, sizeof(progress->direct_reason), "%s", "HOME_CANCELLED_BY_ESTOP");
+                if (progress_cb) progress_cb(progress, progress_user_data);
+            }
+            return 0;
+        }
         if (v5_linuxcncrsh_get_axis_position(config, axis, relative, &current)) {
             if (fabs(current - before) > V5_AXIS_ZERO_MOTION_TOLERANCE && moved) {
                 *moved = 1;
@@ -182,7 +203,11 @@ V5LinuxcncrshSendStatus v5_native_axis_zero_position_send(
     const V5NativeMotionParameters *parameters,
     const V5CommandPrepared *prepared,
     const V5CommandRequest *request,
-    V5NativeAxisZeroPositionResult *result)
+    V5NativeAxisZeroPositionResult *result,
+    unsigned long long run_id,
+    unsigned int generation,
+    V5NativeHomeProgressCallback progress_cb,
+    void *progress_user_data)
 {
     const V5NativeMotionAxisParameters *axis_parameters;
     V5NativeReadback before_wcs;
@@ -194,6 +219,17 @@ V5LinuxcncrshSendStatus v5_native_axis_zero_position_send(
     double before_position;
     double initial_position;
     double after_position = 0.0;
+    V5NativeHomeProgress progress;
+    V5NativeWcheckpointSnapshot wcheckpoint;
+    V5NativeSafeZeroPlan safe_plan;
+    char owner_code[64];
+    double final_target = 0.0;
+
+    memset(&progress, 0, sizeof(progress));
+    progress.run_id = run_id;
+    progress.generation = generation;
+    progress.phase = V5_NATIVE_HOME_PHASE_PREPARING;
+    if (progress_cb) progress_cb(&progress, progress_user_data);
 
     result_init(result);
     if (!request_ok(prepared, request)) {
@@ -202,10 +238,25 @@ V5LinuxcncrshSendStatus v5_native_axis_zero_position_send(
     }
     axis = request->text_value[0];
     relative = strcmp(request->mode_value, "wcs") == 0;
+    snprintf(progress.mode, sizeof(progress.mode), "%s", relative ? "wcs" : "mcs");
+    progress.current_axes[0] = axis;
+    progress.current_axes[1] = '\0';
+    progress.current_axis_mask = 1U << (axis == 'X' ? 0 : axis == 'Y' ? 1 : axis == 'Z' ? 2 : axis == 'A' ? 3 : axis == 'B' ? 4 : 5);
     axis_parameters = v5_native_motion_parameters_axis(parameters, axis);
     if (!axis_parameters) {
         result_code(result, "AXIS_ZERO_PARAMETERS_UNAVAILABLE");
         return V5_LINUXCNCRSH_SEND_INVALID;
+    }
+    progress.phase = V5_NATIVE_HOME_PHASE_RTCP_FORCE_OFF;
+    snprintf(progress.direct_reason, sizeof(progress.direct_reason), "%s", "HOME_RTCP_FORCE_OFF");
+    if (progress_cb) progress_cb(&progress, progress_user_data);
+    if (!v5_native_home_force_rtcp_off(owner_code, sizeof(owner_code))) {
+        result_code(result, owner_code);
+        progress.phase = V5_NATIVE_HOME_PHASE_FAILED;
+        progress.terminal = 1;
+        snprintf(progress.direct_reason, sizeof(progress.direct_reason), "%s", owner_code);
+        if (progress_cb) progress_cb(&progress, progress_user_data);
+        return V5_LINUXCNCRSH_SEND_IO_ERROR;
     }
     if (!v5_linuxcncrsh_get_axis_position(config, axis, 0, &before_abs) ||
         !v5_linuxcncrsh_get_axis_position(config, axis, relative, &before_position)) {
@@ -217,30 +268,73 @@ V5LinuxcncrshSendStatus v5_native_axis_zero_position_send(
         result_code(result, "AXIS_ZERO_WCS_READBACK_UNAVAILABLE");
         return V5_LINUXCNCRSH_SEND_IO_ERROR;
     }
+    if (!relative && rotary_axis(axis)) {
+        if (!v5_native_home_wcheckpoint_read(axis, &wcheckpoint, owner_code, sizeof(owner_code)) ||
+            !v5_native_home_safe_zero_plan(axis_parameters, &wcheckpoint, &safe_plan, owner_code, sizeof(owner_code))) {
+            result_code(result, owner_code);
+            return V5_LINUXCNCRSH_SEND_IO_ERROR;
+        }
+        final_target = (double)safe_plan.runtime_target_counts / axis_parameters->bus_counts_per_unit;
+    }
     if (v5_linuxcncrsh_send_line(config, "Set Mode MDI") != V5_LINUXCNCRSH_SEND_SENT) {
         result_code(result, "AXIS_ZERO_MDI_MODE_REJECTED");
         return V5_LINUXCNCRSH_SEND_IO_ERROR;
     }
-    if (target_error(axis, before_position, 0.0) <=
+    if (target_error(axis, before_position, final_target) <=
         V5_AXIS_ZERO_TARGET_TOLERANCE + V5_AXIS_ZERO_COMPARE_EPSILON) {
         double delta = rotary_axis(axis) ? V5_AXIS_ZERO_ROTARY_PROOF : V5_AXIS_ZERO_LINEAR_PROOF;
-        double proof_target = delta;
+        double proof_target = before_position + delta;
         if (before_abs + delta >= axis_parameters->max_limit) {
             proof_target = -delta;
         }
         if (before_abs + proof_target <= axis_parameters->min_limit ||
             before_abs + proof_target >= axis_parameters->max_limit ||
             !send_target(config, axis, relative, proof_target) ||
-            !wait_position(config, axis, relative, before_position, proof_target, &moved, 0)) {
+            !wait_position(config, axis, relative, before_position, proof_target, &moved, 0,
+                           &progress, progress_cb, progress_user_data)) {
             result_code(result, "AXIS_ZERO_PROOF_MOVE_NOT_CONFIRMED");
             return V5_LINUXCNCRSH_SEND_IO_ERROR;
         }
         before_position = proof_target;
     }
-    if (!send_target(config, axis, relative, 0.0) ||
-        !wait_position(config, axis, relative, before_position, 0.0, &moved, &after_position)) {
+    progress.phase = V5_NATIVE_HOME_PHASE_ZERO_RETURN;
+    progress.detail_valid = 1;
+    progress.actual = before_position;
+    progress.target = final_target;
+    progress.tolerance = rotary_axis(axis) ? 1.0 / fabs(axis_parameters->bus_counts_per_unit) : V5_AXIS_ZERO_TARGET_TOLERANCE;
+    snprintf(progress.direct_reason, sizeof(progress.direct_reason), "%s", "HOME_ZERO_RETURN");
+    if (progress_cb) progress_cb(&progress, progress_user_data);
+    if (!send_target(config, axis, relative, final_target) ||
+        !wait_position(config, axis, relative, before_position, final_target, &moved, &after_position,
+                       &progress, progress_cb, progress_user_data)) {
         result_code(result, "AXIS_ZERO_ARRIVAL_NOT_CONFIRMED");
         return V5_LINUXCNCRSH_SEND_IO_ERROR;
+    }
+    if (!relative && rotary_axis(axis)) {
+        int64_t logical_error = 0;
+        V5NativeWcheckpointSnapshot after;
+        if (!v5_native_home_wcheckpoint_read(axis, &after, owner_code, sizeof(owner_code))) {
+            result_code(result, owner_code);
+            return V5_LINUXCNCRSH_SEND_IO_ERROR;
+        }
+        if (after.generation != safe_plan.generation) {
+            if (!v5_native_home_safe_zero_remap(&safe_plan, &after, owner_code, sizeof(owner_code))) {
+                result_code(result, owner_code);
+                return V5_LINUXCNCRSH_SEND_IO_ERROR;
+            }
+            final_target = (double)safe_plan.runtime_target_counts / axis_parameters->bus_counts_per_unit;
+            if (!send_target(config, axis, 0, final_target) ||
+                !wait_position(config, axis, 0, after_position, final_target, &moved, &after_position,
+                               &progress, progress_cb, progress_user_data) ||
+                !v5_native_home_wcheckpoint_read(axis, &after, owner_code, sizeof(owner_code))) {
+                result_code(result, "HOME_SAFE_ZERO_REMAP_FAILED");
+                return V5_LINUXCNCRSH_SEND_IO_ERROR;
+            }
+        }
+        if (!v5_native_home_safe_zero_arrived(&safe_plan, &after, &logical_error, owner_code, sizeof(owner_code))) {
+            result_code(result, owner_code);
+            return V5_LINUXCNCRSH_SEND_IO_ERROR;
+        }
     }
     if (!moved) {
         result_code(result, "AXIS_ZERO_REAL_MOVE_NOT_CONFIRMED");
@@ -263,5 +357,10 @@ V5LinuxcncrshSendStatus v5_native_axis_zero_position_send(
         result->after_position = after_position;
     }
     result_code(result, relative ? "WCS_AXIS_ZERO_MOVE_CONFIRMED" : "MCS_AXIS_ZERO_MOVE_CONFIRMED");
+    progress.phase = V5_NATIVE_HOME_PHASE_COMPLETE;
+    progress.terminal = 1;
+    progress.detail_valid = 0;
+    snprintf(progress.direct_reason, sizeof(progress.direct_reason), "%s", result ? result->code : "HOME_COMPLETE");
+    if (progress_cb) progress_cb(&progress, progress_user_data);
     return V5_LINUXCNCRSH_SEND_SENT;
 }

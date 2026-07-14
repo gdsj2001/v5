@@ -1,6 +1,8 @@
 #include "v5_command_gate.h"
 #include "v5_linuxcncrsh_client.h"
 #include "v5_native_home.h"
+#include "v5_native_home_runtime_owner.h"
+#include "v5_native_hal_owner_client.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -37,6 +39,13 @@ int main(void)
         V5_COMMAND_RTCP_SET
     };
     unsigned int i;
+    unsigned int wire_target;
+    V5NativeWcheckpointSnapshot snapshot;
+    V5NativeSafeZeroPlan plan;
+    V5NativeMotionAxisParameters rotary;
+    V5NativeHomeRuntimeState runtime_state;
+    V5NativeHomeProgress progress;
+    char owner_code[64];
 
     for (i = 0U; i < sizeof(home_required) / sizeof(home_required[0]); ++i) {
         if (!v5_command_gate_requires_power_on_home(home_required[i])) {
@@ -138,6 +147,49 @@ int main(void)
         v5_native_home_safety_reject_code(0, 0, 0, 0) != 0) {
         return 15;
     }
+    if (!v5_native_hal_owner_request_target(V5_NATIVE_HAL_OWNER_OP_WCHECKPOINT_STATUS, 0U, &wire_target) || wire_target != 0U ||
+        !v5_native_hal_owner_request_target(V5_NATIVE_HAL_OWNER_OP_WCHECKPOINT_STATUS, 1U, &wire_target) || wire_target != 1U ||
+        !v5_native_hal_owner_request_target(V5_NATIVE_HAL_OWNER_OP_WCHECKPOINT_STATUS, 2U, &wire_target) || wire_target != 2U ||
+        v5_native_hal_owner_request_target(V5_NATIVE_HAL_OWNER_OP_WCHECKPOINT_STATUS, 3U, &wire_target)) {
+        return 17;
+    }
+    memset(&rotary, 0, sizeof(rotary));
+    rotary.axis = 'C';
+    rotary.bus_zero_counts = 24.0;
+    rotary.bus_counts_per_unit = 1000.0;
+    rotary.arrival_tolerance_units = 0.001;
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.valid = 1;
+    snapshot.generation = 7U;
+    snapshot.logical_counts = -1799954;
+    snapshot.base_counts = 360000;
+    snapshot.runtime_counts = -2159954;
+    if (!v5_native_home_safe_zero_plan(&rotary, &snapshot, &plan, owner_code, sizeof(owner_code)) ||
+        plan.delta_counts != -22 || plan.logical_target_counts != -1799976 ||
+        plan.runtime_target_counts != -2159976 || plan.arrival_tolerance_counts != 1) {
+        return 18;
+    }
+    snapshot.generation = 8U;
+    snapshot.base_counts = 720000;
+    snapshot.logical_counts = -1799976;
+    snapshot.runtime_counts = -2519976;
+    if (!v5_native_home_safe_zero_remap(&plan, &snapshot, owner_code, sizeof(owner_code)) ||
+        plan.logical_target_counts != -1799976 || plan.runtime_target_counts != -2519976 ||
+        !v5_native_home_safe_zero_arrived(&plan, &snapshot, 0, owner_code, sizeof(owner_code))) {
+        return 19;
+    }
+    if (!v5_native_home_runtime_begin(0x1234ULL, 9U, "all")) return 20;
+    memset(&progress, 0, sizeof(progress));
+    progress.run_id = 0x1234ULL;
+    progress.generation = 9U;
+    progress.phase = V5_NATIVE_HOME_PHASE_HOMED_SYNC;
+    progress.current_axis_mask = (1U << 0) | (1U << 1);
+    snprintf(progress.current_axes, sizeof(progress.current_axes), "%s", "X/Y");
+    v5_native_home_runtime_publish(&progress);
+    if (!v5_native_home_runtime_snapshot(0x1234ULL, 9U, &runtime_state) ||
+        runtime_state.progress.current_axis_mask != 3U ||
+        strcmp(runtime_state.progress.current_axes, "X/Y") != 0) return 21;
+    v5_native_home_runtime_finish(0x1234ULL, 9U, V5_NATIVE_HOME_PHASE_COMPLETE, "HOME_OK", 0);
 
     printf(
         "v5 command gate prepared: kind=%d name=%s owner=%s accepted=%d line=%s send_status=%d\n",

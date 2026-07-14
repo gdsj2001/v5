@@ -391,7 +391,6 @@ enable_boot_services() {
   enable_boot_service v5-ui-relay 94 16
   enable_boot_service v5-settings-actiond 95 15
   enable_boot_service v5-touch-diagnostics 96 14
-  enable_boot_service v5-remote-ssh 97 13
 }
 
 retired_pid_matches_path() {
@@ -530,7 +529,6 @@ if [ "$apply" -eq 1 ]; then
     /etc/init.d/v5-ui-relay restart
     /etc/init.d/v5-settings-actiond restart
     /etc/init.d/v5-touch-diagnostics restart
-    /etc/init.d/v5-remote-ssh restart
   fi
 else
   echo "dry-run only; pass --apply to install files and restart scope=$restart_scope"

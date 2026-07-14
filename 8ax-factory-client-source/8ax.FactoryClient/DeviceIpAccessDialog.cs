@@ -1,21 +1,28 @@
+using System.Diagnostics;
+using System.Net;
+
 namespace EightAxis.FactoryClient;
 
 internal sealed class DeviceIpAccessDialog : Form
 {
     private readonly DeviceRecord _device;
     private readonly List<DeviceIpAccessRecord> _records;
+    private readonly Action<string> _log;
     private ListView _summary = null!;
     private ListView _ipStats = null!;
     private ListView _pathStats = null!;
     private readonly DataGridView _details = new();
     private readonly TextBox _deleteNote = new();
+    private Button _remoteSsh = null!;
+    private string _remoteSshIp = "";
 
     public string DeleteNonce { get; private set; } = "";
     public string DeleteNote => _deleteNote.Text.Trim();
 
-    public DeviceIpAccessDialog(DeviceRecord device)
+    public DeviceIpAccessDialog(DeviceRecord device, Action<string> log)
     {
         _device = device;
+        _log = log;
         _records = (device.IpAccessRecords ?? [])
             .OrderByDescending(item => item.Time)
             .ToList();
@@ -38,12 +45,13 @@ internal sealed class DeviceIpAccessDialog : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 3,
+            RowCount = 4,
             Padding = new Padding(12),
         };
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 78));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
         Controls.Add(root);
 
         var header = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4 };
@@ -83,6 +91,21 @@ internal sealed class DeviceIpAccessDialog : Form
         actions.Controls.Add(_deleteNote, 3, 0);
         root.Controls.Add(actions, 0, 1);
         root.Controls.Add(tabs, 0, 2);
+
+        var remoteActions = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, Padding = new Padding(0, 6, 0, 0) };
+        remoteActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        remoteActions.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 260));
+        var remoteHint = new Label
+        {
+            Text = "SSH 目标由最近 IP 或当前选中的明细/IP分布行决定",
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleRight,
+        };
+        _remoteSsh = new Button { Dock = DockStyle.Fill };
+        _remoteSsh.Click += (_, _) => LaunchRemoteSsh();
+        remoteActions.Controls.Add(remoteHint, 0, 0);
+        remoteActions.Controls.Add(_remoteSsh, 1, 0);
+        root.Controls.Add(remoteActions, 0, 3);
     }
 
     private static TabPage CreateTab(string title, Control content)
@@ -107,6 +130,7 @@ internal sealed class DeviceIpAccessDialog : Form
     private ListView BuildIpStatsList()
     {
         _ipStats = NewList(("IP", 170), ("总数", 70), ("下载", 70), ("挑战", 70), ("最近访问", 170), ("路径数", 90));
+        _ipStats.SelectedIndexChanged += (_, _) => SelectIpStatsTarget();
         return _ipStats;
     }
 
@@ -124,6 +148,7 @@ internal sealed class DeviceIpAccessDialog : Form
         _details.ReadOnly = true;
         _details.RowHeadersVisible = false;
         _details.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+        _details.SelectionChanged += (_, _) => SelectDetailTarget();
         AddDetailColumn("time", "时间", 140);
         AddDetailColumn("ip", "IP", 150);
         AddDetailColumn("status", "状态", 70);
@@ -168,6 +193,7 @@ internal sealed class DeviceIpAccessDialog : Form
 
     private void LoadData()
     {
+        SetRemoteSshTarget(_records.FirstOrDefault()?.Ip);
         LoadSummary(_summary);
         LoadIpStats(_ipStats);
         LoadDetails();
@@ -205,7 +231,7 @@ internal sealed class DeviceIpAccessDialog : Form
         {
             var latest = group.OrderByDescending(item => item.Time).FirstOrDefault();
             var paths = group.Select(item => Clean(item.Path)).Where(item => item != "-").Distinct(StringComparer.OrdinalIgnoreCase).Count();
-            list.Items.Add(new ListViewItem(new[]
+            var row = new ListViewItem(new[]
             {
                 group.Key,
                 group.Count().ToString(),
@@ -213,8 +239,76 @@ internal sealed class DeviceIpAccessDialog : Form
                 group.Count(item => !IsDownload(item)).ToString(),
                 FormatTime(latest?.Time),
                 paths.ToString(),
-            }));
+            });
+            row.Tag = group.Key;
+            list.Items.Add(row);
         }
+    }
+
+    private void SelectDetailTarget()
+    {
+        if (_details.CurrentRow?.Tag is DeviceIpAccessRecord record)
+        {
+            SetRemoteSshTarget(record.Ip);
+        }
+    }
+
+    private void SelectIpStatsTarget()
+    {
+        if (_ipStats.SelectedItems.Count > 0)
+        {
+            SetRemoteSshTarget(_ipStats.SelectedItems[0].Tag as string);
+        }
+    }
+
+    private void SetRemoteSshTarget(string? rawIp)
+    {
+        _remoteSshIp = IPAddress.TryParse((rawIp ?? "").Trim(), out var address)
+            ? address.ToString()
+            : "";
+        _remoteSsh.Text = string.IsNullOrEmpty(_remoteSshIp)
+            ? "远程连接：无有效 IP"
+            : "远程连接：" + _remoteSshIp;
+        _remoteSsh.Enabled = !string.IsNullOrEmpty(_remoteSshIp);
+    }
+
+    private void LaunchRemoteSsh()
+    {
+        if (!IPAddress.TryParse(_remoteSshIp, out var address))
+        {
+            MessageBox.Show(this, "当前设备没有可用的 SSH 目标 IP。", "远程连接", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var sshPath = Path.Combine(Environment.SystemDirectory, "OpenSSH", "ssh.exe");
+        if (!File.Exists(sshPath))
+        {
+            MessageBox.Show(this, $"Windows 系统 SSH 不存在：{sshPath}", "远程连接", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        var deviceId = (_device.VpsDistributionId ?? _device.DeviceId ?? "").Trim();
+        var hostKeyAlias = deviceId.Length == 6 && deviceId.All(char.IsDigit)
+            ? "8ax-device-" + deviceId
+            : "8ax-device-ip-" + address.ToString().Replace(':', '-');
+        var script =
+            "& '" + sshPath.Replace("'", "''") + "' " +
+            "-o 'ConnectTimeout=10' " +
+            "-o 'HostKeyAlias=" + hostKeyAlias + "' " +
+            "-o 'StrictHostKeyChecking=ask' " +
+            "-p 22 'root@" + address + "'";
+        var start = new ProcessStartInfo
+        {
+            FileName = "powershell.exe",
+            UseShellExecute = true,
+            WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        };
+        start.ArgumentList.Add("-NoLogo");
+        start.ArgumentList.Add("-NoExit");
+        start.ArgumentList.Add("-Command");
+        start.ArgumentList.Add(script);
+        Process.Start(start);
+        _log($"已从设备 {deviceId} 的 IP访问记录启动 SSH：{address}:22。");
     }
 
     private void LoadDetails()

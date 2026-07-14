@@ -161,22 +161,18 @@ int v5_main_page_create(V5MainPage *page, lv_obj_t *parent)
     page->spindle_speed_label = v5_main_page_internal_make_label_ex(page->root, 762, 88, 142, 30, "--", 28, 193, 238, LV_TEXT_ALIGN_CENTER);
     v5_main_page_internal_make_label_ex(page->root, 762, 124, 76, 24, "主轴倍率", 238, 245, 248, LV_TEXT_ALIGN_LEFT);
     page->spindle_override_label = v5_main_page_internal_make_label_ex(page->root, 850, 124, 52, 24, "100%", 28, 193, 238, LV_TEXT_ALIGN_RIGHT);
-    v5_main_page_internal_make_override_reset_hit(page, 762, 84, 142, 38, v5_main_page_internal_spindle_override_reset_event_cb);
-    v5_main_page_internal_make_override_reset_hit(page, 840, 120, 70, 32, v5_main_page_internal_spindle_override_reset_event_cb);
-    v5_main_page_internal_make_panel(page->root, 762, 150, 142, 7, 13, 42, 59);
-    v5_main_page_internal_make_panel(page->root, 762, 150, 72, 7, 28, 193, 238);
-    v5_main_page_internal_make_panel(page->root, 823, 143, 22, 22, 38, 180, 230);
+    page->spindle_override_reset_hit = v5_main_page_internal_make_override_reset_hit(
+        page, 762, 64, 154, 58, v5_main_page_internal_spindle_override_reset_event_cb);
+    page->spindle_override_slider = v5_main_page_internal_create_override_slider(page, 1, 762, 150, 142);
     v5_main_page_internal_make_divider(page->root, 758, 220, 150, 1);
     v5_main_page_internal_make_label_ex(page->root, 768, 218, 78, 24, "进给速度", 238, 245, 248, LV_TEXT_ALIGN_LEFT);
     v5_main_page_internal_make_label_ex(page->root, 850, 218, 66, 22, "mm/min", 28, 193, 238, LV_TEXT_ALIGN_LEFT);
     page->linear_velocity_label = v5_main_page_internal_make_label_ex(page->root, 762, 240, 142, 30, "0.0", 28, 193, 238, LV_TEXT_ALIGN_CENTER);
     v5_main_page_internal_make_label_ex(page->root, 762, 275, 76, 24, "进给倍率", 238, 245, 248, LV_TEXT_ALIGN_LEFT);
     page->feed_override_label = v5_main_page_internal_make_label_ex(page->root, 850, 275, 52, 24, "100%", 28, 193, 238, LV_TEXT_ALIGN_RIGHT);
-    v5_main_page_internal_make_override_reset_hit(page, 762, 238, 142, 38, v5_main_page_internal_feed_override_reset_event_cb);
-    v5_main_page_internal_make_override_reset_hit(page, 840, 271, 70, 32, v5_main_page_internal_feed_override_reset_event_cb);
-    v5_main_page_internal_make_panel(page->root, 762, 307, 142, 7, 13, 42, 59);
-    v5_main_page_internal_make_panel(page->root, 762, 307, 72, 7, 28, 193, 238);
-    v5_main_page_internal_make_panel(page->root, 823, 300, 22, 22, 38, 180, 230);
+    page->feed_override_reset_hit = v5_main_page_internal_make_override_reset_hit(
+        page, 762, 218, 154, 53, v5_main_page_internal_feed_override_reset_event_cb);
+    page->feed_override_slider = v5_main_page_internal_create_override_slider(page, 0, 762, 307, 142);
 
     v5_main_page_internal_make_panel(page->root, 746, 342, 174, 188, 5, 24, 39);
     v5_main_page_internal_make_label_ex(page->root, 754, 350, 158, 22, "跟随误差 mm/deg", 210, 220, 226, LV_TEXT_ALIGN_LEFT);
@@ -290,6 +286,7 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
         v5_main_page_internal_set_label_text_if_changed(page->linear_velocity_label, panel.linear_velocity_text);
         v5_main_page_internal_set_label_text_if_changed(page->feed_override_label, panel.feed_override_text);
         v5_main_page_internal_set_label_text_if_changed(page->spindle_override_label, panel.spindle_override_text);
+        v5_main_page_internal_sync_override_sliders(page, status);
     }
 
     if ((refresh_flags & V5_MAIN_PAGE_REFRESH_SLOW) != 0U) {

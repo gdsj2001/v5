@@ -10,7 +10,23 @@ pin out bit heartbeat;
 pin in bit safety_estop_active;
 pin in bit machine_enabled;
 pin out bit rtcp_ui_request;
+pin out bit rtcp_force_off;
 pin in float rtcp_actual;
+pin in float wcheckpoint_a_logical_counts;
+pin in float wcheckpoint_a_base_counts;
+pin in float wcheckpoint_a_runtime_counts;
+pin in u32 wcheckpoint_a_generation;
+pin in bit wcheckpoint_a_valid;
+pin in float wcheckpoint_b_logical_counts;
+pin in float wcheckpoint_b_base_counts;
+pin in float wcheckpoint_b_runtime_counts;
+pin in u32 wcheckpoint_b_generation;
+pin in bit wcheckpoint_b_valid;
+pin in float wcheckpoint_c_logical_counts;
+pin in float wcheckpoint_c_base_counts;
+pin in float wcheckpoint_c_runtime_counts;
+pin in u32 wcheckpoint_c_generation;
+pin in bit wcheckpoint_c_valid;
 pin out float kins_x_rot_point;
 pin out float kins_y_rot_point;
 pin out float kins_z_rot_point;
@@ -75,6 +91,34 @@ static uint64_t g_hal_ready_ns;
 static uint64_t g_reset_started_ns;
 static uint64_t g_last_heartbeat_ns;
 static uint64_t g_last_publish_ns;
+
+static void fill_wcheckpoint_response(
+    unsigned int target,
+    V5NativeHalOwnerResponse *response)
+{
+    if (!response || target > 2U) {
+        return;
+    }
+    if (target == 0U) {
+        response->wcheckpoint_valid = wcheckpoint_a_valid ? 1U : 0U;
+        response->wcheckpoint_generation = wcheckpoint_a_generation;
+        response->wcheckpoint_logical_counts = wcheckpoint_a_logical_counts;
+        response->wcheckpoint_base_counts = wcheckpoint_a_base_counts;
+        response->wcheckpoint_runtime_counts = wcheckpoint_a_runtime_counts;
+    } else if (target == 1U) {
+        response->wcheckpoint_valid = wcheckpoint_b_valid ? 1U : 0U;
+        response->wcheckpoint_generation = wcheckpoint_b_generation;
+        response->wcheckpoint_logical_counts = wcheckpoint_b_logical_counts;
+        response->wcheckpoint_base_counts = wcheckpoint_b_base_counts;
+        response->wcheckpoint_runtime_counts = wcheckpoint_b_runtime_counts;
+    } else {
+        response->wcheckpoint_valid = wcheckpoint_c_valid ? 1U : 0U;
+        response->wcheckpoint_generation = wcheckpoint_c_generation;
+        response->wcheckpoint_logical_counts = wcheckpoint_c_logical_counts;
+        response->wcheckpoint_base_counts = wcheckpoint_c_base_counts;
+        response->wcheckpoint_runtime_counts = wcheckpoint_c_runtime_counts;
+    }
+}
 
 static uint64_t monotonic_ns(void)
 {
@@ -248,6 +292,7 @@ static void fill_response(const V5NativeHalOwnerRequest *request, V5NativeHalOwn
     response->machine_enabled = read_machine_enabled_pin() ? 1U : 0U;
     response->rtcp_actual_known = g_rtcp_known ? 1U : 0U;
     response->rtcp_actual_active = rtcp_actual >= 0.5 ? 1U : 0U;
+    fill_wcheckpoint_response(request->target, response);
 }
 
 static int wait_actual(unsigned int operation, unsigned int target, unsigned int timeout_ms)
@@ -261,7 +306,9 @@ static int wait_actual(unsigned int operation, unsigned int target, unsigned int
         if (operation == V5_NATIVE_HAL_OWNER_OP_ESTOP_RESET && !read_safety_estop_active_pin()) {
             return 1;
         }
-        if (operation == V5_NATIVE_HAL_OWNER_OP_RTCP_SET && g_rtcp_known && (rtcp_actual >= 0.5) == (target != 0U)) {
+        if ((operation == V5_NATIVE_HAL_OWNER_OP_RTCP_SET ||
+             operation == V5_NATIVE_HAL_OWNER_OP_RTCP_FORCE_OFF) &&
+            g_rtcp_known && (rtcp_actual >= 0.5) == (target != 0U)) {
             return 1;
         }
         usleep(500U);
@@ -276,6 +323,12 @@ static void process_request(const V5NativeHalOwnerRequest *request, V5NativeHalO
     if (request->operation == V5_NATIVE_HAL_OWNER_OP_STATUS) {
         response->status = V5_NATIVE_HAL_OWNER_STATUS_OK;
         snprintf(response->code, sizeof(response->code), "%s", "NATIVE_HAL_OWNER_STATUS_OK");
+        return;
+    }
+    if (request->operation == V5_NATIVE_HAL_OWNER_OP_WCHECKPOINT_STATUS &&
+        request->target <= 2U && response->wcheckpoint_valid) {
+        response->status = V5_NATIVE_HAL_OWNER_STATUS_OK;
+        snprintf(response->code, sizeof(response->code), "%s", "NATIVE_WCHECKPOINT_STATUS_OK");
         return;
     }
     if (request->operation == V5_NATIVE_HAL_OWNER_OP_ESTOP_FORCE) {
@@ -296,8 +349,17 @@ static void process_request(const V5NativeHalOwnerRequest *request, V5NativeHalO
         confirmed = wait_actual(request->operation, 0U, 100U);
         safety_reset = 0;
     } else if (request->operation == V5_NATIVE_HAL_OWNER_OP_RTCP_SET && request->target <= 1U) {
+        if (request->target) {
+            rtcp_force_off = 0;
+        }
         rtcp_ui_request = request->target ? 1 : 0;
         confirmed = wait_actual(request->operation, request->target, 500U);
+    } else if (request->operation == V5_NATIVE_HAL_OWNER_OP_RTCP_FORCE_OFF && request->target == 0U) {
+        rtcp_ui_request = 0;
+        rtcp_force_off = 1;
+        confirmed = wait_actual(request->operation, 0U, 600U);
+    } else if (request->operation == V5_NATIVE_HAL_OWNER_OP_RTCP_FORCE_OFF) {
+        snprintf(response->code, sizeof(response->code), "%s", confirmed ? "NATIVE_RTCP_FORCE_OFF_OK" : "NATIVE_RTCP_FORCE_OFF_NOT_CONFIRMED");
     } else {
         response->status = V5_NATIVE_HAL_OWNER_STATUS_BAD_REQUEST;
         snprintf(response->code, sizeof(response->code), "%s", "NATIVE_HAL_OWNER_BAD_REQUEST");

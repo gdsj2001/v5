@@ -196,46 +196,50 @@ void v5_main_page_internal_make_coordinate_value_clickable(V5MainPage *page, lv_
     lv_obj_add_event_cb(label, coordinate_event_cb, LV_EVENT_CLICKED, page);
 }
 
-static void trigger_value_reset_action(V5MainPage *page, V5MainPageActionKind action)
+static void trigger_value_reset_action(V5MainPage *page, int spindle)
 {
     V5MainPageActionReport report;
     int ok;
     if (!page) {
         return;
     }
-    ok = v5_main_page_trigger_action(page, action, &report);
-    v5_main_page_internal_log_button_event(action, ok, ok ? &report : 0);
+    ok = v5_main_page_trigger_override(page, spindle, 100, &report);
+    v5_main_page_internal_log_button_event(
+        spindle ? V5_MAIN_PAGE_ACTION_SPINDLE_OVERRIDE_SET : V5_MAIN_PAGE_ACTION_FEED_OVERRIDE_SET,
+        ok,
+        ok ? &report : 0);
 }
 
 void v5_main_page_internal_spindle_override_reset_event_cb(lv_event_t *event)
 {
     if (lv_event_get_code(event) == LV_EVENT_CLICKED) {
-        trigger_value_reset_action((V5MainPage *)lv_event_get_user_data(event), V5_MAIN_PAGE_ACTION_SPINDLE_OVERRIDE_100);
+        trigger_value_reset_action((V5MainPage *)lv_event_get_user_data(event), 1);
     }
 }
 
 void v5_main_page_internal_feed_override_reset_event_cb(lv_event_t *event)
 {
     if (lv_event_get_code(event) == LV_EVENT_CLICKED) {
-        trigger_value_reset_action((V5MainPage *)lv_event_get_user_data(event), V5_MAIN_PAGE_ACTION_FEED_OVERRIDE_100);
+        trigger_value_reset_action((V5MainPage *)lv_event_get_user_data(event), 0);
     }
 }
 
-void v5_main_page_internal_make_override_reset_hit(V5MainPage *page, int x, int y, int w, int h, lv_event_cb_t cb)
+lv_obj_t *v5_main_page_internal_make_override_reset_hit(V5MainPage *page, int x, int y, int w, int h, lv_event_cb_t cb)
 {
     lv_obj_t *hit;
     if (!page || !page->root || !cb) {
-        return;
+        return 0;
     }
     hit = lv_obj_create(page->root);
     v5_main_page_internal_clear_obj_style(hit);
-    lv_obj_set_pos(hit, x, y);
-    lv_obj_set_size(hit, w, h);
+    lv_obj_set_pos(hit, (lv_coord_t)x, (lv_coord_t)y);
+    lv_obj_set_size(hit, (lv_coord_t)w, (lv_coord_t)h);
     lv_obj_set_style_bg_opa(hit, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(hit, 0, 0);
     lv_obj_add_flag(hit, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(hit, cb, LV_EVENT_CLICKED, page);
     lv_obj_move_foreground(hit);
+    return hit;
 }
 
 static void main_program_edit_hit_event_cb(lv_event_t *event)
