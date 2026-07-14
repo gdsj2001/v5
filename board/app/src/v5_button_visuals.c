@@ -7,11 +7,16 @@ static lv_color_t color(uint8_t r, uint8_t g, uint8_t b)
 
 void v5_button_visual_release_now(lv_obj_t *button)
 {
+    lv_disp_t *display;
     if (!button) {
         return;
     }
+    display = lv_obj_get_disp(button);
     lv_obj_clear_state(button, LV_STATE_PRESSED);
     lv_obj_invalidate(button);
+    if (display) {
+        lv_refr_now(display);
+    }
 }
 
 static void button_visual_event_cb(lv_event_t *event)

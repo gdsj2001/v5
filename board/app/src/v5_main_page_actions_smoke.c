@@ -219,8 +219,10 @@ static int button_pressed_state_clears_on_release(V5MainPage *page, V5MainPageAc
         return 0;
     }
     lv_obj_add_state(button, LV_STATE_PRESSED);
+    v5_lvgl_headless_reset_flush_count();
     lv_event_send(button, LV_EVENT_RELEASED, 0);
-    return !lv_obj_has_state(button, LV_STATE_PRESSED);
+    return !lv_obj_has_state(button, LV_STATE_PRESSED) &&
+           v5_lvgl_headless_flush_count() > 0U;
 }
 
 static int button_visual_state_cycle(V5MainPage *page, V5MainPageActionKind action)
