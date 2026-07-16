@@ -7,6 +7,7 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 SRC_URI = " \
     git://github.com/linuxcnc-ethercat/linuxcnc-ethercat.git;protocol=https;branch=master \
     file://0001-v5-register-pdo-outputs-before-inputs.patch \
+    file://0002-v5-dc-reference-health-pins.patch \
 "
 SRCREV = "de7e377f76873fa99e8ea5dcafd7df916e118024"
 PV = "1.0+git${SRCPV}"

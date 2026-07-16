@@ -275,6 +275,8 @@ bool do_homing(void)
     return 0;
 }
 
+bool homing_wcheckpoint_reset_required(void) { return 1; }
+
 //===============================================================================
 // functions below use unmodified base_*() implementation
 bool get_allhomed(void)                   { return base_get_allhomed(); }
@@ -377,8 +379,14 @@ static int makepins(int id,int njoints)
 // All (skeleton) functions required for homing api follow:
 void homeMotFunctions(void(*pSetRotaryUnlock)(int,int)
                      ,int (*pGetRotaryIsUnlocked)(int)
+                     ,int (*pReadWcheckpointSnapshot)(
+                         unsigned int, struct v5_wcheckpoint_snapshot *)
                      )
-{ return; }
+{
+    (void)pSetRotaryUnlock;
+    (void)pGetRotaryIsUnlocked;
+    (void)pReadWcheckpointSnapshot;
+}
 
 int  homing_init(int id,
                  double servo_period,
@@ -389,6 +397,7 @@ int  homing_init(int id,
      return makepins(id,n_joints);
 }
 bool do_homing(void)                                 {return 1;}
+bool homing_wcheckpoint_reset_required(void)         {return 1;}
 bool get_allhomed()                                  {return 1;}
 bool get_homed(int jno)                              {return 1;}
 bool get_home_is_idle(int jno)                       {return 1;}
@@ -427,6 +436,7 @@ EXPORT_SYMBOL(homeMotFunctions);
 
 EXPORT_SYMBOL(homing_init);
 EXPORT_SYMBOL(do_homing);
+EXPORT_SYMBOL(homing_wcheckpoint_reset_required);
 EXPORT_SYMBOL(get_allhomed);
 EXPORT_SYMBOL(get_homed);
 EXPORT_SYMBOL(get_home_is_idle);

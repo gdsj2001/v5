@@ -12,12 +12,10 @@ int main(void)
 {
     V5CommandRequest request;
     V5CommandPrepared prepared;
+    V5CommandRequest all_home_request;
+    V5CommandPrepared all_home_prepared;
     V5LinuxcncrshConfig config;
     V5LinuxcncrshSendStatus send_status;
-    V5NativeMotionAxisParameters axis;
-    double still_previous[5] = {0.0, 10.0, -20.0, 45.0, 359.999};
-    double still_current[5] = {0.0005, 9.9995, -20.0005, 45.0005, 359.9995};
-    double moving_current[5] = {0.0, 10.0, -19.998, 45.0, 359.999};
     char line[384];
     static const V5CommandKind home_required[] = {
         V5_COMMAND_START,
@@ -36,7 +34,10 @@ int main(void)
         V5_COMMAND_ESTOP_FORCE,
         V5_COMMAND_ESTOP_RESET,
         V5_COMMAND_WCS_SELECT,
-        V5_COMMAND_RTCP_SET
+        V5_COMMAND_RTCP_SET,
+        V5_COMMAND_DRIVE_WRITE_BEGIN,
+        V5_COMMAND_DRIVE_WRITE_FINISH,
+        V5_COMMAND_DRIVE_WRITE_ABORT
     };
     unsigned int i;
     unsigned int wire_target;
@@ -112,40 +113,162 @@ int main(void)
             &prepared, &request, "Get Program\n", line, sizeof(line))) {
         return 8;
     }
-    memset(&axis, 0, sizeof(axis));
-    axis.axis = 'C';
-    axis.status_slot = 4U;
-    axis.max_velocity = 833.333333333;
-    if (!v5_native_home_format_increment(&axis, -3599.971, line, sizeof(line)) ||
-        strcmp(line, "Set Jog_Incr 4 -50000.000000 3599.971000") != 0) {
+    if (!v5_linuxcncrsh_estop_reset_ready(1, 0) ||
+        v5_linuxcncrsh_estop_reset_ready(1, 1) ||
+        v5_linuxcncrsh_estop_reset_ready(0, 0)) {
+        return 31;
+    }
+    {
+        V5CommandRequest drive_request;
+        V5CommandPrepared drive_prepared;
+        memset(&drive_request, 0, sizeof(drive_request));
+        drive_request.kind = V5_COMMAND_DRIVE_WRITE_BEGIN;
+        drive_request.text_value = "settings-42";
+        if (!v5_command_gate_prepare(&drive_request, &drive_prepared) ||
+            strcmp(drive_prepared.owner, "native_drive_write_window") != 0) {
+            return 32;
+        }
+    }
+    memset(&all_home_request, 0, sizeof(all_home_request));
+    all_home_request.kind = V5_COMMAND_HOME;
+    if (!v5_command_gate_prepare(&all_home_request, &all_home_prepared) ||
+        strcmp(all_home_prepared.owner, "native_home_mode_gate") != 0 ||
+        all_home_request.axis_mask != 0U || all_home_request.text_value ||
+        all_home_request.secondary_text_value || all_home_request.mode_value ||
+        all_home_request.axis_value != 0.0 || all_home_request.increment_value != 0.0 ||
+        v5_linuxcncrsh_format_line(
+            &all_home_prepared, &all_home_request, line, sizeof(line)) ||
+        !v5_linuxcncrsh_format_all_home(line, sizeof(line)) ||
+        strcmp(line, "Set Home -1") != 0) {
         return 9;
     }
-    if (!v5_native_home_format_increment(&axis, 1.0, line, sizeof(line)) ||
-        strcmp(line, "Set Jog_Incr 4 50000.000000 1.000000") != 0) {
-        return 12;
+    {
+        V5LinuxcncrshTaskContext before;
+        V5LinuxcncrshTaskContext after;
+        if (!v5_linuxcncrsh_parse_task_context(
+                "Get Mode\nMODE AUTO\n",
+                "Get Program_Status\nPROGRAM_STATUS RUNNING\n",
+                "Get Program\nPROGRAM /opt/8ax/v5/gcode/golden/cc-ac.ngc\n",
+                &before) ||
+            v5_linuxcncrsh_home_entry_actions(&before) !=
+                (V5_LINUXCNCRSH_HOME_ACTION_ABORT |
+                 V5_LINUXCNCRSH_HOME_ACTION_MANUAL) ||
+            !v5_linuxcncrsh_parse_task_context(
+                "MODE MANUAL\n",
+                "PROGRAM_STATUS IDLE\n",
+                "PROGRAM /opt/8ax/v5/gcode/golden/cc-ac.ngc\n",
+                &after) ||
+            !v5_linuxcncrsh_home_entry_context_preserved(&before, &after)) {
+            return 37;
+        }
+        if (!v5_linuxcncrsh_parse_task_context(
+                "MODE MANUAL\n",
+                "PROGRAM_STATUS IDLE\n",
+                "PROGRAM /opt/8ax/v5/gcode/golden/cc-ac.ngc\n",
+                &before) ||
+            v5_linuxcncrsh_home_entry_actions(&before) != 0U) {
+            return 38;
+        }
+        if (!v5_linuxcncrsh_parse_task_context(
+                "MODE MANUAL\n",
+                "PROGRAM_STATUS PAUSED\n",
+                "PROGRAM /opt/8ax/v5/gcode/golden/cc-ac.ngc\n",
+                &before) ||
+            v5_linuxcncrsh_home_entry_actions(&before) !=
+                V5_LINUXCNCRSH_HOME_ACTION_ABORT) {
+            return 39;
+        }
+        if (!v5_linuxcncrsh_parse_task_context(
+                "MODE MANUAL\n",
+                "PROGRAM_STATUS IDLE\n",
+                "PROGRAM NONE\n",
+                &after) ||
+            v5_linuxcncrsh_home_entry_context_preserved(&before, &after) ||
+            v5_linuxcncrsh_parse_task_context(
+                "MODE AUTO\n", "PROGRAM_STATUS IDLE\n", "Get Program\n", &after)) {
+            return 40;
+        }
+        {
+            int teleop_enabled = 0;
+            if (!v5_linuxcncrsh_parse_teleop_enabled_response(
+                    "Get Teleop_Enable\nTELEOP_ENABLE YES\n",
+                    &teleop_enabled) ||
+                !teleop_enabled ||
+                v5_linuxcncrsh_home_entry_joint_mode_ready(1, teleop_enabled) ||
+                !v5_linuxcncrsh_parse_teleop_enabled_response(
+                    "TELEOP_ENABLE YES\nTELEOP_ENABLE NO\n",
+                    &teleop_enabled) ||
+                teleop_enabled ||
+                !v5_linuxcncrsh_home_entry_joint_mode_ready(1, teleop_enabled) ||
+                v5_linuxcncrsh_home_entry_joint_mode_ready(0, 0) ||
+                v5_linuxcncrsh_parse_teleop_enabled_response(
+                    "TELEOP_ENABLE UNKNOWN\n", &teleop_enabled)) {
+                return 41;
+            }
+        }
     }
-    if (fabs(v5_native_home_target_delta('C', -3599.999, 0.0) - (-0.001)) > 1.0e-6 ||
-        fabs(v5_native_home_target_delta('C', 359.999, 0.0) - 0.001) > 1.0e-6 ||
-        fabs(v5_native_home_target_delta('C', -1799.976, 0.024)) > 1.0e-6 ||
-        fabs(v5_native_home_target_delta('X', -12.5, 0.0) - 12.5) > 1.0e-9) {
-        return 16;
+    {
+        V5LinuxcncrshJointState joint_state;
+        if (!v5_linuxcncrsh_parse_joint_state_response(
+                "HELLO ACK\nJOINT_STATE 2 0.106700000 YES 42 17\n",
+                2U, &joint_state) ||
+            fabs(joint_state.actual - 0.1067) > 1.0e-12 ||
+            !joint_state.in_position || joint_state.heartbeat != 42U ||
+            joint_state.echo_serial != 17 ||
+            v5_linuxcncrsh_parse_joint_state_response(
+                "JOINT_STATE 1 0.106700000 YES 42 17\n", 2U, &joint_state)) {
+            return 36;
+        }
     }
-    if (v5_native_home_joint_needs_sync(1, 1) != 0 ||
-        v5_native_home_joint_needs_sync(1, 0) != 1 ||
-        v5_native_home_joint_needs_sync(0, 0) != -1 ||
-        v5_native_home_joint_needs_sync(0, 1) != -1) {
-        return 13;
-    }
-    if (!v5_native_home_positions_still(still_previous, still_current, 5U) ||
-        v5_native_home_positions_still(still_previous, moving_current, 5U) ||
-        v5_native_home_positions_still(still_previous, still_current, 0U)) {
-        return 14;
-    }
-    if (strcmp(v5_native_home_safety_reject_code(1, 1, 1, 0), "HOME_PRECONDITION_ESTOP") != 0 ||
-        strcmp(v5_native_home_safety_reject_code(1, 0, 1, 0), "HOME_PRECONDITION_DISABLED") != 0 ||
-        v5_native_home_safety_reject_code(1, 0, 1, 1) != 0 ||
-        v5_native_home_safety_reject_code(0, 0, 0, 0) != 0) {
-        return 15;
+    {
+        V5LinuxcncrshTaskState task_state;
+        const char *program = "/opt/8ax/v5/gcode/golden/cc-ac.ngc";
+        if (!v5_linuxcncrsh_parse_task_state_response(
+                "Get Task_State\n"
+                "TASK_STATE state=1 mode=2 interp=1 exec=2 paused=0 "
+                "motion_queue=0 motion_inpos=1 current_line=20 motion_line=20 "
+                "read_line=21 echo=44 heartbeat=99 "
+                "program=/opt/8ax/v5/gcode/golden/cc-ac.ngc\n",
+                &task_state) ||
+            task_state.state != V5_LINUXCNCRSH_TASK_STATE_ESTOP ||
+            task_state.mode != V5_LINUXCNCRSH_TASK_MODE_AUTO ||
+            task_state.interp != V5_LINUXCNCRSH_TASK_INTERP_IDLE ||
+            task_state.exec != V5_LINUXCNCRSH_TASK_EXEC_DONE ||
+            task_state.paused != 0 || task_state.motion_queue != 0 ||
+            task_state.motion_inpos != 1 || task_state.current_line != 20 ||
+            task_state.motion_line != 20 || task_state.read_line != 21 ||
+            task_state.echo != 44 || task_state.heartbeat != 99U ||
+            strcmp(task_state.program, program) != 0 ||
+            !v5_linuxcncrsh_task_state_clean_after_estop(
+                &task_state, program)) {
+            return 90;
+        }
+        task_state.motion_queue = 1;
+        if (v5_linuxcncrsh_task_state_clean_after_estop(
+                &task_state, program)) {
+            return 91;
+        }
+        task_state.motion_queue = 0;
+        task_state.motion_inpos = 0;
+        if (v5_linuxcncrsh_task_state_clean_after_estop(
+                &task_state, program)) {
+            return 92;
+        }
+        task_state.motion_inpos = 1;
+        task_state.state = V5_LINUXCNCRSH_TASK_STATE_ON;
+        if (v5_linuxcncrsh_task_state_clean_after_estop(
+                &task_state, program)) {
+            return 93;
+        }
+        task_state.state = V5_LINUXCNCRSH_TASK_STATE_ESTOP;
+        if (v5_linuxcncrsh_task_state_clean_after_estop(
+                &task_state, "/opt/8ax/v5/gcode/golden/cc-bc.ngc") ||
+            v5_linuxcncrsh_parse_task_state_response(
+                "TASK_STATE state=1 mode=2 interp=1 exec=2 paused=0 "
+                "motion_queue=0 motion_inpos=1 current_line=20\n",
+                &task_state)) {
+            return 94;
+        }
     }
     if (!v5_native_hal_owner_request_target(V5_NATIVE_HAL_OWNER_OP_WCHECKPOINT_STATUS, 0U, &wire_target) || wire_target != 0U ||
         !v5_native_hal_owner_request_target(V5_NATIVE_HAL_OWNER_OP_WCHECKPOINT_STATUS, 1U, &wire_target) || wire_target != 1U ||
@@ -155,18 +278,28 @@ int main(void)
     }
     memset(&rotary, 0, sizeof(rotary));
     rotary.axis = 'C';
+    rotary.status_slot = 4U;
     rotary.bus_zero_counts = 24.0;
     rotary.bus_counts_per_unit = 1000.0;
-    rotary.arrival_tolerance_units = 0.001;
+    rotary.positioning_resolution_units = 0.001;
     memset(&snapshot, 0, sizeof(snapshot));
     snapshot.valid = 1;
     snapshot.generation = 7U;
-    snapshot.logical_counts = -1799954;
     snapshot.base_counts = 360000;
-    snapshot.runtime_counts = -2159954;
+    if (!v5_native_home_wcheckpoint_bind_runtime_actual(
+            &rotary, -2159.954, &snapshot, owner_code, sizeof(owner_code)) ||
+        snapshot.logical_counts != -1799954 || snapshot.runtime_counts != -2159954) {
+        return 24;
+    }
+    if (v5_native_home_wcheckpoint_bind_runtime_actual(
+            &rotary, -2159.9544, &snapshot, owner_code, sizeof(owner_code)) ||
+        strcmp(owner_code, "HOME_WCHECKPOINT_RUNTIME_ACTUAL_INVALID") != 0) {
+        return 25;
+    }
     if (!v5_native_home_safe_zero_plan(&rotary, &snapshot, &plan, owner_code, sizeof(owner_code)) ||
-        plan.delta_counts != -22 || plan.logical_target_counts != -1799976 ||
-        plan.runtime_target_counts != -2159976 || plan.arrival_tolerance_counts != 1) {
+        plan.delta_counts != -22 || plan.logical_start_counts != -1799954 ||
+        plan.logical_target_counts != -1799976 ||
+        plan.runtime_target_counts != -2159976) {
         return 18;
     }
     snapshot.generation = 8U;
@@ -174,21 +307,44 @@ int main(void)
     snapshot.logical_counts = -1799976;
     snapshot.runtime_counts = -2519976;
     if (!v5_native_home_safe_zero_remap(&plan, &snapshot, owner_code, sizeof(owner_code)) ||
+        plan.logical_start_counts != -1799954 ||
         plan.logical_target_counts != -1799976 || plan.runtime_target_counts != -2519976 ||
         !v5_native_home_safe_zero_arrived(&plan, &snapshot, 0, owner_code, sizeof(owner_code))) {
         return 19;
+    }
+    snapshot.generation = 9U;
+    snapshot.logical_counts = -1799975;
+    snapshot.base_counts = 720000;
+    snapshot.runtime_counts = -2519975;
+    if (!v5_native_home_safe_zero_plan(
+            &rotary, &snapshot, &plan, owner_code, sizeof(owner_code)) ||
+        plan.delta_counts != -1 || plan.logical_start_counts != -1799975 ||
+        plan.logical_target_counts != -1799976 ||
+        v5_native_home_safe_zero_arrived(
+            &plan, &snapshot, 0, owner_code, sizeof(owner_code)) ||
+        strcmp(owner_code, "HOME_SAFE_ZERO_LOGICAL_TARGET_COUNT_MISMATCH") != 0) {
+        return 40;
+    }
+    snapshot.logical_counts = -1799976;
+    snapshot.runtime_counts = -2519976;
+    if (!v5_native_home_safe_zero_arrived(
+            &plan, &snapshot, 0, owner_code, sizeof(owner_code))) return 40;
+    snapshot.logical_counts = -1439976;
+    snapshot.runtime_counts = -2159976;
+    if (v5_native_home_safe_zero_arrived(&plan, &snapshot, 0, owner_code, sizeof(owner_code)) ||
+        strcmp(owner_code, "HOME_SAFE_ZERO_LOGICAL_TARGET_COUNT_MISMATCH") != 0) {
+        return 23;
     }
     if (!v5_native_home_runtime_begin(0x1234ULL, 9U, "all")) return 20;
     memset(&progress, 0, sizeof(progress));
     progress.run_id = 0x1234ULL;
     progress.generation = 9U;
     progress.phase = V5_NATIVE_HOME_PHASE_HOMED_SYNC;
-    progress.current_axis_mask = (1U << 0) | (1U << 1);
-    snprintf(progress.current_axes, sizeof(progress.current_axes), "%s", "X/Y");
+    snprintf(progress.current_axes, sizeof(progress.current_axes), "%s", "ALL");
     v5_native_home_runtime_publish(&progress);
     if (!v5_native_home_runtime_snapshot(0x1234ULL, 9U, &runtime_state) ||
-        runtime_state.progress.current_axis_mask != 3U ||
-        strcmp(runtime_state.progress.current_axes, "X/Y") != 0) return 21;
+        runtime_state.progress.current_axis_mask != 0U ||
+        strcmp(runtime_state.progress.current_axes, "ALL") != 0) return 22;
     v5_native_home_runtime_finish(0x1234ULL, 9U, V5_NATIVE_HOME_PHASE_COMPLETE, "HOME_OK", 0);
 
     printf(

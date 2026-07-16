@@ -44,3 +44,28 @@ int v5_native_rtcp_control_set(int enabled, V5NativeRtcpControlResult *result)
                ? V5_NATIVE_RTCP_CONTROL_SEND_UNAVAILABLE
                : V5_NATIVE_RTCP_CONTROL_SEND_IO_ERROR;
 }
+
+int v5_native_rtcp_control_force_off(V5NativeRtcpControlResult *result)
+{
+    V5NativeHalOwnerResponse response;
+    int status;
+    v5_native_rtcp_control_result_init(result);
+    status = v5_native_hal_owner_exchange(
+        V5_NATIVE_HAL_OWNER_OP_RTCP_FORCE_OFF,
+        0U,
+        800U,
+        &response);
+    if (result) {
+        result->target_active = 0;
+        result->actual_known = response.rtcp_actual_known ? 1 : 0;
+        result->actual_active = response.rtcp_actual_active ? 1 : 0;
+        copy_code(result, response.code);
+    }
+    if (status == V5_NATIVE_HAL_OWNER_CLIENT_OK &&
+        response.rtcp_actual_known && !response.rtcp_actual_active) {
+        return V5_NATIVE_RTCP_CONTROL_SEND_SENT;
+    }
+    return status == V5_NATIVE_HAL_OWNER_CLIENT_UNAVAILABLE
+               ? V5_NATIVE_RTCP_CONTROL_SEND_UNAVAILABLE
+               : V5_NATIVE_RTCP_CONTROL_SEND_IO_ERROR;
+}

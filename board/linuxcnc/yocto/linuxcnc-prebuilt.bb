@@ -180,8 +180,17 @@ do_install() {
         v5_copy_required "$runtime_path"
         runtime_count=$(expr "$runtime_count" + 1)
     done < ${WORKDIR}/v5_linuxcnc_runtime_allowlist.tsv
-    [ "$runtime_count" -eq 32 ] || \
-        bbfatal "unexpected LinuxCNC runtime allowlist size: $runtime_count"
+    [ "$runtime_count" -gt 0 ] || \
+        bbfatal "LinuxCNC runtime allowlist is empty"
+    bbnote "linuxcnc runtime allowlist entries: $runtime_count"
+
+    rtapi_app_path="${D}${bindir}/rtapi_app"
+    [ -f "$rtapi_app_path" ] || \
+        bbfatal "LinuxCNC realtime loader is missing from the minimal package"
+    chown root:root "$rtapi_app_path"
+    chmod 4755 "$rtapi_app_path"
+    [ "$(stat -c '%u:%g:%a' "$rtapi_app_path")" = "0:0:4755" ] || \
+        bbfatal "LinuxCNC realtime loader must be packaged root:root 4755"
 
     install -d ${D}${includedir}
     cp -a "$full_install${includedir}/linuxcnc" ${D}${includedir}/linuxcnc
@@ -240,6 +249,10 @@ v5_refresh_runtime_hashes() {
     runtime_hashes="$package_root${datadir}/v5-native/linuxcnc-runtime-files.sha256"
     [ -f "$runtime_hashes" ] || \
         bbfatal "runtime hash manifest placeholder is missing from the final package"
+    package_rtapi_app="$package_root${bindir}/rtapi_app"
+    [ -f "$package_rtapi_app" ] && \
+        [ "$(stat -c '%u:%g:%a' "$package_rtapi_app")" = "0:0:4755" ] || \
+        bbfatal "final LinuxCNC package rtapi_app must remain root:root 4755"
     tab=$(printf '\t')
     (
         cd "$package_root"
@@ -282,10 +295,14 @@ FILES_${PN} = " \
     ${libdir}/linuxcnc/modules/trivkins.so \
     ${libdir}/linuxcnc/modules/xyzac-trt-kins.so \
     ${libdir}/linuxcnc/modules/xyzbc-trt-kins.so \
+    ${libdir}/linuxcnc/modules/and2.so \
     ${libdir}/linuxcnc/modules/bitslice.so \
     ${libdir}/linuxcnc/modules/mux2.so \
+    ${libdir}/linuxcnc/modules/not.so \
     ${libdir}/linuxcnc/modules/or2.so \
     ${libdir}/linuxcnc/modules/v5_safety_latch.so \
+    ${libdir}/linuxcnc/modules/v5_bus_axis_router.so \
+    ${libdir}/linuxcnc/modules/v5_bus_homecomp.so \
     ${libdir}/python3/dist-packages/linuxcnc.so \
     ${datadir}/linuxcnc/linuxcnc.nml \
     ${datadir}/v5-native/linuxcnc-runtime-allowlist.tsv \

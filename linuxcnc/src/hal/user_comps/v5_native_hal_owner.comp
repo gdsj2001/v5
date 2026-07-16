@@ -9,24 +9,70 @@ pin out bit safety_reset;
 pin out bit heartbeat;
 pin in bit safety_estop_active;
 pin in bit machine_enabled;
+pin out bit safety_actual_valid;
 pin out bit rtcp_ui_request;
 pin out bit rtcp_force_off;
 pin in float rtcp_actual;
-pin in float wcheckpoint_a_logical_counts;
-pin in float wcheckpoint_a_base_counts;
-pin in float wcheckpoint_a_runtime_counts;
-pin in u32 wcheckpoint_a_generation;
-pin in bit wcheckpoint_a_valid;
-pin in float wcheckpoint_b_logical_counts;
-pin in float wcheckpoint_b_base_counts;
-pin in float wcheckpoint_b_runtime_counts;
-pin in u32 wcheckpoint_b_generation;
-pin in bit wcheckpoint_b_valid;
-pin in float wcheckpoint_c_logical_counts;
-pin in float wcheckpoint_c_base_counts;
-pin in float wcheckpoint_c_runtime_counts;
-pin in u32 wcheckpoint_c_generation;
-pin in bit wcheckpoint_c_valid;
+pin out bit rtcp_actual_valid;
+pin in bit home_rtcp_force_off;
+pin in u32 home_rtcp_req_txn;
+pin out u32 home_rtcp_ack_transaction;
+pin in bit rtcp_gcode_request;
+pin in float wcp_a_logical_counts;
+pin in float wcp_a_base_counts;
+pin in float wcp_a_runtime_counts;
+pin in u32 wcp_a_generation;
+pin in bit wcp_a_valid;
+pin in float wcp_b_logical_counts;
+pin in float wcp_b_base_counts;
+pin in float wcp_b_runtime_counts;
+pin in u32 wcp_b_generation;
+pin in bit wcp_b_valid;
+pin in float wcp_c_logical_counts;
+pin in float wcp_c_base_counts;
+pin in float wcp_c_runtime_counts;
+pin in u32 wcp_c_generation;
+pin in bit wcp_c_valid;
+pin out bit home_config_valid_##[5];
+pin out u32 home_status_slot_##[5];
+pin out u32 home_axis_code_##[5];
+pin out u32 home_slave_position_##[5];
+pin out u32 home_mapping_generation_##[5];
+pin out float home_zero_counts_##[5];
+pin out float home_counts_per_unit_##[5];
+pin out bit home_table_mapping_valid;
+pin out u32 home_table_map_gen;
+pin out u32 home_table_active_mask;
+pin out u32 home_table_commit_seq;
+pin in bit home_router_mapping_valid;
+pin in u32 home_router_map_gen;
+pin in u32 home_router_active_mask;
+pin in u32 home_router_commit_seq;
+pin in u32 home_router_reject_seq;
+pin in s32 home_phase_##[5];
+pin in s32 home_failure_##[5];
+pin in float home_start_counts_##[5];
+pin in float home_target_counts_##[5];
+pin in float home_readback_counts_##[5];
+pin in float home_error_counts_##[5];
+pin in u32 home_readback_generation_##[5];
+pin in bit home_readback_valid_##[5];
+pin in bit home_motion_active_##[5];
+pin in u32 home_transaction_##[5];
+pin in u32 home_global_transaction;
+pin in u32 home_runtime_active_mask;
+pin in u32 home_completed_mask;
+pin in u32 home_terminal_mask;
+pin in u32 home_failed_joint;
+pin in s32 home_failure_code;
+pin in s32 home_failure_phase;
+pin in u32 home_failure_current_mask;
+pin in float home_failure_actual_counts;
+pin in float home_failure_target_counts;
+pin in float home_failure_error_counts;
+pin in u32 home_failure_generation;
+pin in bit home_failure_readback_valid;
+pin in bit home_failure_motion_active;
 pin out float kins_x_rot_point;
 pin out float kins_y_rot_point;
 pin out float kins_z_rot_point;
@@ -80,6 +126,16 @@ typedef struct OwnerConfig {
     int rtcp_default;
 } OwnerConfig;
 
+typedef struct HomeConfigRecord {
+    uint32_t active;
+    uint32_t status_slot;
+    uint32_t axis_code;
+    uint32_t slave_position;
+    uint32_t mapping_generation;
+    double zero_counts;
+    double counts_per_unit;
+} HomeConfigRecord;
+
 static OwnerConfig g_config;
 static volatile sig_atomic_t g_stop;
 static gid_t g_product_gid;
@@ -91,6 +147,15 @@ static uint64_t g_hal_ready_ns;
 static uint64_t g_reset_started_ns;
 static uint64_t g_last_heartbeat_ns;
 static uint64_t g_last_publish_ns;
+static HomeConfigRecord g_home_stage[V5_NATIVE_HOME_JOINT_COUNT];
+static uint32_t g_home_stage_mask;
+static uint32_t g_home_stage_mapping_generation;
+static uint32_t g_home_stage_expected_active_mask;
+static uint32_t g_home_stage_commit_seq;
+static int g_home_rtcp_latched;
+static uint32_t g_home_rtcp_seen_transaction;
+static int g_gcode_rearm_seen_low;
+static int g_previous_gcode_request;
 
 static void fill_wcheckpoint_response(
     unsigned int target,
@@ -100,23 +165,298 @@ static void fill_wcheckpoint_response(
         return;
     }
     if (target == 0U) {
-        response->wcheckpoint_valid = wcheckpoint_a_valid ? 1U : 0U;
-        response->wcheckpoint_generation = wcheckpoint_a_generation;
-        response->wcheckpoint_logical_counts = wcheckpoint_a_logical_counts;
-        response->wcheckpoint_base_counts = wcheckpoint_a_base_counts;
-        response->wcheckpoint_runtime_counts = wcheckpoint_a_runtime_counts;
+        response->wcheckpoint_valid = wcp_a_valid ? 1U : 0U;
+        response->wcheckpoint_generation = wcp_a_generation;
+        response->wcheckpoint_logical_counts = wcp_a_logical_counts;
+        response->wcheckpoint_base_counts = wcp_a_base_counts;
+        response->wcheckpoint_runtime_counts = wcp_a_runtime_counts;
     } else if (target == 1U) {
-        response->wcheckpoint_valid = wcheckpoint_b_valid ? 1U : 0U;
-        response->wcheckpoint_generation = wcheckpoint_b_generation;
-        response->wcheckpoint_logical_counts = wcheckpoint_b_logical_counts;
-        response->wcheckpoint_base_counts = wcheckpoint_b_base_counts;
-        response->wcheckpoint_runtime_counts = wcheckpoint_b_runtime_counts;
+        response->wcheckpoint_valid = wcp_b_valid ? 1U : 0U;
+        response->wcheckpoint_generation = wcp_b_generation;
+        response->wcheckpoint_logical_counts = wcp_b_logical_counts;
+        response->wcheckpoint_base_counts = wcp_b_base_counts;
+        response->wcheckpoint_runtime_counts = wcp_b_runtime_counts;
     } else {
-        response->wcheckpoint_valid = wcheckpoint_c_valid ? 1U : 0U;
-        response->wcheckpoint_generation = wcheckpoint_c_generation;
-        response->wcheckpoint_logical_counts = wcheckpoint_c_logical_counts;
-        response->wcheckpoint_base_counts = wcheckpoint_c_base_counts;
-        response->wcheckpoint_runtime_counts = wcheckpoint_c_runtime_counts;
+        response->wcheckpoint_valid = wcp_c_valid ? 1U : 0U;
+        response->wcheckpoint_generation = wcp_c_generation;
+        response->wcheckpoint_logical_counts = wcp_c_logical_counts;
+        response->wcheckpoint_base_counts = wcp_c_base_counts;
+        response->wcheckpoint_runtime_counts = wcp_c_runtime_counts;
+    }
+}
+
+static int home_axis_code_valid(unsigned int axis_code)
+{
+    return axis_code == (unsigned int)'X' || axis_code == (unsigned int)'Y' ||
+           axis_code == (unsigned int)'Z' || axis_code == (unsigned int)'A' ||
+           axis_code == (unsigned int)'B' || axis_code == (unsigned int)'C';
+}
+
+static uint32_t home_fnv1a_u32(uint32_t value, uint32_t hash)
+{
+    unsigned int byte;
+    for (byte = 0U; byte < 4U; ++byte) {
+        hash ^= (value >> (byte * 8U)) & 0xffU;
+        hash *= 16777619U;
+    }
+    return hash;
+}
+
+static void home_config_reset_stage(void)
+{
+    memset(g_home_stage, 0, sizeof(g_home_stage));
+    g_home_stage_mask = 0U;
+    g_home_stage_mapping_generation = 0U;
+    g_home_stage_expected_active_mask = 0U;
+    g_home_stage_commit_seq = 0U;
+}
+
+static uint32_t home_config_next_commit_seq(void)
+{
+    uint32_t next = home_table_commit_seq + 1U;
+    return next ? next : 1U;
+}
+
+static int home_config_request_valid(const V5NativeHalOwnerRequest *request)
+{
+    const uint32_t full_mask = (1U << V5_NATIVE_HOME_JOINT_COUNT) - 1U;
+    return request && request->target < V5_NATIVE_HOME_JOINT_COUNT &&
+           request->home_status_slot == request->target &&
+           !(request->flags & ~V5_NATIVE_HOME_CONFIG_FLAG_MASK) &&
+           (request->flags & V5_NATIVE_HOME_CONFIG_ACTIVE) &&
+           request->home_slave_position < V5_NATIVE_HOME_JOINT_COUNT &&
+           request->home_mapping_generation != 0U &&
+           request->home_expected_active_mask == full_mask &&
+           request->home_config_commit_seq != 0U &&
+           home_axis_code_valid(request->axis_code) &&
+           isfinite(request->home_zero_counts) &&
+           isfinite(request->home_counts_per_unit) &&
+           request->home_counts_per_unit != 0.0;
+}
+
+static int home_config_staged_table_valid(void)
+{
+    const uint32_t full_mask = (1U << V5_NATIVE_HOME_JOINT_COUNT) - 1U;
+    uint32_t axis_mask = 0U;
+    uint32_t slave_mask = 0U;
+    uint32_t generation = 2166136261U;
+    unsigned int joint;
+    if (g_home_stage_mask != full_mask ||
+        g_home_stage_expected_active_mask != full_mask ||
+        !g_home_stage_mapping_generation || !g_home_stage_commit_seq) {
+        return 0;
+    }
+    for (joint = 0U; joint < V5_NATIVE_HOME_JOINT_COUNT; ++joint) {
+        const HomeConfigRecord *record = &g_home_stage[joint];
+        uint32_t axis_bit;
+        if (!record->active || record->status_slot != joint ||
+            record->slave_position >= V5_NATIVE_HOME_JOINT_COUNT ||
+            record->mapping_generation != g_home_stage_mapping_generation ||
+            !home_axis_code_valid(record->axis_code) ||
+            !isfinite(record->zero_counts) ||
+            !isfinite(record->counts_per_unit) || record->counts_per_unit == 0.0) {
+            return 0;
+        }
+        axis_bit = 1U << (record->axis_code - (unsigned int)'A');
+        if ((axis_mask & axis_bit) || (slave_mask & (1U << record->slave_position))) {
+            return 0;
+        }
+        axis_mask |= axis_bit;
+        slave_mask |= 1U << record->slave_position;
+        generation = home_fnv1a_u32(joint, generation);
+        generation = home_fnv1a_u32(record->axis_code, generation);
+        generation = home_fnv1a_u32(record->slave_position, generation);
+    }
+    if (!generation) generation = 1U;
+    return generation == g_home_stage_mapping_generation && slave_mask == full_mask;
+}
+
+static void home_config_publish_staged_table(void)
+{
+    unsigned int joint;
+    /*
+     * All per-joint staging pins are written first.  The non-zero commit
+     * sequence is the only consumer publication edge and is written last, so
+     * the realtime router can never observe a half table.
+     */
+    for (joint = 0U; joint < V5_NATIVE_HOME_JOINT_COUNT; ++joint) {
+        const HomeConfigRecord *record = &g_home_stage[joint];
+        home_status_slot(joint) = record->status_slot;
+        home_axis_code(joint) = record->axis_code;
+        home_slave_position(joint) = record->slave_position;
+        home_mapping_generation(joint) = record->mapping_generation;
+        home_zero_counts(joint) = record->zero_counts;
+        home_counts_per_unit(joint) = record->counts_per_unit;
+    }
+    home_table_map_gen = g_home_stage_mapping_generation;
+    home_table_active_mask = g_home_stage_expected_active_mask;
+    for (joint = 0U; joint < V5_NATIVE_HOME_JOINT_COUNT; ++joint) {
+        home_config_valid(joint) = 1;
+    }
+    home_table_mapping_valid = 1;
+    __sync_synchronize();
+    home_table_commit_seq = g_home_stage_commit_seq;
+}
+
+static int home_config_stage_request(const V5NativeHalOwnerRequest *request)
+{
+    HomeConfigRecord *record;
+    uint32_t mask;
+    if (!home_config_request_valid(request)) return 0;
+    if (!g_home_stage_mask) {
+        if (home_global_transaction && home_runtime_active_mask &&
+            home_terminal_mask == 0U) return 0;
+        if (request->home_config_commit_seq != home_config_next_commit_seq()) return 0;
+        g_home_stage_mapping_generation = request->home_mapping_generation;
+        g_home_stage_expected_active_mask = request->home_expected_active_mask;
+        g_home_stage_commit_seq = request->home_config_commit_seq;
+    } else if (request->home_mapping_generation != g_home_stage_mapping_generation ||
+               request->home_expected_active_mask != g_home_stage_expected_active_mask ||
+               request->home_config_commit_seq != g_home_stage_commit_seq) {
+        home_config_reset_stage();
+        return 0;
+    }
+    mask = 1U << request->target;
+    if (g_home_stage_mask & mask) {
+        home_config_reset_stage();
+        return 0;
+    }
+    record = &g_home_stage[request->target];
+    record->active = 1U;
+    record->status_slot = request->home_status_slot;
+    record->axis_code = request->axis_code;
+    record->slave_position = request->home_slave_position;
+    record->mapping_generation = request->home_mapping_generation;
+    record->zero_counts = request->home_zero_counts;
+    record->counts_per_unit = request->home_counts_per_unit;
+    g_home_stage_mask |= mask;
+    if (!(request->flags & V5_NATIVE_HOME_CONFIG_COMMIT)) return 1;
+    if (!home_config_staged_table_valid()) {
+        home_config_reset_stage();
+        return 0;
+    }
+    home_config_publish_staged_table();
+    home_config_reset_stage();
+    return 2;
+}
+
+static void fill_home_status_response(V5NativeHalOwnerResponse *response)
+{
+    const uint32_t legal_mask = (1U << V5_NATIVE_HOME_JOINT_COUNT) - 1U;
+    unsigned int joint;
+    unsigned int selected = V5_NATIVE_HOME_JOINT_COUNT;
+    uint32_t expected;
+    uint32_t transaction;
+    uint32_t phase_complete_mask = 0U;
+    uint32_t aggregate_phase = 0U;
+    int transactions_match = 1;
+    if (!response) return;
+    response->status_home_router_mapping_valid = home_router_mapping_valid ? 1U : 0U;
+    response->status_home_router_mapping_generation = home_router_map_gen;
+    response->status_home_router_active_mask = home_router_active_mask;
+    response->status_home_router_commit_seq = home_router_commit_seq;
+    response->status_home_router_rejected_commit_seq = home_router_reject_seq;
+    response->home_mapping_generation = home_table_map_gen;
+    response->home_config_active_mask = home_table_active_mask;
+    response->home_config_commit_seq = home_table_commit_seq;
+    response->home_config_readback_valid =
+        home_table_mapping_valid && home_router_mapping_valid &&
+        home_router_map_gen == home_table_map_gen &&
+        home_router_active_mask == home_table_active_mask &&
+        home_router_commit_seq == home_table_commit_seq;
+    transaction = home_global_transaction;
+    expected = home_runtime_active_mask;
+    response->home_transaction = transaction;
+    response->home_expected_active_mask = expected;
+    response->status_home_terminal_mask = home_terminal_mask & legal_mask;
+    response->rtcp_home_request_transaction = home_rtcp_req_txn;
+    response->rtcp_home_ack_transaction = home_rtcp_ack_transaction;
+    for (joint = 0U; joint < V5_NATIVE_HOME_JOINT_COUNT; ++joint) {
+        unsigned int mask = 1U << joint;
+        int phase = home_phase(joint);
+        response->home_axis_code_by_joint[joint] = home_axis_code(joint);
+        if (home_config_valid(joint)) response->home_config_mask |= mask;
+        if (!(expected & mask)) continue;
+        if (!transaction || home_transaction(joint) != transaction) {
+            transactions_match = 0;
+            continue;
+        }
+        if (phase == 1 || phase == 2 || phase == 6 || phase == 7) {
+            response->home_active_mask |= mask;
+            if (!aggregate_phase || phase == 7 || phase == 6) aggregate_phase = (uint32_t)phase;
+            if (phase == 1 || phase == 2) {
+                response->home_current_mask |= mask;
+                if (selected == V5_NATIVE_HOME_JOINT_COUNT) selected = joint;
+            }
+        } else if (phase == 3) {
+            phase_complete_mask |= mask;
+        } else if (phase == 4) {
+            response->home_failed_mask |= mask;
+        } else if (phase == 5) {
+            response->home_cancelled_mask |= mask;
+        }
+    }
+    response->home_complete_mask = home_completed_mask & expected & legal_mask;
+    if (response->home_current_mask && selected < V5_NATIVE_HOME_JOINT_COUNT)
+        aggregate_phase = (uint32_t)home_phase(selected);
+    else if (response->home_complete_mask && response->home_active_mask)
+        aggregate_phase = 6U;
+    if (response->home_failed_mask || response->home_cancelled_mask) {
+        if (home_failed_joint < V5_NATIVE_HOME_JOINT_COUNT &&
+            (expected & (1U << home_failed_joint)) &&
+            home_transaction(home_failed_joint) == transaction) {
+            selected = home_failed_joint;
+            response->home_current_mask = home_failure_current_mask & expected & legal_mask;
+        } else {
+            transactions_match = 0;
+            selected = V5_NATIVE_HOME_JOINT_COUNT;
+        }
+    }
+    response->home_joint_transaction = transactions_match ? transaction : 0U;
+    response->home_status_consistent =
+        (expected & ~legal_mask) == 0U &&
+        ((transaction == 0U && expected == 0U &&
+          response->home_active_mask == 0U && response->home_complete_mask == 0U &&
+          response->home_failed_mask == 0U && response->home_cancelled_mask == 0U &&
+          response->status_home_terminal_mask == 0U) ||
+         (transaction != 0U && expected != 0U && transactions_match &&
+          phase_complete_mask == response->home_complete_mask &&
+          (response->home_active_mask & response->home_complete_mask) == 0U &&
+          (response->home_active_mask & response->home_failed_mask) == 0U &&
+          (response->home_active_mask & response->home_cancelled_mask) == 0U &&
+          (response->status_home_terminal_mask == 0U ||
+           (response->home_active_mask == 0U &&
+            response->status_home_terminal_mask == expected &&
+            (response->home_complete_mask | response->home_failed_mask |
+             response->home_cancelled_mask) == expected))));
+    if (selected < V5_NATIVE_HOME_JOINT_COUNT) {
+        response->home_current_joint = selected;
+        response->home_axis_code = home_axis_code(selected);
+        response->home_phase = (uint32_t)home_phase(selected);
+        if (response->home_failed_mask || response->home_cancelled_mask) {
+            response->home_failure = (uint32_t)home_failure_code;
+            response->status_home_failure_phase = (uint32_t)home_failure_phase;
+            response->home_actual_counts = home_failure_actual_counts;
+            response->home_target_counts = home_failure_target_counts;
+            response->home_error_counts = home_failure_error_counts;
+            response->home_detail_generation = home_failure_generation;
+            response->home_detail_readback_valid = home_failure_readback_valid ? 1U : 0U;
+            response->home_detail_motion_active = home_failure_motion_active ? 1U : 0U;
+        } else {
+            response->home_failure = (uint32_t)home_failure(selected);
+            response->home_start_counts = home_start_counts(selected);
+            response->home_actual_counts = home_readback_counts(selected);
+            response->home_target_counts = home_target_counts(selected);
+            response->home_error_counts = home_error_counts(selected);
+            response->home_detail_generation = home_readback_generation(selected);
+            response->home_detail_readback_valid =
+                response->home_config_readback_valid && home_config_valid(selected) &&
+                home_transaction(selected) == transaction && home_readback_valid(selected);
+            response->home_detail_motion_active = home_motion_active(selected) ? 1U : 0U;
+        }
+    } else {
+        response->home_current_joint = UINT32_MAX;
+        response->home_phase = aggregate_phase;
     }
 }
 
@@ -250,6 +590,43 @@ static void publish_status(void)
     (void)write_block_atomic(V5_NATIVE_G53_STATUS_PATH, &geometry, sizeof(geometry));
 }
 
+static void update_home_rtcp_latch(void)
+{
+    int gcode_request = rtcp_gcode_request ? 1 : 0;
+    uint32_t request_transaction = home_rtcp_req_txn;
+    if (home_rtcp_force_off && request_transaction) {
+        if (g_home_rtcp_seen_transaction != request_transaction) {
+            g_home_rtcp_seen_transaction = request_transaction;
+            home_rtcp_ack_transaction = 0U;
+            g_home_rtcp_latched = 1;
+            g_gcode_rearm_seen_low = 0;
+            rtcp_ui_request = 0;
+            rtcp_force_off = 1;
+            g_previous_gcode_request = gcode_request;
+            return;
+        }
+        if (g_home_rtcp_latched) {
+            g_gcode_rearm_seen_low = 0;
+            rtcp_ui_request = 0;
+            rtcp_force_off = 1;
+            if (g_rtcp_known && rtcp_actual < 0.5)
+                home_rtcp_ack_transaction = request_transaction;
+        }
+    } else if (g_home_rtcp_latched) {
+        rtcp_ui_request = 0;
+        rtcp_force_off = 1;
+        if (!gcode_request) {
+            g_gcode_rearm_seen_low = 1;
+        } else if (g_gcode_rearm_seen_low && !g_previous_gcode_request) {
+            g_home_rtcp_latched = 0;
+            home_rtcp_ack_transaction = 0U;
+            g_gcode_rearm_seen_low = 0;
+            rtcp_force_off = 0;
+        }
+    }
+    g_previous_gcode_request = gcode_request;
+}
+
 static void owner_tick(void)
 {
     uint64_t now = monotonic_ns();
@@ -257,13 +634,18 @@ static void owner_tick(void)
         heartbeat = !heartbeat;
         g_last_heartbeat_ns = now;
     }
-    if (!g_safety_known && read_safety_estop_active_pin()) {
-        g_safety_known = 1;
+    if (!g_hal_ready_ns) {
         g_hal_ready_ns = now;
+    }
+    if (!g_safety_known && now - g_hal_ready_ns >= 1000000ULL) {
+        g_safety_known = 1;
     }
     if (g_safety_known && !g_rtcp_known && now - g_hal_ready_ns >= 5000000ULL) {
         g_rtcp_known = 1;
     }
+    safety_actual_valid = g_safety_known ? 1 : 0;
+    rtcp_actual_valid = g_rtcp_known ? 1 : 0;
+    update_home_rtcp_latch();
     if (g_safety_known && !g_boot_reset_started && now - g_hal_ready_ns >= 25000000ULL) {
         safety_reset = 1;
         g_boot_reset_started = 1;
@@ -293,6 +675,7 @@ static void fill_response(const V5NativeHalOwnerRequest *request, V5NativeHalOwn
     response->rtcp_actual_known = g_rtcp_known ? 1U : 0U;
     response->rtcp_actual_active = rtcp_actual >= 0.5 ? 1U : 0U;
     fill_wcheckpoint_response(request->target, response);
+    fill_home_status_response(response);
 }
 
 static int wait_actual(unsigned int operation, unsigned int target, unsigned int timeout_ms)
@@ -316,6 +699,26 @@ static int wait_actual(unsigned int operation, unsigned int target, unsigned int
     return 0;
 }
 
+static int wait_home_router_ack(
+    uint32_t commit_seq,
+    uint32_t mapping_generation,
+    uint32_t active_mask,
+    unsigned int timeout_ms)
+{
+    uint64_t deadline = monotonic_ns() + ((uint64_t)timeout_ms * 1000000ULL);
+    while (!g_stop && monotonic_ns() < deadline) {
+        if (home_router_reject_seq == commit_seq) return -1;
+        if (home_router_mapping_valid &&
+            home_router_commit_seq == commit_seq &&
+            home_router_map_gen == mapping_generation &&
+            home_router_active_mask == active_mask) {
+            return 1;
+        }
+        usleep(500U);
+    }
+    return 0;
+}
+
 static void process_request(const V5NativeHalOwnerRequest *request, V5NativeHalOwnerResponse *response)
 {
     int confirmed = 0;
@@ -329,6 +732,46 @@ static void process_request(const V5NativeHalOwnerRequest *request, V5NativeHalO
         request->target <= 2U && response->wcheckpoint_valid) {
         response->status = V5_NATIVE_HAL_OWNER_STATUS_OK;
         snprintf(response->code, sizeof(response->code), "%s", "NATIVE_WCHECKPOINT_STATUS_OK");
+        return;
+    }
+    if (request->operation == V5_NATIVE_HAL_OWNER_OP_HOME_CONFIG) {
+        int staged = home_config_stage_request(request);
+        int router_ack = 0;
+        if (!staged) {
+            response->status = V5_NATIVE_HAL_OWNER_STATUS_BAD_REQUEST;
+            snprintf(response->code, sizeof(response->code), "%s", "NATIVE_HOME_CONFIG_INVALID");
+            return;
+        }
+        if (staged == 2) {
+            router_ack = wait_home_router_ack(
+                request->home_config_commit_seq,
+                request->home_mapping_generation,
+                request->home_expected_active_mask,
+                100U);
+            if (router_ack != 1) {
+                home_table_mapping_valid = 0;
+                __sync_synchronize();
+                fill_response(request, response);
+                response->status = V5_NATIVE_HAL_OWNER_STATUS_NOT_CONFIRMED;
+                snprintf(response->code, sizeof(response->code), "%s",
+                         router_ack < 0 ? "NATIVE_HOME_ROUTER_REJECTED" :
+                                          "NATIVE_HOME_ROUTER_ACK_TIMEOUT");
+                return;
+            }
+        }
+        fill_response(request, response);
+        response->status = V5_NATIVE_HAL_OWNER_STATUS_OK;
+        snprintf(response->code, sizeof(response->code), "%s",
+                 staged == 2 ? "NATIVE_HOME_CONFIG_COMMITTED" : "NATIVE_HOME_CONFIG_STAGED");
+        return;
+    }
+    if (request->operation == V5_NATIVE_HAL_OWNER_OP_HOME_STATUS) {
+        response->status = V5_NATIVE_HAL_OWNER_STATUS_OK;
+        snprintf(response->code, sizeof(response->code), "%s",
+                 !response->home_status_consistent ? "NATIVE_HOME_STATUS_TRANSITION" :
+                 response->home_cancelled_mask ? "NATIVE_HOME_CANCELLED" :
+                 response->home_failed_mask ? "NATIVE_HOME_FAILED" :
+                 response->home_active_mask ? "NATIVE_HOME_ACTIVE" : "NATIVE_HOME_IDLE");
         return;
     }
     if (request->operation == V5_NATIVE_HAL_OWNER_OP_ESTOP_FORCE) {
@@ -350,11 +793,19 @@ static void process_request(const V5NativeHalOwnerRequest *request, V5NativeHalO
         safety_reset = 0;
     } else if (request->operation == V5_NATIVE_HAL_OWNER_OP_RTCP_SET && request->target <= 1U) {
         if (request->target) {
+            g_home_rtcp_latched = 0;
+            home_rtcp_ack_transaction = 0U;
+            g_gcode_rearm_seen_low = 0;
+            g_previous_gcode_request = rtcp_gcode_request ? 1 : 0;
             rtcp_force_off = 0;
         }
         rtcp_ui_request = request->target ? 1 : 0;
         confirmed = wait_actual(request->operation, request->target, 500U);
     } else if (request->operation == V5_NATIVE_HAL_OWNER_OP_RTCP_FORCE_OFF && request->target == 0U) {
+        g_home_rtcp_latched = 1;
+        g_home_rtcp_seen_transaction = 0U;
+        home_rtcp_ack_transaction = 0U;
+        g_gcode_rearm_seen_low = 0;
         rtcp_ui_request = 0;
         rtcp_force_off = 1;
         confirmed = wait_actual(request->operation, 0U, 600U);
@@ -468,8 +919,34 @@ void user_mainloop(void)
     signal(SIGINT, on_signal);
     safety_force = 0;
     safety_reset = 0;
+    safety_actual_valid = 0;
     heartbeat = 0;
     rtcp_ui_request = g_config.rtcp_default ? 1 : 0;
+    rtcp_force_off = 0;
+    rtcp_actual_valid = 0;
+    g_home_rtcp_latched = 0;
+    g_home_rtcp_seen_transaction = 0U;
+    home_rtcp_ack_transaction = 0U;
+    g_gcode_rearm_seen_low = 0;
+    g_previous_gcode_request = rtcp_gcode_request ? 1 : 0;
+    g_hal_ready_ns = monotonic_ns();
+    home_table_mapping_valid = 0;
+    home_table_map_gen = 0U;
+    home_table_active_mask = 0U;
+    home_table_commit_seq = 0U;
+    home_config_reset_stage();
+    {
+        unsigned int joint;
+        for (joint = 0U; joint < V5_NATIVE_HOME_JOINT_COUNT; ++joint) {
+            home_config_valid(joint) = 0;
+            home_status_slot(joint) = joint;
+            home_axis_code(joint) = 0U;
+            home_slave_position(joint) = UINT32_MAX;
+            home_mapping_generation(joint) = 0U;
+            home_zero_counts(joint) = 0.0;
+            home_counts_per_unit(joint) = 0.0;
+        }
+    }
     kins_x_rot_point = g_config.g53_c_x;
     kins_y_rot_point = g_config.g53_c_y;
     kins_z_rot_point = 0.0;

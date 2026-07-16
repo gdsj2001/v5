@@ -220,11 +220,15 @@ int v5_settings_apply_ini_value_for_field(
     }
     if (strcmp(field_key, "home_order") == 0) {
         if (strcmp(local, "禁用") == 0) {
-            snprintf(ini_value, ini_cap, "-1");
-        } else if (!v5_settings_apply_numeric_text(local)) {
+            snprintf(ini_value, ini_cap, "999");
+        } else if (!settings_apply_integer_text(local)) {
             return 0;
         } else {
-            snprintf(ini_value, ini_cap, "%s", local);
+            numeric = strtod(local, &end);
+            if (end == local || *end != '\0' || numeric < 0.0 || numeric > 7.0) {
+                return 0;
+            }
+            settings_apply_format_integer(ini_value, ini_cap, numeric);
         }
         snprintf(expected_display, display_cap, "%s", local);
         return 1;
@@ -302,7 +306,7 @@ int v5_settings_apply_display_from_raw(const char *field_key, const char *raw, c
         }
         return 1;
     }
-    if (strcmp(field_key, "home_order") == 0 && strcmp(raw, "-1") == 0) {
+    if (strcmp(field_key, "home_order") == 0 && strcmp(raw, "999") == 0) {
         snprintf(out, out_cap, "禁用");
         return 1;
     }

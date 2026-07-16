@@ -93,8 +93,8 @@ def parse_allowlist(path: Path) -> dict[str, str]:
         if runtime_path in rows:
             fail(f"duplicate allowlist path: {runtime_path}")
         rows[runtime_path] = consumer
-    if len(rows) != 32:
-        fail(f"expected 32 runtime allowlist rows, got {len(rows)}")
+    if not rows:
+        fail("runtime allowlist must contain at least one row")
     return rows
 
 

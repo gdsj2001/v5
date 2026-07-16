@@ -49,6 +49,8 @@ int  homing_init(int id,
 // once-per-servo-period functions:
 void read_homing_in_pins(int njoints);
 bool do_homing(void);  //return 1 if allhomed
+/* Custom HOMEMODs that preserve a proven logical/runtime window return false. */
+bool homing_wcheckpoint_reset_required(void);
 void write_homing_out_pins(int njoints);
 
 // responses to EMCMOT_JOINT_HOME message:
@@ -77,8 +79,11 @@ bool get_homing_at_index_search_wait(int jno);
 //---------------------------------------------------------------------
 // Module interface
 // motmod provided ptrs for functions called by homing:
+struct v5_wcheckpoint_snapshot;
 void homeMotFunctions(void(*pSetRotaryUnlock)(int,int)
                      ,int( *pGetRotaryUnlock)(int)
+                     ,int( *pReadWcheckpointSnapshot)(
+                         unsigned int, struct v5_wcheckpoint_snapshot *)
                      );
 
 #endif /* HOMING_H */

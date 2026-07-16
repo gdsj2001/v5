@@ -218,10 +218,8 @@ static int send_status_request(char *response, size_t response_size)
                                           0);
 }
 
-int v5_settings_action_cancel(const char *run_id)
+static int settings_action_run_id_is_valid(const char *run_id)
 {
-    char request[160];
-    char response[512];
     size_t i;
     if (!run_id || !run_id[0] || strlen(run_id) >= 64U) {
         return 0;
@@ -232,6 +230,16 @@ int v5_settings_action_cancel(const char *run_id)
               (ch >= 'a' && ch <= 'z') || ch == '-' || ch == '_')) {
             return 0;
         }
+    }
+    return 1;
+}
+
+int v5_settings_action_cancel(const char *run_id)
+{
+    char request[160];
+    char response[512];
+    if (!settings_action_run_id_is_valid(run_id)) {
+        return 0;
     }
     snprintf(request, sizeof(request), "{\"action\":\"job_cancel\",\"run_id\":\"%s\"}\n", run_id);
     if (!v5_settings_action_ipc_request(V5_SETTINGS_ACTIOND_SOCKET,
@@ -316,6 +324,34 @@ static void json_string_value(const char *json, const char *key, char *out, size
         out[n++] = ch;
     }
     out[n] = '\0';
+}
+
+int v5_settings_action_restart_commit(const char *run_id)
+{
+    char request[192];
+    char response[512];
+    char response_run_id[64];
+    char response_code[72];
+    if (!settings_action_run_id_is_valid(run_id)) {
+        return 0;
+    }
+    snprintf(request,
+             sizeof(request),
+             "{\"action\":\"settings_save_restart_commit\",\"run_id\":\"%s\"}\n",
+             run_id);
+    if (!v5_settings_action_ipc_request(V5_SETTINGS_ACTIOND_SOCKET,
+                                        request,
+                                        1000U,
+                                        response,
+                                        sizeof(response),
+                                        0) ||
+        !v5_settings_action_ipc_response_accepted(response)) {
+        return 0;
+    }
+    json_string_value(response, "run_id", response_run_id, sizeof(response_run_id));
+    json_string_value(response, "code", response_code, sizeof(response_code));
+    return strcmp(response_run_id, run_id) == 0 &&
+           strcmp(response_code, "SETTINGS_SAVE_RESTART_COMMIT_ACK") == 0;
 }
 
 

@@ -2,12 +2,15 @@
 #include "v5_command_gate_server_io.h"
 #include "v5_command_gate_server_response.h"
 #include "v5_command_gate_validator.h"
+#include "v5_estop_clean_state.h"
+#include "v5_drive_write_window.h"
 #include "v5_linuxcncrsh_client.h"
 #include "v5_jog_watchdog.h"
 #include "v5_native_axis_zero_position.h"
 #include "v5_native_first_point.h"
 #include "v5_native_home.h"
 #include "v5_native_home_runtime_owner.h"
+#include "v5_native_hal_owner_client.h"
 #include "v5_native_motion_parameters.h"
 #include "v5_native_rtcp_control.h"
 #include "v5_native_safety.h"
@@ -49,6 +52,83 @@ static char g_socket_path[sizeof(((struct sockaddr_un *)0)->sun_path)] = V5_COMM
 static V5NativeMotionParameters g_motion_parameters;
 static V5JogWatchdog g_jog_watchdog;
 
+static int project_native_home_config(
+    const V5NativeMotionParameters *parameters,
+    char *code,
+    size_t code_cap)
+{
+    unsigned int index;
+    unsigned int expected_active_mask = 0U;
+    unsigned int commit_seq;
+    const unsigned int full_mask = (1U << V5_NATIVE_HOME_JOINT_COUNT) - 1U;
+    V5NativeHomeConfigRecord records[V5_NATIVE_HOME_JOINT_COUNT];
+    V5NativeHalOwnerResponse response;
+    if (!parameters || parameters->driver_mode != V5_NATIVE_DRIVER_MODE_BUS ||
+        !parameters->runtime_owner_loaded || !parameters->mapping_generation) {
+        snprintf(code, code_cap, "%s", "NATIVE_HOME_BUS_CONFIG_NOT_RESIDENT");
+        return 0;
+    }
+    memset(records, 0, sizeof(records));
+    for (index = 0U; index < V5_NATIVE_HOME_JOINT_COUNT; ++index) {
+        records[index].joint = index;
+        records[index].status_slot = index;
+        records[index].slave_position = UINT32_MAX;
+    }
+    for (index = 0U; index < V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT; ++index) {
+        const V5NativeMotionAxisParameters *axis = &parameters->axes[index];
+        if (!axis->active) continue;
+        if (axis->status_slot >= V5_NATIVE_HOME_JOINT_COUNT ||
+            !axis->bus_zero_evidence_known ||
+            !axis->slave_mapping_known ||
+            axis->slave_position >= V5_NATIVE_HOME_JOINT_COUNT ||
+            (expected_active_mask & (1U << axis->status_slot))) {
+            snprintf(code, code_cap, "NATIVE_HOME_AXIS_%c_CONFIG_FAILED", axis->axis ? axis->axis : '?');
+            return 0;
+        }
+        records[axis->status_slot].active = 1U;
+        records[axis->status_slot].axis_code = (unsigned int)(unsigned char)axis->axis;
+        records[axis->status_slot].slave_position = axis->slave_position;
+        records[axis->status_slot].mapping_generation = parameters->mapping_generation;
+        records[axis->status_slot].zero_counts = axis->bus_zero_counts;
+        records[axis->status_slot].counts_per_unit = axis->bus_counts_per_unit;
+        expected_active_mask |= 1U << axis->status_slot;
+    }
+    if (expected_active_mask != full_mask ||
+        v5_native_hal_owner_exchange(
+            V5_NATIVE_HAL_OWNER_OP_HOME_STATUS, 0U, 100U,
+            &response) != V5_NATIVE_HAL_OWNER_CLIENT_OK) {
+        snprintf(code, code_cap, "%s", "NATIVE_HOME_CONFIG_TABLE_INCOMPLETE");
+        return 0;
+    }
+    commit_seq = response.home_config_commit_seq + 1U;
+    if (!commit_seq) commit_seq = 1U;
+    for (index = 0U; index < V5_NATIVE_HOME_JOINT_COUNT; ++index) {
+        records[index].expected_active_mask = expected_active_mask;
+        records[index].commit_seq = commit_seq;
+        if (v5_native_hal_owner_stage_home_joint(
+                &records[index], index + 1U == V5_NATIVE_HOME_JOINT_COUNT,
+                100U, &response) != V5_NATIVE_HAL_OWNER_CLIENT_OK) {
+            snprintf(code, code_cap, "NATIVE_HOME_JOINT_%u_CONFIG_FAILED", index);
+            return 0;
+        }
+    }
+    if (!response.home_config_readback_valid ||
+        response.home_config_mask != expected_active_mask ||
+        response.home_config_active_mask != expected_active_mask ||
+        response.home_mapping_generation != parameters->mapping_generation ||
+        response.home_config_commit_seq != commit_seq ||
+        !response.status_home_router_mapping_valid ||
+        response.status_home_router_mapping_generation != parameters->mapping_generation ||
+        response.status_home_router_active_mask != expected_active_mask ||
+        response.status_home_router_commit_seq != commit_seq ||
+        response.status_home_router_rejected_commit_seq == commit_seq) {
+        snprintf(code, code_cap, "%s", "NATIVE_HOME_CONFIG_READBACK_MISMATCH");
+        return 0;
+    }
+    snprintf(code, code_cap, "%s", "NATIVE_HOME_CONFIG_PROJECTED");
+    return 1;
+}
+
 static void publish_home_progress(const V5NativeHomeProgress *progress, void *user_data)
 {
     (void)user_data;
@@ -88,10 +168,24 @@ static void copy_home_status(
     response->home_detail_valid = p->detail_valid;
     response->home_actual = p->actual;
     response->home_target = p->target;
-    response->home_tolerance = p->tolerance;
     v5_command_gate_response_copy_text(response->home_mode, sizeof(response->home_mode), p->mode);
     v5_command_gate_response_copy_text(response->home_current_axes, sizeof(response->home_current_axes), p->current_axes);
     v5_command_gate_response_copy_text(response->home_direct_reason, sizeof(response->home_direct_reason), p->direct_reason);
+}
+
+static void copy_estop_clean_status(
+    V5CommandGateIpcResponseFrame *response,
+    const V5EstopCleanStatus *status)
+{
+    if (!response || !status) return;
+    response->estop_clean_generation = status->generation;
+    response->estop_clean_active = status->active;
+    response->estop_clean_terminal = status->terminal;
+    response->estop_clean_ok = status->ok;
+    v5_command_gate_response_copy_text(
+        response->estop_clean_code,
+        sizeof(response->estop_clean_code),
+        status->code);
 }
 
 static void on_signal(int signo)
@@ -111,7 +205,123 @@ static void linuxcncrsh_unlock(void)
     (void)pthread_mutex_unlock(&g_linuxcncrsh_lock);
 }
 
-static int restore_machine_on_after_estop_reset(V5NativeSafetyResult *native_result)
+static int drive_window_read_safety(void *context, V5DriveWriteSafetyActual *actual)
+{
+    V5NativeSafetyResult native_result;
+    (void)context;
+    if (!actual || v5_native_safety_read_status(&native_result) != V5_NATIVE_SAFETY_SEND_SENT) {
+        return 0;
+    }
+    actual->safety_estop_known = native_result.safety_estop_known;
+    actual->safety_estop_active = native_result.safety_estop_active;
+    actual->machine_enable_known = native_result.machine_enable_known;
+    actual->machine_enabled = native_result.machine_enabled;
+    return 1;
+}
+
+static int drive_window_set_machine_off(void *context)
+{
+    unsigned int attempt;
+    (void)context;
+    if (v5_linuxcncrsh_send_machine_off_sequence(&g_linuxcncrsh_config) !=
+        V5_LINUXCNCRSH_SEND_SENT) {
+        return 0;
+    }
+    for (attempt = 0U; attempt < 40U; ++attempt) {
+        V5NativeSafetyResult actual;
+        if (v5_native_safety_read_status(&actual) == V5_NATIVE_SAFETY_SEND_SENT &&
+            actual.machine_enable_known && !actual.machine_enabled) {
+            return 1;
+        }
+        usleep(25000U);
+    }
+    return 0;
+}
+
+static int drive_window_set_machine_on(void *context)
+{
+    unsigned int attempt;
+    (void)context;
+    if (v5_linuxcncrsh_send_machine_on_sequence(&g_linuxcncrsh_config) !=
+        V5_LINUXCNCRSH_SEND_SENT) {
+        return 0;
+    }
+    for (attempt = 0U; attempt < 40U; ++attempt) {
+        V5NativeSafetyResult actual;
+        if (v5_native_safety_read_status(&actual) == V5_NATIVE_SAFETY_SEND_SENT &&
+            actual.machine_enable_known && actual.machine_enabled) {
+            return 1;
+        }
+        usleep(25000U);
+    }
+    return 0;
+}
+
+static const V5DriveWriteWindowOps g_drive_window_ops = {
+    0,
+    drive_window_read_safety,
+    drive_window_set_machine_off,
+    drive_window_set_machine_on,
+};
+
+static void copy_drive_window_result(
+    V5CommandGateIpcResponseFrame *response,
+    const V5DriveWriteWindowResult *result)
+{
+    if (!response || !result) {
+        return;
+    }
+    /* Drive-window EXECUTE reuses the existing response fields to keep IPC v4 ABI stable. */
+    response->machine_on_requested = result->initial_machine_enabled ? 1 : 0;
+    response->machine_enable_known = result->final_machine_enable_known ? 1 : 0;
+    response->machine_enabled = result->final_machine_enabled ? 1 : 0;
+    v5_command_gate_response_copy_text(
+        response->readback_code, sizeof(response->readback_code), result->code);
+}
+
+static void execute_drive_write_window(
+    const V5CommandRequest *request,
+    V5CommandGateIpcResponseFrame *response)
+{
+    V5DriveWriteWindowResult result;
+    int ok = 0;
+    if (!request || !response || !request->text_value) {
+        return;
+    }
+    linuxcncrsh_lock();
+    if (request->kind == V5_COMMAND_DRIVE_WRITE_BEGIN) {
+        ok = v5_drive_write_window_begin(request->text_value, &g_drive_window_ops, &result);
+        v5_command_gate_response_copy_text(
+            response->command_line, sizeof(response->command_line), "native_drive_write_window.begin");
+    } else if (request->kind == V5_COMMAND_DRIVE_WRITE_FINISH) {
+        ok = v5_drive_write_window_finish(
+            request->text_value, request->enabled_value, &g_drive_window_ops, &result);
+        v5_command_gate_response_copy_text(
+            response->command_line, sizeof(response->command_line), "native_drive_write_window.finish");
+    } else {
+        ok = v5_drive_write_window_abort(request->text_value, &g_drive_window_ops, &result);
+        v5_command_gate_response_copy_text(
+            response->command_line, sizeof(response->command_line), "native_drive_write_window.abort");
+    }
+    linuxcncrsh_unlock();
+    copy_drive_window_result(response, &result);
+    response->send_status = ok ? V5_COMMAND_GATE_SEND_SENT : V5_COMMAND_GATE_SEND_INVALID;
+    response->executed = ok ? 1 : 0;
+}
+
+static void estop_clean_linuxcncrsh_lock(void *context)
+{
+    (void)context;
+    linuxcncrsh_lock();
+}
+
+static void estop_clean_linuxcncrsh_unlock(void *context)
+{
+    (void)context;
+    linuxcncrsh_unlock();
+}
+
+static int restore_machine_on_after_estop_reset_locked(V5NativeSafetyResult *native_result)
 {
     V5LinuxcncrshSendStatus machine_on_status;
 
@@ -120,9 +330,7 @@ static int restore_machine_on_after_estop_reset(V5NativeSafetyResult *native_res
         native_result->machine_on_status = (int)V5_LINUXCNCRSH_SEND_UNAVAILABLE;
     }
 
-    linuxcncrsh_lock();
-    machine_on_status = v5_linuxcncrsh_send_machine_on_sequence(&g_linuxcncrsh_config);
-    linuxcncrsh_unlock();
+    machine_on_status = v5_linuxcncrsh_send_machine_on_after_estop_reset(&g_linuxcncrsh_config);
     if (native_result) {
         native_result->machine_on_status = (int)machine_on_status;
     }
@@ -177,6 +385,7 @@ static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5Command
     V5CommandRequest request;
     V5CommandPrepared prepared;
     int status = V5_COMMAND_GATE_SEND_INVALID;
+    int home_runtime_started = 0;
     char reject_reason[64];
     v5_command_gate_response_init(response);
     reject_reason[0] = '\0';
@@ -190,20 +399,68 @@ static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5Command
 
     if (request.kind == V5_COMMAND_ESTOP_FORCE && strcmp(prepared.owner, "native_safety") == 0) {
         V5NativeSafetyResult native_result;
+        V5EstopCleanStatus clean_status;
+        unsigned int clean_generation = 0U;
         v5_command_gate_response_copy_text(response->command_line, sizeof(response->command_line), "native_safety.estop_force");
         status = v5_native_safety_estop_force(&native_result);
+        if (status == V5_NATIVE_SAFETY_SEND_SENT) {
+            (void)v5_estop_clean_state_start(
+                &g_linuxcncrsh_config,
+                estop_clean_linuxcncrsh_lock,
+                estop_clean_linuxcncrsh_unlock,
+                0,
+                &clean_generation);
+            if (clean_generation != 0U &&
+                v5_estop_clean_state_snapshot(clean_generation, &clean_status)) {
+                copy_estop_clean_status(response, &clean_status);
+            }
+        }
         v5_command_gate_response_copy_native_safety(response, &native_result);
         response->send_status = (int32_t)status;
         response->executed = status == V5_NATIVE_SAFETY_SEND_SENT ? 1 : 0;
         return;
     }
+    if ((request.kind == V5_COMMAND_DRIVE_WRITE_BEGIN ||
+         request.kind == V5_COMMAND_DRIVE_WRITE_FINISH ||
+         request.kind == V5_COMMAND_DRIVE_WRITE_ABORT) &&
+        strcmp(prepared.owner, "native_drive_write_window") == 0) {
+        execute_drive_write_window(&request, response);
+        return;
+    }
     if (request.kind == V5_COMMAND_ESTOP_RESET && strcmp(prepared.owner, "native_safety") == 0) {
         V5NativeSafetyResult native_result;
+        V5EstopCleanStatus clean_status;
+        if (!v5_estop_clean_state_wait_latest_terminal(1000U, &clean_status) ||
+            !clean_status.terminal || !clean_status.ok) {
+            copy_estop_clean_status(response, &clean_status);
+            v5_command_gate_response_fill_safety(response);
+            response->send_status = V5_COMMAND_GATE_SEND_INVALID;
+            response->executed = 0;
+            v5_command_gate_response_copy_text(
+                response->readback_code,
+                sizeof(response->readback_code),
+                clean_status.terminal && clean_status.code[0]
+                    ? clean_status.code
+                    : "ESTOP_CLEAN_PENDING");
+            return;
+        }
+        copy_estop_clean_status(response, &clean_status);
         v5_command_gate_response_copy_text(response->command_line, sizeof(response->command_line), "native_safety.estop_reset | Set Machine On");
+        linuxcncrsh_lock();
+        if (v5_drive_write_window_blocks_kind(V5_COMMAND_ESTOP_RESET)) {
+            linuxcncrsh_unlock();
+            v5_command_gate_response_fill_safety(response);
+            response->send_status = V5_COMMAND_GATE_SEND_INVALID;
+            response->executed = 0;
+            v5_command_gate_response_copy_text(
+                response->readback_code, sizeof(response->readback_code), "DRIVE_WRITE_WINDOW_ACTIVE");
+            return;
+        }
         status = v5_native_safety_estop_reset_latch(&native_result);
         if (status == V5_NATIVE_SAFETY_SEND_SENT) {
-            status = restore_machine_on_after_estop_reset(&native_result);
+            status = restore_machine_on_after_estop_reset_locked(&native_result);
         }
+        linuxcncrsh_unlock();
         v5_command_gate_response_copy_native_safety(response, &native_result);
         response->send_status = (int32_t)status;
         response->executed = status == V5_NATIVE_SAFETY_SEND_SENT ? 1 : 0;
@@ -223,7 +480,40 @@ static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5Command
     }
 
     linuxcncrsh_lock();
+    if (v5_drive_write_window_blocks_kind(request.kind)) {
+        response->send_status = V5_COMMAND_GATE_SEND_INVALID;
+        response->executed = 0;
+        v5_command_gate_response_copy_text(
+            response->readback_code, sizeof(response->readback_code), "DRIVE_WRITE_WINDOW_ACTIVE");
+        linuxcncrsh_unlock();
+        return;
+    }
+
+    if (request.kind == V5_COMMAND_AXIS_ZERO_POSITION &&
+        strcmp(prepared.owner, "native_axis_zero_position") == 0) {
+        if (!begin_home_runtime(frame, request.mode_value, response)) {
+            linuxcncrsh_unlock();
+            return;
+        }
+        home_runtime_started = 1;
+    } else if (request.kind == V5_COMMAND_HOME &&
+               strcmp(prepared.owner, "native_home_mode_gate") == 0) {
+        if (!begin_home_runtime(frame, "all", response)) {
+            linuxcncrsh_unlock();
+            return;
+        }
+        home_runtime_started = 1;
+    }
+
     if (!power_on_home_gate_accepts(&request, response)) {
+        if (home_runtime_started) {
+            v5_native_home_runtime_finish(
+                (unsigned long long)frame->home_run_id,
+                frame->home_generation,
+                V5_NATIVE_HOME_PHASE_FAILED,
+                response->readback_code[0] ? response->readback_code : "HOME_PRECONDITION_FAILED",
+                0);
+        }
         linuxcncrsh_unlock();
         return;
     }
@@ -237,13 +527,15 @@ static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5Command
     } else if (request.kind == V5_COMMAND_AXIS_ZERO_POSITION &&
                strcmp(prepared.owner, "native_axis_zero_position") == 0) {
         V5NativeAxisZeroPositionResult native_result;
-        if (!begin_home_runtime(frame, request.mode_value, response)) {
-            linuxcncrsh_unlock();
-            return;
-        }
         if (!v5_native_axis_zero_position_format_report(
                 &prepared, &request, response->command_line, sizeof(response->command_line))) {
             response->send_status = V5_COMMAND_GATE_SEND_INVALID;
+            v5_native_home_runtime_finish(
+                (unsigned long long)frame->home_run_id,
+                frame->home_generation,
+                V5_NATIVE_HOME_PHASE_FAILED,
+                "AXIS_ZERO_REPORT_INVALID",
+                0);
             linuxcncrsh_unlock();
             return;
         }
@@ -281,17 +573,13 @@ static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5Command
         v5_command_gate_response_copy_text(response->readback_code, sizeof(response->readback_code), native_result.code);
     } else if (request.kind == V5_COMMAND_HOME && strcmp(prepared.owner, "native_home_mode_gate") == 0) {
         V5NativeHomeResult native_result;
-        if (!begin_home_runtime(frame, "all", response)) {
-            linuxcncrsh_unlock();
-            return;
-        }
-        snprintf(
+        v5_command_gate_response_copy_text(
             response->command_line,
             sizeof(response->command_line),
-            "native_home_mode_gate %s real Home",
-            v5_native_driver_mode_text(g_motion_parameters.driver_mode));
+            "ALL_HOME -> native_home_owner");
         status = v5_native_home_send(
-            &g_linuxcncrsh_config, &g_motion_parameters, &native_result,
+            &g_linuxcncrsh_config,
+            &native_result,
             (unsigned long long)frame->home_run_id,
             frame->home_generation,
             publish_home_progress,
@@ -429,6 +717,30 @@ static void handle_frame(const V5CommandGateIpcRequestFrame *request, V5CommandG
         v5_command_gate_response_copy_text(response->readback_code, sizeof(response->readback_code), "HOME_STATUS_OK");
         return;
     }
+    if (request->op == V5_COMMAND_GATE_IPC_OP_PROBE_ESTOP_CLEAN) {
+        V5EstopCleanStatus clean_status;
+        if (!v5_command_gate_validate_envelope(
+                request,
+                V5_COMMAND_GATE_IPC_OP_PROBE_ESTOP_CLEAN,
+                reject_reason,
+                sizeof(reject_reason))) {
+            response->send_status = V5_COMMAND_GATE_SEND_INVALID;
+            v5_command_gate_response_copy_text(response->readback_code, sizeof(response->readback_code), reject_reason);
+            return;
+        }
+        if (!v5_estop_clean_state_snapshot(request->estop_clean_generation, &clean_status)) {
+            response->send_status = V5_COMMAND_GATE_SEND_UNAVAILABLE;
+            v5_command_gate_response_copy_text(
+                response->readback_code,
+                sizeof(response->readback_code),
+                "ESTOP_CLEAN_STATUS_NOT_FOUND");
+            return;
+        }
+        copy_estop_clean_status(response, &clean_status);
+        response->send_status = V5_COMMAND_GATE_SEND_SENT;
+        v5_command_gate_response_copy_text(response->readback_code, sizeof(response->readback_code), "ESTOP_CLEAN_STATUS_OK");
+        return;
+    }
     if (request->op == V5_COMMAND_GATE_IPC_OP_EXECUTE) {
         execute_request(request, response);
         return;
@@ -552,6 +864,11 @@ int main(int argc, char **argv)
         fprintf(stderr,
                 "v5_command_gate_server Home runtime owner unavailable: %s; "
                 "dependent Home actions remain fail-closed\n",
+                motion_code);
+    } else if (!project_native_home_config(&g_motion_parameters, motion_code, sizeof(motion_code))) {
+        fprintf(stderr,
+                "v5_command_gate_server native Home config projection failed: %s; "
+                "ALL_HOME remains fail-closed\n",
                 motion_code);
     }
     if (!v5_linuxcncrsh_gate_preconnect(&g_linuxcncrsh_config)) {

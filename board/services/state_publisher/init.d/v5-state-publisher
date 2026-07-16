@@ -10,6 +10,7 @@ PIDFILE=/run/8ax/v5_state_publisher.pid
 LOGFILE=/run/8ax/v5_state_publisher.log
 STATUS_PATH=${V5_STATUS_SHM_PATH:-/dev/shm/v3_status_shm}
 INTERVAL_MS=${V5_STATE_PUBLISHER_INTERVAL_MS:-30}
+NON_MICROKERNEL_NICE=10
 
 is_running() {
   [ -r "$PIDFILE" ] || return 1
@@ -21,10 +22,15 @@ is_running() {
 set_non_microkernel_affinity() {
   pid="$1"
   [ -n "$pid" ] || return 0
-  command -v taskset >/dev/null 2>&1 || return 0
-  if grep -qw 1 /sys/devices/system/cpu/online 2>/dev/null || grep -q '0-1' /sys/devices/system/cpu/online 2>/dev/null; then
-    taskset -pc 1 "$pid" >>"$LOGFILE" 2>&1 || true
-  fi
+  command -v taskset >/dev/null 2>&1 || return 1
+  command -v renice >/dev/null 2>&1 || return 1
+  taskset -a -pc 1 "$pid" >>"$LOGFILE" 2>&1 || return 1
+  for task in /proc/"$pid"/task/[0-9]*; do
+    [ -r "$task/stat" ] || return 1
+    tid=${task##*/}
+    renice -n "$NON_MICROKERNEL_NICE" -p "$tid" >>"$LOGFILE" 2>&1 || return 1
+    [ "$(awk '{print $19}' "$task/stat" 2>/dev/null || true)" = "$NON_MICROKERNEL_NICE" ] || return 1
+  done
 }
 
 start_service() {
@@ -33,9 +39,12 @@ start_service() {
     return 0
   fi
   test -x "$DAEMON"
+  command -v taskset >/dev/null 2>&1
+  command -v nice >/dev/null 2>&1
+  command -v renice >/dev/null 2>&1
   mkdir -p /run/8ax
   rm -f "$PIDFILE"
-  setsid "$DAEMON" --path "$STATUS_PATH" --interval-ms "$INTERVAL_MS" >>"$LOGFILE" 2>&1 &
+  setsid taskset -c 1 nice -n "$NON_MICROKERNEL_NICE" "$DAEMON" --path "$STATUS_PATH" --interval-ms "$INTERVAL_MS" >>"$LOGFILE" 2>&1 &
   echo "$!" >"$PIDFILE"
   sleep 1
   if is_running; then

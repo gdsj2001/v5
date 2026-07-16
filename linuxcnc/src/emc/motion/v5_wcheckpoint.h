@@ -21,10 +21,21 @@ enum v5_wcheckpoint_reason {
     V5_WCHECKPOINT_RUNTIME_WINDOW_FAILED = 11,
 };
 
+typedef struct v5_wcheckpoint_snapshot {
+    double logical_counts;
+    double base_counts;
+    double runtime_counts;
+    unsigned int generation;
+    unsigned int sample_sequence;
+    unsigned int valid;
+} v5_wcheckpoint_snapshot_t;
+
 int v5_wcheckpoint_export_hal(int component_id);
 void v5_wcheckpoint_reset(void);
 void v5_wcheckpoint_update_before_inputs(void);
 void v5_wcheckpoint_publish(void);
+int v5_wcheckpoint_read_snapshot(
+    unsigned int rotary_index, v5_wcheckpoint_snapshot_t *snapshot);
 
 int v5_wcheckpoint_forward(
     const double *joint,

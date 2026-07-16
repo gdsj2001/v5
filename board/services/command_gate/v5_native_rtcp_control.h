@@ -20,6 +20,7 @@ typedef struct V5NativeRtcpControlResult {
 
 void v5_native_rtcp_control_result_init(V5NativeRtcpControlResult *result);
 int v5_native_rtcp_control_set(int enabled, V5NativeRtcpControlResult *result);
+int v5_native_rtcp_control_force_off(V5NativeRtcpControlResult *result);
 
 #ifdef __cplusplus
 }

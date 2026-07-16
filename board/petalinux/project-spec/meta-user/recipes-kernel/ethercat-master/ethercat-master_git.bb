@@ -15,6 +15,7 @@ SRC_URI = " \
     file://0004-v5-ignore-outgoing-generic-packet-echo.patch \
     file://0005-v5-drain-generic-rx-burst.patch \
     file://0006-v5-keep-sent-datagram-state-on-duplicate-queue.patch \
+    file://0007-v5-silent-cyclic-reference-clock-errors.patch \
 "
 SRCREV = "b709e58147e65b5e3251b45f48c01ef33cc7366f"
 PV = "1.6.9+git${SRCPV}"

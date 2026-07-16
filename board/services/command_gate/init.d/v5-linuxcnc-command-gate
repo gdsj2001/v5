@@ -21,6 +21,12 @@ LINUXCNCRSH_PORT=${V5_LINUXCNCRSH_PORT:-5007}
 LINUXCNCRSH_CONNECTPW=${V5_LINUXCNCRSH_CONNECTPW:-EMC}
 LINUXCNCRSH_ENABLEPW=${V5_LINUXCNCRSH_ENABLEPW:-EMCTOO}
 NC_PATH=/opt/8ax/v5/linuxcnc/nc
+MICROKERNEL_NON_RT_NICE=-5
+MANAGEMENT_NICE=15
+MANAGEMENT_IFACE=eth0
+ETHERCAT_IFACE=eth1
+ETHERCAT_CONFIG=/opt/8ax/v5/linuxcnc/hal/ethercat-conf-2ms.xml
+ETHERCAT_LIFECYCLE_LIB=${V5_ETHERCAT_LIFECYCLE_LIB:-/usr/libexec/8ax/v5_ethercat_backend_lifecycle.sh}
 
 runtime_prepare() {
   mkdir -p "$RUN_DIR" /run/8ax_v5_product_ui /opt/8ax/v5/linuxcnc/var "$NC_PATH" /opt/8ax/v5/linuxcnc/remap_subs
@@ -42,6 +48,12 @@ backend_residue_running() {
   return 1
 }
 
+[ -r "$ETHERCAT_LIFECYCLE_LIB" ] || {
+  echo "EtherCAT lifecycle owner missing: $ETHERCAT_LIFECYCLE_LIB" >&2
+  exit 1
+}
+. "$ETHERCAT_LIFECYCLE_LIB"
+
 gate_running() {
   [ -r "$LINUXCNCRSH_PID" ] || return 1
   pid=$(cat "$LINUXCNCRSH_PID" 2>/dev/null || true)
@@ -59,10 +71,18 @@ native_gate_running() {
 set_command_gate_affinity() {
   pid="$1"
   [ -n "$pid" ] || return 0
-  command -v taskset >/dev/null 2>&1 || return 0
-  if grep -qw 1 /sys/devices/system/cpu/online 2>/dev/null || grep -q '0-1' /sys/devices/system/cpu/online 2>/dev/null; then
-    taskset -pc 1 "$pid" >>"$COMMAND_GATE_LOG" 2>&1 || true
+  command -v taskset >/dev/null 2>&1 || return 1
+  command -v renice >/dev/null 2>&1 || return 1
+  if ! grep -qw 1 /sys/devices/system/cpu/online 2>/dev/null && ! grep -q '0-1' /sys/devices/system/cpu/online 2>/dev/null; then
+    return 1
   fi
+  taskset -a -pc 1 "$pid" >>"$COMMAND_GATE_LOG" 2>&1 || return 1
+  for task in /proc/"$pid"/task/[0-9]*; do
+    [ -r "$task/stat" ] || return 1
+    tid=${task##*/}
+    renice -n "$MICROKERNEL_NON_RT_NICE" -p "$tid" >>"$COMMAND_GATE_LOG" 2>&1 || return 1
+    [ "$(awk '{print $19}' "$task/stat" 2>/dev/null || true)" = "$MICROKERNEL_NON_RT_NICE" ] || return 1
+  done
 }
 
 set_management_process_affinity() {
@@ -75,16 +95,159 @@ set_management_process_affinity() {
     [ -n "$pids" ] || continue
     for pid in $pids; do
       taskset -a -pc 1 "$pid" >>"$LINUXCNC_LOG" 2>&1 || true
+      for task in /proc/"$pid"/task/[0-9]*; do
+        [ -r "$task/stat" ] || continue
+        renice -n "$MANAGEMENT_NICE" -p "${task##*/}" >>"$LINUXCNC_LOG" 2>&1 || true
+      done
     done
   done
+}
+
+linuxcnc_non_realtime_pids() {
+  collected=
+  for name in linuxcncsvr milltask io linuxcncrsh v5_native_hal_owner; do
+    pids=$(pidof "$name" 2>/dev/null) || return 1
+    [ -n "$pids" ] || return 1
+    collected="$collected $pids"
+  done
+  printf '%s\n' "${collected# }"
+}
+
+linuxcnc_non_realtime_affinity_ok() {
+  pids=$(linuxcnc_non_realtime_pids) || return 1
+  [ -n "$pids" ] || return 1
+  for pid in $pids; do
+    [ -d "/proc/$pid/task" ] || return 1
+    for task in /proc/"$pid"/task/[0-9]*; do
+      [ -r "$task/status" ] || return 1
+      cpus=$(awk -F: '/^Cpus_allowed_list:/ {gsub(/[ \t]/, "", $2); print $2}' "$task/status")
+      [ "$cpus" = "1" ] || return 1
+    done
+  done
+  return 0
+}
+
+linuxcnc_non_realtime_priority_ok() {
+  pids=$(linuxcnc_non_realtime_pids) || return 1
+  [ -n "$pids" ] || return 1
+  for pid in $pids; do
+    for task in /proc/"$pid"/task/[0-9]*; do
+      [ -r "$task/stat" ] || return 1
+      nice_value=$(awk '{print $19}' "$task/stat" 2>/dev/null || true)
+      [ "$nice_value" = "$MICROKERNEL_NON_RT_NICE" ] || return 1
+    done
+  done
+  return 0
+}
+
+set_linuxcnc_non_realtime_priority() {
+  command -v renice >/dev/null 2>&1 || {
+    echo "renice missing; cannot protect LinuxCNC non-realtime motion paths on CPU1" >&2
+    return 1
+  }
+  pids=$(linuxcnc_non_realtime_pids) || return 1
+  [ -n "$pids" ] || return 1
+  for pid in $pids; do
+    for task in /proc/"$pid"/task/[0-9]*; do
+      [ -r "$task/stat" ] || return 1
+      renice -n "$MICROKERNEL_NON_RT_NICE" -p "${task##*/}" >>"$LINUXCNC_LOG" 2>&1 || return 1
+    done
+  done
+  linuxcnc_non_realtime_priority_ok
+}
+
+set_linuxcnc_non_realtime_affinity() {
+  command -v taskset >/dev/null 2>&1 || {
+    echo "taskset missing; cannot pin LinuxCNC non-realtime paths to CPU1" >&2
+    return 1
+  }
+  if ! grep -qw 1 /sys/devices/system/cpu/online 2>/dev/null && ! grep -q '0-1' /sys/devices/system/cpu/online 2>/dev/null; then
+    echo "CPU1 unavailable; cannot isolate LinuxCNC non-realtime paths" >&2
+    return 1
+  fi
+  pids=$(linuxcnc_non_realtime_pids) || return 1
+  [ -n "$pids" ] || return 1
+  for pid in $pids; do
+    taskset -a -pc 1 "$pid" >>"$LINUXCNC_LOG" 2>&1 || return 1
+  done
+  linuxcnc_non_realtime_affinity_ok
 }
 
 linuxcnc_realtime_pids() {
   pidof rtapi_app 2>/dev/null || true
 }
 
+linuxcnc_privileged_helpers_ok() {
+  for helper in /usr/bin/rtapi_app /usr/bin/linuxcnc_module_helper; do
+    [ -f "$helper" ] || return 1
+    [ "$(stat -c '%u:%g:%a' "$helper" 2>/dev/null || true)" = "0:0:4755" ] || return 1
+  done
+  return 0
+}
+
+linuxcnc_realtime_scheduler_ok() {
+  pids=$(linuxcnc_realtime_pids | xargs 2>/dev/null || true)
+  [ -n "$pids" ] || return 1
+  realtime_threads=0
+  for pid in $pids; do
+    [ -d "/proc/$pid/task" ] || return 1
+    for task in /proc/"$pid"/task/[0-9]*; do
+      [ -r "$task/comm" ] && [ -r "$task/stat" ] || return 1
+      comm=$(cat "$task/comm" 2>/dev/null || true)
+      case "$comm" in
+        rtapi_app:T*)
+          policy=$(awk '{print $41; exit}' "$task/stat" 2>/dev/null || true)
+          case "$policy" in
+            1|2) ;;
+            *) return 1 ;;
+          esac
+          realtime_threads=$((realtime_threads + 1))
+          ;;
+      esac
+    done
+  done
+  [ "$realtime_threads" -gt 0 ]
+}
+
+network_iface_irq_numbers() {
+  iface="$1"
+  awk -v iface="$iface" 'index($0, iface) {irq=$1; sub(":", "", irq); print irq}' /proc/interrupts 2>/dev/null || true
+}
+
 ethercat_irq_numbers() {
-  awk '/eth1/ {irq=$1; sub(":", "", irq); print irq}' /proc/interrupts 2>/dev/null || true
+  network_iface_irq_numbers "$ETHERCAT_IFACE"
+}
+
+network_iface_irq_affinity_ok() {
+  iface="$1"
+  expected_cpu="$2"
+  irqs=$(network_iface_irq_numbers "$iface" | xargs 2>/dev/null || true)
+  [ -n "$irqs" ] || return 1
+  for irq in $irqs; do
+    [ "$(cat "/proc/irq/$irq/smp_affinity_list" 2>/dev/null || true)" = "$expected_cpu" ] || return 1
+  done
+}
+
+network_iface_rps_ok() {
+  iface="$1"
+  expected_mask="$2"
+  found=0
+  for path in /sys/class/net/"$iface"/queues/rx-*/rps_cpus; do
+    [ -r "$path" ] || continue
+    found=1
+    readback=$(cat "$path" 2>/dev/null | tr -d ',' | sed 's/^0*//' || true)
+    [ -n "$readback" ] || readback=0
+    [ "$readback" = "$expected_mask" ] || return 1
+  done
+  [ "$found" = "1" ]
+}
+
+network_cpu_isolation_ok() {
+  pidof irqbalance >/dev/null 2>&1 && return 1
+  network_iface_irq_affinity_ok "$MANAGEMENT_IFACE" 1 || return 1
+  network_iface_rps_ok "$MANAGEMENT_IFACE" 2 || return 1
+  network_iface_irq_affinity_ok "$ETHERCAT_IFACE" 0 || return 1
+  network_iface_rps_ok "$ETHERCAT_IFACE" 0 || return 1
 }
 
 ethercat_kernel_threads() {
@@ -150,12 +313,10 @@ set_ethercat_realtime_affinity() {
   }
   irqs=$(ethercat_irq_numbers | xargs 2>/dev/null || true)
   [ -n "$irqs" ] || return 1
-  for irq in $irqs; do
-    if [ -w "/proc/irq/$irq/smp_affinity_list" ]; then
-      echo 0 >"/proc/irq/$irq/smp_affinity_list"
-      echo "EtherCAT irq=$irq affinity=$(cat "/proc/irq/$irq/smp_affinity_list" 2>/dev/null || true)" >>"$LINUXCNC_LOG"
-    fi
-  done
+  ethercat_irq_affinity_ok || {
+    echo "EtherCAT IRQ affinity is not CPU0; network affinity owner must establish it before LinuxCNC starts" >&2
+    return 1
+  }
   tids=$(ethercat_kernel_threads | xargs 2>/dev/null || true)
   [ -n "$tids" ] || return 1
   for tid in $tids; do
@@ -244,13 +405,28 @@ stop_backend() {
     sleep 0.25
   done
   rm -f "$LINUXCNC_PID"
+  ethercat_backend_stopped || return 1
 }
 
 start_backend() {
   runtime_prepare
+  linuxcnc_privileged_helpers_ok || {
+    echo "LinuxCNC privileged helpers must be root:root 4755; refusing backend start" >&2
+    return 1
+  }
+  network_cpu_isolation_ok || {
+    echo "Network CPU isolation readback invalid; refusing LinuxCNC start" >&2
+    return 1
+  }
   if backend_running; then
-    echo "LinuxCNC backend already running"
-    return 0
+    if linuxcnc_realtime_affinity_ok &&
+       linuxcnc_realtime_scheduler_ok &&
+       ethercat_backend_ready; then
+      echo "LinuxCNC and EtherCAT backend already ready"
+      return 0
+    fi
+    echo "LinuxCNC processes exist but EtherCAT/DC is not ready; rebuilding backend once" >&2
+    stop_backend
   fi
   set_management_process_affinity
   if backend_residue_running; then
@@ -268,22 +444,14 @@ start_backend() {
   chown petalinux:petalinux "$LINUXCNC_LOG" 2>/dev/null || true
   su petalinux -c "cd /opt/8ax/v5/linuxcnc/ini && TCLLIBPATH=/usr/lib/tcltk /usr/bin/linuxcnc -r '$LINUXCNC_INI' >>'$LINUXCNC_LOG' 2>&1" &
   echo "$!" >"$LINUXCNC_PID"
-  i=0
-  while [ "$i" -lt 80 ]; do
-    if backend_running; then
-      if set_linuxcnc_realtime_affinity; then
-        echo "LinuxCNC backend running; RTAPI and EtherCAT realtime paths pinned to CPU0"
-        return 0
-      fi
-    fi
-    if [ -r "$LINUXCNC_PID" ] && ! kill -0 "$(cat "$LINUXCNC_PID")" 2>/dev/null; then
-      break
-    fi
-    i=$((i + 1))
-    sleep 0.25
-  done
-  echo "LinuxCNC backend failed to start or RTAPI/EtherCAT CPU0 affinity was not confirmed" >&2
+  if wait_linuxcnc_backend_ready; then
+    echo "RTAPI and EtherCAT realtime paths pinned to CPU0; LinuxCNC non-realtime motion paths protected on CPU1"
+    echo "LinuxCNC backend transport ready; configured slaves responding, domain WKC complete, DC reference clock healthy"
+    return 0
+  fi
+  echo "LinuxCNC backend failed readiness: process/affinity/realtime-scheduler/slaves/WKC/DC proof incomplete" >&2
   tail -n 80 "$LINUXCNC_LOG" 2>/dev/null || true
+  stop_backend || true
   return 1
 }
 
@@ -295,7 +463,10 @@ start_native_gate() {
   i=0
   while [ "$i" -lt 40 ]; do
     if native_gate_running; then
-      set_command_gate_affinity "$(cat "$COMMAND_GATE_PID")"
+      if ! set_command_gate_affinity "$(cat "$COMMAND_GATE_PID")"; then
+        stop_native_gate
+        return 1
+      fi
       echo "v5_command_gate_server running pid=$(cat "$COMMAND_GATE_PID") socket=$COMMAND_GATE_SOCKET"
       return 0
     fi
@@ -344,11 +515,29 @@ case "${1:-}" in
     start_gate
     start_native_gate
     ;;
+  restart-native)
+    ethercat_backend_ready || {
+      echo "LinuxCNC/EtherCAT backend is not ready; refusing native-gate-only restart" >&2
+      exit 1
+    }
+    gate_running || {
+      echo "linuxcncrsh gate is not running; refusing native-gate-only restart" >&2
+      exit 1
+    }
+    network_cpu_isolation_ok || {
+      echo "Network CPU isolation readback invalid; refusing native-gate-only restart" >&2
+      exit 1
+    }
+    set_linuxcnc_non_realtime_affinity
+    set_linuxcnc_non_realtime_priority
+    stop_native_gate
+    start_native_gate
+    ;;
   status)
-    backend_running && gate_running && native_gate_running
+    ethercat_backend_ready && gate_running && native_gate_running
     ;;
   *)
-    echo "usage: $0 {start|stop|restart|status}" >&2
+    echo "usage: $0 {start|stop|restart|restart-native|status}" >&2
     exit 2
     ;;
 esac

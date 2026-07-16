@@ -10,7 +10,7 @@
     "tree": "cbadbb8d029aefe7a8d0e3218885aaa59798337b"
   },
   "v5_source_tree": "c1f4c53315c8e614fafbe48992afa91e8aef8014",
-  "content_sha256": "3c058850c4f9c63b1489cfb78e5191548b2ab962561492e644c35e28937571c4",
+  "content_sha256": "450fae5bb06d6e341f8bdf4658e17ef8fcc238cd387211869525e76c5fc183ba",
   "implementation": "in_tree",
   "changed_files": [
     "scripts/linuxcnc.in",
@@ -20,13 +20,25 @@
     "src/emc/ini/inijoint.cc",
     "src/emc/motion/command.c",
     "src/emc/motion/control.c",
+    "src/emc/motion/homing.c",
+    "src/emc/motion/homing.h",
     "src/emc/motion/mot_priv.h",
     "src/emc/motion/motion.c",
     "src/emc/motion/v5_wcheckpoint.c",
     "src/emc/motion/v5_wcheckpoint.h",
     "src/emc/usr_intf/Submakefile",
+    "src/emc/usr_intf/emcrsh.cc",
+    "src/emc/usr_intf/shcom.cc",
     "src/emc/usr_intf/axis/Submakefile",
     "src/emc/usr_intf/axis/extensions/emcmodule.cc",
+    "src/hal/components/v5_bus_axis_router.comp",
+    "src/hal/components/homecomp.comp",
+    "src/hal/components/v5_bus_home_api.h",
+    "src/hal/components/v5_bus_home_math.h",
+    "src/hal/components/v5_bus_home_motion.h",
+    "src/hal/components/v5_bus_home_pins.h",
+    "src/hal/components/v5_bus_home_state_smoke.c",
+    "src/hal/components/v5_bus_homecomp.comp",
     "src/hal/components/v5_safety_latch.comp",
     "src/hal/user_comps/v5_native_hal_owner.comp",
     "src/hal/user_comps/v5_native_hal_owner_protocol.h",
@@ -66,12 +78,23 @@
       "v5_wrapped_rotary_mask",
       "v5_wcheckpoint_command_raw_bits",
       "v5_wcheckpoint_feedback_raw_bits",
-      "v5_wcheckpoint_counts_per_rev"
+      "v5_wcheckpoint_counts_per_rev",
+      "v5_wcheckpoint_read_snapshot"
+    ],
+    "src/emc/motion/homing.c": [
+      "ReadWcheckpointSnapshot = *pReadWcheckpointSnapshot;"
+    ],
+    "src/emc/motion/homing.h": [
+      "struct v5_wcheckpoint_snapshot;"
     ],
     "src/emc/motion/v5_wcheckpoint.c": [
       "v5_wcheckpoint_update_before_inputs",
       "v5_wcheckpoint_target_allowed",
       "V5_WCHECKPOINT_DRIVE_WINDOW_UNPROVEN",
+      "snapshot_truth_available",
+      "&emcmotStatus->carte_pos_fb",
+      "state->generation = 1U",
+      "v5_wcheckpoint_read_snapshot",
       "motion.v5-wcheckpoint-%c-raw-count-bits"
     ],
     "src/emc/usr_intf/axis/Submakefile": [
@@ -83,6 +106,58 @@
     ],
     "src/emc/usr_intf/Submakefile": [
       "ifeq ($(V5_HEADLESS_RUNTIME),1)"
+    ],
+    "src/emc/usr_intf/emcrsh.cc": [
+      "scJointState",
+      "JOINT_STATE %d %.9f %s %u %d",
+      "scTaskState",
+      "TASK_STATE state=%d mode=%d interp=%d exec=%d paused=%d ",
+      "(cmd != scAbort)"
+    ],
+    "src/emc/usr_intf/shcom.cc": [
+      "return emcCommandWaitReceived();"
+    ],
+    "src/hal/components/v5_bus_axis_router.comp": [
+      "component v5_bus_axis_router",
+      "option singleton yes;",
+      "function read fp;",
+      "function write nofp;",
+      "joint-zero-counts-##[5]",
+      "rejected-commit-seq"
+    ],
+    "src/hal/components/v5_bus_home_api.h": [
+      "V5_HOME_EXPORT(homeMotFunctions);"
+    ],
+    "src/hal/components/v5_bus_home_math.h": [
+      "v5_home_motion_sample_complete",
+      "v5_home_motion_timeout_reason",
+      "v5_home_sequence_run_mask",
+      "v5_home_next_sequence"
+    ],
+    "src/hal/components/v5_bus_home_motion.h": [
+      "v5_joint_common_guard",
+      "v5_terminal_readback_ready",
+      "v5_restart_after_rebase"
+    ],
+    "src/hal/components/homecomp.comp": [
+      "pReadWcheckpointSnapshot"
+    ],
+    "src/hal/components/v5_bus_home_pins.h": [
+      "motion.v5-bus-home-failed-joint"
+    ],
+    "src/hal/components/v5_bus_home_state_smoke.c": [
+      "test_transaction_contract",
+      "-10799976"
+    ],
+    "src/hal/components/v5_bus_homecomp.comp": [
+      "component v5_bus_homecomp",
+      "option homemod;",
+      "#define CUSTOM_HOMEMODULE",
+      "V5_SETTLING",
+      "V5_ZERO_DELTA_UNPROVEN",
+      "V5_TXN_PLAN",
+      "H[j].home_sequence",
+      "resume_next_native_sequence"
     ],
     "src/hal/components/v5_safety_latch.comp": [
       "component v5_safety_latch",
@@ -141,6 +216,13 @@
       ]
     },
     {
+      "path": "usr/bin/linuxcncrsh",
+      "required_ascii": [
+        "JOINT_STATE %d %.9f %s %u %d"
+      ],
+      "forbidden_ascii": []
+    },
+    {
       "path": "usr/bin/v5_native_hal_owner",
       "required_ascii": [
         "v5_native_hal_owner",
@@ -155,6 +237,24 @@
         "v5_safety_latch",
         "watchdog-cycles",
         "estop-active"
+      ],
+      "forbidden_ascii": []
+    },
+    {
+      "path": "usr/lib/linuxcnc/modules/v5_bus_homecomp.so",
+      "required_ascii": [
+        "v5_bus_homecomp",
+        "config-valid",
+        "rtcp-force-off"
+      ],
+      "forbidden_ascii": []
+    },
+    {
+      "path": "usr/lib/linuxcnc/modules/v5_bus_axis_router.so",
+      "required_ascii": [
+        "v5_bus_axis_router",
+        "mapping-valid",
+        "rejected-commit-seq"
       ],
       "forbidden_ascii": []
     }

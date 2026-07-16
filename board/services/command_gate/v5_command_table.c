@@ -20,6 +20,9 @@ static const V5CommandEntry kV5Commands[] = {
     {"spindle_override_set", "native_linuxcncrsh"},
     {"first_point", "native_first_point"},
     {"axis_zero_position", "native_axis_zero_position"},
+    {"drive_write_begin", "native_drive_write_window"},
+    {"drive_write_finish", "native_drive_write_window"},
+    {"drive_write_abort", "native_drive_write_window"},
 };
 
 const V5CommandEntry *v5_command_table_entries(size_t *count)

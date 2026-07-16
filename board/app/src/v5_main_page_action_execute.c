@@ -19,15 +19,22 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 #include "v5_main_page_internal.h"
 
 static void main_page_sleep_ms(unsigned int ms)
 {
+#ifdef _WIN32
+    Sleep(ms);
+#else
     struct timespec req;
     req.tv_sec = (time_t)(ms / 1000U);
     req.tv_nsec = (long)(ms % 1000U) * 1000000L;
     (void)nanosleep(&req, 0);
+#endif
 }
 
 static int main_page_confirm_wcs_readback_once(
@@ -213,6 +220,9 @@ static void execute_prepared_command_if_enabled(V5MainPage *page, V5MainPageActi
     }
     if (report->executed && strcmp(report->command.owner ? report->command.owner : "", "native_safety") == 0) {
         V5NativeReadback readback = page->native_readback;
+        if (report->request.kind == V5_COMMAND_ESTOP_FORCE) {
+            v5_main_page_home_transaction_reset_after_estop(page);
+        }
         if (gate_result.safety_estop_known) {
             v5_native_readback_set_safety_estop(&readback, gate_result.safety_estop_active);
         }
@@ -328,13 +338,6 @@ int v5_main_page_trigger_action(V5MainPage *page, V5MainPageActionKind action, V
     }
     if (v5_main_page_internal_action_needs_native_readback_refresh(action) && page->native_readback_refresh_cb) {
         page->native_readback_refresh_cb(page->native_readback_refresh_user_data, action);
-    }
-    if (action == V5_MAIN_PAGE_ACTION_HOME) {
-        const char *safety_precondition = v5_main_page_internal_home_safety_precondition_code(page);
-        if (safety_precondition) {
-            v5_main_page_internal_block_home_for_safety(page, out, safety_precondition);
-            return 1;
-        }
     }
     if (v5_main_page_internal_action_requires_power_on_home(page, action) &&
         (!v5_native_readback_all_homed_known(&page->native_readback) ||

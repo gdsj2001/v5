@@ -25,6 +25,142 @@ from v5_wcs_status_codec import (
     wcs_from_g5x,
 )
 
+V5_HOME_JOINT_COUNT = 5
+V5_ROTARY_AXIS_CODES = {ord('A'): 'a', ord('B'): 'b', ord('C'): 'c'}
+POSITION_STATUS_HEARTBEAT_SECONDS = 0.1
+
+
+def exact_native_count(value):
+    number = finite_float(value)
+    if number is None:
+        return None
+    rounded = int(round(number))
+    return rounded if abs(number - rounded) <= 1.0e-6 else None
+
+
+def rotary_phase_degrees(relative_counts, counts_per_rev, counts_per_unit):
+    period = int(counts_per_rev)
+    relative = finite_float(relative_counts)
+    if (relative is None or period <= 0 or
+            not math.isfinite(float(counts_per_unit)) or float(counts_per_unit) == 0.0):
+        raise RuntimeError('native_rotary_projection_count_domain_invalid')
+    rounded = round(relative)
+    if abs(relative - rounded) <= 1.0e-6:
+        relative = float(rounded)
+    phase_counts = relative % period
+    return float(phase_counts) / abs(float(counts_per_unit))
+
+
+class NativeRotaryDisplayProjection:
+    """Resident native zero-relative rotary display projection.
+
+    The BUS axis router has already subtracted the registered physical zero
+    anchor before LinuxCNC and wcheckpoint see these coordinates.  Fold that
+    zero-relative logical position once; subtracting the anchor here again
+    would reproduce the physical anchor as a false A/C display offset.
+    """
+
+    def __init__(self, hal_module):
+        self._hal = hal_module
+        self._mapping_key = None
+        self._records = {}
+
+    def _get(self, name):
+        return self._hal.get_value(name)
+
+    def _load_mapping(self):
+        valid = bool(self._get('v5-native-hal-owner.home-table-mapping-valid'))
+        generation = int(self._get('v5-native-hal-owner.home-table-map-gen'))
+        active_mask = int(self._get('v5-native-hal-owner.home-table-active-mask'))
+        commit_seq = int(self._get('v5-native-hal-owner.home-table-commit-seq'))
+        mapping_key = (generation, active_mask, commit_seq)
+        if valid and generation and active_mask and commit_seq and mapping_key == self._mapping_key:
+            return
+        if not valid or not generation or not active_mask or not commit_seq:
+            raise RuntimeError('native_rotary_projection_mapping_invalid')
+
+        records = {}
+        for joint in range(V5_HOME_JOINT_COUNT):
+            if not (active_mask & (1 << joint)):
+                continue
+            suffix = f'{joint:02d}'
+            if not bool(self._get(f'v5-native-hal-owner.home-config-valid-{suffix}')):
+                raise RuntimeError('native_rotary_projection_joint_config_invalid')
+            if int(self._get(f'v5-native-hal-owner.home-mapping-generation-{suffix}')) != generation:
+                raise RuntimeError('native_rotary_projection_generation_mismatch')
+            axis_code = int(self._get(f'v5-native-hal-owner.home-axis-code-{suffix}'))
+            axis_name = V5_ROTARY_AXIS_CODES.get(axis_code)
+            if axis_name is None:
+                continue
+            status_slot = int(self._get(f'v5-native-hal-owner.home-status-slot-{suffix}'))
+            counts_per_unit = finite_float(
+                self._get(f'v5-native-hal-owner.home-counts-per-unit-{suffix}'))
+            counts_per_rev = exact_native_count(
+                abs(float(counts_per_unit or 0.0)) * 360.0)
+            if (status_slot < 0 or status_slot >= POSITION_AXIS_COUNT or
+                    counts_per_unit is None or counts_per_unit <= 0.0 or
+                    counts_per_rev is None or counts_per_rev <= 0 or status_slot in records):
+                raise RuntimeError('native_rotary_projection_joint_mapping_invalid')
+            records[status_slot] = {
+                'axis': axis_name,
+                'counts_per_unit': abs(float(counts_per_unit)),
+                'counts_per_rev': counts_per_rev,
+            }
+        if not records:
+            raise RuntimeError('native_rotary_projection_axis_missing')
+        mapping_key_after = (
+            int(self._get('v5-native-hal-owner.home-table-map-gen')),
+            int(self._get('v5-native-hal-owner.home-table-active-mask')),
+            int(self._get('v5-native-hal-owner.home-table-commit-seq')))
+        if (not bool(self._get('v5-native-hal-owner.home-table-mapping-valid')) or
+                mapping_key_after != mapping_key):
+            raise RuntimeError('native_rotary_projection_mapping_changed')
+        self._records = records
+        self._mapping_key = mapping_key
+
+    def _read_wcheckpoint(self, axis):
+        for _attempt in range(3):
+            valid_before = bool(self._get(f'v5-native-hal-owner.wcp-{axis}-valid'))
+            generation_before = int(self._get(f'v5-native-hal-owner.wcp-{axis}-generation'))
+            logical_counts = exact_native_count(
+                self._get(f'v5-native-hal-owner.wcp-{axis}-logical-counts'))
+            base_counts = exact_native_count(
+                self._get(f'v5-native-hal-owner.wcp-{axis}-base-counts'))
+            runtime_counts = exact_native_count(
+                self._get(f'v5-native-hal-owner.wcp-{axis}-runtime-counts'))
+            generation_after = int(self._get(f'v5-native-hal-owner.wcp-{axis}-generation'))
+            valid_after = bool(self._get(f'v5-native-hal-owner.wcp-{axis}-valid'))
+            if (valid_before and valid_after and generation_before and
+                    generation_after == generation_before and
+                    logical_counts is not None and base_counts is not None and
+                    runtime_counts is not None and
+                    runtime_counts == logical_counts - base_counts):
+                return logical_counts, base_counts
+        raise RuntimeError('native_rotary_projection_readback_invalid')
+
+    def project(self, raw_mcs=None, raw_cmd=None):
+        self._load_mapping()
+        mcs = list(raw_mcs) if raw_mcs is not None else None
+        cmd = list(raw_cmd) if raw_cmd is not None else None
+        for status_slot, record in self._records.items():
+            axis = record['axis']
+            logical_counts, base_counts = self._read_wcheckpoint(axis)
+            if mcs is not None:
+                mcs[status_slot] = rotary_phase_degrees(
+                    logical_counts,
+                    record['counts_per_rev'],
+                    record['counts_per_unit'])
+            if cmd is not None:
+                runtime_cmd_counts = float(cmd[status_slot]) * record['counts_per_unit']
+                if not math.isfinite(runtime_cmd_counts):
+                    raise RuntimeError('native_rotary_projection_command_invalid')
+                logical_cmd_counts = runtime_cmd_counts + base_counts
+                cmd[status_slot] = rotary_phase_degrees(
+                    logical_cmd_counts,
+                    record['counts_per_rev'],
+                    record['counts_per_unit'])
+        return mcs, cmd
+
 def normalized_axis(values: Iterable[float]):
     out = [0.0] * POSITION_AXIS_COUNT
     for i, value in enumerate(values):
@@ -41,23 +177,6 @@ def normalized_axis_with_presence(values: Iterable[float]):
         if i >= POSITION_AXIS_COUNT:
             break
         out[i] = float(value)
-        present = True
-    return out, present
-
-
-def normalized_joint_output_with_presence(joints):
-    out = [0.0] * POSITION_AXIS_COUNT
-    present = False
-    if not joints:
-        return out, present
-    for i, item in enumerate(joints):
-        if i >= POSITION_AXIS_COUNT:
-            break
-        try:
-            value = item.get('output') if isinstance(item, dict) else getattr(item, 'output')
-            out[i] = float(value)
-        except Exception:
-            return [0.0] * POSITION_AXIS_COUNT, False
         present = True
     return out, present
 
@@ -301,13 +420,31 @@ def first_spindle(stat):
     return {}
 
 
-def write_position_status(path: str, stat) -> None:
+def write_position_status(
+        path: str,
+        stat,
+        rotary_projection=None,
+        publish_cadence=None,
+        now_monotonic=None) -> bool:
     raw_mcs, mcs_present = normalized_axis_with_presence(getattr(stat, 'joint_actual_position', ()))
     mcs = display_position_projection(raw_mcs)
-    raw_cmd, cmd_present = normalized_joint_output_with_presence(getattr(stat, 'joint', ()))
-    if not cmd_present:
-        raw_cmd, cmd_present = normalized_axis_with_presence(getattr(stat, 'position', ()))
+    raw_cmd, cmd_present = normalized_axis_with_presence(
+        getattr(stat, 'joint_position', ()))
     cmd = display_position_projection(raw_cmd)
+    if rotary_projection is not None:
+        try:
+            projected_mcs, projected_cmd = rotary_projection.project(
+                mcs if mcs_present else None,
+                cmd if cmd_present else None)
+            if projected_mcs is not None:
+                mcs = projected_mcs
+            if projected_cmd is not None:
+                cmd = projected_cmd
+        except RuntimeError:
+            mcs = [0.0] * POSITION_AXIS_COUNT
+            cmd = [0.0] * POSITION_AXIS_COUNT
+            mcs_present = False
+            cmd_present = False
     spindle = first_spindle(stat)
     spindle_speed = float(spindle.get('speed', 0.0)) if isinstance(spindle, dict) else 0.0
     spindle_override = float(spindle.get('override', 1.0)) * 100.0 if isinstance(spindle, dict) else 100.0
@@ -323,6 +460,18 @@ def write_position_status(path: str, stat) -> None:
         valid_mask |= V5_STATUS_VALID_CMD_MCS
     feed_override = float(getattr(stat, 'feedrate', 1.0)) * 100.0
     linear_velocity = float(getattr(stat, 'current_vel', 0.0)) * 60.0
+    signature = (
+        valid_mask,
+        tuple(mcs),
+        tuple(cmd),
+        spindle_speed,
+        linear_velocity,
+        feed_override,
+        spindle_override,
+    )
+    if publish_cadence is not None and not publish_cadence.should_publish(
+            'position', signature, now_monotonic, POSITION_STATUS_HEARTBEAT_SECONDS):
+        return False
     monotonic_ns = time.monotonic_ns()
     prefix = struct.pack(
         '<IIIIIIQ' + ('d' * (POSITION_AXIS_COUNT * 2)) + ('d' * 4),
@@ -333,6 +482,9 @@ def write_position_status(path: str, stat) -> None:
         POSITION_MAGIC, POSITION_STATUS_VERSION, POSITION_BLOCK_STRUCT.size, valid_mask, POSITION_AXIS_COUNT, 0, monotonic_ns,
         *(mcs + cmd), spindle_speed, linear_velocity, feed_override, spindle_override, crc, 0)
     atomic_write(path, payload)
+    if publish_cadence is not None:
+        publish_cadence.mark_published('position', signature, now_monotonic)
+    return True
 
 
 def write_mock_position_status(path: str, mcs_values, cmd_values, modal: str = 'G90 G17 G54') -> None:
@@ -341,7 +493,7 @@ def write_mock_position_status(path: str, mcs_values, cmd_values, modal: str = '
     stat = MockStat()
     stat.actual_position = normalized_axis(mcs_values)
     stat.joint_actual_position = normalized_axis(mcs_values)
-    stat.position = normalized_axis(cmd_values or mcs_values)
+    stat.joint_position = normalized_axis(cmd_values or mcs_values)
     stat.gcodes = ()
     stat.g5x_index = 1
     stat.spindle = ({'speed': 0.0, 'override': 1.0},)

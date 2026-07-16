@@ -21,7 +21,6 @@ from v5_remote_ui_contract import (
     LARGE_DIRTY_PIXEL_RATIO,
     MAX_DIRTY_RECTS_PER_FRAME,
     FramePayload,
-    PayloadViews,
 )
 
 LOCK_SH = 1
@@ -198,7 +197,9 @@ class FrameState:
         try:
             flock(fd, LOCK_SH)
             locked = True
-            data = mapped[:self.frame_size]
+            with self.condition:
+                frame_id = max(1, self.frame_id)
+            data = bytes(mapped[:self.frame_size])
         except OSError:
             return None
         finally:
@@ -209,8 +210,6 @@ class FrameState:
                     pass
         if len(data) != self.frame_size:
             return None
-        with self.condition:
-            frame_id = max(1, self.frame_id)
         return frame_id, data
 
     def mark_metric(self, name: str, delta: int = 1) -> None:
@@ -308,36 +307,53 @@ class FrameState:
         if not rects:
             return None
         mapped = self.framebuffer_map()
-        if mapped is None:
+        fd = self._framebuffer_fd
+        if mapped is None or fd is None:
             return None
         total_bytes = sum(int(rect["w"]) * int(rect["h"]) * 4 for rect in rects)
         total_rows = sum(int(rect["h"]) for rect in rects)
-        src = memoryview(mapped)
-        payload_parts: list[memoryview] = []
-        for rect in rects:
-            x = int(rect["x"])
-            y = int(rect["y"])
-            w = int(rect["w"])
-            h = int(rect["h"])
-            row_bytes = w * 4
-            if x == 0 and w == self.width:
-                start = (y * self.stride) + (x * 4)
-                end = start + (row_bytes * h)
-                if end > self.frame_size:
-                    return None
-                payload_parts.append(src[start:end])
-                self.mark_metric("dirty_payload_contiguous_frames")
-                continue
-            for row in range(h):
-                src_start = ((y + row) * self.stride) + (x * 4)
-                src_end = src_start + row_bytes
-                if src_end > self.frame_size:
-                    return None
-                payload_parts.append(src[src_start:src_end])
+        payload = bytearray(total_bytes)
+        payload_offset = 0
+        locked = False
+        try:
+            flock(fd, LOCK_SH)
+            locked = True
+            for rect in rects:
+                x = int(rect["x"])
+                y = int(rect["y"])
+                w = int(rect["w"])
+                h = int(rect["h"])
+                row_bytes = w * 4
+                if x == 0 and w == self.width:
+                    start = (y * self.stride) + (x * 4)
+                    end = start + (row_bytes * h)
+                    if end > self.frame_size:
+                        return None
+                    payload[payload_offset:payload_offset + (end - start)] = mapped[start:end]
+                    payload_offset += end - start
+                    self.mark_metric("dirty_payload_contiguous_frames")
+                    continue
+                for row in range(h):
+                    src_start = ((y + row) * self.stride) + (x * 4)
+                    src_end = src_start + row_bytes
+                    if src_end > self.frame_size:
+                        return None
+                    payload[payload_offset:payload_offset + row_bytes] = mapped[src_start:src_end]
+                    payload_offset += row_bytes
+        except OSError:
+            return None
+        finally:
+            if locked:
+                try:
+                    flock(fd, LOCK_UN)
+                except OSError:
+                    pass
+        if payload_offset != total_bytes:
+            return None
         self.mark_metric("dirty_payload_bytes", total_bytes)
         self.mark_metric("dirty_payload_rows", total_rows)
         self.mark_metric("dirty_payload_rects", len(rects))
-        return PayloadViews(payload_parts, total_bytes), rects
+        return bytes(payload), rects
 
     def publish_dirty(self, event: dict) -> None:
         with self.condition:
@@ -377,26 +393,37 @@ class FrameState:
         latest_frame = expected_base
         rects = []
         merged = 0
-        for event in events:
-            event_frame = int(event["frame_id"])
-            event_base = int(event["base_frame_id"])
+        index = 0
+        while index < len(events):
+            event_frame = int(events[index]["frame_id"])
+            group_end = index + 1
+            while group_end < len(events) and int(events[group_end]["frame_id"]) == event_frame:
+                group_end += 1
             if event_frame <= expected_base:
+                index = group_end
                 continue
-            if event_base != expected_base:
-                return {
-                    "needs_full": True,
-                    "frame_id": max(latest_frame, event_frame),
-                    "base_frame_id": base_frame_id,
-                    "reason": "missing_dirty_event",
-                }
-            x = int(event["x"])
-            y = int(event["y"])
-            w = int(event["w"])
-            h = int(event["h"])
-            rects.append({"x": x, "y": y, "w": w, "h": h, "codec": "raw"})
-            expected_base = event_frame
+            for event in events[index:group_end]:
+                event_base = int(event["base_frame_id"])
+                if event_base != expected_base:
+                    return {
+                        "needs_full": True,
+                        "frame_id": max(latest_frame, event_frame),
+                        "base_frame_id": base_frame_id,
+                        "reason": "missing_dirty_event",
+                    }
+                event_rects = self.normalized_dirty_rects(event)
+                if not event_rects:
+                    return {
+                        "needs_full": True,
+                        "frame_id": max(latest_frame, event_frame),
+                        "base_frame_id": base_frame_id,
+                        "reason": "invalid_dirty_event",
+                    }
+                rects.extend(event_rects)
+                merged += len(event_rects)
             latest_frame = event_frame
-            merged += 1
+            expected_base = event_frame
+            index = group_end
         if merged == 0:
             return None
         return {
@@ -444,22 +471,36 @@ class DirtyReader(threading.Thread):
 
     def handle_line(self, line: str) -> None:
         parts = line.split()
-        if len(parts) < 6:
+        if len(parts) < 7:
             return
         try:
-            frame_id, base_frame_id, x, y, w, h = [int(part) for part in parts[:6]]
+            frame_id, base_frame_id, rect_count = [int(part) for part in parts[:3]]
         except ValueError:
             return
-        if frame_id <= 0 or base_frame_id < 0 or w <= 0 or h <= 0:
+        if (
+            frame_id <= 0
+            or base_frame_id < 0
+            or rect_count <= 0
+            or rect_count > MAX_DIRTY_RECTS_PER_FRAME
+            or len(parts) != 3 + (rect_count * 4)
+        ):
             return
-        if x < 0 or y < 0 or x + w > self.state.width or y + h > self.state.height:
-            return
-        self.state.mark_metric("dirty_events")
-        self.state.publish_dirty({
+        rects = []
+        for index in range(rect_count):
+            start = 3 + (index * 4)
+            try:
+                x, y, w, h = [int(part) for part in parts[start : start + 4]]
+            except ValueError:
+                return
+            if w <= 0 or h <= 0 or x < 0 or y < 0 or x + w > self.state.width or y + h > self.state.height:
+                return
+            rects.append({"x": x, "y": y, "w": w, "h": h})
+        event = {
             "frame_id": frame_id,
             "base_frame_id": base_frame_id,
-            "x": x,
-            "y": y,
-            "w": w,
-            "h": h,
-        })
+            "rects": rects,
+        }
+        if rect_count == 1:
+            event.update(rects[0])
+        self.state.mark_metric("dirty_events", rect_count)
+        self.state.publish_dirty(event)

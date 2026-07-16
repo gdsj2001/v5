@@ -37,6 +37,7 @@ from v5_wcs_status_codec import (
     wcs_from_g5x,
 )
 from v5_machine_status_projection import (
+    NativeRotaryDisplayProjection,
     all_homed_from_stat,
     current_tool_length,
     current_tool_number,
@@ -51,12 +52,87 @@ from v5_machine_status_projection import (
     modal_text_from_gcodes,
     normalized_axis,
     normalized_axis_with_presence,
-    normalized_joint_output_with_presence,
     tool_entry_value,
     write_mock_position_status,
     write_modal_tool_status,
     write_position_status,
 )
+
+SLOW_STATUS_HEARTBEAT_SECONDS = 0.2
+HAL_DISPLAY_PROJECTION_COMPONENT = 'v5-wcs-display'
+
+
+class StatusPublishCadence:
+    def __init__(self, heartbeat_seconds=SLOW_STATUS_HEARTBEAT_SECONDS):
+        self.heartbeat_seconds = max(0.0, float(heartbeat_seconds))
+        self._last = {}
+
+    def should_publish(self, name: str, signature, now=None, heartbeat_seconds=None) -> bool:
+        now = time.monotonic() if now is None else float(now)
+        heartbeat = self.heartbeat_seconds if heartbeat_seconds is None else max(0.0, float(heartbeat_seconds))
+        previous = self._last.get(name)
+        if previous is not None:
+            previous_signature, previous_time = previous
+            if signature == previous_signature and now - previous_time < heartbeat:
+                return False
+        return True
+
+    def mark_published(self, name: str, signature, now=None) -> None:
+        now = time.monotonic() if now is None else float(now)
+        self._last[name] = (signature, now)
+
+
+class HalReadAccess:
+    def __init__(self, hal_module):
+        self._hal = hal_module
+        self._component = hal_module.component(HAL_DISPLAY_PROJECTION_COMPONENT)
+        self._pin_names = {}
+        specs = [
+            ('home-table-mapping-valid', 'home-table-valid', 'v5-home-table-valid', hal_module.HAL_BIT),
+            ('home-table-map-gen', 'home-table-generation', 'v5-home-table-generation', hal_module.HAL_U32),
+            ('home-table-active-mask', 'home-table-active-mask', 'v5-home-table-active-mask', hal_module.HAL_U32),
+            ('home-table-commit-seq', 'home-table-commit', 'v5-home-table-commit', hal_module.HAL_U32),
+        ]
+        joint_fields = (
+            ('home-config-valid', 'config-valid', hal_module.HAL_BIT),
+            ('home-status-slot', 'status-slot', hal_module.HAL_U32),
+            ('home-axis-code', 'axis-code', hal_module.HAL_U32),
+            ('home-mapping-generation', 'generation', hal_module.HAL_U32),
+            ('home-zero-counts', 'zero', hal_module.HAL_FLOAT),
+            ('home-counts-per-unit', 'scale', hal_module.HAL_FLOAT),
+        )
+        for joint in range(5):
+            suffix = f'{joint:02d}'
+            for owner_field, signal_field, pin_type in joint_fields:
+                specs.append((
+                    f'{owner_field}-{suffix}',
+                    f'home-j{joint}-{signal_field}',
+                    f'v5-home-j{joint}-{signal_field}',
+                    pin_type))
+        wcheckpoint_fields = (
+            ('valid', hal_module.HAL_BIT),
+            ('generation', hal_module.HAL_U32),
+            ('logical-counts', hal_module.HAL_FLOAT),
+            ('base-counts', hal_module.HAL_FLOAT),
+            ('runtime-counts', hal_module.HAL_FLOAT),
+        )
+        for axis in ('a', 'b', 'c'):
+            for owner_field, pin_type in wcheckpoint_fields:
+                signal_field = owner_field[:-7] if owner_field.endswith('-counts') else owner_field
+                specs.append((
+                    f'wcp-{axis}-{owner_field}',
+                    f'wcp-{axis}-{signal_field}',
+                    f'v5-wcheckpoint-{axis}-{signal_field}',
+                    pin_type))
+        for owner_name, local_name, signal_name, pin_type in specs:
+            self._component.newpin(local_name, pin_type, hal_module.HAL_IN)
+            hal_module.connect(
+                f'{HAL_DISPLAY_PROJECTION_COMPONENT}.{local_name}', signal_name)
+            self._pin_names[f'v5-native-hal-owner.{owner_name}'] = local_name
+        self._component.ready()
+
+    def get_value(self, name):
+        return self._component[self._pin_names[name]]
 
 
 
@@ -237,8 +313,10 @@ class ResidentWcsParameterOwner:
         for axis in range(WCS_AXIS_COUNT):
             if not math.isfinite(row[axis]):
                 return False
-            self.table[wcs_index][axis] = row[axis]
-        self.epoch = ((int(self.epoch) + 1) & 0xFFFFFFFF) or 1
+        if any(self.table[wcs_index][axis] != row[axis] for axis in range(WCS_AXIS_COUNT)):
+            for axis in range(WCS_AXIS_COUNT):
+                self.table[wcs_index][axis] = row[axis]
+            self.epoch = ((int(self.epoch) + 1) & 0xFFFFFFFF) or 1
         return True
 
 
@@ -270,6 +348,14 @@ def load_linuxcnc():
     return linuxcnc
 
 
+def load_hal():
+    dist = '/usr/lib/python3/dist-packages'
+    if os.path.isdir(dist) and dist not in sys.path:
+        sys.path.insert(0, dist)
+    import hal  # type: ignore
+    return HalReadAccess(hal)
+
+
 
 def poll_once(
     stat,
@@ -279,11 +365,24 @@ def poll_once(
     modal_tool_path: str,
     t0_tool_holder_length_mm=DEFAULT_T0_TOOL_HOLDER_LENGTH_MM,
     interpreter_idle_value=None,
-    interpreter_paused_value=None) -> Tuple[int, int]:
+    interpreter_paused_value=None,
+    publish_cadence=None,
+    now_monotonic=None,
+    rotary_projection=None) -> Tuple[int, int]:
     stat.poll()
     valid, wcs_index = wcs_from_g5x(int(getattr(stat, 'g5x_index', 0)))
     if not resident_wcs.loaded():
         raise RuntimeError('wcs_resident_owner_unloaded')
+    write_position_status(
+        position_path,
+        stat,
+        rotary_projection,
+        publish_cadence,
+        now_monotonic)
+    slow_signature = ('slow-status-sample', valid, wcs_index)
+    if publish_cadence is not None and not publish_cadence.should_publish(
+            'slow-status', slow_signature, now_monotonic):
+        return valid, wcs_index if valid else -1
     table_valid = 0
     if valid:
         active_offsets = active_wcs_offsets_from_stat(stat)
@@ -300,7 +399,6 @@ def poll_once(
     motion_line_valid, motion_line = line_from_stat(stat, 'motion_line')
     mdi_run_valid, mdi_run_active, mdi_run_line, mdi_run_command = mdi_run_from_stat(stat, current_line)
     write_status(path, valid, wcs_index, table, table_valid, resident_wcs.epoch)
-    write_position_status(position_path, stat)
     write_modal_tool_status(
         modal_tool_path,
         modal,
@@ -321,12 +419,13 @@ def poll_once(
         mdi_run_active,
         mdi_run_line,
         mdi_run_command)
+    if publish_cadence is not None:
+        publish_cadence.mark_published('slow-status', slow_signature, now_monotonic)
     return valid if table_valid else 0, wcs_index if table_valid else -1
 
 
-lock_process_memory("v5_wcs_status_publisher")
-
 def main() -> int:
+    lock_process_memory("v5_wcs_status_publisher")
     parser = argparse.ArgumentParser(description='Publish v5 WCS actual status from boot-resident native WCS memory.')
     parser.add_argument('--path', default=DEFAULT_PATH)
     parser.add_argument('--position-path', default=DEFAULT_POSITION_PATH)
@@ -394,6 +493,7 @@ def main() -> int:
         flush=True)
 
     linuxcnc = load_linuxcnc()
+    rotary_projection = NativeRotaryDisplayProjection(load_hal())
     interpreter_idle_value = getattr(linuxcnc, 'INTERP_IDLE', 1)
     interpreter_paused_value = getattr(linuxcnc, 'INTERP_PAUSED', None)
     operator_error_types = {
@@ -409,6 +509,7 @@ def main() -> int:
     operator_error_channel = None
     operator_error_generation = 0
     next_operator_error_log = 0.0
+    publish_cadence = StatusPublishCadence()
     write_operator_error_status(args.operator_error_path, 0, 0, 0)
     while True:
         try:
@@ -422,7 +523,9 @@ def main() -> int:
                 args.modal_tool_path,
                 args.t0_tool_holder_length_mm,
                 interpreter_idle_value,
-                interpreter_paused_value)
+                interpreter_paused_value,
+                publish_cadence,
+                rotary_projection=rotary_projection)
             try:
                 if operator_error_channel is None:
                     operator_error_channel = linuxcnc.error_channel()
@@ -454,8 +557,14 @@ def main() -> int:
             consecutive_failures += 1
             stat = None
             if consecutive_failures >= invalid_after_failures:
-                write_status(args.path, 0, -1, empty_wcs_table(), 0, 0)
-                write_modal_tool_status(args.modal_tool_path, '', None, 0, 0.0)
+                invalid_now = time.monotonic()
+                invalid_signature = ('invalid',)
+                if publish_cadence.should_publish('wcs-invalid', invalid_signature, invalid_now):
+                    write_status(args.path, 0, -1, empty_wcs_table(), 0, 0)
+                    publish_cadence.mark_published('wcs-invalid', invalid_signature, invalid_now)
+                if publish_cadence.should_publish('modal-invalid', invalid_signature, invalid_now):
+                    write_modal_tool_status(args.modal_tool_path, '', None, 0, 0.0)
+                    publish_cadence.mark_published('modal-invalid', invalid_signature, invalid_now)
             if consecutive_failures == 1 or consecutive_failures >= invalid_after_failures:
                 print(f'v5_wcs_status_publisher reconnecting after unavailable poll: {exc}', file=sys.stderr, flush=True)
             if args.once and consecutive_failures >= invalid_after_failures:

@@ -72,6 +72,11 @@ MODE=dual
 WIRED_SELECTED="${WIRED_SELECTED:-$V5_MAINT_IFACE_DEFAULT}"
 log_usb_wifi "apply begin iface=$iface driver=$driver product=$product"
 configure_wifi || true
+if ! apply_network_cpu_isolation; then
+    log_usb_wifi "apply blocked: CPU isolation owner rejected network layout"
+    write_state "blocked" "cpu_isolation_failed" "$iface" "$driver" "$product"
+    exit 1
+fi
 
 assoc=unknown
 if command -v wpa_cli >/dev/null 2>&1; then

@@ -10,9 +10,12 @@ import textwrap
 DEFAULT_BOARD_TARGET = "root@192.168.1.221"
 
 REMOTE_CHECK = r'''
+from __future__ import annotations
+
 from pathlib import Path
 import json
 import re
+import stat
 import sys
 import time
 import urllib.request
@@ -27,6 +30,21 @@ PIDFILES = {
     "v5_settings_actiond": "/run/8ax/v5_settings_actiond.pid",
     "v5_touch_diagnostics": "/run/8ax/v5_touch_diagnostics.pid",
 }
+
+EXPECTED_NICE = {
+    "v5_command_gate": -5,
+    "v5_state_publisher": 10,
+    "v5_wcs_status_publisher": 10,
+    "v5_lvgl_shell": 0,
+}
+
+LINUXCNC_NON_REALTIME_NAMES = (
+    "linuxcncsvr",
+    "milltask",
+    "io",
+    "linuxcncrsh",
+    "v5_native_hal_owner",
+)
 
 SANDBOX_AUDIT_PATHS = (
     ("framebuffer", "/dev/fb0"),
@@ -75,18 +93,40 @@ def read_status_field(pid: int, field: str) -> str:
 
 def read_sched_policy(pid: int) -> int:
     try:
-        for line in Path(f"/proc/{pid}/sched").read_text(encoding="utf-8", errors="ignore").splitlines():
-            if line.strip().startswith("policy"):
-                return int(line.split(":", 1)[1].strip())
-    except Exception:
-        pass
-    try:
-        stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8", errors="ignore").split()
-        if len(stat) >= 41:
-            return int(stat[40])
+        stat_line = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8", errors="ignore")
+        tail = stat_line[stat_line.rfind(")") + 2 :].split()
+        if len(tail) >= 39:
+            return int(tail[38])
     except Exception:
         pass
     return -1
+
+def read_task_records(pid: int) -> list[tuple[int, str, int, int]]:
+    records = []
+    for task in sorted(Path(f"/proc/{pid}/task").glob("[0-9]*")):
+        try:
+            tid = int(task.name)
+            stat = (task / "stat").read_text(encoding="utf-8", errors="ignore")
+            tail = stat[stat.rfind(")") + 2 :].split()
+            comm = (task / "comm").read_text(encoding="utf-8", errors="ignore").strip()
+            records.append((tid, comm, int(tail[16]), read_sched_policy(tid)))
+        except Exception:
+            records.append((-1, "<unreadable>", 999, -1))
+    return records
+
+def read_task_nice_values(pid: int) -> list[int]:
+    return [record[2] for record in read_task_records(pid)]
+
+def pids_by_executable_name(name: str) -> list[int]:
+    pids = []
+    for proc in Path("/proc").glob("[0-9]*"):
+        try:
+            argv0 = (proc / "cmdline").read_bytes().split(b"\0", 1)[0].decode("utf-8", errors="ignore")
+        except Exception:
+            continue
+        if Path(argv0).name == name:
+            pids.append(int(proc.name))
+    return sorted(pids)
 
 def read_uid(pid: int):
     uid_text = read_status_field(pid, "Uid").split()
@@ -346,12 +386,34 @@ def rtapi_pids():
                 pass
     return sorted(pids)
 
+def audit_linuxcnc_privileged_helpers() -> int:
+    rc = 0
+    for helper in (Path("/usr/bin/rtapi_app"), Path("/usr/bin/linuxcnc_module_helper")):
+        try:
+            helper_stat = helper.stat()
+        except OSError as exc:
+            print(f"FAIL linuxcnc_privileged_helper: path={helper} error={exc}", file=sys.stderr)
+            rc = 1
+            continue
+        mode = stat.S_IMODE(helper_stat.st_mode)
+        if helper_stat.st_uid != 0 or helper_stat.st_gid != 0 or mode != 0o4755:
+            print(
+                f"FAIL linuxcnc_privileged_helper: path={helper} "
+                f"uid={helper_stat.st_uid} gid={helper_stat.st_gid} mode={mode:o} expected=0:0:4755",
+                file=sys.stderr,
+            )
+            rc = 1
+        else:
+            print(f"OK_LINUXCNC_PRIVILEGED_HELPER path={helper} owner=0:0 mode=4755")
+    return rc
+
 def audit_linuxcnc_rtapi_affinity() -> int:
     pids = rtapi_pids()
     if not pids:
         print("FAIL linuxcnc_rtapi_affinity: rtapi_app not running", file=sys.stderr)
         return 1
     rc = 0
+    realtime_threads = 0
     for pid in pids:
         task_dir = Path(f"/proc/{pid}/task")
         for task in sorted(task_dir.glob("[0-9]*")):
@@ -371,6 +433,20 @@ def audit_linuxcnc_rtapi_affinity() -> int:
                 comm = (task / "comm").read_text(encoding="utf-8", errors="ignore").strip()
             except Exception:
                 comm = "<unknown>"
+            policy = read_sched_policy(tid)
+            if comm.startswith("rtapi_app:T"):
+                realtime_threads += 1
+                if policy not in (1, 2):
+                    print(
+                        f"FAIL linuxcnc_rtapi_scheduler: pid={pid} tid={tid} comm={comm} "
+                        f"policy={policy} expected=SCHED_FIFO(1) or SCHED_RR(2)",
+                        file=sys.stderr,
+                    )
+                    rc = 1
+                else:
+                    print(
+                        f"OK_LINUXCNC_RTAPI_SCHEDULER pid={pid} tid={tid} comm={comm} policy={policy}"
+                    )
             if not cpu_list_is_exact_zero(cpus):
                 print(
                     f"FAIL linuxcnc_rtapi_affinity: pid={pid} tid={tid} comm={comm} "
@@ -380,6 +456,85 @@ def audit_linuxcnc_rtapi_affinity() -> int:
                 rc = 1
             else:
                 print(f"OK_LINUXCNC_RTAPI_CPU0 pid={pid} tid={tid} comm={comm} Cpus_allowed_list={cpus}")
+    if realtime_threads == 0:
+        print("FAIL linuxcnc_rtapi_scheduler: no rtapi_app:T realtime thread found", file=sys.stderr)
+        rc = 1
+    return rc
+
+def audit_linuxcnc_non_realtime_scheduling() -> int:
+    rc = 0
+    for name in LINUXCNC_NON_REALTIME_NAMES:
+        pids = pids_by_executable_name(name)
+        if not pids:
+            print(f"FAIL linuxcnc_non_realtime: name={name} not running", file=sys.stderr)
+            rc = 1
+            continue
+        for pid in pids:
+            cpus = read_status_field(pid, "Cpus_allowed_list")
+            task_records = read_task_records(pid)
+            nice_values = [record[2] for record in task_records]
+            if (
+                cpus != "1"
+                or not nice_values
+                or any(value != -5 for value in nice_values)
+                or any(record[3] != 0 for record in task_records)
+            ):
+                print(
+                    f"FAIL linuxcnc_non_realtime: name={name} pid={pid} "
+                    f"cpus={cpus} nice={nice_values} expected_cpu=1 expected_nice=-5",
+                    file=sys.stderr,
+                )
+                rc = 1
+            else:
+                print(f"OK_LINUXCNC_NON_RT_CPU1 name={name} pid={pid} nice=-5")
+    return rc
+
+def normalize_cpu_mask(text: str) -> int:
+    compact = text.strip().replace(",", "")
+    return int(compact or "0", 16)
+
+def audit_network_cpu_isolation() -> int:
+    rc = 0
+    interrupts = Path("/proc/interrupts").read_text(encoding="utf-8", errors="ignore").splitlines()
+    for iface, expected_cpu, expected_rps in (("eth0", "1", 2), ("eth1", "0", 0)):
+        irqs = []
+        for line in interrupts:
+            if iface not in line or ":" not in line:
+                continue
+            token = line.split(":", 1)[0].strip()
+            if token.isdigit():
+                irqs.append(token)
+        if not irqs:
+            print(f"FAIL network_cpu_isolation: iface={iface} irq=missing", file=sys.stderr)
+            rc = 1
+        for irq in irqs:
+            affinity = Path(f"/proc/irq/{irq}/smp_affinity_list").read_text(encoding="ascii", errors="ignore").strip()
+            if affinity != expected_cpu:
+                print(
+                    f"FAIL network_cpu_isolation: iface={iface} irq={irq} "
+                    f"affinity={affinity} expected={expected_cpu}",
+                    file=sys.stderr,
+                )
+                rc = 1
+        rps_queues = list(Path(f"/sys/class/net/{iface}/queues").glob("rx-*/rps_cpus"))
+        if not rps_queues:
+            print(f"FAIL network_cpu_isolation: iface={iface} rps_queue=missing", file=sys.stderr)
+            rc = 1
+        for queue in rps_queues:
+            try:
+                actual = normalize_cpu_mask(queue.read_text(encoding="ascii", errors="ignore"))
+            except (OSError, ValueError):
+                print(f"FAIL network_cpu_isolation: path={queue} readback=unavailable", file=sys.stderr)
+                rc = 1
+                continue
+            if actual != expected_rps:
+                print(f"FAIL network_cpu_isolation: path={queue} actual={actual:x} expected={expected_rps:x}", file=sys.stderr)
+                rc = 1
+    if pids_by_executable_name("irqbalance"):
+        print("FAIL network_cpu_isolation: irqbalance is active", file=sys.stderr)
+        rc = 1
+    if rc == 0:
+        print("OK_NETWORK_CPU_ISOLATION eth0=CPU1 eth1=CPU0")
     return rc
 
 rc = 0
@@ -391,13 +546,41 @@ for name, pidfile in PIDFILES.items():
     service_rc = 0
     cpus = read_status_field(pid, "Cpus_allowed_list")
     policy = read_sched_policy(pid)
+    task_records = read_task_records(pid)
+    nice_values = [record[2] for record in task_records]
     uid = read_uid(pid)
     if cpu_list_contains_zero(cpus):
         print(f"FAIL {name}: pid={pid} Cpus_allowed_list={cpus} contains CPU0", file=sys.stderr)
         service_rc = 1
-    if policy != 0:
-        print(f"FAIL {name}: pid={pid} sched_policy={policy} expected SCHED_OTHER(0)", file=sys.stderr)
+    if policy != 0 or any(record[3] != 0 for record in task_records):
+        print(
+            f"FAIL {name}: pid={pid} sched_policy={policy} task_records={task_records} "
+            f"expected SCHED_OTHER(0)",
+            file=sys.stderr,
+        )
         service_rc = 1
+    expected_nice = EXPECTED_NICE.get(name)
+    if expected_nice is not None and (not nice_values or any(value != expected_nice for value in nice_values)):
+        print(
+            f"FAIL {name}: pid={pid} nice={nice_values} expected={expected_nice}",
+            file=sys.stderr,
+        )
+        service_rc = 1
+    if name == "v5_ui_relay":
+        frame_records = [record for record in task_records if record[2] == 10]
+        input_records = [record for record in task_records if record[2] != 10]
+        if (
+            len(frame_records) != 1
+            or frame_records[0][2] != 10
+            or not input_records
+            or any(record[2] != 0 for record in input_records)
+        ):
+            print(
+                f"FAIL {name}: pid={pid} task_records={task_records} "
+                f"expected exactly one frame-producer worker=10 and every input/server thread=0",
+                file=sys.stderr,
+            )
+            service_rc = 1
     if uid == 0:
         print(f"AUDIT_SANDBOX_ROOT {name}: pid={pid} uid=0(root) allowlist_required_before_drop")
     elif uid is not None:
@@ -408,9 +591,12 @@ for name, pidfile in PIDFILES.items():
     if name == "v5_ui_relay":
         service_rc |= audit_remote_relay(pid)
     if service_rc == 0:
-        print(f"OK {name}: pid={pid} Cpus_allowed_list={cpus} sched_policy={policy}")
+        print(f"OK {name}: pid={pid} Cpus_allowed_list={cpus} sched_policy={policy} nice={nice_values}")
     rc |= service_rc
+rc |= audit_linuxcnc_privileged_helpers()
 rc |= audit_linuxcnc_rtapi_affinity()
+rc |= audit_linuxcnc_non_realtime_scheduling()
+rc |= audit_network_cpu_isolation()
 audit_sandbox_paths()
 sys.exit(rc)
 '''

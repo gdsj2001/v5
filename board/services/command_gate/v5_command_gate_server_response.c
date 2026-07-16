@@ -84,5 +84,6 @@ int v5_command_gate_response_owner_is_allowed(const char *owner)
          strcmp(owner, "native_first_point") == 0 ||
          strcmp(owner, "native_axis_zero_position") == 0 ||
          strcmp(owner, "native_work_zero") == 0 ||
-         strcmp(owner, "native_rtcp_control") == 0);
+         strcmp(owner, "native_rtcp_control") == 0 ||
+         strcmp(owner, "native_drive_write_window") == 0);
 }

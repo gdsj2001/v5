@@ -22,27 +22,49 @@ VIEWER_HTML = r"""<!doctype html>
     header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
     h1 { font-size: 16px; margin: 0; font-weight: 600; }
     #status { color: #67e8b3; font: 13px ui-monospace, monospace; }
-    canvas { display: block; width: 100%; height: auto; background: #000; border: 1px solid #31566b; touch-action: none; cursor: default; }
+    #screen-wrap { position: relative; width: 100%; aspect-ratio: 1024 / 600; background: #000; border: 1px solid #31566b; touch-action: none; cursor: default; }
+    #screen-wrap canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; pointer-events: none; }
   </style>
 </head>
 <body>
 <main>
   <header><h1>V5 开发板实时屏幕</h1><div id="status">连接中…</div></header>
-  <canvas id="screen" width="1024" height="600"></canvas>
+  <div id="screen-wrap">
+    <canvas id="screen" width="1024" height="600"></canvas>
+  </div>
 </main>
 <script>
 (() => {
+  const screenTarget = document.getElementById('screen-wrap');
   const canvas = document.getElementById('screen');
-  const ctx = canvas.getContext('2d', {alpha: false});
   const statusNode = document.getElementById('status');
+  const bitmapCtx = canvas.getContext('bitmaprenderer');
+  if (!bitmapCtx || typeof OffscreenCanvas !== 'function') {
+    statusNode.textContent = 'render=unsupported';
+    return;
+  }
+  let stagingCanvas = new OffscreenCanvas(1024, 600);
+  let stagingCtx = stagingCanvas.getContext('2d', {alpha: false});
+  if (!stagingCtx) {
+    statusNode.textContent = 'render=unsupported';
+    return;
+  }
   let rgba = null;
   let frameId = 0;
   let streamLive = false;
   let inputReady = false;
   let pendingMeta = null;
+  let streamWs = null;
+  let streamGeneration = 0;
+  let reconnectTimer = null;
+  let baseReady = false;
+  let progressCheckInFlight = false;
+  let upstreamAheadSince = 0;
   let inputWs = null;
   let inputSeq = 0;
   let pointerDown = false;
+  let pointerForwarded = false;
+  let aiClickActive = false;
   const sessionId = `v5-browser-${Date.now()}`;
 
   const wsUrl = path => `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${path}`;
@@ -63,57 +85,129 @@ VIEWER_HTML = r"""<!doctype html>
     }
   }
 
-  function applyFull(meta, pixels) {
-    canvas.width = meta.width;
-    canvas.height = meta.height;
-    rgba = new Uint8ClampedArray(meta.width * meta.height * 4);
-    for (let y = 0; y < meta.height; y++) {
-      bgraRowToRgba(pixels, y * meta.stride, rgba, y * meta.width * 4, meta.width);
+  function presentRgba(width, height) {
+    if (stagingCanvas.width !== width || stagingCanvas.height !== height) {
+      stagingCanvas = new OffscreenCanvas(width, height);
+      stagingCtx = stagingCanvas.getContext('2d', {alpha: false});
+      if (!stagingCtx) throw new Error('staging context unavailable');
     }
-    ctx.putImageData(new ImageData(rgba, meta.width, meta.height), 0, 0);
-    frameId = Number(meta.frame_id || 0);
+    stagingCtx.putImageData(new ImageData(rgba, width, height), 0, 0);
+    const bitmap = stagingCanvas.transferToImageBitmap();
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+    }
+    bitmapCtx.transferFromImageBitmap(bitmap);
+  }
+
+  function applyFull(meta, pixels, generation) {
+    const width = Number(meta.width || 0);
+    const height = Number(meta.height || 0);
+    const stride = Number(meta.stride || 0);
+    const nextFrameId = Number(meta.frame_id || 0);
+    if (generation !== streamGeneration || width <= 0 || height <= 0 || stride < width * 4 ||
+        nextFrameId <= 0 || pixels.byteLength < stride * height) {
+      scheduleStreamReconnect('invalid-full-frame');
+      return;
+    }
+    const nextRgba = new Uint8ClampedArray(width * height * 4);
+    for (let y = 0; y < height; y++) {
+      bgraRowToRgba(pixels, y * stride, nextRgba, y * width * 4, width);
+    }
+    if (generation !== streamGeneration) return;
+    rgba = nextRgba;
+    presentRgba(width, height);
+    frameId = nextFrameId;
+    baseReady = true;
+    streamLive = true;
+    upstreamAheadSince = 0;
     updateStatus();
   }
 
-  function applyDirty(meta, pixels) {
-    if (!rgba || Number(meta.base_frame_id) !== frameId) {
-      repairFull('base-repair');
+  function applyDirty(meta, pixels, generation) {
+    if (generation !== streamGeneration) return;
+    if (!baseReady || !rgba || Number(meta.base_frame_id) !== frameId) {
+      scheduleStreamReconnect('base-repair');
+      return;
+    }
+    let expectedBytes = 0;
+    for (const rect of meta.rects || []) {
+      if (rect.x < 0 || rect.y < 0 || rect.w <= 0 || rect.h <= 0 ||
+          rect.x + rect.w > canvas.width || rect.y + rect.h > canvas.height) {
+        scheduleStreamReconnect('invalid-dirty-rect');
+        return;
+      }
+      expectedBytes += rect.w * rect.h * 4;
+    }
+    if (expectedBytes !== pixels.byteLength) {
+      scheduleStreamReconnect('invalid-dirty-payload');
       return;
     }
     let payloadOffset = 0;
     for (const rect of meta.rects || []) {
-      const rectRgba = new Uint8ClampedArray(rect.w * rect.h * 4);
       for (let y = 0; y < rect.h; y++) {
         const packedRow = payloadOffset + y * rect.w * 4;
-        bgraRowToRgba(pixels, packedRow, rectRgba, y * rect.w * 4, rect.w);
-        rgba.set(rectRgba.subarray(y * rect.w * 4, (y + 1) * rect.w * 4), ((rect.y + y) * canvas.width + rect.x) * 4);
+        const targetRow = ((rect.y + y) * canvas.width + rect.x) * 4;
+        bgraRowToRgba(pixels, packedRow, rgba, targetRow, rect.w);
       }
-      ctx.putImageData(new ImageData(rectRgba, rect.w, rect.h), rect.x, rect.y);
       payloadOffset += rect.w * rect.h * 4;
     }
+    presentRgba(canvas.width, canvas.height);
     frameId = Number(meta.frame_id || frameId);
+    upstreamAheadSince = 0;
     updateStatus();
   }
 
-  async function repairFull(reason = '') {
+  async function checkStreamProgress() {
+    if (progressCheckInFlight || !streamLive || !baseReady) return;
+    progressCheckInFlight = true;
+    const generation = streamGeneration;
     try {
-      const response = await fetch('/api/frame', {cache: 'no-store'});
-      if (!response.ok) throw new Error(`full frame HTTP ${response.status}`);
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      const metaLen = new DataView(bytes.buffer, bytes.byteOffset, 4).getUint32(0, true);
-      const meta = JSON.parse(new TextDecoder().decode(bytes.subarray(4, 4 + metaLen)));
-      applyFull(meta, bytes.subarray(4 + metaLen));
-      updateStatus(reason);
+      const response = await fetch('/api/info', {cache: 'no-store'});
+      if (!response.ok) throw new Error(`info HTTP ${response.status}`);
+      const info = await response.json();
+      if (generation !== streamGeneration) return;
+      const upstreamFrameId = Number(info.frame_id || 0);
+      if (upstreamFrameId > frameId) {
+        if (!upstreamAheadSince) upstreamAheadSince = Date.now();
+        else if (Date.now() - upstreamAheadSince >= 1000) scheduleStreamReconnect('stale-stream');
+      } else {
+        upstreamAheadSince = 0;
+      }
     } catch (error) {
-      updateStatus(`frame-error=${error.message}`);
+      if (generation === streamGeneration) updateStatus(`progress-error=${error.message}`);
+    } finally {
+      progressCheckInFlight = false;
     }
   }
 
+  function scheduleStreamReconnect(reason) {
+    streamLive = false;
+    baseReady = false;
+    upstreamAheadSince = 0;
+    pendingMeta = null;
+    updateStatus(reason);
+    const oldWs = streamWs;
+    streamWs = null;
+    streamGeneration += 1;
+    if (oldWs && oldWs.readyState < WebSocket.CLOSING) oldWs.close();
+    if (reconnectTimer !== null) return;
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      connectStream();
+    }, 250);
+  }
+
   function connectStream() {
+    const generation = ++streamGeneration;
     const ws = new WebSocket(wsUrl('/api/stream'));
+    streamWs = ws;
     ws.binaryType = 'arraybuffer';
-    ws.onopen = () => { streamLive = true; updateStatus(); };
+    ws.onopen = () => {
+      if (generation === streamGeneration) updateStatus('stream-open');
+    };
     ws.onmessage = event => {
+      if (generation !== streamGeneration) return;
       if (typeof event.data === 'string') {
         pendingMeta = JSON.parse(event.data);
         return;
@@ -122,20 +216,32 @@ VIEWER_HTML = r"""<!doctype html>
       const pixels = new Uint8Array(event.data);
       const meta = pendingMeta;
       pendingMeta = null;
-      if (meta.type === 'full_frame') applyFull(meta, pixels);
-      else if (meta.type === 'dirty_rects') applyDirty(meta, pixels);
+      if (meta.type === 'full_frame') applyFull(meta, pixels, generation);
+      else if (meta.type === 'dirty_rects') applyDirty(meta, pixels, generation);
     };
-    ws.onerror = () => updateStatus('stream-error');
+    ws.onerror = () => {
+      if (generation === streamGeneration) updateStatus('stream-error');
+    };
     ws.onclose = () => {
+      if (generation !== streamGeneration) return;
+      streamWs = null;
       streamLive = false;
+      baseReady = false;
       pendingMeta = null;
       updateStatus('stream-reconnect');
-      setTimeout(() => { repairFull('reconnected'); connectStream(); }, 1000);
+      if (reconnectTimer === null) {
+        reconnectTimer = setTimeout(() => {
+          reconnectTimer = null;
+          connectStream();
+        }, 1000);
+      }
     };
   }
 
   function sendInput(message) {
-    if (inputWs && inputWs.readyState === WebSocket.OPEN) inputWs.send(JSON.stringify(message));
+    if (!inputWs || inputWs.readyState !== WebSocket.OPEN) return false;
+    inputWs.send(JSON.stringify(message));
+    return true;
   }
 
   function connectInput() {
@@ -153,42 +259,70 @@ VIEWER_HTML = r"""<!doctype html>
   }
 
   function boardPoint(event) {
-    const bounds = canvas.getBoundingClientRect();
+    const bounds = screenTarget.getBoundingClientRect();
     return {
       x: Math.max(0, Math.min(canvas.width - 1, Math.floor((event.clientX - bounds.left) * canvas.width / bounds.width))),
       y: Math.max(0, Math.min(canvas.height - 1, Math.floor((event.clientY - bounds.top) * canvas.height / bounds.height)))
     };
   }
 
-  function pointerEvent(phase, event) {
-    if (!inputReady) return;
-    const point = boardPoint(event);
-    sendInput({
+  function sendPointer(phase, x, y, requireRenderable) {
+    if (!inputReady || (requireRenderable && (!streamLive || !baseReady))) return false;
+    return sendInput({
       type: 'pointer_event', session_id: sessionId, source: 'v5_browser_mirror', seq: ++inputSeq,
-      phase, x: point.x, y: point.y, button: 'left', client_time_ms: Date.now()
+      phase, x, y, button: 'left', client_time_ms: Date.now()
     });
   }
 
-  canvas.addEventListener('pointerdown', event => {
+  function pointerEvent(phase, event, requireRenderable = true) {
+    const point = boardPoint(event);
+    return sendPointer(phase, point.x, point.y, requireRenderable);
+  }
+
+  async function v5AiClick(x, y, holdMs = 60) {
+    const point = {
+      x: Math.max(0, Math.min(canvas.width - 1, Math.floor(Number(x)))),
+      y: Math.max(0, Math.min(canvas.height - 1, Math.floor(Number(y))))
+    };
+    if (aiClickActive || pointerDown) return {ok: false, reason: 'pointer_busy'};
+    if (!inputReady || !streamLive || !baseReady) return {ok: false, reason: 'not_ready'};
+    aiClickActive = true;
+    try {
+      if (!sendPointer('down', point.x, point.y, true)) return {ok: false, reason: 'down_not_sent'};
+      await new Promise(resolve => setTimeout(resolve, Math.max(40, Math.min(500, Number(holdMs) || 60))));
+      if (!sendPointer('up', point.x, point.y, false)) return {ok: false, reason: 'up_not_sent'};
+      return {ok: true, x: point.x, y: point.y};
+    } finally {
+      aiClickActive = false;
+    }
+  }
+
+  globalThis.v5AiClick = v5AiClick;
+
+  screenTarget.addEventListener('pointerdown', event => {
     event.preventDefault();
     pointerDown = true;
-    canvas.setPointerCapture(event.pointerId);
-    pointerEvent('down', event);
+    screenTarget.setPointerCapture(event.pointerId);
+    pointerForwarded = pointerEvent('down', event, true);
   });
-  canvas.addEventListener('pointermove', event => { if (pointerDown) pointerEvent('move', event); });
-  canvas.addEventListener('pointerup', event => {
+  screenTarget.addEventListener('pointermove', event => {
+    if (pointerDown && pointerForwarded) pointerEvent('move', event, false);
+  });
+  screenTarget.addEventListener('pointerup', event => {
     if (!pointerDown) return;
-    pointerEvent('up', event);
+    if (pointerForwarded) pointerEvent('up', event, false);
     pointerDown = false;
+    pointerForwarded = false;
   });
-  canvas.addEventListener('pointercancel', event => {
-    if (pointerDown) pointerEvent('up', event);
+  screenTarget.addEventListener('pointercancel', event => {
+    if (pointerDown && pointerForwarded) pointerEvent('up', event, false);
     pointerDown = false;
+    pointerForwarded = false;
   });
 
-  repairFull('initial');
   connectStream();
   connectInput();
+  setInterval(checkStreamProgress, 1000);
 })();
 </script>
 </body>

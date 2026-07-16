@@ -263,7 +263,9 @@ void emcmotController(void *arg, long period)
     if (   (emcmotStatus->motion_state == EMCMOT_MOTION_FREE)
         && do_homing()) {
         v5_reset_wrapped_rotary_turn_offsets();
-        v5_wcheckpoint_reset();
+        if (homing_wcheckpoint_reset_required()) {
+            v5_wcheckpoint_reset();
+        }
         switch_to_teleop_mode();
     }
 

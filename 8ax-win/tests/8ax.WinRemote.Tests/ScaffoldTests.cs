@@ -30,6 +30,7 @@ Require(false, outside.IsInside, "outside left");
 
 VerifyProtocolEnvelopeRoundTrip();
 VerifyRemoteInfoSystemMetricsSerialization();
+VerifyProgramProtocolCompatibility();
 VerifyPointerEventDtoSerialization();
 VerifyFullFrameAndDirtyRectApply();
 VerifyCoalescedDirtyFrameIsAccepted();
@@ -96,6 +97,21 @@ static void VerifyRemoteInfoSystemMetricsSerialization()
     Require(11.0, decoded.SystemMetrics?.Cpu1Percent ?? -1.0, "decoded cpu1 percent");
     Require(42.5, decoded.SystemMetrics?.MemoryPercent ?? -1.0, "decoded memory percent");
     Require(64.0, decoded.SystemMetrics?.DiskPercent ?? -1.0, "decoded disk percent");
+}
+
+static void VerifyProgramProtocolCompatibility()
+{
+    const string current = """
+        {"schema":"v5.remote_program_list.v1","program_dir":"/opt/8ax/v5/gcode/golden","count":0,"files":[]}
+        """;
+    const string legacy = """
+        {"schema":"re.v3.remote_program_list.v1","program_dir":"/opt/8ax/v5/gcode/golden","count":0,"files":[]}
+        """;
+    ProgramListResult currentResult = RemoteProtocolJson.Deserialize<ProgramListResult>(current);
+    ProgramListResult legacyResult = RemoteProtocolJson.Deserialize<ProgramListResult>(legacy);
+    Require("v5.remote_program_list.v1", currentResult.Schema, "current board program schema");
+    Require("re.v3.remote_program_list.v1", legacyResult.Schema, "legacy board program schema compatibility");
+    Require("/opt/8ax/v5/gcode/golden", currentResult.ProgramDir, "current board program directory");
 }
 
 static void VerifyPointerEventDtoSerialization()
@@ -663,6 +679,7 @@ static void VerifyOperatorButtonsContract()
     Require(true, programDialog.Contains("OpenSelectedAsync", StringComparison.Ordinal), "program directory dialog opens file for edit");
     Require(true, programDialog.Contains("SaveEditAsync", StringComparison.Ordinal), "program directory dialog saves edited file");
     Require(true, programDialog.Contains("DeleteSelectedAsync", StringComparison.Ordinal), "program directory dialog deletes selected file");
+    Require(true, programDialog.Contains("LoadInitialListAsync", StringComparison.Ordinal), "program directory initial refresh handles board errors");
     Require(false, mainWindow.Contains("gcode_upload_blocked", StringComparison.Ordinal), "gcode button no longer uses placeholder block event");
     Require(true, relayClient.Contains("remote/program/upload", StringComparison.Ordinal), "relay client calls program upload endpoint");
     Require(true, relayClient.Contains("remote/program/list", StringComparison.Ordinal), "relay client calls program list endpoint");
@@ -684,7 +701,7 @@ static void VerifyOperatorButtonsContract()
     Require(true, buttonDoc.Contains("GET /remote/diagnostics", StringComparison.Ordinal), "button doc documents diagnostics endpoint");
     Require(true, buttonDoc.Contains("GET /remote/diagnostics", StringComparison.Ordinal), "button doc documents diagnostics wrapping");
     Require(true, logDialog.Contains("[redacted]", StringComparison.Ordinal), "button doc documents diagnostics redaction placeholder");
-    Require(true, buttonDoc.Contains("/opt/8ax/phase0_bus5/nc", StringComparison.Ordinal), "button doc documents board program directory");
+    Require(true, buttonDoc.Contains("/opt/8ax/v5/gcode/golden", StringComparison.Ordinal), "button doc documents board program directory");
     Require(true, buttonDoc.Contains("GET /remote/program/list", StringComparison.Ordinal), "button doc documents board program list endpoint");
     Require(true, buttonDoc.Contains("GET /remote/program/file?filename=<name>&content=1", StringComparison.Ordinal), "button doc documents open system gcode button");
     Require(true, buttonDoc.Contains("POST /remote/ota/upgrade", StringComparison.Ordinal), "button doc documents OTA upgrade button");
@@ -818,8 +835,8 @@ static async Task VerifyMockRelayReadOnlyClientAsync()
         Require(64.0, info.SystemMetrics?.DiskPercent ?? -1.0, "mock relay disk metric");
 
         string diagnostics = await client.GetDiagnosticsJsonAsync(CancellationToken.None);
-        Require(true, diagnostics.Contains("\"schema\":\"re.v3.remote_diagnostics.v1\"", StringComparison.Ordinal), "mock relay diagnostics schema");
-        Require(true, diagnostics.Contains("\"program_dir\":\"/opt/8ax/phase0_bus5/nc\"", StringComparison.Ordinal), "mock relay diagnostics program dir");
+        Require(true, diagnostics.Contains("\"schema\":\"re.v5.remote_diagnostics.v1\"", StringComparison.Ordinal), "mock relay diagnostics schema");
+        Require(true, diagnostics.Contains("\"program_dir\":\"/opt/8ax/v5/gcode/golden\"", StringComparison.Ordinal), "mock relay diagnostics program dir");
 
         OtaUpgradeResult ota = await client.RequestOtaUpgradeAsync(CancellationToken.None);
         Require("rejected", ota.Status, "mock relay OTA status");
@@ -833,7 +850,7 @@ static async Task VerifyMockRelayReadOnlyClientAsync()
         Require("unit_test.ngc", upload.FileName, "mock relay upload filename");
         Require(program.Length, (int)upload.SizeBytes, "mock relay upload size");
         Require(programSha, upload.Sha256, "mock relay upload sha");
-        Require("/opt/8ax/phase0_bus5/nc/unit_test.ngc", upload.DestinationPath, "mock relay upload destination");
+        Require("/opt/8ax/v5/gcode/golden/unit_test.ngc", upload.DestinationPath, "mock relay upload destination");
 
         ProgramListResult list = await client.GetProgramListAsync(CancellationToken.None);
         Require(1, list.Count, "mock relay program list count");
@@ -850,7 +867,7 @@ static async Task VerifyMockRelayReadOnlyClientAsync()
             using MemoryStream duplicateStream = new(program);
             _ = await client.UploadProgramAsync("unit_test.ngc", duplicateStream, program.Length, programSha, overwrite: false, CancellationToken.None);
         }
-        catch (HttpRequestException)
+        catch (InvalidOperationException ex) when (ex.Message.Contains("program file exists", StringComparison.Ordinal))
         {
             duplicateRejected = true;
         }

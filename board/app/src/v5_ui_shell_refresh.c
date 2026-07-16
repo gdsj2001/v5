@@ -167,11 +167,7 @@ int v5_ui_shell_refresh_once(void)
         return 0;
     }
     if (v5_main_page_home_transaction_poll(&g_v5_shell_main_page)) {
-        V5CommandGateHomeStatus home_status;
         shell_update_top_status_label();
-        if (v5_main_page_home_transaction_status(&home_status)) {
-            shell_show_home_failure_popup(&home_status);
-        }
     } else if (v5_main_page_home_transaction_active()) {
         shell_update_top_status_label();
     }

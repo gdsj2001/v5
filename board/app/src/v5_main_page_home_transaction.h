@@ -13,6 +13,7 @@ int v5_main_page_home_transaction_start(
     V5MainPageActionReport *report,
     unsigned int timeout_ms);
 int v5_main_page_home_transaction_poll(V5MainPage *page);
+void v5_main_page_home_transaction_reset_after_estop(V5MainPage *page);
 int v5_main_page_home_transaction_active(void);
 int v5_main_page_home_transaction_status(V5CommandGateHomeStatus *status);
 int v5_main_page_home_transaction_format_status_cn(

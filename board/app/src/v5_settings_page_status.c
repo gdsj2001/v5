@@ -166,6 +166,8 @@ void v5_settings_page_popup_show(V5SettingsPage *page, const char *action, const
     snprintf(page->popup_action, sizeof(page->popup_action), "%s", action ? action : "");
     page->popup_active = 1;
     page->popup_final = final ? 1 : 0;
+    page->popup_ok = ok ? 1 : 0;
+    page->popup_restart_handoff_accepted = 0;
     page->popup_started_s = v5_settings_page_monotonic_seconds();
     page->popup_eta_seconds = (!final && settings_action_requires_countdown(action)) ? settings_action_eta_seconds(action) : 0;
     (void)v5_ui_first_frame_guard_set_label_text(
@@ -189,6 +191,8 @@ void v5_settings_page_popup_show(V5SettingsPage *page, const char *action, const
         !v5_ui_first_frame_guard_present_overlay(&page->popup_frame_guard, page->popup_overlay)) {
         page->popup_active = 0;
         page->popup_final = 0;
+        page->popup_ok = 0;
+        page->popup_restart_handoff_accepted = 0;
         page->popup_action[0] = '\0';
         page->popup_run_id[0] = '\0';
         page->popup_cancel_pending = 0;
@@ -263,6 +267,8 @@ static void settings_popup_hide(V5SettingsPage *page)
     }
     page->popup_active = 0;
     page->popup_final = 0;
+    page->popup_ok = 0;
+    page->popup_restart_handoff_accepted = 0;
     page->popup_action[0] = '\0';
     page->popup_run_id[0] = '\0';
     page->popup_cancel_pending = 0;
@@ -293,12 +299,18 @@ static void settings_popup_update_running(V5SettingsPage *page, const char *titl
 
 static void settings_popup_update_final(V5SettingsPage *page, const char *title, int ok, const char *code, const char *message)
 {
+    char action[sizeof(page->popup_action)];
     char body[1024];
     const char *msg = message && message[0] ? message : (ok ? "动作完成" : "动作未完成");
     const char *next = ok ? "确认结果后点关闭" : "按提示处理后重新执行";
     if (!page || !page->popup_overlay) return;
+    snprintf(action, sizeof(action), "%s", page->popup_action);
     snprintf(body, sizeof(body), "提示: %s\n原因: %s\n下一步: %s", code && code[0] ? code : (ok ? "OK" : "FAILED"), msg, next);
-    v5_settings_page_popup_show(page, page->popup_action, title, body, 1, ok);
+    v5_settings_page_popup_show(page, action, title, body, 1, ok);
+    page->popup_restart_handoff_accepted =
+        page->popup_active && ok &&
+        strcmp(action, "settings_save_and_restart") == 0 &&
+        code && strcmp(code, "SETTINGS_SAVE_RESTART_BOARD_REBOOT_SCHEDULED") == 0;
 }
 
 static void settings_popup_close_cb(lv_event_t *event)
@@ -311,6 +323,20 @@ static void settings_popup_close_cb(lv_event_t *event)
         lv_indev_wait_release(lv_indev_get_act());
     }
     if (page->popup_final) {
+        if (page->popup_restart_handoff_accepted) {
+            if (!page->popup_run_id[0] ||
+                !v5_settings_action_restart_commit(page->popup_run_id)) {
+                settings_popup_update_final(
+                    page,
+                    "保存并重启",
+                    0,
+                    "SETTINGS_SAVE_RESTART_COMMIT_REJECTED",
+                    "后台未接受本次重启确认，未黑屏、未重启；请关闭提示后重新执行保存并重启。");
+                return;
+            }
+            (void)v5_lvgl_remote_display_blackout_for_restart();
+            return;
+        }
         settings_popup_hide(page);
         return;
     }
@@ -416,6 +442,9 @@ void v5_settings_page_status_timer_cb(lv_timer_t *timer)
         if (page->popup_active && !page->popup_final &&
             (!page->popup_action[0] || strcmp(page->popup_action, status.action) == 0) &&
             (!page->popup_run_id[0] || strcmp(page->popup_run_id, status.run_id) == 0)) {
+            if (!page->popup_run_id[0]) {
+                snprintf(page->popup_run_id, sizeof(page->popup_run_id), "%s", status.run_id);
+            }
             settings_popup_update_final(page, label, 1, status.code, detail);
         }
         if (!modal_active) {
@@ -429,6 +458,9 @@ void v5_settings_page_status_timer_cb(lv_timer_t *timer)
         if (page->popup_active && !page->popup_final &&
             (!page->popup_action[0] || strcmp(page->popup_action, status.action) == 0) &&
             (!page->popup_run_id[0] || strcmp(page->popup_run_id, status.run_id) == 0)) {
+            if (!page->popup_run_id[0]) {
+                snprintf(page->popup_run_id, sizeof(page->popup_run_id), "%s", status.run_id);
+            }
             if (page->popup_cancel_pending && strcmp(status.code, "SETTINGS_ACTION_CANCELLED") == 0) {
                 settings_popup_hide(page);
             } else {

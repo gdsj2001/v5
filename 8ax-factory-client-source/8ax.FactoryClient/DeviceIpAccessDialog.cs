@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Net;
 
 namespace EightAxis.FactoryClient;
 
@@ -7,6 +6,7 @@ internal sealed class DeviceIpAccessDialog : Form
 {
     private readonly DeviceRecord _device;
     private readonly List<DeviceIpAccessRecord> _records;
+    private readonly ApiClient _api;
     private readonly Action<string> _log;
     private ListView _summary = null!;
     private ListView _ipStats = null!;
@@ -14,14 +14,14 @@ internal sealed class DeviceIpAccessDialog : Form
     private readonly DataGridView _details = new();
     private readonly TextBox _deleteNote = new();
     private Button _remoteSsh = null!;
-    private string _remoteSshIp = "";
 
     public string DeleteNonce { get; private set; } = "";
     public string DeleteNote => _deleteNote.Text.Trim();
 
-    public DeviceIpAccessDialog(DeviceRecord device, Action<string> log)
+    public DeviceIpAccessDialog(DeviceRecord device, ApiClient api, Action<string> log)
     {
         _device = device;
+        _api = api;
         _log = log;
         _records = (device.IpAccessRecords ?? [])
             .OrderByDescending(item => item.Time)
@@ -97,12 +97,12 @@ internal sealed class DeviceIpAccessDialog : Form
         remoteActions.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 260));
         var remoteHint = new Label
         {
-            Text = "SSH 目标由最近 IP 或当前选中的明细/IP分布行决定",
+            Text = "访问记录 IP 仅用于出站审计；SSH 按设备 ID 通过 VPS 反向隧道路由",
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleRight,
         };
         _remoteSsh = new Button { Dock = DockStyle.Fill };
-        _remoteSsh.Click += (_, _) => LaunchRemoteSsh();
+        _remoteSsh.Click += async (_, _) => await ConnectRemoteSshAsync();
         remoteActions.Controls.Add(remoteHint, 0, 0);
         remoteActions.Controls.Add(_remoteSsh, 1, 0);
         root.Controls.Add(remoteActions, 0, 3);
@@ -130,7 +130,6 @@ internal sealed class DeviceIpAccessDialog : Form
     private ListView BuildIpStatsList()
     {
         _ipStats = NewList(("IP", 170), ("总数", 70), ("下载", 70), ("挑战", 70), ("最近访问", 170), ("路径数", 90));
-        _ipStats.SelectedIndexChanged += (_, _) => SelectIpStatsTarget();
         return _ipStats;
     }
 
@@ -148,7 +147,6 @@ internal sealed class DeviceIpAccessDialog : Form
         _details.ReadOnly = true;
         _details.RowHeadersVisible = false;
         _details.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
-        _details.SelectionChanged += (_, _) => SelectDetailTarget();
         AddDetailColumn("time", "时间", 140);
         AddDetailColumn("ip", "IP", 150);
         AddDetailColumn("status", "状态", 70);
@@ -193,7 +191,7 @@ internal sealed class DeviceIpAccessDialog : Form
 
     private void LoadData()
     {
-        SetRemoteSshTarget(_records.FirstOrDefault()?.Ip);
+        UpdateRemoteSshButton();
         LoadSummary(_summary);
         LoadIpStats(_ipStats);
         LoadDetails();
@@ -231,7 +229,7 @@ internal sealed class DeviceIpAccessDialog : Form
         {
             var latest = group.OrderByDescending(item => item.Time).FirstOrDefault();
             var paths = group.Select(item => Clean(item.Path)).Where(item => item != "-").Distinct(StringComparer.OrdinalIgnoreCase).Count();
-            var row = new ListViewItem(new[]
+            list.Items.Add(new ListViewItem(new[]
             {
                 group.Key,
                 group.Count().ToString(),
@@ -239,44 +237,107 @@ internal sealed class DeviceIpAccessDialog : Form
                 group.Count(item => !IsDownload(item)).ToString(),
                 FormatTime(latest?.Time),
                 paths.ToString(),
-            });
-            row.Tag = group.Key;
-            list.Items.Add(row);
+            }));
         }
     }
 
-    private void SelectDetailTarget()
+    private string DeviceId()
     {
-        if (_details.CurrentRow?.Tag is DeviceIpAccessRecord record)
+        return (_device.VpsDistributionId ?? _device.DeviceId ?? "").Trim();
+    }
+
+    private static bool IsValidDeviceId(string deviceId)
+    {
+        return deviceId.Length == 6 && deviceId.All(char.IsDigit);
+    }
+
+    private void UpdateRemoteSshButton()
+    {
+        var deviceId = DeviceId();
+        _remoteSsh.Text = IsValidDeviceId(deviceId)
+            ? $"远程连接：设备 {deviceId}（VPS）"
+            : "远程连接：设备 ID 无效";
+        _remoteSsh.Enabled = IsValidDeviceId(deviceId);
+    }
+
+    private static async Task<(string IdentityFile, string Error)> ResolveBoardIdentityFileAsync(string sshPath)
+    {
+        try
         {
-            SetRemoteSshTarget(record.Ip);
+            var start = new ProcessStartInfo
+            {
+                FileName = sshPath,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            };
+            start.ArgumentList.Add("-G");
+            start.ArgumentList.Add("re-board");
+            using var process = Process.Start(start);
+            if (process is null)
+            {
+                return ("", "Windows SSH 配置读取失败。");
+            }
+
+            var outputTask = process.StandardOutput.ReadToEndAsync();
+            var errorTask = process.StandardError.ReadToEndAsync();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+            try
+            {
+                await process.WaitForExitAsync(timeout.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                process.Kill(entireProcessTree: true);
+                return ("", "读取 Windows SSH 别名 re-board 超时。");
+            }
+            var output = await outputTask;
+            _ = await errorTask;
+            if (process.ExitCode != 0)
+            {
+                return ("", "Windows SSH 别名 re-board 无法解析。");
+            }
+
+            foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                const string prefix = "identityfile ";
+                if (!line.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+                var candidate = line[prefix.Length..].Trim().Trim('"');
+                if (candidate.StartsWith("~/", StringComparison.Ordinal) || candidate.StartsWith("~\\", StringComparison.Ordinal))
+                {
+                    candidate = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                        candidate[2..].Replace('/', Path.DirectorySeparatorChar));
+                }
+                candidate = Environment.ExpandEnvironmentVariables(candidate);
+                if (File.Exists(candidate))
+                {
+                    return (Path.GetFullPath(candidate), "");
+                }
+            }
+            return ("", "Windows SSH 别名 re-board 未配置可用的 IdentityFile。");
+        }
+        catch (Exception exc)
+        {
+            return ("", "读取 Windows SSH 别名 re-board 失败：" + exc.Message);
         }
     }
 
-    private void SelectIpStatsTarget()
+    private async Task ConnectRemoteSshAsync()
     {
-        if (_ipStats.SelectedItems.Count > 0)
+        var deviceId = DeviceId();
+        if (!IsValidDeviceId(deviceId))
         {
-            SetRemoteSshTarget(_ipStats.SelectedItems[0].Tag as string);
+            MessageBox.Show(this, "当前设备没有合法的 6 位 VPS 分发 ID。", "远程连接", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
         }
-    }
-
-    private void SetRemoteSshTarget(string? rawIp)
-    {
-        _remoteSshIp = IPAddress.TryParse((rawIp ?? "").Trim(), out var address)
-            ? address.ToString()
-            : "";
-        _remoteSsh.Text = string.IsNullOrEmpty(_remoteSshIp)
-            ? "远程连接：无有效 IP"
-            : "远程连接：" + _remoteSshIp;
-        _remoteSsh.Enabled = !string.IsNullOrEmpty(_remoteSshIp);
-    }
-
-    private void LaunchRemoteSsh()
-    {
-        if (!IPAddress.TryParse(_remoteSshIp, out var address))
+        if (!string.Equals((_device.AuthorizationStatus ?? "").Trim(), "authorized", StringComparison.OrdinalIgnoreCase))
         {
-            MessageBox.Show(this, "当前设备没有可用的 SSH 目标 IP。", "远程连接", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show(this, "当前设备尚未授权，请先重新生成并下发包含远程 SSH 权限的授权文件。", "远程连接", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
@@ -286,17 +347,62 @@ internal sealed class DeviceIpAccessDialog : Form
             MessageBox.Show(this, $"Windows 系统 SSH 不存在：{sshPath}", "远程连接", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return;
         }
+        var boardIdentity = await ResolveBoardIdentityFileAsync(sshPath);
+        if (string.IsNullOrWhiteSpace(boardIdentity.IdentityFile))
+        {
+            MessageBox.Show(this, boardIdentity.Error, "远程连接失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
 
-        var deviceId = (_device.VpsDistributionId ?? _device.DeviceId ?? "").Trim();
-        var hostKeyAlias = deviceId.Length == 6 && deviceId.All(char.IsDigit)
-            ? "8ax-device-" + deviceId
-            : "8ax-device-ip-" + address.ToString().Replace(':', '-');
+        _remoteSsh.Enabled = false;
+        _remoteSsh.Text = $"正在查询设备 {deviceId} 隧道…";
+        var result = await _api.GetRemoteSshStatusAsync(deviceId, CancellationToken.None);
+        UpdateRemoteSshButton();
+        if (!result.Success || result.Value is null)
+        {
+            var error = string.IsNullOrWhiteSpace(result.Error) ? "VPS 未返回远程 SSH 状态。" : result.Error;
+            _log($"远程 SSH 状态读取失败：设备 {deviceId} / {error}");
+            MessageBox.Show(this, error, "远程连接失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        var status = result.Value;
+        if (!string.Equals(status.DeviceId, deviceId, StringComparison.Ordinal))
+        {
+            MessageBox.Show(this, "VPS 返回了其它设备的隧道状态。", "远程连接失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+        if (!status.Registered || !status.Online)
+        {
+            var message = string.IsNullOrWhiteSpace(status.Message)
+                ? "设备反向 SSH 通道尚未在线，请确认设备联网并已下载最新授权。"
+                : status.Message;
+            _log($"远程 SSH 未在线：设备 {deviceId}");
+            MessageBox.Show(this, message, "设备不在线", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        if (status.AssignedPort is null ||
+            status.AssignedPort.Value < 25000 ||
+            status.AssignedPort.Value > 44999 ||
+            status.VpsPort != 22 ||
+            !string.Equals(status.VpsHost, "it.cjwsjzyy.xyz", StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(status.TunnelUser, "8ax-tunnel", StringComparison.Ordinal))
+        {
+            MessageBox.Show(this, "VPS 返回的设备身份或隧道端口信息无效。", "远程连接失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        var port = status.AssignedPort.Value;
+        var hostKeyAlias = "8ax-device-" + deviceId;
         var script =
             "& '" + sshPath.Replace("'", "''") + "' " +
             "-o 'ConnectTimeout=10' " +
             "-o 'HostKeyAlias=" + hostKeyAlias + "' " +
             "-o 'StrictHostKeyChecking=ask' " +
-            "-p 22 'root@" + address + "'";
+            "-o 'HostKeyAlgorithms=+ssh-rsa' " +
+            "-o 'PubkeyAcceptedAlgorithms=+ssh-rsa' " +
+            "-i '" + boardIdentity.IdentityFile.Replace("'", "''") + "' " +
+            "-J 'vps3' -p " + port + " 'root@127.0.0.1'";
         var start = new ProcessStartInfo
         {
             FileName = "powershell.exe",
@@ -308,7 +414,7 @@ internal sealed class DeviceIpAccessDialog : Form
         start.ArgumentList.Add("-Command");
         start.ArgumentList.Add(script);
         Process.Start(start);
-        _log($"已从设备 {deviceId} 的 IP访问记录启动 SSH：{address}:22。");
+        _log($"已从 IP访问记录启动远程 SSH：设备 {deviceId} / VPS loopback 端口 {port}。");
     }
 
     private void LoadDetails()

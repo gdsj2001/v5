@@ -25,9 +25,9 @@ typedef struct V5NativeSafeZeroPlan {
     int64_t zero_abs_counts;
     int64_t counts_per_rev;
     int64_t delta_counts;
+    int64_t logical_start_counts;
     int64_t logical_target_counts;
     int64_t runtime_target_counts;
-    int64_t arrival_tolerance_counts;
 } V5NativeSafeZeroPlan;
 
 typedef struct V5NativeHomeRuntimeState {
@@ -50,10 +50,17 @@ void v5_native_home_runtime_finish(
     V5NativeHomePhase phase,
     const char *reason,
     int cancelled);
+int v5_native_home_runtime_cancel_active_by_estop(void);
 
 int v5_native_home_force_rtcp_off(char *code, size_t code_cap);
 int v5_native_home_wcheckpoint_read(
     char axis,
+    V5NativeWcheckpointSnapshot *snapshot,
+    char *code,
+    size_t code_cap);
+int v5_native_home_wcheckpoint_bind_runtime_actual(
+    const V5NativeMotionAxisParameters *axis,
+    double runtime_position,
     V5NativeWcheckpointSnapshot *snapshot,
     char *code,
     size_t code_cap);

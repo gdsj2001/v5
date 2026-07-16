@@ -431,7 +431,7 @@ typedef enum {
   scOperatorDisplay, scOperatorText, scTime, scEStop, scMachine, scMode,
   scMist, scFlood, scLube, scLubeLevel, scSpindle, scBrake, scTool, scToolOffset,
   scLoadToolTable, scHome, scJogStop, scJog, scJogIncr, scFeedOverride,
-  scAbsCmdPos, scAbsActPos, scRelCmdPos, scRelActPos, scJointPos, scPosOffset,
+  scAbsCmdPos, scAbsActPos, scRelCmdPos, scRelActPos, scJointPos, scJointState, scTaskState, scPosOffset,
   scJointLimit, scJointFault, scJointHomed, scMDI, scTskPlanInit, scOpen, scRun,
   scPause, scResume, scStep, scAbort, scProgram, scProgramLine, scProgramStatus,
   scProgramCodes, scJointType, scJointUnits, scProgramUnits, scProgramLinearUnits,
@@ -480,7 +480,7 @@ const char *setCommands[] = {
   "TIME", "ESTOP", "MACHINE", "MODE", "MIST", "FLOOD", "LUBE", "LUBE_LEVEL",
   "SPINDLE", "BRAKE", "TOOL", "TOOL_OFFSET", "LOAD_TOOL_TABLE", "HOME",
   "JOG_STOP", "JOG", "JOG_INCR", "FEED_OVERRIDE", "ABS_CMD_POS", "ABS_ACT_POS",
-  "REL_CMD_POS", "REL_ACT_POS", "JOINT_POS", "POS_OFFSET", "JOINT_LIMIT",
+  "REL_CMD_POS", "REL_ACT_POS", "JOINT_POS", "JOINT_STATE", "TASK_STATE", "POS_OFFSET", "JOINT_LIMIT",
   "JOINT_FAULT", "JOINT_HOMED", "MDI", "TASK_PLAN_INIT", "OPEN", "RUN", "PAUSE",
   "RESUME", "STEP", "ABORT", "PROGRAM", "PROGRAM_LINE", "PROGRAM_STATUS", "PROGRAM_CODES",
   "JOINT_TYPE", "JOINT_UNITS", "PROGRAM_UNITS", "PROGRAM_LINEAR_UNITS", "PROGRAM_ANGULAR_UNITS",
@@ -1026,7 +1026,7 @@ static cmdResponseType setHome(char *s, connectionRecType *context)
   if (sscanf(s, "%d", &joint) <= 0) return rtStandardError;
   // joint == -1 means "Home All", any other negative is wrong
   if ((joint < -1) || (joint > EMCMOT_MAX_JOINTS)) return rtStandardError;
-  sendHome(joint);
+  if (sendHome(joint) != 0) return rtStandardError;
   return rtNoError;
 }
 
@@ -1323,7 +1323,8 @@ int commandSet(connectionRecType *context)
     snprintf(context->outBuf, sizeof(context->outBuf), setCmdNakStr, pch);
     return write(context->cliSock, context->outBuf, strlen(context->outBuf));
     }
-  if ((cmd > scMachine) && (emcStatus->task.state != EMC_TASK_STATE_ON)) {
+  if ((cmd > scMachine) && (cmd != scAbort) &&
+      (emcStatus->task.state != EMC_TASK_STATE_ON)) {
 //  Extra check in the event of an undetected change in Machine state resulting in
 //  sending a set command when the machine state is off. This condition is detected
 //  and appropriate error messages are generated, however erratic behavior has been
@@ -1372,6 +1373,8 @@ int commandSet(connectionRecType *context)
     case scRelCmdPos: ret = rtStandardError; break;
     case scRelActPos: ret = rtStandardError; break;
     case scJointPos: ret = rtStandardError; break;
+    case scJointState: ret = rtStandardError; break;
+    case scTaskState: ret = rtStandardError; break;
     case scPosOffset: ret = rtStandardError; break;
     case scJointLimit: ret = rtStandardError; break;
     case scJointFault: ret = rtStandardError; break;
@@ -1889,6 +1892,50 @@ static cmdResponseType getJointPos(char *s, connectionRecType *context)
   else
     snprintf(context->outBuf, sizeof(context->outBuf), "%s %d %f", pJointPos, joint, emcStatus->motion.joint[joint].input);
 
+  return rtNoError;
+}
+
+static cmdResponseType getJointState(char *s, connectionRecType *context)
+{
+  int joint;
+
+  if (s == NULL || sscanf(s, "%d", &joint) != 1 ||
+      joint < 0 || joint >= emcStatus->motion.traj.joints ||
+      joint >= EMCMOT_MAX_JOINTS) {
+    return rtStandardError;
+  }
+  snprintf(context->outBuf, sizeof(context->outBuf),
+           "JOINT_STATE %d %.9f %s %u %d", joint,
+           emcStatus->motion.joint[joint].input,
+           emcStatus->motion.joint[joint].inpos ? "YES" : "NO",
+           (unsigned int)emcStatus->motion.heartbeat,
+           emcStatus->motion.echo_serial_number);
+  return rtNoError;
+}
+
+static cmdResponseType getTaskState(char *s, connectionRecType *context)
+{
+  const char *program = emcStatus->task.file[0] != 0
+      ? emcStatus->task.file
+      : "NONE";
+
+  snprintf(context->outBuf, sizeof(context->outBuf),
+           "TASK_STATE state=%d mode=%d interp=%d exec=%d paused=%d "
+           "motion_queue=%d motion_inpos=%d current_line=%d motion_line=%d "
+           "read_line=%d echo=%d heartbeat=%u program=%s",
+           (int)emcStatus->task.state,
+           (int)emcStatus->task.mode,
+           (int)emcStatus->task.interpState,
+           (int)emcStatus->task.execState,
+           emcStatus->task.task_paused ? 1 : 0,
+           emcStatus->motion.traj.queue,
+           emcStatus->motion.traj.inpos ? 1 : 0,
+           emcStatus->task.currentLine,
+           emcStatus->task.motionLine,
+           emcStatus->task.readLine,
+           emcStatus->echo_serial_number,
+           (unsigned int)emcStatus->motion.heartbeat,
+           program);
   return rtNoError;
 }
 
@@ -2443,6 +2490,8 @@ int commandGet(connectionRecType *context)
     case scRelCmdPos: ret = getRelCmdPos(strtok(NULL, delims), context); break;
     case scRelActPos: ret = getRelActPos(strtok(NULL, delims), context); break;
     case scJointPos: ret = getJointPos(strtok(NULL, delims), context); break;
+    case scJointState: ret = getJointState(strtok(NULL, delims), context); break;
+    case scTaskState: ret = getTaskState(pch, context); break;
     case scPosOffset: ret = getPosOffset(strtok(NULL, delims), context); break;
     case scJointLimit: ret = getJointLimit(strtok(NULL, delims), context); break;
     case scJointFault: ret = getJointFault(strtok(NULL, delims), context); break;

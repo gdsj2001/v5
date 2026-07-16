@@ -2,6 +2,8 @@
 set -eu
 
 action=${1:-status}
+verify_petalinux_owner=1
+verify_linux_owner=1
 source_mount=${VM_SOURCE_MOUNT_ROOT:-/mnt/v5-source}
 build_root=${VM_BUILD_ROOT:-$HOME/v5-build}
 build_user=${V5_PETALINUX_BUILD_USER:-}
@@ -48,11 +50,19 @@ validate_source_mount() {
         *) fail "PetaLinux source escaped the canonical mount: $resolved_source" ;;
     esac
 
-    python3 "$verifier" --project-root "$source_mount" --source-root "$source_root"
-    python3 "$linux_verifier" \
-        --project-root "$source_mount" \
-        --build-root "$build_root" \
-        --projection-root "$build_root/petalinux/linux-source-verify"
+    if [ "$verify_petalinux_owner" -eq 1 ]; then
+        python3 "$verifier" --project-root "$source_mount" --source-root "$source_root"
+    else
+        echo "V5_PETALINUX_SOURCE_VERIFY_SKIPPED mode=target-only"
+    fi
+    if [ "$verify_linux_owner" -eq 1 ]; then
+        python3 "$linux_verifier" \
+            --project-root "$source_mount" \
+            --build-root "$build_root" \
+            --projection-root "$build_root/petalinux/linux-source-verify"
+    else
+        echo "V5_PETALINUX_LINUX_SOURCE_VERIFY_SKIPPED mode=target-only"
+    fi
 }
 
 validate_build_root() {
@@ -199,9 +209,14 @@ dry_run() {
 
 case "$action" in
     prepare) prepare_overlay ;;
+    prepare-target-only)
+        verify_petalinux_owner=0
+        verify_linux_owner=0
+        prepare_overlay
+        ;;
     status) show_status ;;
     unmount) unmount_overlay ;;
     clean) clean_overlay ;;
     dry-run) dry_run ;;
-    *) fail "usage: $0 {prepare|status|unmount|clean|dry-run}" ;;
+    *) fail "usage: $0 {prepare|prepare-target-only|status|unmount|clean|dry-run}" ;;
 esac

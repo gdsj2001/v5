@@ -633,10 +633,14 @@ add_executable(v5_command_gate_smoke
 target_link_libraries(v5_command_gate_smoke PRIVATE v5_command_gate_core)
 
 add_executable(v5_command_gate_validator_smoke
+    ../services/command_gate/v5_command_gate_validator.c
     ../services/command_gate/v5_command_gate_validator_smoke.c
 )
 
-target_link_libraries(v5_command_gate_validator_smoke PRIVATE v5_command_gate_core m)
+target_link_libraries(v5_command_gate_validator_smoke PRIVATE v5_command_gate_client)
+if(NOT MSVC)
+    target_link_libraries(v5_command_gate_validator_smoke PRIVATE m)
+endif()
 
 add_executable(v5_native_motion_parameters_smoke
     ../services/command_gate/v5_native_motion_parameters_smoke.c
@@ -654,10 +658,32 @@ add_executable(v5_command_gate_server
     ../services/command_gate/v5_command_gate_server.c
     ../services/command_gate/v5_command_gate_server_io.c
     ../services/command_gate/v5_command_gate_server_response.c
+    ../services/command_gate/v5_estop_clean_state.c
+    ../services/command_gate/v5_drive_write_window.c
     src/v5_process_residency.c
 )
 
 target_link_libraries(v5_command_gate_server PRIVATE v5_command_gate_core Threads::Threads)
+
+add_executable(v5_command_gate_drive_window
+    ../services/command_gate/v5_command_gate_drive_window.c
+)
+
+target_link_libraries(v5_command_gate_drive_window PRIVATE v5_command_gate_client)
+
+add_executable(v5_drive_write_window_smoke
+    ../services/command_gate/v5_drive_write_window.c
+    ../services/command_gate/v5_drive_write_window_smoke.c
+)
+
+target_link_libraries(v5_drive_write_window_smoke PRIVATE Threads::Threads)
+
+add_executable(v5_estop_clean_state_smoke
+    ../services/command_gate/v5_estop_clean_state.c
+    ../services/command_gate/v5_estop_clean_state_smoke.c
+)
+
+target_link_libraries(v5_estop_clean_state_smoke PRIVATE Threads::Threads)
 
 add_executable(v5_linuxcncrsh_golden_run
     ../services/command_gate/v5_linuxcncrsh_golden_run.c

@@ -36,6 +36,7 @@ fi
 verify_linuxcnc_deploy_bundle() {
   embedded_allowlist="$linuxcnc_package_root/usr/share/v5-native/linuxcnc-runtime-allowlist.tsv"
   runtime_hashes="$linuxcnc_package_root/usr/share/v5-native/linuxcnc-runtime-files.sha256"
+  linuxcnc_rtapi_app="$linuxcnc_package_root/usr/bin/rtapi_app"
   [ -d "$linuxcnc_package_root" ] || {
     echo "missing LinuxCNC deploy bundle: $linuxcnc_package_root" >&2
     exit 7
@@ -48,6 +49,10 @@ verify_linuxcnc_deploy_bundle() {
   done
   cmp -s "$linuxcnc_bundle_allowlist" "$embedded_allowlist" || {
     echo "LinuxCNC deploy allowlist differs from the packaged owner" >&2
+    exit 7
+  }
+  [ -f "$linuxcnc_rtapi_app" ] && [ "$(stat -c '%a' "$linuxcnc_rtapi_app")" = "4755" ] || {
+    echo "LinuxCNC deploy bundle rtapi_app must retain setuid mode 4755" >&2
     exit 7
   }
 
@@ -110,9 +115,11 @@ install_linuxcnc_deploy_bundle() {
     source_path="$linuxcnc_package_root/${relative#./}"
     destination="/${relative#./}"
     temporary="$destination.v5-new.$$"
+    source_mode=$(stat -c '%a' "$source_path")
     install -d "$(dirname "$destination")"
     cp -p "$source_path" "$temporary"
     chown root:root "$temporary"
+    chmod "$source_mode" "$temporary"
     mv -f "$temporary" "$destination"
   done
   while read -r digest relative extra; do
@@ -123,6 +130,11 @@ install_linuxcnc_deploy_bundle() {
     destination="/${relative#./}"
     printf '%s  %s\n' "$digest" "$destination" | sha256sum -c -
   done <"$linuxcnc_bundle_hashes"
+  linuxcnc_rtapi_app=/usr/bin/rtapi_app
+  [ -f "$linuxcnc_rtapi_app" ] && [ "$(stat -c '%u:%g:%a' "$linuxcnc_rtapi_app")" = "0:0:4755" ] || {
+    echo "installed LinuxCNC rtapi_app is not root:root 4755" >&2
+    exit 7
+  }
   echo "V5_LINUXCNC_DEPLOY_INSTALL_OK files=$linuxcnc_bundle_count"
 }
 
@@ -227,6 +239,18 @@ fi
 manifest_ui_only=1
 manifest_actiond_only=1
 manifest_settings_only=1
+manifest_command_gate_only=1
+manifest_wcs_only=1
+manifest_backend_only=1
+manifest_gcode_only=1
+manifest_cpu_policy_only=1
+manifest_cpu_policy_net_core=0
+manifest_cpu_policy_usb_wifi=0
+manifest_cpu_policy_relay_payload=0
+manifest_cpu_policy_command_gate=0
+manifest_cpu_policy_ui=0
+manifest_cpu_policy_state=0
+manifest_cpu_policy_wcs=0
 manifest_drive_profiles=0
 manifest_row_count=0
 while IFS="$tab" read -r scope_kind scope_source scope_destination scope_mode scope_extra; do
@@ -235,24 +259,92 @@ while IFS="$tab" read -r scope_kind scope_source scope_destination scope_mode sc
   esac
   manifest_row_count=$((manifest_row_count + 1))
   case "$scope_destination" in
+    /usr/local/sbin/v5_net_core.sh)
+      manifest_cpu_policy_net_core=1
+      ;;
+    /usr/local/sbin/v5_usb_wifi_apply.sh)
+      manifest_cpu_policy_usb_wifi=1
+      ;;
+    /usr/libexec/8ax/v5_remote_ui_shared_payload.py)
+      manifest_cpu_policy_relay_payload=1
+      ;;
+    /etc/init.d/v5-linuxcnc-command-gate)
+      manifest_cpu_policy_command_gate=1
+      ;;
+    /etc/init.d/v5-ui-relay)
+      manifest_cpu_policy_ui=1
+      ;;
+    /etc/init.d/v5-state-publisher)
+      manifest_cpu_policy_state=1
+      ;;
+    /etc/init.d/v5-wcs-status-publisher)
+      manifest_cpu_policy_wcs=1
+      ;;
+    *)
+      manifest_cpu_policy_only=0
+      ;;
+  esac
+  case "$scope_destination" in
+    /opt/8ax/v5/gcode/golden/cc-ac.ngc|/opt/8ax/v5/gcode/golden/cc-bc.ngc)
+      ;;
+    *)
+      manifest_gcode_only=0
+      ;;
+  esac
+  case "$scope_destination" in
+    /usr/lib/linuxcnc/modules/cia402.so)
+      if [ "$scope_kind:$scope_source:$scope_mode" != "binary:build/board/app/cia402.so:0644" ]; then
+        echo "cia402 backend module requires the registered ARM build artifact and mode 0644" >&2
+        exit 6
+      fi
+      ;;
+    *)
+      manifest_backend_only=0
+      ;;
+  esac
+  case "$scope_destination" in
+    /usr/libexec/8ax/v5_wcs_status_publisher.py|\
+    /usr/libexec/8ax/v5_machine_status_projection.py|\
+    /usr/libexec/8ax/v5_wcs_status_codec.py|\
+    /usr/libexec/8ax/v5_native_operator_error_map.py|\
+    /etc/init.d/v5-wcs-status-publisher)
+      manifest_ui_only=0
+      manifest_actiond_only=0
+      manifest_settings_only=0
+      manifest_command_gate_only=0
+      ;;
+    *)
+      manifest_wcs_only=0
+      ;;
+  esac
+  case "$scope_destination" in
     /usr/libexec/8ax/v5_lvgl_shell|\
     /usr/libexec/8ax/v5_remote_ui_*|\
     /usr/libexec/8ax/v5_ui_*|\
     /etc/init.d/v5-ui-relay)
       manifest_actiond_only=0
       manifest_settings_only=0
+      manifest_command_gate_only=0
       ;;
     /usr/libexec/8ax/drive_profile/*|\
     /usr/libexec/8ax/auth_download/*|\
     /etc/init.d/v5-settings-actiond)
       manifest_ui_only=0
+      manifest_command_gate_only=0
       ;;
     /opt/8ax/v5/config/drive-profiles/*)
       manifest_ui_only=0
       manifest_drive_profiles=1
+      manifest_command_gate_only=0
       ;;
-    /opt/8ax/phase0_bus5/settings_runtime.json|\
+    /opt/8ax/phase0_bus5/settings_runtime.json)
+      manifest_ui_only=0
+      manifest_actiond_only=0
+      manifest_command_gate_only=0
+      ;;
     /usr/libexec/8ax/v5_command_gate_server|\
+    /usr/libexec/8ax/v5_command_gate_drive_window|\
+    /usr/libexec/8ax/v5_ethercat_backend_lifecycle.sh|\
     /etc/init.d/v5-linuxcnc-command-gate)
       manifest_ui_only=0
       manifest_actiond_only=0
@@ -261,6 +353,7 @@ while IFS="$tab" read -r scope_kind scope_source scope_destination scope_mode sc
       manifest_ui_only=0
       manifest_actiond_only=0
       manifest_settings_only=0
+      manifest_command_gate_only=0
       ;;
   esac
 done < "$manifest"
@@ -268,6 +361,10 @@ done < "$manifest"
 case "$restart_scope_requested" in
   auto)
     if [ "$linuxcnc_bundle_enabled" -eq 0 ] &&
+       [ "$manifest_row_count" -gt 0 ] &&
+       [ "$manifest_gcode_only" -eq 1 ]; then
+      restart_scope=gcode
+    elif [ "$linuxcnc_bundle_enabled" -eq 0 ] &&
        [ "$manifest_row_count" -gt 0 ] &&
        [ "$manifest_ui_only" -eq 1 ]; then
       restart_scope=ui
@@ -277,9 +374,41 @@ case "$restart_scope_requested" in
       restart_scope=actiond
     elif [ "$linuxcnc_bundle_enabled" -eq 0 ] &&
          [ "$manifest_row_count" -gt 0 ] &&
+         [ "$manifest_command_gate_only" -eq 1 ]; then
+      restart_scope=command_gate
+    elif [ "$linuxcnc_bundle_enabled" -eq 0 ] &&
+         [ "$manifest_row_count" -eq 1 ] &&
+         [ "$manifest_backend_only" -eq 1 ]; then
+      restart_scope=backend
+    elif [ "$linuxcnc_bundle_enabled" -eq 0 ] &&
+         [ "$manifest_row_count" -gt 0 ] &&
+         [ "$manifest_wcs_only" -eq 1 ]; then
+      restart_scope=wcs
+    elif [ "$linuxcnc_bundle_enabled" -eq 0 ] &&
+         [ "$manifest_row_count" -gt 0 ] &&
+         [ "$manifest_cpu_policy_only" -eq 1 ] &&
+         [ "$manifest_cpu_policy_net_core" -eq 1 ] &&
+         [ "$manifest_cpu_policy_usb_wifi" -eq 1 ] &&
+         [ "$manifest_cpu_policy_relay_payload" -eq 1 ] &&
+         [ "$manifest_cpu_policy_command_gate" -eq 1 ] &&
+         [ "$manifest_cpu_policy_ui" -eq 1 ] &&
+         [ "$manifest_cpu_policy_state" -eq 1 ] &&
+         [ "$manifest_cpu_policy_wcs" -eq 1 ]; then
+      restart_scope=cpu_policy
+    elif [ "$linuxcnc_bundle_enabled" -eq 0 ] &&
+         [ "$manifest_row_count" -gt 0 ] &&
          [ "$manifest_settings_only" -eq 1 ]; then
       restart_scope=settings
     fi
+    ;;
+  gcode)
+    if [ "$linuxcnc_bundle_enabled" -ne 0 ] ||
+       [ "$manifest_row_count" -eq 0 ] ||
+       [ "$manifest_gcode_only" -ne 1 ]; then
+      echo "G-code restart scope requires a non-empty cc-ac/cc-bc manifest and no LinuxCNC bundle" >&2
+      exit 8
+    fi
+    restart_scope=gcode
     ;;
   ui)
     if [ "$linuxcnc_bundle_enabled" -ne 0 ] ||
@@ -299,6 +428,49 @@ case "$restart_scope_requested" in
     fi
     restart_scope=actiond
     ;;
+  command_gate)
+    if [ "$linuxcnc_bundle_enabled" -ne 0 ] ||
+       [ "$manifest_row_count" -eq 0 ] ||
+       [ "$manifest_command_gate_only" -ne 1 ]; then
+      echo "Command-gate restart scope requires a non-empty command-gate-only manifest and no LinuxCNC bundle" >&2
+      exit 8
+    fi
+    restart_scope=command_gate
+    ;;
+  backend)
+    if [ "$linuxcnc_bundle_enabled" -ne 0 ] ||
+       [ "$manifest_row_count" -ne 1 ] ||
+       [ "$manifest_backend_only" -ne 1 ]; then
+      echo "Backend restart scope requires exactly one registered backend-module row and no LinuxCNC bundle" >&2
+      exit 8
+    fi
+    restart_scope=backend
+    ;;
+  wcs)
+    if [ "$linuxcnc_bundle_enabled" -ne 0 ] ||
+       [ "$manifest_row_count" -eq 0 ] ||
+       [ "$manifest_wcs_only" -ne 1 ]; then
+      echo "WCS-publisher restart scope requires a non-empty WCS-publisher-only manifest and no LinuxCNC bundle" >&2
+      exit 8
+    fi
+    restart_scope=wcs
+    ;;
+  cpu_policy)
+    if [ "$linuxcnc_bundle_enabled" -ne 0 ] ||
+       [ "$manifest_row_count" -eq 0 ] ||
+       [ "$manifest_cpu_policy_only" -ne 1 ] ||
+       [ "$manifest_cpu_policy_net_core" -ne 1 ] ||
+       [ "$manifest_cpu_policy_usb_wifi" -ne 1 ] ||
+       [ "$manifest_cpu_policy_relay_payload" -ne 1 ] ||
+       [ "$manifest_cpu_policy_command_gate" -ne 1 ] ||
+       [ "$manifest_cpu_policy_ui" -ne 1 ] ||
+       [ "$manifest_cpu_policy_state" -ne 1 ] ||
+       [ "$manifest_cpu_policy_wcs" -ne 1 ]; then
+      echo "CPU-policy restart scope requires the complete registered CPU-policy manifest and no LinuxCNC bundle" >&2
+      exit 8
+    fi
+    restart_scope=cpu_policy
+    ;;
   settings)
     if [ "$linuxcnc_bundle_enabled" -ne 0 ] ||
        [ "$manifest_row_count" -eq 0 ] ||
@@ -312,11 +484,11 @@ case "$restart_scope_requested" in
     restart_scope=all
     ;;
   *)
-    echo "unsupported V5_RUNTIME_RESTART_SCOPE: $restart_scope_requested (expected auto, ui, actiond, settings, or all)" >&2
+    echo "unsupported V5_RUNTIME_RESTART_SCOPE: $restart_scope_requested (expected auto, gcode, ui, actiond, command_gate, backend, wcs, cpu_policy, settings, or all)" >&2
     exit 8
     ;;
 esac
-echo "V5_RUNTIME_RESTART_SCOPE scope=$restart_scope rows=$manifest_row_count ui_only=$manifest_ui_only actiond_only=$manifest_actiond_only settings_only=$manifest_settings_only"
+echo "V5_RUNTIME_RESTART_SCOPE scope=$restart_scope rows=$manifest_row_count gcode_only=$manifest_gcode_only ui_only=$manifest_ui_only actiond_only=$manifest_actiond_only command_gate_only=$manifest_command_gate_only backend_only=$manifest_backend_only wcs_only=$manifest_wcs_only cpu_policy_only=$manifest_cpu_policy_only settings_only=$manifest_settings_only"
 
 if [ "$apply" -eq 1 ] && [ "$linuxcnc_bundle_enabled" -eq 1 ]; then
   verify_linuxcnc_deploy_bundle
@@ -326,6 +498,13 @@ if [ "$apply" -eq 1 ] && [ "$linuxcnc_bundle_enabled" -eq 1 ]; then
   }
   /etc/init.d/v5-linuxcnc-command-gate stop
   install_linuxcnc_deploy_bundle
+fi
+if [ "$apply" -eq 1 ] && [ "$restart_scope" = "backend" ]; then
+  [ -x /etc/init.d/v5-linuxcnc-command-gate ] || {
+    echo "LinuxCNC command-gate init is missing before backend module deploy" >&2
+    exit 7
+  }
+  /etc/init.d/v5-linuxcnc-command-gate stop
 fi
 while IFS="$tab" read -r kind source destination mode extra; do
   case "$kind" in
@@ -362,7 +541,14 @@ while IFS="$tab" read -r kind source destination mode extra; do
     continue
   fi
   install -d "$(dirname "$destination")"
-  install -m "$mode" "$source_path" "$destination"
+  if [ "$restart_scope" = "backend" ]; then
+    temporary="$destination.v5-new.$$"
+    install -m "$mode" "$source_path" "$temporary"
+    chown root:root "$temporary"
+    mv -f "$temporary" "$destination"
+  else
+    install -m "$mode" "$source_path" "$destination"
+  fi
 done < "$manifest"
 
 enable_boot_service() {
@@ -391,6 +577,7 @@ enable_boot_services() {
   enable_boot_service v5-ui-relay 94 16
   enable_boot_service v5-settings-actiond 95 15
   enable_boot_service v5-touch-diagnostics 96 14
+  enable_boot_service v5-remote-ssh 97 13
 }
 
 retired_pid_matches_path() {
@@ -502,13 +689,38 @@ PY
 }
 
 if [ "$apply" -eq 1 ]; then
-  if [ "$restart_scope" = "ui" ]; then
+  if [ "$restart_scope" = "gcode" ]; then
+    rm -f /opt/8ax/v5/gcode/golden/cc.ngc
+  elif [ "$restart_scope" = "ui" ]; then
     enable_boot_service v5-ui-relay 94 16
     /etc/init.d/v5-ui-relay restart
   elif [ "$restart_scope" = "actiond" ]; then
     enable_boot_service v5-settings-actiond 95 15
     [ "$manifest_drive_profiles" -eq 0 ] || install_runtime_drive_profiles
     /etc/init.d/v5-settings-actiond restart
+  elif [ "$restart_scope" = "command_gate" ]; then
+    enable_boot_service v5-linuxcnc-command-gate 91 19
+    /etc/init.d/v5-linuxcnc-command-gate restart-native
+  elif [ "$restart_scope" = "backend" ]; then
+    enable_boot_service v5-linuxcnc-command-gate 91 19
+    /etc/init.d/v5-linuxcnc-command-gate start
+  elif [ "$restart_scope" = "wcs" ]; then
+    enable_boot_service v5-wcs-status-publisher 92 18
+    /etc/init.d/v5-wcs-status-publisher restart
+  elif [ "$restart_scope" = "cpu_policy" ]; then
+    enable_boot_service v5-linuxcnc-command-gate 91 19
+    enable_boot_service v5-wcs-status-publisher 92 18
+    enable_boot_service v5-state-publisher 93 17
+    enable_boot_service v5-ui-relay 94 16
+    (
+      LOG=/run/8ax/v5_cpu_policy.log
+      . /usr/local/sbin/v5_net_core.sh
+      apply_network_cpu_isolation
+    )
+    /etc/init.d/v5-linuxcnc-command-gate restart-native
+    /etc/init.d/v5-wcs-status-publisher restart
+    /etc/init.d/v5-state-publisher restart
+    /etc/init.d/v5-ui-relay restart
   elif [ "$restart_scope" = "settings" ]; then
     enable_boot_service v5-linuxcnc-command-gate 91 19
     enable_boot_service v5-wcs-status-publisher 92 18
@@ -529,6 +741,7 @@ if [ "$apply" -eq 1 ]; then
     /etc/init.d/v5-ui-relay restart
     /etc/init.d/v5-settings-actiond restart
     /etc/init.d/v5-touch-diagnostics restart
+    /etc/init.d/v5-remote-ssh restart
   fi
 else
   echo "dry-run only; pass --apply to install files and restart scope=$restart_scope"

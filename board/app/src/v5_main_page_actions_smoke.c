@@ -18,6 +18,10 @@
 #endif
 
 static volatile int g_home_hook_terminal;
+static volatile unsigned int g_home_send_hook_calls;
+static volatile unsigned int g_home_send_delay_ms = 25U;
+static volatile unsigned int g_home_progress_terminal_phase;
+static volatile int g_home_send_hook_returned;
 
 static void smoke_sleep_us(unsigned int delay_us)
 {
@@ -45,17 +49,36 @@ static int home_send_hook(
     V5CommandGateResult *result,
     unsigned int timeout_ms)
 {
-    (void)prepared; (void)request; (void)timeout_ms;
-#ifdef _WIN32
-    Sleep(25U);
-#else
-    smoke_sleep_us(25000U);
-#endif
+    int all_home;
+    int single_axis;
+    (void)timeout_ms;
+    ++g_home_send_hook_calls;
+    if (!prepared || !request || !result) {
+        return 0;
+    }
+    all_home = request->kind == V5_COMMAND_HOME &&
+               strcmp(prepared->owner, "native_home_mode_gate") == 0 &&
+               request->index_value == 0 && request->enabled_value == 0 &&
+               request->axis_value == 0.0 && request->increment_value == 0.0 &&
+               request->axis_mask == 0U && !request->text_value &&
+               !request->secondary_text_value && !request->mode_value;
+    single_axis = request->kind == V5_COMMAND_AXIS_ZERO_POSITION &&
+                  strcmp(prepared->owner, "native_axis_zero_position") == 0 &&
+                  request->text_value && request->text_value[0] && !request->text_value[1] &&
+                  request->mode_value &&
+                  (strcmp(request->mode_value, "mcs") == 0 || strcmp(request->mode_value, "wcs") == 0);
+    if (!all_home && !single_axis) {
+        return 0;
+    }
+    g_home_send_hook_returned = 0;
+    smoke_sleep_us(g_home_send_delay_ms * 1000U);
     v5_command_gate_result_init(result);
     result->send_status = V5_COMMAND_GATE_SEND_SENT;
     result->executed = 1;
-    snprintf(result->readback_code, sizeof(result->readback_code), "%s", "BUS_HOME_REAL_MOVE_CONFIRMED");
+    snprintf(result->readback_code, sizeof(result->readback_code), "%s",
+             all_home ? "ALL_HOME_CONFIRMED" : "AXIS_ZERO_POSITION_CONFIRMED");
     g_home_hook_terminal = 1;
+    g_home_send_hook_returned = 1;
     return 1;
 }
 
@@ -69,13 +92,24 @@ static int home_progress_hook(
     memset(status, 0, sizeof(*status));
     status->run_id = run_id;
     status->generation = generation;
-    status->phase = g_home_hook_terminal ? V5_NATIVE_HOME_PHASE_COMPLETE : V5_NATIVE_HOME_PHASE_ZERO_RETURN;
-    status->current_axis_mask = 1U << 5;
+    if (g_home_progress_terminal_phase != 0U) {
+        status->phase = g_home_progress_terminal_phase;
+        status->active = 0;
+        status->terminal = 1;
+        status->cancelled = g_home_progress_terminal_phase == V5_NATIVE_HOME_PHASE_CANCELLED;
+        snprintf(status->mode, sizeof(status->mode), "%s", "all");
+        snprintf(status->current_axes, sizeof(status->current_axes), "%s", "C");
+        snprintf(status->direct_reason, sizeof(status->direct_reason), "%s",
+                 status->cancelled ? "HOME_CANCELLED" : "ALL_HOME_NATIVE_CONFIG_INVALID");
+        return 1;
+    }
+    status->phase = g_home_hook_terminal ? V5_NATIVE_HOME_PHASE_COMPLETE : V5_NATIVE_HOME_PHASE_NATIVE_HOME;
     status->active = g_home_hook_terminal ? 0 : 1;
     status->terminal = g_home_hook_terminal ? 1 : 0;
     snprintf(status->mode, sizeof(status->mode), "%s", "all");
-    snprintf(status->current_axes, sizeof(status->current_axes), "%s", "C");
-    snprintf(status->direct_reason, sizeof(status->direct_reason), "%s", g_home_hook_terminal ? "HOME_OK" : "HOME_ZERO_RETURN");
+    snprintf(status->current_axes, sizeof(status->current_axes), "%s", "ALL");
+    snprintf(status->direct_reason, sizeof(status->direct_reason), "%s",
+             g_home_hook_terminal ? "ALL_HOME_CONFIRMED" : "ALL_HOME_ACCEPTED");
     return 1;
 }
 
@@ -184,20 +218,52 @@ static int expect_home_native_gate(V5MainPage *page)
     unsigned long long started = smoke_now_ms();
     g_home_hook_terminal = 0;
     if (!v5_main_page_trigger_action(page, V5_MAIN_PAGE_ACTION_HOME, &report)) {
+        fprintf(stderr, "ALL_HOME trigger rejected\n");
         return 0;
     }
     if (report.action != V5_MAIN_PAGE_ACTION_HOME || !report.prepared || report.local_only || report.executed) {
+        fprintf(stderr, "ALL_HOME initial report invalid action=%d prepared=%d local=%d executed=%d\n",
+                (int)report.action, report.prepared, report.local_only, report.executed);
         return 0;
     }
     if (smoke_now_ms() > started + 15ULL ||
         !same_text(report.command.name, "home") ||
         !same_text(report.command.owner, "native_home_mode_gate") ||
+        report.request.kind != V5_COMMAND_HOME ||
+        report.request.index_value != 0 || report.request.enabled_value != 0 ||
+        report.request.axis_value != 0.0 || report.request.increment_value != 0.0 ||
+        report.request.axis_mask != 0U || report.request.text_value ||
+        report.request.secondary_text_value || report.request.mode_value ||
         !report.command.accepted || report.command_line[0] ||
-        report.send_status != V5_COMMAND_GATE_SEND_SENT || !report.pending_readback ||
-        !wait_home_transaction(page)) return 0;
-    return page->last_action.executed &&
-           same_text(page->last_action.readback_code, "BUS_HOME_REAL_MOVE_CONFIRMED") &&
-           !v5_main_page_home_transaction_active();
+        report.send_status != V5_COMMAND_GATE_SEND_SENT || !report.pending_readback) {
+        fprintf(stderr,
+                "ALL_HOME request contract invalid kind=%d owner=%s mask=%u text=%p secondary=%p mode=%p accepted=%d send=%d pending=%d code=%s\n",
+                (int)report.request.kind,
+                report.command.owner ? report.command.owner : "(null)",
+                report.request.axis_mask,
+                (void *)report.request.text_value,
+                (void *)report.request.secondary_text_value,
+                (void *)report.request.mode_value,
+                report.command.accepted,
+                (int)report.send_status,
+                report.pending_readback,
+                report.readback_code);
+        return 0;
+    }
+    if (!wait_home_transaction(page)) {
+        fprintf(stderr, "ALL_HOME transaction did not finish\n");
+        return 0;
+    }
+    if (!page->last_action.executed ||
+        !same_text(page->last_action.readback_code, "ALL_HOME_CONFIRMED") ||
+        v5_main_page_home_transaction_active()) {
+        fprintf(stderr, "ALL_HOME final report invalid executed=%d code=%s active=%d\n",
+                page->last_action.executed,
+                page->last_action.readback_code,
+                v5_main_page_home_transaction_active());
+        return 0;
+    }
+    return 1;
 }
 
 static int expect_axis_zero_position(V5MainPage *page, char axis, const char *space)
@@ -221,6 +287,91 @@ static int expect_axis_zero_position(V5MainPage *page, char axis, const char *sp
            report.send_status == V5_COMMAND_GATE_SEND_SENT &&
            report.pending_readback &&
            wait_home_transaction(page);
+}
+
+static int expect_estop_local_reset_preserves_program_and_homed(V5MainPage *page)
+{
+    V5MainPageActionReport report;
+    V5CommandGateHomeStatus status;
+    V5ProgramOpenResult saved_open;
+    V5NativeReadback before;
+    V5ProgramController *controller;
+    unsigned int attempt;
+    int progress_seen = 0;
+    int terminal_polled = 0;
+    char status_text[64];
+    if (!page) return 0;
+    saved_open = page->last_program_open;
+    before = page->native_readback;
+    controller = page->program_controller;
+    page->last_program_open.ok = 1;
+    page->last_program_open.display_name = "cc-ac.ngc";
+    page->last_program_open.source_path = "/opt/8ax/programs/cc-ac.ngc";
+    page->last_program_open.loaded_epoch = 77U;
+    v5_native_readback_set_all_homed(&page->native_readback, 1);
+    before = page->native_readback;
+    g_home_hook_terminal = 0;
+    g_home_progress_terminal_phase = 0U;
+    g_home_send_delay_ms = 250U;
+    g_home_send_hook_returned = 0;
+    v5_main_page_select_all_axes(page);
+    if (!v5_main_page_trigger_action(page, V5_MAIN_PAGE_ACTION_HOME, &report) ||
+        !v5_main_page_home_transaction_active() || !page->home_transaction_active) {
+        page->last_program_open = saved_open;
+        return 0;
+    }
+    for (attempt = 0U; attempt < 100U; ++attempt) {
+        if (v5_main_page_home_transaction_status(&status)) {
+            progress_seen = 1;
+            break;
+        }
+        smoke_sleep_us(1000U);
+    }
+    if (!progress_seen) {
+        v5_main_page_home_transaction_reset_after_estop(page);
+        page->last_program_open = saved_open;
+        g_home_send_delay_ms = 25U;
+        return 0;
+    }
+    v5_main_page_home_transaction_reset_after_estop(page);
+    if (!v5_main_page_home_transaction_active() || page->home_transaction_active) {
+        page->last_program_open = saved_open;
+        g_home_send_delay_ms = 25U;
+        return 0;
+    }
+    g_home_progress_terminal_phase = V5_NATIVE_HOME_PHASE_CANCELLED;
+    for (attempt = 0U; attempt < 500U; ++attempt) {
+        if (v5_main_page_home_transaction_poll(page)) {
+            terminal_polled = 1;
+            break;
+        }
+        smoke_sleep_us(1000U);
+    }
+    status_text[0] = '\0';
+    if (!terminal_polled || v5_main_page_home_transaction_active() || page->home_transaction_active ||
+        !v5_main_page_home_transaction_status(&status) || !status.terminal || !status.cancelled ||
+        status.phase != V5_NATIVE_HOME_PHASE_CANCELLED ||
+        !v5_main_page_home_transaction_format_status_cn(&status, status_text, sizeof(status_text)) ||
+        !same_text(status_text, "回零已取消") ||
+        page->last_action.executed || page->last_action.pending_readback ||
+        !same_text(page->last_action.readback_code, "HOME_CANCELLED") ||
+        page->program_controller != controller ||
+        !page->last_program_open.ok ||
+        page->last_program_open.loaded_epoch != 77U ||
+        !same_text(page->last_program_open.display_name, "cc-ac.ngc") ||
+        memcmp(&page->native_readback, &before, sizeof(before)) != 0) {
+        page->last_program_open = saved_open;
+        g_home_progress_terminal_phase = 0U;
+        g_home_send_delay_ms = 25U;
+        return 0;
+    }
+    for (attempt = 0U; attempt < 500U && !g_home_send_hook_returned; ++attempt) {
+        smoke_sleep_us(1000U);
+    }
+    page->last_program_open = saved_open;
+    g_home_progress_terminal_phase = 0U;
+    g_home_send_delay_ms = 25U;
+    return g_home_send_hook_returned != 0;
 }
 
 
@@ -283,6 +434,83 @@ static lv_obj_t *button_for_action(V5MainPage *page, V5MainPageActionKind action
 static int button_bg_matches(V5MainPage *page, V5MainPageActionKind action, int r, int g, int b)
 {
     lv_obj_t *button = button_for_action(page, action);
+    if (!button) {
+        return 0;
+    }
+    return lv_color_to32(lv_obj_get_style_bg_color(button, LV_PART_MAIN)) ==
+           lv_color_to32(lv_color_make((uint8_t)r, (uint8_t)g, (uint8_t)b));
+}
+
+static int expect_home_terminal_clears_visual(V5MainPage *page, unsigned int phase)
+{
+    V5MainPageActionReport report;
+    V5CommandGateHomeStatus status;
+    lv_obj_t *button;
+    unsigned int attempt;
+    unsigned int flush_before_terminal;
+    char text[64];
+    int polled = 0;
+    if (!page || (phase != V5_NATIVE_HOME_PHASE_FAILED &&
+                  phase != V5_NATIVE_HOME_PHASE_CANCELLED)) return 0;
+    button = button_for_action(page, V5_MAIN_PAGE_ACTION_HOME);
+    if (!button) return 0;
+    g_home_hook_terminal = 0;
+    g_home_progress_terminal_phase = phase;
+    g_home_send_delay_ms = 250U;
+    g_home_send_hook_returned = 0;
+    v5_main_page_select_all_axes(page);
+    if (!v5_main_page_trigger_action(page, V5_MAIN_PAGE_ACTION_HOME, &report) ||
+        !v5_main_page_home_transaction_active() || !page->home_transaction_active ||
+        lv_obj_has_state(button, LV_STATE_USER_1) ||
+        !button_bg_matches(page, V5_MAIN_PAGE_ACTION_HOME, 42, 63, 85)) {
+        g_home_progress_terminal_phase = 0U;
+        g_home_send_delay_ms = 25U;
+        return 0;
+    }
+    flush_before_terminal = v5_lvgl_headless_flush_count();
+    for (attempt = 0U; attempt < 100U; ++attempt) {
+        if (v5_main_page_home_transaction_poll(page)) {
+            polled = 1;
+            break;
+        }
+        smoke_sleep_us(1000U);
+    }
+    if (!polled || g_home_send_hook_returned ||
+        v5_main_page_home_transaction_active() || page->home_transaction_active ||
+        page->last_action.pending_readback ||
+        lv_obj_has_state(button, LV_STATE_PRESSED) ||
+        lv_obj_has_state(button, LV_STATE_USER_1) ||
+        v5_lvgl_headless_flush_count() <= flush_before_terminal ||
+        !button_bg_matches(page, V5_MAIN_PAGE_ACTION_HOME, 42, 63, 85) ||
+        !v5_main_page_home_transaction_status(&status) || !status.terminal ||
+        status.phase != phase) {
+        g_home_progress_terminal_phase = 0U;
+        g_home_send_delay_ms = 25U;
+        return 0;
+    }
+    text[0] = '\0';
+    if (phase == V5_NATIVE_HOME_PHASE_FAILED) {
+        if (v5_main_page_home_transaction_format_status_cn(&status, text, sizeof(text)) || text[0]) {
+            g_home_progress_terminal_phase = 0U;
+            g_home_send_delay_ms = 25U;
+            return 0;
+        }
+    } else if (!v5_main_page_home_transaction_format_status_cn(&status, text, sizeof(text)) ||
+               strcmp(text, "回零已取消") != 0) {
+        g_home_progress_terminal_phase = 0U;
+        g_home_send_delay_ms = 25U;
+        return 0;
+    }
+    for (attempt = 0U; attempt < 500U && !g_home_send_hook_returned; ++attempt) {
+        smoke_sleep_us(1000U);
+    }
+    g_home_progress_terminal_phase = 0U;
+    g_home_send_delay_ms = 25U;
+    return g_home_send_hook_returned != 0;
+}
+
+static int button_object_bg_matches(lv_obj_t *button, int r, int g, int b)
+{
     lv_color_t actual;
     lv_color_t expected;
     if (!button) {
@@ -315,9 +543,8 @@ static int program_row_text_has(V5MainPage *page, unsigned int row, const char *
     return text && strstr(text, needle) != 0;
 }
 
-static int button_pressed_state_clears_on_click(V5MainPage *page, V5MainPageActionKind action, int r, int g, int b)
+static int button_pressed_state_clears_on_click(lv_obj_t *button, int r, int g, int b)
 {
-    lv_obj_t *button = button_for_action(page, action);
     if (!button) {
         return 0;
     }
@@ -326,12 +553,12 @@ static int button_pressed_state_clears_on_click(V5MainPage *page, V5MainPageActi
         return 0;
     }
     lv_event_send(button, LV_EVENT_CLICKED, 0);
-    return !lv_obj_has_state(button, LV_STATE_PRESSED) && button_bg_matches(page, action, r, g, b);
+    return !lv_obj_has_state(button, LV_STATE_PRESSED) &&
+           button_object_bg_matches(button, r, g, b);
 }
 
-static int button_pressed_state_clears_on_release(V5MainPage *page, V5MainPageActionKind action)
+static int button_pressed_state_clears_on_release(lv_obj_t *button)
 {
-    lv_obj_t *button = button_for_action(page, action);
     if (!button) {
         return 0;
     }
@@ -342,9 +569,8 @@ static int button_pressed_state_clears_on_release(V5MainPage *page, V5MainPageAc
            v5_lvgl_headless_flush_count() > 0U;
 }
 
-static int button_visual_state_cycle(V5MainPage *page, V5MainPageActionKind action)
+static int button_visual_state_cycle(lv_obj_t *button)
 {
-    lv_obj_t *button = button_for_action(page, action);
     if (!button) {
         return 0;
     }
@@ -360,7 +586,7 @@ static int button_visual_state_cycle(V5MainPage *page, V5MainPageActionKind acti
     }
     v5_button_visual_set_transaction_active(button, 1);
     if (!lv_obj_has_state(button, LV_STATE_USER_1) ||
-        !button_bg_matches(page, action, 29, 151, 104)) {
+        !button_object_bg_matches(button, 29, 151, 104)) {
         return 0;
     }
     v5_button_visual_set_transaction_active(button, 0);
@@ -513,41 +739,13 @@ static int expect_power_on_home_block(
     return lv_obj_has_flag(page->power_on_home_popup, LV_OBJ_FLAG_HIDDEN);
 }
 
-static int expect_estop_home_block(V5MainPage *page)
-{
-    V5MainPageActionReport report;
-    const char *message;
-    if (!page || !v5_main_page_trigger_action(page, V5_MAIN_PAGE_ACTION_HOME, &report)) {
-        return 0;
-    }
-    if (report.action != V5_MAIN_PAGE_ACTION_HOME || report.prepared || !report.local_only ||
-        report.executed || report.send_status != V5_COMMAND_GATE_SEND_INVALID ||
-        report.request.kind != V5_COMMAND_UI_LOCAL ||
-        !same_text(report.command.name, "home_safety_precondition") ||
-        !same_text(report.command.owner, "native_home_precondition") ||
-        report.command.accepted || !same_text(report.readback_code, "HOME_PRECONDITION_ESTOP")) {
-        return 0;
-    }
-    if (!page->power_on_home_popup || !page->power_on_home_popup_message ||
-        lv_obj_has_flag(page->power_on_home_popup, LV_OBJ_FLAG_HIDDEN)) {
-        return 0;
-    }
-    message = lv_label_get_text(page->power_on_home_popup_message);
-    if (!message || !strstr(message, "提示: 请先取消急停") ||
-        !strstr(message, "原因: 机器当前处于急停状态，不能执行回零") ||
-        !strstr(message, "下一步:") || !strstr(message, "取消急停") ||
-        strstr(message, "HOME_PRECONDITION_ESTOP")) {
-        return 0;
-    }
-    lv_event_send(page->power_on_home_popup_close, LV_EVENT_RELEASED, 0);
-    return lv_obj_has_flag(page->power_on_home_popup, LV_OBJ_FLAG_HIDDEN);
-}
-
 int main(void)
 {
     V5MainPage page;
+    V5MainPageActionReport visual_report_before;
     V5ProgramController controller;
     lv_obj_t *screen;
+    lv_obj_t *visual_button;
 
     lv_init();
     if (!v5_lvgl_headless_display_setup()) {
@@ -559,6 +757,8 @@ int main(void)
     }
     v5_main_page_home_transaction_set_send_hook(home_send_hook);
     v5_main_page_home_transaction_set_progress_hook(home_progress_hook);
+    v5_main_page_set_command_execution_enabled(&page, 0);
+    g_home_send_hook_calls = 0U;
     if (page.button_count != V5_MAIN_PAGE_BUTTON_COUNT) {
         return 3;
     }
@@ -584,14 +784,33 @@ int main(void)
         !button_bg_matches(&page, V5_MAIN_PAGE_ACTION_JOG_STEP_10, 32, 52, 73)) {
         return 44;
     }
-    if (!button_pressed_state_clears_on_click(&page, V5_MAIN_PAGE_ACTION_HOME, 42, 63, 85)) {
+    visual_button = lv_btn_create(screen);
+    if (!visual_button) {
+        return 75;
+    }
+    lv_obj_set_size(visual_button, 40, 24);
+    lv_obj_set_style_bg_color(visual_button, lv_color_make(42, 63, 85), 0);
+    v5_button_visual_bind(visual_button);
+    memcpy(&visual_report_before, &page.last_action, sizeof(visual_report_before));
+    if (!button_pressed_state_clears_on_click(visual_button, 42, 63, 85)) {
         return 50;
     }
-    if (!button_pressed_state_clears_on_release(&page, V5_MAIN_PAGE_ACTION_HOME)) {
+    if (!button_pressed_state_clears_on_release(visual_button)) {
         return 65;
     }
-    if (!button_visual_state_cycle(&page, V5_MAIN_PAGE_ACTION_HOME)) {
+    if (!button_visual_state_cycle(visual_button)) {
         return 67;
+    }
+    if (page.command_execution_enabled || g_home_send_hook_calls != 0U ||
+        v5_main_page_home_transaction_active() ||
+        memcmp(&visual_report_before, &page.last_action, sizeof(visual_report_before)) != 0) {
+        return 74;
+    }
+    lv_obj_del(visual_button);
+    v5_main_page_set_command_execution_enabled(&page, 1);
+    if (!expect_home_terminal_clears_visual(&page, V5_NATIVE_HOME_PHASE_FAILED) ||
+        !expect_home_terminal_clears_visual(&page, V5_NATIVE_HOME_PHASE_CANCELLED)) {
+        return 121;
     }
     {
         V5NativeReadback readback;
@@ -660,7 +879,7 @@ int main(void)
         v5_native_readback_set_machine_enabled(&readback, 0);
         v5_main_page_set_native_readback(&page, &readback);
         v5_main_page_select_all_axes(&page);
-        if (!expect_estop_home_block(&page)) {
+        if (!expect_home_native_gate(&page)) {
             return 73;
         }
         v5_native_readback_set_safety_estop(&readback, 0);
@@ -718,6 +937,9 @@ int main(void)
         !expect_command(&page, V5_MAIN_PAGE_ACTION_ESTOP_FORCE, "estop_force", "native_safety") ||
         !expect_command(&page, V5_MAIN_PAGE_ACTION_WCS_G55, "wcs_select", "native_linuxcncrsh")) {
         return 8;
+    }
+    if (!expect_estop_local_reset_preserves_program_and_homed(&page)) {
+        return 120;
     }
     {
         V5NativeReadback readback;
@@ -1094,6 +1316,7 @@ int main(void)
 
     printf("v5 main page actions: buttons=%u local=view_3d mdi=start jog=native rtcp=toggle axis_select=prepared axis_zero_position=prepared first_point=prepared native_lines=prepared missing_gates=0\n",
            page.button_count);
+    v5_main_page_set_command_execution_enabled(&page, 0);
     v5_program_controller_destroy(&controller);
     return 0;
 }

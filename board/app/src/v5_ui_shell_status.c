@@ -114,6 +114,14 @@ void shell_update_top_status_label(void)
         return;
     }
     shell_set_text_color_if_changed(g_v5_shell_top_status_label, lv_color_make(255, 86, 86), 0);
+    /* Fixed priority P0: fresh native E-stop actual always wins. */
+    if (v5_native_readback_safety_estop_known(&g_v5_shell_main_page.native_readback) &&
+        g_v5_shell_main_page.native_readback.safety_estop_active) {
+        changed = shell_set_label_text_if_changed(g_v5_shell_top_status_label, "急停中");
+        if (changed) shell_mark_all_page_caches_dirty();
+        return;
+    }
+    /* P1: current Home/positioning transaction; P2: fresh operator error. */
     if (v5_main_page_home_transaction_status(&home_status) &&
         v5_main_page_home_transaction_format_status_cn(&home_status, home_text, sizeof(home_text))) {
         changed = shell_set_label_text_if_changed(g_v5_shell_top_status_label, home_text);

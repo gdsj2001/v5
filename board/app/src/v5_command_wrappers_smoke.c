@@ -89,9 +89,14 @@ int main(void)
     {
         char home_line[128];
         if (!v5_command_home_prepare(&prepared, &request) ||
-            !v5_linuxcncrsh_format_home_sequence(home_line, sizeof(home_line)) ||
+            !v5_linuxcncrsh_format_all_home(home_line, sizeof(home_line)) ||
             strcmp(prepared.name, "home") != 0 ||
-            strcmp(prepared.owner, "native_home_mode_gate") != 0) {
+            strcmp(prepared.owner, "native_home_mode_gate") != 0 ||
+            request.kind != V5_COMMAND_HOME || request.index_value != 0 ||
+            request.enabled_value != 0 || request.axis_value != 0.0 ||
+            request.increment_value != 0.0 || request.axis_mask != 0U ||
+            request.text_value || request.secondary_text_value || request.mode_value ||
+            strcmp(home_line, "Set Home -1") != 0) {
             return 12;
         }
         printf("home=%s\n", home_line);

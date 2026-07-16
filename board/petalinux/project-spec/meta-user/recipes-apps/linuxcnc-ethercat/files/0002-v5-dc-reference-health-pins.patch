@@ -1,0 +1,87 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: V5 Project <v5@example.invalid>
+Date: Wed, 15 Jul 2026 20:21:00 +0800
+Subject: [PATCH] v5: export fresh DC reference clock health
+
+The existing dc-phased pin describes the local application phase controller;
+with a positive refClockSyncCycles it can be true even when the fresh DC
+reference-clock ioctl is failing. Export the result of the cyclic native
+read itself so lifecycle and operator owners can distinguish phase from
+freshness without parsing realtime stderr.
+---
+ src/lcec.h      |  4 ++++
+ src/lcec_main.c | 23 ++++++++++++++++++++++-
+ 2 files changed, 26 insertions(+), 1 deletion(-)
+
+diff --git a/src/lcec.h b/src/lcec.h
+index 89a19774b..9042ad449 100644
+--- a/src/lcec.h
++++ b/src/lcec.h
+@@ -189,6 +189,10 @@ typedef struct lcec_master_data {
+   hal_u32_t dc_phase_max_err;
+   hal_s32_t *app_phase;            // Our execution phase in local cycle (ns, real-time)
+   hal_bit_t *dc_phased;           // PLL lock status indicator
++  hal_bit_t *dc_time_valid;        // Fresh reference-clock read succeeded this cycle
++  hal_u32_t *dc_time_ok_seq;       // Increments after every successful fresh read
++  hal_u32_t *dc_time_age_cycles;   // Consecutive cycles since the last successful read
++  hal_u32_t *dc_time_error_count;  // Total failed reference-clock reads
+   hal_s32_t *phase_jitter_out;     // Output: measured app_phase jitter amplitude (ns)
+   hal_s32_t *drift_mode;            // Input: 0=simple, 1=manual
+   hal_s32_t *pll_drift;            // Input: debug offset added to PLL correction (ns)
+diff --git a/src/lcec_main.c b/src/lcec_main.c
+index 44fbc9c73..92729e7a7 100644
+--- a/src/lcec_main.c
++++ b/src/lcec_main.c
+@@ -65,6 +65,10 @@ static const lcec_pindesc_t master_pins[] = {
+     {HAL_U32, HAL_OUT, offsetof(lcec_master_data_t, pll_reset_cnt), "%s.pll-reset-count"},
+     {HAL_S32, HAL_OUT, offsetof(lcec_master_data_t, app_phase), "%s.app-phase"},
+     {HAL_BIT, HAL_OUT, offsetof(lcec_master_data_t, dc_phased), "%s.dc-phased"},
++    {HAL_BIT, HAL_OUT, offsetof(lcec_master_data_t, dc_time_valid), "%s.dc-time-valid"},
++    {HAL_U32, HAL_OUT, offsetof(lcec_master_data_t, dc_time_ok_seq), "%s.dc-time-ok-seq"},
++    {HAL_U32, HAL_OUT, offsetof(lcec_master_data_t, dc_time_age_cycles), "%s.dc-time-age-cycles"},
++    {HAL_U32, HAL_OUT, offsetof(lcec_master_data_t, dc_time_error_count), "%s.dc-time-error-count"},
+     {HAL_S32, HAL_OUT, offsetof(lcec_master_data_t, phase_jitter_out), "%s.phase-jitter"},
+     {HAL_S32, HAL_IN, offsetof(lcec_master_data_t, drift_mode), "%s.drift-mode"},
+     {HAL_S32, HAL_IN, offsetof(lcec_master_data_t, pll_drift), "%s.pll-drift"},
+@@ -1123,6 +1127,10 @@ static int lcec_activate_master(lcec_master_t *master) {
+   
+ #ifdef RTAPI_TASK_PLL_SUPPORT
+   master->dc_time_valid_last = 0;
++  *(master->hal_data->dc_time_valid) = 0;
++  *(master->hal_data->dc_time_ok_seq) = 0;
++  *(master->hal_data->dc_time_age_cycles) = 0;
++  *(master->hal_data->dc_time_error_count) = 0;
+   master->dc_ref = 0;
+   if (!master->sync_to_ref_clock) {
+     long long rtapi_now = rtapi_get_time();
+@@ -1303,6 +1311,20 @@ void lcec_write_master(void *arg, long period) {
+ #ifdef RTAPI_TASK_PLL_SUPPORT
+   uint32_t dc_time = 0;
+   int dc_time_valid = (ecrt_master_reference_clock_time(master->master, &dc_time) == 0);
++  hal_data = master->hal_data;
++  if (dc_time_valid) {
++    *(hal_data->dc_time_valid) = 1;
++    (*(hal_data->dc_time_ok_seq))++;
++    *(hal_data->dc_time_age_cycles) = 0;
++  } else {
++    *(hal_data->dc_time_valid) = 0;
++    if (*(hal_data->dc_time_age_cycles) != UINT32_MAX) {
++      (*(hal_data->dc_time_age_cycles))++;
++    }
++    if (*(hal_data->dc_time_error_count) != UINT32_MAX) {
++      (*(hal_data->dc_time_error_count))++;
++    }
++  }
+ #endif
+ 
+   // sync ref clock to master
+@@ -1324,7 +1346,6 @@ void lcec_write_master(void *arg, long period) {
+ #ifdef RTAPI_TASK_PLL_SUPPORT
+   // BANG-BANG controller for master thread PLL sync
+   // this part is done after ecrt_master_send() to reduce jitter
+-  hal_data = master->hal_data;
+   *(hal_data->pll_err) = 0;
+   *(hal_data->pll_out) = 0;
+   *(hal_data->dc_phased) = 0;
+-- 
+2.39.2

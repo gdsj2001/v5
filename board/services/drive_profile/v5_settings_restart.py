@@ -8,79 +8,57 @@ from typing import Any, Dict
 from v5_settings_action_contract import CANONICAL_CLEAN_RESTART_SERVICES, RUN_DIR
 
 
+RESTART_HANDOFF_DELAY_S = 1.0
+RESTART_GATE_POLL_S = 0.1
+RESTART_GATE_TIMEOUT_POLLS = 100
+
+
+def restart_handoff_paths() -> tuple[Path, Path, Path, Path]:
+    return (
+        RUN_DIR / "settings_clean_restart_handoff.sh",
+        RUN_DIR / "settings_clean_restart_handoff.log",
+        RUN_DIR / "settings_clean_restart_commit.armed",
+        RUN_DIR / "settings_clean_restart_commit.go",
+    )
+
+
+def remove_runtime_marker(path: Path) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+
+
 def now_utc() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
-def service_status(name: str, timeout_s: float = 4.0) -> Dict[str, Any]:
-    script = Path('/etc/init.d') / name
-    if not script.exists():
-        return {"ok": False, "code": "SERVICE_SCRIPT_MISSING", "script": str(script)}
-    try:
-        proc = subprocess.run([str(script), 'status'], text=True, capture_output=True, timeout=timeout_s, check=False)
-    except Exception as exc:
-        return {"ok": False, "code": "SERVICE_STATUS_EXCEPTION", "detail": "%s: %s" % (type(exc).__name__, exc), "script": str(script)}
-    return {
-        "ok": proc.returncode == 0,
-        "code": "SERVICE_RUNNING" if proc.returncode == 0 else "SERVICE_NOT_RUNNING",
-        "returncode": proc.returncode,
-        "stdout": proc.stdout[-1000:],
-        "stderr": proc.stderr[-1000:],
-        "script": str(script),
-    }
-
-
-def restart_service(name: str, timeout_s: float = 8.0) -> Dict[str, Any]:
-    script = Path('/etc/init.d') / name
-    if not script.exists():
-        return {"service": name, "ok": False, "code": "SERVICE_SCRIPT_MISSING", "script": str(script)}
-    RUN_DIR.mkdir(parents=True, exist_ok=True)
-    safe_name = ''.join(ch if ch.isalnum() or ch in ('-', '_') else '_' for ch in name)
-    log_path = RUN_DIR / ("settings_restart_%s.log" % safe_name)
-    try:
-        with log_path.open('w', encoding='utf-8') as fp:
-            proc = subprocess.run([str(script), 'restart'], text=True, stdout=fp, stderr=subprocess.STDOUT, timeout=timeout_s, check=False)
-    except subprocess.TimeoutExpired as exc:
-        status = service_status(name)
-        detail = str(exc)
-        try:
-            output = log_path.read_text(encoding='utf-8', errors='replace')[-2000:]
-        except Exception:
-            output = ''
-        return {"service": name, "ok": False, "code": "SERVICE_RESTART_TIMEOUT", "script": str(script), "timeout_s": timeout_s, "detail": detail, "stdout": output, "log_path": str(log_path), "status": status}
-    except Exception as exc:
-        status = service_status(name)
-        return {"service": name, "ok": False, "code": "SERVICE_RESTART_EXCEPTION", "script": str(script), "detail": "%s: %s" % (type(exc).__name__, exc), "log_path": str(log_path), "status": status}
-    try:
-        output = log_path.read_text(encoding='utf-8', errors='replace')[-2000:]
-    except Exception:
-        output = ''
-    status = service_status(name)
-    ok = proc.returncode == 0 and bool(status.get('ok'))
-    return {
-        "service": name,
-        "ok": ok,
-        "code": "SERVICE_RESTARTED" if ok else "SERVICE_RESTART_FAILED",
-        "returncode": proc.returncode,
-        "stdout": output,
-        "stderr": "",
-        "script": str(script),
-        "timeout_s": timeout_s,
-        "log_path": str(log_path),
-        "status": status,
-    }
-
-
 def run_restart_handoff(action: str, spec: Dict[str, Any]) -> Dict[str, Any]:
     RUN_DIR.mkdir(parents=True, exist_ok=True)
-    handoff_script = RUN_DIR / "settings_clean_restart_handoff.sh"
-    handoff_log = RUN_DIR / "settings_clean_restart_handoff.log"
+    handoff_script, handoff_log, armed_marker, go_marker = restart_handoff_paths()
+    remove_runtime_marker(armed_marker)
+    remove_runtime_marker(go_marker)
     service_list = " ".join(CANONICAL_CLEAN_RESTART_SERVICES)
     handoff_script.write_text("""#!/bin/sh
 set -u
 LOG="%s"
+ARMED="%s"
+GO="%s"
 exec >>"$LOG" 2>&1
-echo "clean_restart_handoff begin $(date -u '+%%Y-%%m-%%dT%%H:%%M:%%SZ')"
+echo "clean_restart_handoff armed $(date -u '+%%Y-%%m-%%dT%%H:%%M:%%SZ')"
+polls=0
+while [ ! -f "$GO" ]; do
+  if [ "$polls" -ge %d ]; then
+    echo "clean_restart_handoff gate_timeout $(date -u '+%%Y-%%m-%%dT%%H:%%M:%%SZ')"
+    rm -f "$ARMED"
+    exit 111
+  fi
+  sleep %.1f
+  polls=$((polls + 1))
+done
+rm -f "$GO" "$ARMED"
+echo "clean_restart_handoff acknowledged $(date -u '+%%Y-%%m-%%dT%%H:%%M:%%SZ')"
+sleep %.1f
 sync || true
 for svc in %s; do
   if [ -x "/etc/init.d/$svc" ]; then
@@ -121,13 +99,57 @@ elif [ -x /sbin/reboot ]; then
 else
   echo b >/proc/sysrq-trigger
 fi
-""" % (str(handoff_log), service_list), encoding="utf-8")
+""" % (
+        str(handoff_log),
+        str(armed_marker),
+        str(go_marker),
+        RESTART_GATE_TIMEOUT_POLLS,
+        RESTART_GATE_POLL_S,
+        RESTART_HANDOFF_DELAY_S,
+        service_list,
+    ), encoding="utf-8")
     handoff_script.chmod(0o755)
-    detail = ""
+    result = {
+        "schema": "v5.settings_action_result.v1",
+        "generated_at": now_utc(),
+        "action": action,
+        "owner": spec.get("owner", ""),
+        "ok": True,
+        "code": "SETTINGS_SAVE_RESTART_BOARD_REBOOT_SCHEDULED",
+        "message_cn": "系统级重启已准备，等待关闭结果窗后提交。",
+        "display_message_cn": "系统级重启已准备，点击关闭后黑屏并重启。",
+        "write_executed": False,
+        "motion_executed": False,
+        "restart_executed": False,
+        "restart_commit_required": True,
+        "clean_restart_equivalent": "board_reboot_after_ui_ack",
+        "handoff_script": str(handoff_script),
+        "handoff_log": str(handoff_log),
+        "stop_order": CANONICAL_CLEAN_RESTART_SERVICES,
+    }
+    return result
+
+
+def commit_restart_handoff() -> Dict[str, Any]:
+    handoff_script, _handoff_log, armed_marker, go_marker = restart_handoff_paths()
+    if not handoff_script.is_file():
+        return {
+            "ok": False,
+            "accepted": False,
+            "code": "SETTINGS_SAVE_RESTART_HANDOFF_NOT_PREPARED",
+            "detail": str(handoff_script),
+        }
+    remove_runtime_marker(go_marker)
     try:
-        # This is the cancellable pre-commit window. After Popen succeeds the
-        # detached handoff owns the reboot and the action becomes terminal.
-        time.sleep(1.0)
+        armed_marker.write_text("armed\n", encoding="utf-8")
+    except Exception as exc:
+        return {
+            "ok": False,
+            "accepted": False,
+            "code": "SETTINGS_SAVE_RESTART_COMMIT_ARM_FAILED",
+            "detail": "%s: %s" % (type(exc).__name__, exc),
+        }
+    try:
         subprocess.Popen(
             ["/bin/sh", str(handoff_script)],
             stdin=subprocess.DEVNULL,
@@ -135,29 +157,46 @@ fi
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
-        ok = True
-        code = "SETTINGS_SAVE_RESTART_BOARD_REBOOT_SCHEDULED"
     except Exception as exc:
-        ok = False
-        code = "SETTINGS_SAVE_RESTART_HANDOFF_SPAWN_FAILED"
-        detail = "%s: %s" % (type(exc).__name__, exc)
-    result = {
-        "schema": "v5.settings_action_result.v1",
-        "generated_at": now_utc(),
-        "action": action,
-        "owner": spec.get("owner", ""),
-        "ok": ok,
-        "code": code,
-        "message_cn": "保存并重启已进入开发板干净重启流程。" if ok else "保存并重启 handoff 启动失败。",
-        "display_message_cn": "保存并重启已进入开发板干净重启流程。" if ok else "保存并重启 handoff 启动失败。",
-        "write_executed": False,
-        "motion_executed": False,
-        "restart_executed": ok,
-        "clean_restart_equivalent": "board_reboot" if ok else "",
+        remove_runtime_marker(armed_marker)
+        return {
+            "ok": False,
+            "accepted": False,
+            "code": "SETTINGS_SAVE_RESTART_COMMIT_SPAWN_FAILED",
+            "detail": "%s: %s" % (type(exc).__name__, exc),
+        }
+    return {
+        "ok": True,
+        "accepted": True,
+        "code": "SETTINGS_SAVE_RESTART_COMMIT_ACK",
         "handoff_script": str(handoff_script),
-        "handoff_log": str(handoff_log),
-        "stop_order": CANONICAL_CLEAN_RESTART_SERVICES,
+        "handoff_delay_s": RESTART_HANDOFF_DELAY_S,
+        "gate_armed": True,
     }
-    if detail:
-        result["detail"] = detail
-    return result
+
+
+def release_restart_handoff() -> Dict[str, Any]:
+    _handoff_script, _handoff_log, armed_marker, go_marker = restart_handoff_paths()
+    if not armed_marker.is_file():
+        return {
+            "ok": False,
+            "code": "SETTINGS_SAVE_RESTART_COMMIT_GATE_NOT_ARMED",
+        }
+    try:
+        armed_marker.replace(go_marker)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "code": "SETTINGS_SAVE_RESTART_COMMIT_GATE_RELEASE_FAILED",
+            "detail": "%s: %s" % (type(exc).__name__, exc),
+        }
+    return {
+        "ok": True,
+        "code": "SETTINGS_SAVE_RESTART_COMMIT_GATE_RELEASED",
+    }
+
+
+def abort_restart_handoff() -> None:
+    _handoff_script, _handoff_log, armed_marker, go_marker = restart_handoff_paths()
+    remove_runtime_marker(armed_marker)
+    remove_runtime_marker(go_marker)

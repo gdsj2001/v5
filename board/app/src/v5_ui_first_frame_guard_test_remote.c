@@ -24,9 +24,20 @@ int v5_lvgl_remote_display_publish_current_frame(void)
     return !g_test_output_suppressed;
 }
 
+int v5_lvgl_remote_display_blackout_for_restart(void)
+{
+    g_test_output_suppressed = 1;
+    return 1;
+}
+
 int v5_lvgl_remote_display_set_output_suppressed(int suppressed)
 {
     int previous = g_test_output_suppressed;
     g_test_output_suppressed = suppressed ? 1 : 0;
     return previous;
+}
+
+int v5_lvgl_remote_display_output_suppressed(void)
+{
+    return g_test_output_suppressed;
 }

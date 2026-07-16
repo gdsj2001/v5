@@ -30,6 +30,117 @@ have_cmd() {
     command -v "$1" >/dev/null 2>&1
 }
 
+cpu1_available() {
+    grep -qw 1 /sys/devices/system/cpu/online 2>/dev/null ||
+        grep -q '0-1' /sys/devices/system/cpu/online 2>/dev/null
+}
+
+iface_irq_numbers() {
+    iface="$1"
+    awk -v iface="$iface" 'index($0, iface) {irq=$1; sub(":", "", irq); print irq}' \
+        /proc/interrupts 2>/dev/null || true
+}
+
+set_iface_irq_affinity() {
+    iface="$1"
+    cpu="$2"
+    required="$3"
+    irqs=$(iface_irq_numbers "$iface" | xargs 2>/dev/null || true)
+    if [ -z "$irqs" ]; then
+        log "cpu isolation iface=$iface irq=missing required=$required"
+        [ "$required" = "0" ]
+        return
+    fi
+    for irq in $irqs; do
+        affinity_path="/proc/irq/$irq/smp_affinity_list"
+        [ -w "$affinity_path" ] || {
+            log "ERROR cpu isolation iface=$iface irq=$irq affinity_not_writable"
+            return 1
+        }
+        printf '%s\n' "$cpu" >"$affinity_path" || return 1
+        readback=$(cat "$affinity_path" 2>/dev/null || true)
+        [ "$readback" = "$cpu" ] || {
+            log "ERROR cpu isolation iface=$iface irq=$irq expected=$cpu actual=$readback"
+            return 1
+        }
+        log "cpu isolation iface=$iface irq=$irq cpu=$cpu"
+    done
+}
+
+set_iface_queue_masks() {
+    iface="$1"
+    rps_mask="$2"
+    xps_mask="$3"
+    rps_found=0
+    for path in /sys/class/net/"$iface"/queues/rx-*/rps_cpus; do
+        [ -e "$path" ] || continue
+        rps_found=1
+        [ -w "$path" ] || return 1
+        printf '%s\n' "$rps_mask" >"$path" || return 1
+        readback=$(cat "$path" 2>/dev/null | tr -d ',' | sed 's/^0*//' || true)
+        [ -n "$readback" ] || readback=0
+        [ "$readback" = "$rps_mask" ] || return 1
+    done
+    [ "$rps_found" = "1" ] || {
+        log "ERROR cpu isolation iface=$iface rps_queue_missing"
+        return 1
+    }
+    for path in /sys/class/net/"$iface"/queues/tx-*/xps_cpus; do
+        [ -e "$path" ] || continue
+        if [ ! -w "$path" ]; then
+            log "cpu isolation iface=$iface xps_unsupported path=$path reason=not_writable"
+            continue
+        fi
+        if ! (printf '%s\n' "$xps_mask" >"$path") 2>/dev/null; then
+            log "cpu isolation iface=$iface xps_unsupported path=$path reason=write_rejected"
+            continue
+        fi
+        readback=$(cat "$path" 2>/dev/null | tr -d ',' | sed 's/^0*//' || true)
+        [ -n "$readback" ] || readback=0
+        if [ "$readback" != "$xps_mask" ]; then
+            log "cpu isolation iface=$iface xps_unsupported path=$path expected=$xps_mask actual=$readback"
+        fi
+    done
+    log "cpu isolation iface=$iface rps_mask=$rps_mask xps_mask=$xps_mask"
+}
+
+disable_irqbalance() {
+    pidof irqbalance >/dev/null 2>&1 || return 0
+    killall irqbalance 2>/dev/null || true
+    sleep 0.1
+    if pidof irqbalance >/dev/null 2>&1; then
+        log "ERROR cpu isolation irqbalance remained active"
+        return 1
+    fi
+    log "cpu isolation stopped conflicting irqbalance owner"
+}
+
+apply_network_cpu_isolation() {
+    cpu1_available || {
+        log "ERROR cpu isolation requires CPU1"
+        return 1
+    }
+    disable_irqbalance || return 1
+    ethercat_iface="${V5_ETHERCAT_IFACE_DEFAULT:-eth1}"
+    management_iface="${V5_MAINT_IFACE_DEFAULT:-eth0}"
+    iface_exists "$ethercat_iface" || {
+        log "ERROR cpu isolation EtherCAT iface missing=$ethercat_iface"
+        return 1
+    }
+    iface_exists "$management_iface" || {
+        log "ERROR cpu isolation management iface missing=$management_iface"
+        return 1
+    }
+    set_iface_irq_affinity "$ethercat_iface" 0 1 || return 1
+    set_iface_queue_masks "$ethercat_iface" 0 1 || return 1
+    set_iface_irq_affinity "$management_iface" 1 1 || return 1
+    set_iface_queue_masks "$management_iface" 2 2 || return 1
+    if [ -n "${WIFI_SELECTED:-}" ] && iface_exists "$WIFI_SELECTED"; then
+        set_iface_irq_affinity "$WIFI_SELECTED" 1 0 || return 1
+        set_iface_queue_masks "$WIFI_SELECTED" 2 2 || return 1
+    fi
+}
+
 read_mode() {
     if [ -f "$MODE_FILE" ]; then
         tr -d ' \t\r\n' <"$MODE_FILE" 2>/dev/null | tr 'A-Z' 'a-z'
@@ -369,6 +480,7 @@ v5_net_apply() {
     apply_multihome_sysctl
     configure_wired
     configure_wifi
+    apply_network_cpu_isolation || return 1
     start_ssh_backend
     log "net apply done wired=${WIRED_SELECTED:-none} wifi=${WIFI_SELECTED:-none}"
     return 0

@@ -48,6 +48,7 @@ void v5_lvgl_remote_display_render_now(void);
 int v5_lvgl_remote_display_cache_capture(unsigned int slot);
 int v5_lvgl_remote_display_cache_blit(unsigned int slot);
 int v5_lvgl_remote_display_publish_current_frame(void);
+int v5_lvgl_remote_display_blackout_for_restart(void);
 int v5_lvgl_remote_display_cache_valid(unsigned int slot);
 void v5_lvgl_remote_display_cache_invalidate(unsigned int slot);
 size_t v5_lvgl_remote_display_cache_budget_bytes(void);

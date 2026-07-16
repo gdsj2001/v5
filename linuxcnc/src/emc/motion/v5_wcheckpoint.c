@@ -34,6 +34,7 @@ typedef struct {
     double runtime_counts;
     double safe_half_counts;
     unsigned int generation;
+    unsigned int sample_sequence;
     unsigned int raw_bits;
     unsigned int valid;
     enum v5_wcheckpoint_reason reason;
@@ -135,6 +136,12 @@ static enum v5_wcheckpoint_reason profile_reason(
         return V5_WCHECKPOINT_DRIVE_WINDOW_UNPROVEN;
     }
     return V5_WCHECKPOINT_OK;
+}
+
+static int snapshot_truth_available(enum v5_wcheckpoint_reason reason)
+{
+    return reason == V5_WCHECKPOINT_OK ||
+        reason == V5_WCHECKPOINT_DRIVE_WINDOW_UNPROVEN;
 }
 
 static void logical_to_runtime_pose(const EmcPose *logical, EmcPose *runtime)
@@ -313,7 +320,10 @@ void v5_wcheckpoint_update_before_inputs(void)
         reason = profile_reason(index, &axis_state[index].safe_half_counts,
                                 &turn_quantum[index]);
         axis_state[index].reason = reason;
-        axis_state[index].valid = reason == V5_WCHECKPOINT_OK;
+        /* A drive without proven periodic command/feedback support cannot
+         * rebase, but its current logical/base/runtime window is still valid
+         * and may be used for bounded motion inside the mapped safe range. */
+        axis_state[index].valid = snapshot_truth_available(reason);
         axis_state[index].raw_bits = (unsigned int)(
             v5_wcheckpoint_command_raw_bits[index] < v5_wcheckpoint_feedback_raw_bits[index]
                 ? v5_wcheckpoint_command_raw_bits[index]
@@ -335,7 +345,7 @@ void v5_wcheckpoint_update_before_inputs(void)
         }
     }
 
-    if (shift_needed && get_allhomed()) {
+    if (shift_needed && get_allhomed() && !get_homing_is_active()) {
         int result = apply_joint_shift(&emcmotStatus->carte_pos_cmd, new_base_turns);
         if (result == V5_WCHECKPOINT_OK) {
             for (index = 0U; index < V5_WCHECKPOINT_ROTARY_AXES; ++index) {
@@ -361,13 +371,23 @@ void v5_wcheckpoint_publish(void)
     for (index = 0U; index < V5_WCHECKPOINT_ROTARY_AXES; ++index) {
         v5_wcheckpoint_axis_state_t *state = &axis_state[index];
         v5_wcheckpoint_hal_t *hal_axis = &emcmot_hal_data->v5_wcheckpoint[index];
-        double logical_deg = pose_rotary(&emcmotStatus->carte_pos_cmd, index);
+        double logical_deg = pose_rotary(&emcmotStatus->carte_pos_fb, index);
         double counts_per_degree = v5_wcheckpoint_counts_per_rev[index] > 0
             ? (double)v5_wcheckpoint_counts_per_rev[index] / V5_FULL_TURN_DEG : 0.0;
+        if (!isfinite(logical_deg)) {
+            logical_deg = 0.0;
+            state->valid = 0U;
+            state->reason = V5_WCHECKPOINT_KINEMATICS_FAILED;
+        }
+        if (state->valid && state->generation == 0U) {
+            state->generation = 1U;
+        }
         state->logical_counts = logical_deg * counts_per_degree;
         state->base_counts = state->base_turns *
             (double)v5_wcheckpoint_counts_per_rev[index];
         state->runtime_counts = state->logical_counts - state->base_counts;
+        state->sample_sequence++;
+        if (state->sample_sequence == 0U) state->sample_sequence = 1U;
         *hal_axis->logical_abs_counts = state->logical_counts;
         *hal_axis->base_counts = state->base_counts;
         *hal_axis->runtime_window_counts = state->runtime_counts;
@@ -377,6 +397,21 @@ void v5_wcheckpoint_publish(void)
         *hal_axis->invalid_reason = state->reason;
         *hal_axis->valid = state->valid;
     }
+}
+
+int v5_wcheckpoint_read_snapshot(
+    unsigned int index, v5_wcheckpoint_snapshot_t *snapshot)
+{
+    v5_wcheckpoint_axis_state_t *state;
+    if (!snapshot || index >= V5_WCHECKPOINT_ROTARY_AXES) return 0;
+    state = &axis_state[index];
+    snapshot->logical_counts = state->logical_counts;
+    snapshot->base_counts = state->base_counts;
+    snapshot->runtime_counts = state->runtime_counts;
+    snapshot->generation = state->generation;
+    snapshot->sample_sequence = state->sample_sequence;
+    snapshot->valid = state->valid;
+    return 1;
 }
 
 int v5_wcheckpoint_forward(

@@ -45,6 +45,12 @@ static const char *v5_command_gate_name_for_kind(V5CommandKind kind)
         return "first_point";
     case V5_COMMAND_AXIS_ZERO_POSITION:
         return "axis_zero_position";
+    case V5_COMMAND_DRIVE_WRITE_BEGIN:
+        return "drive_write_begin";
+    case V5_COMMAND_DRIVE_WRITE_FINISH:
+        return "drive_write_finish";
+    case V5_COMMAND_DRIVE_WRITE_ABORT:
+        return "drive_write_abort";
     default:
         return 0;
     }

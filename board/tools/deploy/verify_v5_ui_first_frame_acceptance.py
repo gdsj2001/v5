@@ -641,19 +641,38 @@ def rect_union_area(rects: list[dict], label: str) -> int:
 
 def validate_dirty_chain(events: list[dict], base_frame_id: int, label: str) -> int:
     expected_base = int(base_frame_id)
-    for index, event in enumerate(events):
+    index = 0
+    while index < len(events):
         try:
-            frame_id = int(event.get("frame_id") or 0)
-            event_base = int(event.get("base_frame_id") if event.get("base_frame_id") is not None else -1)
+            frame_id = int(events[index].get("frame_id") or 0)
         except (AttributeError, TypeError, ValueError) as exc:
-            raise AcceptanceError(f"invalid dirty identity label={label} index={index} event={event!r}") from exc
-        if event_base != expected_base or frame_id <= event_base:
-            raise AcceptanceError(
-                f"dirty base continuity failed label={label} index={index} "
-                f"expected_base={expected_base} event={event!r}"
-            )
-        checked_rect(event, f"{label}[{index}]")
+            raise AcceptanceError(f"invalid dirty identity label={label} index={index} event={events[index]!r}") from exc
+        group_end = index + 1
+        while group_end < len(events):
+            try:
+                if int(events[group_end].get("frame_id") or 0) != frame_id:
+                    break
+            except (AttributeError, TypeError, ValueError) as exc:
+                raise AcceptanceError(
+                    f"invalid dirty identity label={label} index={group_end} event={events[group_end]!r}"
+                ) from exc
+            group_end += 1
+        for event_index in range(index, group_end):
+            event = events[event_index]
+            try:
+                event_base = int(event.get("base_frame_id") if event.get("base_frame_id") is not None else -1)
+            except (AttributeError, TypeError, ValueError) as exc:
+                raise AcceptanceError(
+                    f"invalid dirty identity label={label} index={event_index} event={event!r}"
+                ) from exc
+            if event_base != expected_base or frame_id <= event_base:
+                raise AcceptanceError(
+                    f"dirty base continuity failed label={label} index={event_index} "
+                    f"expected_base={expected_base} event={event!r}"
+                )
+            checked_rect(event, f"{label}[{event_index}]")
         expected_base = frame_id
+        index = group_end
     return expected_base
 
 
@@ -1319,6 +1338,15 @@ def self_test() -> int:
         [{"x": 0, "y": 0, "w": 10, "h": 10}, {"x": 5, "y": 0, "w": 10, "h": 10}],
         "self_test.union",
     ) == 150
+    assert validate_dirty_chain(
+        [
+            {"frame_id": 11, "base_frame_id": 10, "x": 0, "y": 0, "w": 10, "h": 10},
+            {"frame_id": 11, "base_frame_id": 10, "x": 100, "y": 100, "w": 10, "h": 10},
+            {"frame_id": 12, "base_frame_id": 11, "x": 200, "y": 200, "w": 10, "h": 10},
+        ],
+        10,
+        "self_test.multi_rect_frame",
+    ) == 12
 
     first_visible = validate_first_visible_events(
         [

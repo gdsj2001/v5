@@ -287,7 +287,7 @@ void v5_settings_axis_parse_runtime_ini_text(const char *text)
         if (row->pitch[0]) v5_settings_axis_set_value(i, "pitch", row->pitch, 1);
         if (row->motor_rev[0]) v5_settings_axis_set_value(i, "motor_rev", row->motor_rev, 1);
         if (row->load_rev[0]) v5_settings_axis_set_value(i, "load_rev", row->load_rev, 1);
-        if (row->home_sequence[0]) v5_settings_axis_set_value(i, "home_order", strcmp(row->home_sequence, "-1") == 0 ? "禁用" : row->home_sequence, 1);
+        if (row->home_sequence[0]) v5_settings_axis_set_value(i, "home_order", strcmp(row->home_sequence, "999") == 0 ? "禁用" : row->home_sequence, 1);
         if (row->home_search_vel[0]) {
             double vel = strtod(row->home_search_vel, 0);
             if (vel > 0.0) v5_settings_axis_set_value(i, "home_direction", "+", 1);

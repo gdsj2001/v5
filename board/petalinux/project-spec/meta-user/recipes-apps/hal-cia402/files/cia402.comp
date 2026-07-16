@@ -194,6 +194,11 @@ void check_scales(hal_float_t *scale,float *scale_old, double *scale_rcpt) {
     *scale_rcpt = 1.0 / *scale;
   }
 }
+
+static int32_t v5_round_position_count(double position, double scale) {
+  double scaled = position * scale;
+  return (int32_t)(scaled >= 0.0 ? scaled + 0.5 : scaled - 0.5);
+}
   
 FUNCTION(read_all) {
 
@@ -282,7 +287,10 @@ FUNCTION(write_all) {
   }
 
   // write position command
-  drv_target_position = (int32_t) (pos_cmd * pos_scale);
+  // A position target denotes the nearest integer drive count.  Truncation
+  // turns a negative exact boundary such as -27000000 into -26999999 when
+  // the preceding floating-point calculation lands one ULP above it.
+  drv_target_position = v5_round_position_count(pos_cmd, pos_scale);
   // write velocity command
   drv_target_velocity = (int32_t) (velocity_cmd * velo_scale);
 
@@ -307,4 +315,3 @@ FUNCTION(write_all) {
     controlword |= (home << 4);  
   }
 }
-

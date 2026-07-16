@@ -5,8 +5,14 @@
 
 #define V5_NATIVE_HAL_OWNER_SOCKET_PATH "/run/8ax_v5_product_ui/v5_native_hal_owner.sock"
 #define V5_NATIVE_HAL_OWNER_MAGIC 0x5635484fu
-#define V5_NATIVE_HAL_OWNER_VERSION 2u
+#define V5_NATIVE_HAL_OWNER_VERSION 6u
 #define V5_NATIVE_HAL_OWNER_CODE_CAP 64u
+#define V5_NATIVE_HOME_JOINT_COUNT 5u
+
+#define V5_NATIVE_HOME_CONFIG_ACTIVE 0x1u
+#define V5_NATIVE_HOME_CONFIG_COMMIT 0x2u
+#define V5_NATIVE_HOME_CONFIG_FLAG_MASK \
+    (V5_NATIVE_HOME_CONFIG_ACTIVE | V5_NATIVE_HOME_CONFIG_COMMIT)
 
 enum V5NativeHalOwnerOperation {
     V5_NATIVE_HAL_OWNER_OP_STATUS = 1,
@@ -14,7 +20,9 @@ enum V5NativeHalOwnerOperation {
     V5_NATIVE_HAL_OWNER_OP_ESTOP_RESET = 3,
     V5_NATIVE_HAL_OWNER_OP_RTCP_SET = 4,
     V5_NATIVE_HAL_OWNER_OP_RTCP_FORCE_OFF = 5,
-    V5_NATIVE_HAL_OWNER_OP_WCHECKPOINT_STATUS = 6
+    V5_NATIVE_HAL_OWNER_OP_WCHECKPOINT_STATUS = 6,
+    V5_NATIVE_HAL_OWNER_OP_HOME_CONFIG = 7,
+    V5_NATIVE_HAL_OWNER_OP_HOME_STATUS = 8
 };
 
 enum V5NativeHalOwnerStatus {
@@ -31,7 +39,15 @@ typedef struct V5NativeHalOwnerRequest {
     uint32_t operation;
     uint64_t request_id;
     uint32_t target;
-    uint32_t reserved;
+    uint32_t flags;
+    uint32_t home_status_slot;
+    uint32_t axis_code;
+    uint32_t home_slave_position;
+    uint32_t home_mapping_generation;
+    uint32_t home_expected_active_mask;
+    uint32_t home_config_commit_seq;
+    double home_zero_counts;
+    double home_counts_per_unit;
 } V5NativeHalOwnerRequest;
 
 typedef struct V5NativeHalOwnerResponse {
@@ -52,7 +68,41 @@ typedef struct V5NativeHalOwnerResponse {
     double wcheckpoint_logical_counts;
     double wcheckpoint_base_counts;
     double wcheckpoint_runtime_counts;
-    uint32_t reserved;
+    uint32_t home_config_readback_valid;
+    uint32_t home_mapping_generation;
+    uint32_t home_config_active_mask;
+    uint32_t home_config_commit_seq;
+    uint32_t home_config_mask;
+    uint32_t status_home_router_mapping_valid;
+    uint32_t status_home_router_mapping_generation;
+    uint32_t status_home_router_active_mask;
+    uint32_t status_home_router_commit_seq;
+    uint32_t status_home_router_rejected_commit_seq;
+    uint32_t home_status_consistent;
+    uint32_t home_active_mask;
+    uint32_t home_complete_mask;
+    uint32_t home_failed_mask;
+    uint32_t home_cancelled_mask;
+    uint32_t home_current_joint;
+    uint32_t home_current_mask;
+    uint32_t home_axis_code;
+    uint32_t home_axis_code_by_joint[V5_NATIVE_HOME_JOINT_COUNT];
+    uint32_t home_phase;
+    uint32_t status_home_failure_phase;
+    uint32_t home_failure;
+    uint32_t home_transaction;
+    uint32_t home_joint_transaction;
+    uint32_t home_expected_active_mask;
+    uint32_t status_home_terminal_mask;
+    uint32_t home_detail_readback_valid;
+    uint32_t home_detail_motion_active;
+    uint32_t home_detail_generation;
+    uint32_t rtcp_home_request_transaction;
+    uint32_t rtcp_home_ack_transaction;
+    double home_start_counts;
+    double home_actual_counts;
+    double home_target_counts;
+    double home_error_counts;
     char code[V5_NATIVE_HAL_OWNER_CODE_CAP];
 } V5NativeHalOwnerResponse;
 

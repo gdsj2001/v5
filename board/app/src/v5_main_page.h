@@ -145,6 +145,7 @@ typedef struct V5MainPage {
     V5MainPageSelection selection;
     lv_point_t trajectory_points[V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT];
     lv_point_t toolpath_segment_points[V5_MAIN_PAGE_TOOLPATH_DRAW_SEGMENTS][V5_MAIN_PAGE_TOOLPATH_SEGMENT_POINT_COUNT];
+    uint16_t toolpath_segment_point_counts[V5_MAIN_PAGE_TOOLPATH_DRAW_SEGMENTS];
     unsigned int trajectory_point_count;
     lv_point_t toolpath_mcs_origin_points[5];
     lv_point_t toolpath_wcs_origin_points[5];
@@ -190,6 +191,10 @@ typedef struct V5MainPage {
     unsigned int toolpath_static_cache_hits;
     unsigned int toolpath_static_cache_misses;
     unsigned int toolpath_line_rewrite_count;
+    unsigned int toolpath_line_set_points_count;
+    unsigned int toolpath_line_last_dirty_rect_count;
+    uint64_t toolpath_line_last_dirty_pixels;
+    uint64_t toolpath_line_last_dirty_max_pixels;
 } V5MainPage;
 
 void v5_main_page_init(V5MainPage *page);

@@ -37,6 +37,16 @@ int v5_native_hal_owner_request_target(
         *wire_target = target;
         return 1;
     }
+    if (operation == V5_NATIVE_HAL_OWNER_OP_HOME_CONFIG) {
+        if (target >= V5_NATIVE_HOME_JOINT_COUNT) return 0;
+        *wire_target = target;
+        return 1;
+    }
+    if (operation == V5_NATIVE_HAL_OWNER_OP_HOME_STATUS) {
+        if (target != 0U) return 0;
+        *wire_target = 0U;
+        return 1;
+    }
     if (target > 1U) return 0;
     *wire_target = target;
     return 1;
@@ -89,34 +99,19 @@ static int read_full(int fd, void *buffer, size_t size)
     return 1;
 }
 
-int v5_native_hal_owner_exchange(
-    unsigned int operation,
-    unsigned int target,
+static int exchange_request(
+    const V5NativeHalOwnerRequest *request,
     unsigned int timeout_ms,
     V5NativeHalOwnerResponse *response)
 {
-    V5NativeHalOwnerRequest request;
     struct sockaddr_un address;
     struct timeval timeout;
     int fd;
-    unsigned int wire_target;
 
-    response_init(response, operation);
-    if (!response) {
+    response_init(response, request ? request->operation : 0U);
+    if (!request || !response) {
         return V5_NATIVE_HAL_OWNER_CLIENT_IO_ERROR;
     }
-    if (!v5_native_hal_owner_request_target(operation, target, &wire_target)) {
-        snprintf(response->code, sizeof(response->code), "%s", "NATIVE_HAL_OWNER_TARGET_INVALID");
-        return V5_NATIVE_HAL_OWNER_CLIENT_IO_ERROR;
-    }
-    memset(&request, 0, sizeof(request));
-    request.magic = V5_NATIVE_HAL_OWNER_MAGIC;
-    request.version = V5_NATIVE_HAL_OWNER_VERSION;
-    request.size = (uint32_t)sizeof(request);
-    request.operation = operation;
-    request.request_id = next_request_id();
-    request.target = wire_target;
-
     fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
     if (fd < 0) {
         snprintf(response->code, sizeof(response->code), "%s", "NATIVE_HAL_OWNER_SOCKET_FAILED");
@@ -134,9 +129,9 @@ int v5_native_hal_owner_exchange(
         snprintf(response->code, sizeof(response->code), "%s", "NATIVE_HAL_OWNER_CONNECT_FAILED");
         return V5_NATIVE_HAL_OWNER_CLIENT_UNAVAILABLE;
     }
-    if (!write_full(fd, &request, sizeof(request)) || !read_full(fd, response, sizeof(*response))) {
+    if (!write_full(fd, request, sizeof(*request)) || !read_full(fd, response, sizeof(*response))) {
         close(fd);
-        response_init(response, operation);
+        response_init(response, request->operation);
         snprintf(response->code, sizeof(response->code), "%s", "NATIVE_HAL_OWNER_IO_FAILED");
         return V5_NATIVE_HAL_OWNER_CLIENT_IO_ERROR;
     }
@@ -144,15 +139,73 @@ int v5_native_hal_owner_exchange(
     if (response->magic != V5_NATIVE_HAL_OWNER_MAGIC ||
         response->version != V5_NATIVE_HAL_OWNER_VERSION ||
         response->size != (uint32_t)sizeof(*response) ||
-        response->operation != operation ||
-        response->request_id != request.request_id) {
-        response_init(response, operation);
+        response->operation != request->operation ||
+        response->request_id != request->request_id) {
+        response_init(response, request->operation);
         snprintf(response->code, sizeof(response->code), "%s", "NATIVE_HAL_OWNER_BAD_RESPONSE");
         return V5_NATIVE_HAL_OWNER_CLIENT_IO_ERROR;
     }
     return response->status == V5_NATIVE_HAL_OWNER_STATUS_OK
                ? V5_NATIVE_HAL_OWNER_CLIENT_OK
                : V5_NATIVE_HAL_OWNER_CLIENT_IO_ERROR;
+}
+
+int v5_native_hal_owner_exchange(
+    unsigned int operation,
+    unsigned int target,
+    unsigned int timeout_ms,
+    V5NativeHalOwnerResponse *response)
+{
+    V5NativeHalOwnerRequest request;
+    unsigned int wire_target;
+    response_init(response, operation);
+    if (!response || !v5_native_hal_owner_request_target(operation, target, &wire_target)) {
+        if (response) snprintf(response->code, sizeof(response->code), "%s", "NATIVE_HAL_OWNER_TARGET_INVALID");
+        return V5_NATIVE_HAL_OWNER_CLIENT_IO_ERROR;
+    }
+    memset(&request, 0, sizeof(request));
+    request.magic = V5_NATIVE_HAL_OWNER_MAGIC;
+    request.version = V5_NATIVE_HAL_OWNER_VERSION;
+    request.size = (uint32_t)sizeof(request);
+    request.operation = operation;
+    request.request_id = next_request_id();
+    request.target = wire_target;
+    return exchange_request(&request, timeout_ms, response);
+}
+
+int v5_native_hal_owner_stage_home_joint(
+    const V5NativeHomeConfigRecord *record,
+    int commit,
+    unsigned int timeout_ms,
+    V5NativeHalOwnerResponse *response)
+{
+    V5NativeHalOwnerRequest request;
+    unsigned int wire_target;
+    response_init(response, V5_NATIVE_HAL_OWNER_OP_HOME_CONFIG);
+    if (!record || !response || record->joint != record->status_slot ||
+        !v5_native_hal_owner_request_target(
+            V5_NATIVE_HAL_OWNER_OP_HOME_CONFIG, record->joint, &wire_target)) {
+        if (response) snprintf(response->code, sizeof(response->code), "%s", "NATIVE_HOME_CONFIG_TARGET_INVALID");
+        return V5_NATIVE_HAL_OWNER_CLIENT_IO_ERROR;
+    }
+    memset(&request, 0, sizeof(request));
+    request.magic = V5_NATIVE_HAL_OWNER_MAGIC;
+    request.version = V5_NATIVE_HAL_OWNER_VERSION;
+    request.size = (uint32_t)sizeof(request);
+    request.operation = V5_NATIVE_HAL_OWNER_OP_HOME_CONFIG;
+    request.request_id = next_request_id();
+    request.target = wire_target;
+    request.flags = (record->active ? V5_NATIVE_HOME_CONFIG_ACTIVE : 0U) |
+                    (commit ? V5_NATIVE_HOME_CONFIG_COMMIT : 0U);
+    request.home_status_slot = record->status_slot;
+    request.axis_code = record->axis_code;
+    request.home_slave_position = record->slave_position;
+    request.home_mapping_generation = record->mapping_generation;
+    request.home_expected_active_mask = record->expected_active_mask;
+    request.home_config_commit_seq = record->commit_seq;
+    request.home_zero_counts = record->zero_counts;
+    request.home_counts_per_unit = record->counts_per_unit;
+    return exchange_request(&request, timeout_ms, response);
 }
 #else
 int v5_native_hal_owner_exchange(
@@ -164,6 +217,22 @@ int v5_native_hal_owner_exchange(
     (void)target;
     (void)timeout_ms;
     response_init(response, operation);
+    if (response) {
+        snprintf(response->code, sizeof(response->code), "%s", "NATIVE_HAL_OWNER_UNAVAILABLE_ON_WIN32");
+    }
+    return V5_NATIVE_HAL_OWNER_CLIENT_UNAVAILABLE;
+}
+
+int v5_native_hal_owner_stage_home_joint(
+    const V5NativeHomeConfigRecord *record,
+    int commit,
+    unsigned int timeout_ms,
+    V5NativeHalOwnerResponse *response)
+{
+    (void)record;
+    (void)commit;
+    (void)timeout_ms;
+    response_init(response, V5_NATIVE_HAL_OWNER_OP_HOME_CONFIG);
     if (response) {
         snprintf(response->code, sizeof(response->code), "%s", "NATIVE_HAL_OWNER_UNAVAILABLE_ON_WIN32");
     }

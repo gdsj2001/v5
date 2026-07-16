@@ -7,6 +7,20 @@ repo_root="${V5_REPO_ROOT:-$default_repo_root}"
 manifest="${1:-$repo_root/config/deploy/v5_runtime_deploy_manifest.tsv}"
 board_ssh="${V5_BOARD_SSH:-}"
 board_ssh_port="${V5_BOARD_SSH_PORT:-22}"
+board_ssh_key="${V5_BOARD_SSH_KEY:-}"
+board_ssh_key_opts=""
+if [ -n "$board_ssh_key" ]; then
+  board_ssh_key_opts="-i $board_ssh_key -o IdentitiesOnly=yes"
+fi
+board_ssh_user_known_hosts="${V5_BOARD_SSH_USER_KNOWN_HOSTS:-/dev/null}"
+board_ssh_strict_host_key="${V5_BOARD_SSH_STRICT_HOST_KEY:-no}"
+board_ssh_pubkey_rsa_opt=""
+if ssh -G 127.0.0.1 2>/dev/null | grep -qi '^pubkeyacceptedalgorithms '; then
+  board_ssh_pubkey_rsa_opt="-o PubkeyAcceptedAlgorithms=+ssh-rsa"
+elif ssh -G 127.0.0.1 2>/dev/null | grep -qi '^pubkeyacceptedkeytypes '; then
+  board_ssh_pubkey_rsa_opt="-o PubkeyAcceptedKeyTypes=+ssh-rsa"
+fi
+board_ssh_legacy_rsa_opts="-o HostKeyAlgorithms=+ssh-rsa $board_ssh_pubkey_rsa_opt -o StrictHostKeyChecking=$board_ssh_strict_host_key -o UserKnownHostsFile=$board_ssh_user_known_hosts"
 strict_remote="${V5_PRECHECK_STRICT_REMOTE:-0}"
 precheck_scope="${V5_PRECHECK_SCOPE:-full}"
 home_dir="${HOME:?HOME is required}"
@@ -29,7 +43,7 @@ remote_check() {
   if [ -z "$board_ssh" ]; then
     return 2
   fi
-  ssh -o BatchMode=yes -o LogLevel=ERROR -o ConnectTimeout=3 -p "$board_ssh_port" "$board_ssh" "$@"
+  ssh -o BatchMode=yes -o LogLevel=ERROR -o ConnectTimeout=3 $board_ssh_legacy_rsa_opts $board_ssh_key_opts -p "$board_ssh_port" "$board_ssh" "$@"
 }
 
 manifest_source_path() {

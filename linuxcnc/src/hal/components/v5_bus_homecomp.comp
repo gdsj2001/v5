@@ -1,0 +1,544 @@
+component v5_bus_homecomp "V5 BUS count-domain native all-axis Home owner";
+
+description """
+Consumes one opaque all-axis Home request.  The realtime owner validates the
+atomically latched axis/slave mapping, safety, stillness, RTCP actual and
+  resident count-domain zero model before LinuxCNC HOME_SEQUENCE can move.
+  The realtime BUS router continuously presents zero-relative feedback and
+  converts zero-relative commands back to physical counts.  Linear joints move
+  to count zero; rotary joints move to the nearest unambiguous equivalent zero.
+  Completion comes only from actual movement, planner completion, native
+  in-position and stable fresh physical samples; Home never rewrites coordinates
+  or adds a second target/error gate after the planner has completed.
+""";
+
+pin out bit is_module = 1;
+license "GPL";
+author "V5 project";
+option homemod;
+;;
+
+#include <stdint.h>
+#include "motion.h"
+#include "homing.h"
+#include "emc/motion/v5_wcheckpoint.h"
+#define CUSTOM_HOMEMODULE
+#include "emc/motion/homing.c"
+#include "hal/components/v5_bus_home_math.h"
+
+#define V5_HOME_JOINTS 5
+#define V5_HOME_STABLE_CYCLES 3u
+#define V5_HOME_WAIT_CYCLES 500u
+
+enum v5_phase {
+    V5_IDLE, V5_MOVING, V5_SETTLING, V5_COMPLETE, V5_FAILED,
+    V5_CANCELLED, V5_PRECHECK, V5_RTCP_WAIT
+};
+enum v5_failure {
+    V5_OK, V5_CONFIG, V5_COUNT_INPUT, V5_LIMIT, V5_CANCEL,
+    V5_ESTOP = 8,
+    V5_DISABLED, V5_DRIVE, V5_RTCP, V5_MOVING_MACHINE,
+    V5_SAFETY_UNKNOWN, V5_MAPPING, V5_RTCP_UNKNOWN, V5_MOTION_PROOF,
+    V5_MOTION_NOT_COMPLETE, V5_SEQUENCE_NOT_STARTED,
+    V5_SINGLE_HOME_UNSUPPORTED, V5_ZERO_DELTA_UNPROVEN, V5_PLAN_STALE
+};
+enum v5_txn_phase {
+    V5_TXN_IDLE, V5_TXN_PRECHECK, V5_TXN_RTCP,
+    V5_TXN_PLAN, V5_TXN_RUN, V5_TXN_TERMINAL
+};
+
+typedef struct {
+    hal_bit_t *config_valid;
+    hal_u32_t *status_slot, *axis_code, *slave_position, *mapping_generation;
+    hal_float_t *counts_per_unit;
+    hal_s32_t *actual_counts, *phase, *failure;
+    hal_float_t *start_counts, *target_counts, *readback_counts, *error_counts;
+    hal_u32_t *readback_generation, *transaction;
+    hal_bit_t *readback_valid, *motion_active;
+} v5_joint_pins;
+
+typedef struct {
+    hal_float_t *base_counts;
+    hal_u32_t *generation;
+    hal_bit_t *valid;
+} v5_wcp_pins;
+
+typedef struct {
+    v5_joint_pins joint[EMCMOT_MAX_JOINTS];
+    v5_wcp_pins rotary[3];
+    hal_bit_t *config_mapping_valid, *router_mapping_valid;
+    hal_u32_t *config_mapping_generation, *config_active_mask, *config_commit_seq;
+    hal_u32_t *router_mapping_generation, *router_active_mask, *router_commit_seq;
+    hal_bit_t *safety_actual_valid, *estop_active, *machine_enabled;
+    hal_bit_t *rtcp_actual_valid, *rtcp_force_latched, *rtcp_force_off;
+    hal_u32_t *rtcp_latched_transaction;
+    hal_float_t *rtcp_active;
+    hal_u32_t *rtcp_request_transaction;
+    hal_u32_t *transaction, *run_active_mask, *completed_mask, *terminal_mask;
+    hal_u32_t *failed_joint, *failure_current_mask;
+    hal_u32_t *failure_generation;
+    hal_s32_t *failure_code, *failure_phase;
+    hal_float_t *failure_actual_counts, *failure_target_counts, *failure_error_counts;
+    hal_bit_t *failure_readback_valid, *failure_motion_active;
+} v5_pins_t;
+
+typedef struct {
+    int phase;
+    int64_t start_counts, target_counts, last_counts;
+    int64_t motion_start_runtime_counts, motion_target_counts;
+    int64_t plan_start_counts, plan_target_counts, plan_delta_counts;
+    int64_t transaction_start_runtime_counts;
+    int64_t zero_cycle_excursion_target_counts;
+    int64_t terminal_last_counts;
+    int64_t plan_sample_counts;
+    unsigned int wcp_generation, stable, settle_timeout;
+    unsigned int plan_generation;
+    unsigned int plan_sample_generation, plan_sample_stable;
+    unsigned int terminal_generation;
+    unsigned int motion_cycles, motion_timeout;
+    int motion_required, motion_observed, last_counts_valid, remap_pending;
+    int zero_cycle_required, zero_cycle_return_pending;
+    int sample_valid, plan_valid, plan_sample_valid, terminal_sample_valid;
+    int64_t actual_counts;
+} v5_joint_state;
+
+typedef struct {
+    int valid;
+    unsigned int status_slot, axis_code, slave_position, mapping_generation;
+    double counts_per_unit;
+} v5_config_snapshot;
+
+static v5_pins_t *P;
+static v5_joint_state S[EMCMOT_MAX_JOINTS];
+static v5_config_snapshot C[V5_HOME_JOINTS];
+static enum v5_txn_phase txn_phase;
+static unsigned int txn_id, mapping_mask, run_mask, run_generation, run_commit_seq;
+static unsigned int precheck_stable, txn_timeout, physical_complete_mask, movement_mask;
+static unsigned int start_ready_mask, start_release_mask, start_stage_mask;
+static unsigned int terminal_stable;
+static double servo_period_seconds;
+static int base_arming, context_started, failure_latched, start_sequence;
+static int snapshot_valid;
+
+static int v5_plan_target(int j, int64_t current, int64_t *target, int64_t *delta);
+
+static int rotary_index(unsigned int axis, unsigned int *index)
+{
+    if (axis == 'A') *index = 0;
+    else if (axis == 'B') *index = 1;
+    else if (axis == 'C') *index = 2;
+    else return 0;
+    return 1;
+}
+
+static int read_wcheckpoint_snapshot(
+    unsigned int rotary, v5_wcheckpoint_snapshot_t *snapshot)
+{
+    return ReadWcheckpointSnapshot &&
+        ReadWcheckpointSnapshot(rotary, snapshot);
+}
+
+static int axis_bit(unsigned int axis, unsigned int *bit)
+{
+    if (axis == 'X') *bit = 1u << 0;
+    else if (axis == 'Y') *bit = 1u << 1;
+    else if (axis == 'Z') *bit = 1u << 2;
+    else if (axis == 'A') *bit = 1u << 3;
+    else if (axis == 'B') *bit = 1u << 4;
+    else if (axis == 'C') *bit = 1u << 5;
+    else return 0;
+    return 1;
+}
+
+static unsigned int active_mask(void)
+{
+    unsigned int mask = 0;
+    int j;
+    for (j = 0; j < all_joints && j < V5_HOME_JOINTS; ++j)
+        if (GET_JOINT_ACTIVE_FLAG(&joints[j])) mask |= 1u << j;
+    return mask;
+}
+
+static unsigned int native_home_run_mask(unsigned int configured_mask)
+{
+    int sequences[V5_HOME_JOINTS];
+    int j;
+    for (j = 0; j < V5_HOME_JOINTS; ++j) sequences[j] = H[j].home_sequence;
+    return v5_home_sequence_run_mask(
+        configured_mask, sequences, V5_HOME_JOINTS);
+}
+
+static int resume_next_native_sequence(void)
+{
+    int sequences[V5_HOME_JOINTS];
+    int next;
+    int j;
+    for (j = 0; j < V5_HOME_JOINTS; ++j) sequences[j] = H[j].home_sequence;
+    if (!v5_home_next_sequence(
+            run_mask, physical_complete_mask, sequences, V5_HOME_JOINTS,
+            current_sequence, &next)) return 0;
+    current_sequence = next;
+    sequence_state = HOME_SEQUENCE_START_JOINTS;
+    homing_active = 1;
+    return 1;
+}
+
+static int current_counts(
+    int j, int64_t *logical, int64_t *base, int64_t *runtime, unsigned int *generation)
+{
+    unsigned int r;
+    int64_t raw;
+    if (!rotary_index(C[j].axis_code, &r)) {
+        *logical = (int64_t)*P->joint[j].actual_counts;
+        *base = 0;
+        *runtime = *logical;
+        *generation = 0;
+        return 1;
+    }
+    if (!*P->rotary[r].valid || !*P->rotary[r].generation ||
+        !v5_home_exact_i64(*P->rotary[r].base_counts, base)) return 0;
+    raw = (int64_t)*P->joint[j].actual_counts;
+    *runtime = raw;
+    if (!v5_home_bind_runtime_actual(*base, raw, logical)) return 0;
+    *generation = *P->rotary[r].generation;
+    return 1;
+}
+
+static void publish_sample(
+    int j, int64_t actual, unsigned int generation, int motion_active);
+
+static int validate_global(int *failed_joint)
+{
+    unsigned int seen_axes = 0, seen_slaves = 0;
+    unsigned int generation = run_generation;
+    unsigned int mask = active_mask();
+    int j;
+    if (failed_joint) *failed_joint = -1;
+    if (!*P->safety_actual_valid) return V5_SAFETY_UNKNOWN;
+    if (*P->estop_active) return V5_ESTOP;
+    if (!*P->machine_enabled) return V5_DISABLED;
+    if (!*P->config_mapping_valid || !*P->router_mapping_valid ||
+        generation == 0 || mask == 0 || mask != mapping_mask ||
+        run_mask == 0 || (run_mask & ~mapping_mask) != 0 ||
+        mask != *P->config_active_mask || mask != *P->router_active_mask ||
+        generation != *P->router_mapping_generation ||
+        generation != *P->config_mapping_generation ||
+        *P->config_commit_seq == 0 ||
+        *P->config_commit_seq != run_commit_seq ||
+        *P->config_commit_seq != *P->router_commit_seq) return V5_MAPPING;
+    for (j = 0; j < all_joints && j < V5_HOME_JOINTS; ++j) {
+        v5_config_snapshot *cfg = &C[j];
+        int64_t logical, base, runtime;
+        unsigned int axis, wgen;
+        if (!(mask & (1u << j))) continue;
+        if (!cfg->valid || cfg->status_slot != (unsigned int)j ||
+            cfg->slave_position >= V5_HOME_JOINTS ||
+            cfg->mapping_generation != generation ||
+            !axis_bit(cfg->axis_code, &axis) || (seen_axes & axis) ||
+            (seen_slaves & (1u << cfg->slave_position)) ||
+            !isfinite(cfg->counts_per_unit) || cfg->counts_per_unit == 0.0 ||
+            ((run_mask & (1u << j))
+                ? !v5_home_sequence_valid(H[j].home_sequence)
+                : !v5_home_sequence_disabled(H[j].home_sequence))) {
+            v5_home_set_failed_joint(j, V5_HOME_JOINTS, failed_joint);
+            return V5_CONFIG;
+        }
+        seen_axes |= axis;
+        seen_slaves |= 1u << cfg->slave_position;
+        if (!current_counts(j, &logical, &base, &runtime, &wgen)) {
+            v5_home_set_failed_joint(j, V5_HOME_JOINTS, failed_joint);
+            return V5_COUNT_INPUT;
+        }
+        S[j].start_counts = logical;
+        S[j].target_counts = logical;
+        S[j].wcp_generation = wgen;
+        publish_sample(j, logical, wgen, joints[j].free_tp.active);
+        if (joints[j].flag & (EMCMOT_JOINT_FAULT_BIT | EMCMOT_JOINT_ERROR_BIT)) {
+            v5_home_set_failed_joint(j, V5_HOME_JOINTS, failed_joint);
+            return V5_DRIVE;
+        }
+        if (!GET_JOINT_INPOS_FLAG(&joints[j]) || joints[j].free_tp.active) {
+            v5_home_set_failed_joint(j, V5_HOME_JOINTS, failed_joint);
+            return V5_MOVING_MACHINE;
+        }
+    }
+    return V5_OK;
+}
+
+static int snapshot_config(void)
+{
+    int j;
+    unsigned int generation = *P->config_mapping_generation;
+    unsigned int mask = *P->config_active_mask;
+    unsigned int commit = *P->config_commit_seq;
+    for (j = 0; j < V5_HOME_JOINTS; ++j) {
+        C[j].valid = *P->joint[j].config_valid ? 1 : 0;
+        C[j].status_slot = *P->joint[j].status_slot;
+        C[j].axis_code = *P->joint[j].axis_code;
+        C[j].slave_position = *P->joint[j].slave_position;
+        C[j].mapping_generation = *P->joint[j].mapping_generation;
+        C[j].counts_per_unit = *P->joint[j].counts_per_unit;
+    }
+    if (!commit || commit != *P->config_commit_seq ||
+        generation != *P->config_mapping_generation ||
+        mask != *P->config_active_mask) return 0;
+    run_generation = generation;
+    run_commit_seq = commit;
+    mapping_mask = mask;
+    run_mask = native_home_run_mask(mapping_mask);
+    return run_mask != 0;
+}
+
+#include "hal/components/v5_bus_home_motion.h"
+
+#include "hal/components/v5_bus_home_pins.h"
+
+int homing_init(int id, double period, int njoints, int nextra, emcmot_joint_t *pjoints)
+{
+    int rc;
+    if (!v5_home_joint_count_supported(njoints, V5_HOME_JOINTS)) return -1;
+    rc = base_homing_init(id, period, njoints, nextra, pjoints);
+    if (rc) return rc;
+    servo_period_seconds = period;
+    rc = v5_home_make_pins(id, njoints);
+    if (!rc) *P->failed_joint = UINT32_MAX;
+    return rc;
+}
+
+void read_homing_in_pins(int n) { base_read_homing_in_pins(n); }
+void write_homing_out_pins(int n) { base_write_homing_out_pins(n); }
+
+bool do_homing(void)
+{
+    int j, busy = 0, failure, failed_joint = -1;
+    unsigned int planned_cycle_mask = 0;
+    if (txn_phase == V5_TXN_PRECHECK) {
+        failure = validate_global(&failed_joint);
+        if (failure == V5_MOVING_MACHINE) {
+            v5_home_precheck_sample(1, V5_HOME_STABLE_CYCLES, &precheck_stable);
+            if (++txn_timeout > V5_HOME_WAIT_CYCLES)
+                fail_transaction(failed_joint, failure, 0);
+            return 0;
+        }
+        if (failure) {
+            fail_transaction(failed_joint,
+                             failure, failure == V5_ESTOP &&
+                             v5_home_estop_is_cancel(1));
+            return 0;
+        }
+        txn_timeout = 0;
+        if (!v5_home_precheck_sample(
+                0, V5_HOME_STABLE_CYCLES, &precheck_stable)) return 0;
+        *P->rtcp_request_transaction = txn_id;
+        *P->rtcp_force_off = 1;
+        txn_phase = V5_TXN_RTCP;
+        txn_timeout = 0;
+        precheck_stable = 0;
+        publish_run(V5_RTCP_WAIT, V5_OK);
+    }
+    if (txn_phase == V5_TXN_RTCP) {
+        if (!*P->safety_actual_valid || *P->estop_active || !*P->machine_enabled) {
+            failure = !*P->safety_actual_valid ? V5_SAFETY_UNKNOWN :
+                (*P->estop_active ? V5_ESTOP : V5_DISABLED);
+            fail_transaction(-1, *P->estop_active ? V5_CANCEL : failure,
+                             *P->estop_active ? 1 : 0);
+            return 0;
+        }
+        if (!*P->rtcp_actual_valid) {
+            fail_transaction(-1, V5_RTCP_UNKNOWN, 0);
+            return 0;
+        }
+        if (!v5_home_rtcp_ack_matches(
+                txn_id, *P->rtcp_latched_transaction,
+                *P->rtcp_actual_valid, *P->rtcp_force_latched,
+                *P->rtcp_active)) {
+            if (++txn_timeout > V5_HOME_WAIT_CYCLES)
+                fail_transaction(-1, V5_RTCP, 0);
+            return 0;
+        }
+        txn_phase = V5_TXN_PLAN;
+        txn_timeout = 0;
+        precheck_stable = 0;
+        publish_run(V5_PRECHECK, V5_OK);
+        return 0;
+    }
+    if (txn_phase == V5_TXN_PLAN) {
+        failure = validate_global(&failed_joint);
+        if (failure == V5_MOVING_MACHINE) {
+            v5_home_precheck_sample(1, V5_HOME_STABLE_CYCLES, &precheck_stable);
+            if (++txn_timeout > V5_HOME_WAIT_CYCLES)
+                fail_transaction(failed_joint, failure, 0);
+            return 0;
+        }
+        if (failure) {
+            fail_transaction(failed_joint,
+                             failure, failure == V5_ESTOP &&
+                             v5_home_estop_is_cancel(1));
+            return 0;
+        }
+        if (!v5_home_precheck_sample(
+                0, V5_HOME_STABLE_CYCLES, &precheck_stable)) return 0;
+        failure = freeze_execution_plan(&failed_joint, &planned_cycle_mask);
+        if (failure) {
+            fail_transaction(failed_joint, failure, 0);
+            return 0;
+        }
+        if (!v5_home_expected_mask_complete(run_mask, planned_cycle_mask)) {
+            fail_transaction(-1, V5_ZERO_DELTA_UNPROVEN, 0);
+            return 0;
+        }
+        failure = validate_frozen_execution_plan(&failed_joint);
+        if (failure) {
+            fail_transaction(failed_joint, failure, 0);
+            return 0;
+        }
+        for (j = 0; j < all_joints && j < V5_HOME_JOINTS; ++j)
+            if (run_mask & (1u << j)) H[j].homed = 0;
+        base_arming = 1;
+        base_do_home_joint(-1);
+        base_arming = 0;
+        if (sequence_state != HOME_SEQUENCE_START) {
+            fail_transaction(0, V5_SEQUENCE_NOT_STARTED, 0);
+            return 0;
+        }
+        txn_phase = V5_TXN_RUN;
+        txn_timeout = 0;
+    }
+    if (txn_phase != V5_TXN_RUN) return base_do_homing();
+    do_homing_sequence();
+    if (sequence_state == HOME_SEQUENCE_IDLE &&
+        physical_complete_mask != run_mask &&
+        resume_next_native_sequence()) {
+        do_homing_sequence();
+    }
+    if (sequence_state != HOME_SEQUENCE_IDLE) {
+        unsigned int sequence_mask = active_stage_mask();
+        if (sequence_mask && !v5_home_stage_mask_valid(run_mask, sequence_mask)) {
+            fail_transaction(-1, V5_SEQUENCE_NOT_STARTED, 0);
+            return 0;
+        }
+        if (sequence_mask) {
+            txn_timeout = 0;
+        } else if (++txn_timeout > V5_HOME_WAIT_CYCLES) {
+            fail_transaction(-1, V5_SEQUENCE_NOT_STARTED, 0);
+            return 0;
+        }
+    }
+    failure = update_stage_start_barrier(&failed_joint);
+    if (failure) {
+        fail_transaction(failed_joint, failure, 0);
+        return 0;
+    }
+    for (j = 0; j < all_joints; ++j) {
+        if (H[j].joint_in_sequence && GET_JOINT_ACTIVE_FLAG(&joints[j])) {
+            busy += v5_joint_machine(j);
+        }
+    }
+    if (sequence_state == HOME_SEQUENCE_IDLE && physical_complete_mask != run_mask) {
+        for (j = 0; j < all_joints && j < V5_HOME_JOINTS; ++j) {
+            if ((run_mask & (1u << j)) &&
+                !(physical_complete_mask & (1u << j))) break;
+        }
+        fail_transaction(j < all_joints ? j : 0, V5_SEQUENCE_NOT_STARTED, 0);
+        return 0;
+    }
+    homing_active = busy > 0 || sequence_state != HOME_SEQUENCE_IDLE;
+    if (sequence_state == HOME_SEQUENCE_IDLE &&
+        v5_home_expected_mask_complete(run_mask, physical_complete_mask)) {
+        int terminal_ready;
+        if (!v5_home_transaction_motion_proven(movement_mask, run_mask)) {
+            fail_transaction(-1, V5_ZERO_DELTA_UNPROVEN, 0);
+            return 0;
+        }
+        terminal_ready = v5_terminal_readback_ready(&failed_joint, &failure);
+        if (terminal_ready < 0) {
+            fail_transaction(failed_joint, failure, 0);
+            return 0;
+        }
+        if (!terminal_ready) {
+            if (++txn_timeout > V5_HOME_WAIT_CYCLES)
+                fail_transaction(failed_joint,
+                    failure ? failure : V5_MOTION_NOT_COMPLETE, 0);
+            return 0;
+        }
+        if (!v5_home_atomic_commit_ready(
+                run_mask, physical_complete_mask, movement_mask,
+                terminal_stable, V5_HOME_STABLE_CYCLES)) {
+            fail_transaction(-1, V5_MOTION_PROOF, 0);
+            return 0;
+        }
+        v5_commit_all_homed();
+        finish_transaction();
+        return 1;
+    }
+    return 0;
+}
+
+void do_home_joint(int j)
+{
+    int i;
+    if (j != -1) {
+        if (txn_phase > V5_TXN_IDLE && txn_phase < V5_TXN_TERMINAL) return;
+        txn_id++;
+        if (!txn_id) txn_id = 1;
+        run_mask = (j >= 0 && j < all_joints && j < V5_HOME_JOINTS)
+            ? (1u << j) : 0;
+        context_started = 0;
+        physical_complete_mask = movement_mask = 0;
+        start_ready_mask = start_release_mask = start_stage_mask = 0;
+        terminal_stable = 0;
+        start_sequence = -1;
+        failure_latched = 0;
+        reset_transaction_outputs();
+        txn_phase = V5_TXN_PRECHECK;
+        if (run_mask) {
+            S[j].sample_valid = 0;
+            S[j].start_counts = S[j].target_counts = 0;
+            publish_run(V5_PRECHECK, V5_SINGLE_HOME_UNSUPPORTED);
+        }
+        fail_transaction(run_mask ? j : -1, V5_SINGLE_HOME_UNSUPPORTED, 0);
+        return;
+    }
+    if (txn_phase > V5_TXN_IDLE && txn_phase < V5_TXN_TERMINAL) return;
+    txn_id++;
+    if (!txn_id) txn_id = 1;
+    precheck_stable = txn_timeout = physical_complete_mask = movement_mask = 0;
+    start_ready_mask = start_release_mask = start_stage_mask = 0;
+    terminal_stable = 0;
+    start_sequence = -1;
+    context_started = 0;
+    failure_latched = 0;
+    snapshot_valid = snapshot_config();
+    if (!snapshot_valid) {
+        mapping_mask = active_mask();
+        run_mask = native_home_run_mask(mapping_mask);
+    }
+    reset_transaction_outputs();
+    for (i = 0; i < all_joints && i < V5_HOME_JOINTS; ++i) {
+        S[i].phase = V5_IDLE;
+        S[i].sample_valid = S[i].plan_valid = 0;
+        S[i].plan_sample_valid = 0;
+        S[i].plan_sample_stable = S[i].settle_timeout = 0;
+        S[i].terminal_sample_valid = 0;
+        *P->joint[i].readback_valid = 0;
+        *P->joint[i].motion_active = 0;
+    }
+    txn_phase = V5_TXN_PRECHECK;
+    publish_run(V5_PRECHECK, V5_OK);
+    if (*P->safety_actual_valid && *P->estop_active)
+        fail_transaction(-1, V5_ESTOP, v5_home_estop_is_cancel(0));
+    else if (!snapshot_valid)
+        fail_transaction(-1, V5_MAPPING, 0);
+}
+
+void do_cancel_homing(int j)
+{
+    if (txn_phase > V5_TXN_IDLE && txn_phase < V5_TXN_TERMINAL) {
+        fail_transaction(j >= 0 ? j : 0, V5_CANCEL, 1);
+        return;
+    }
+    base_do_cancel_homing(j);
+}
+
+#include "hal/components/v5_bus_home_api.h"
+#undef CUSTOM_HOMEMODULE

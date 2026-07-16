@@ -44,6 +44,7 @@ int v5_settings_axis_zero_start(const char *axis,
                                 V5SettingsActionResult *result);
 int v5_settings_action_poll_status(V5SettingsActionStatus *status);
 int v5_settings_action_cancel(const char *run_id);
+int v5_settings_action_restart_commit(const char *run_id);
 
 #ifdef __cplusplus
 }

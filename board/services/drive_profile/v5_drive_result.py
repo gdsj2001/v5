@@ -74,19 +74,6 @@ def compact_write_result(item: Any) -> Dict[str, Any]:
     return compact
 
 
-def compact_recovery_result(item: Any) -> Dict[str, Any]:
-    if not isinstance(item, dict):
-        return {"ok": False, "code": "BAD_RECOVERY_RESULT"}
-    operations = item.get("operations") if isinstance(item.get("operations"), list) else []
-    compact: Dict[str, Any] = {
-        "ok": bool(item.get("ok")),
-        "operation_count": len(operations),
-    }
-    if operations:
-        compact["last_operation"] = compact_sdo_io(operations[-1]) if isinstance(operations[-1], dict) else {"ok": False, "code": "BAD_SDO_RESULT"}
-    return compact
-
-
 def compact_read_item(item: Any) -> Dict[str, Any]:
     if not isinstance(item, dict):
         return {"ok": False, "code": "BAD_READ_RESULT"}
@@ -126,25 +113,29 @@ def compact_health(health: Any) -> Dict[str, Any]:
     return compact
 
 
+def append_batch_readback_context(compact: Dict[str, Any], readback: Dict[str, Any]) -> None:
+    if "slave_state" in readback:
+        compact["slave_state"] = str(readback.get("slave_state") or "")
+    required_failures = readback.get("required_read_failures") if isinstance(readback.get("required_read_failures"), list) else []
+    if required_failures:
+        compact["required_read_failures"] = [
+            {key: item.get(key) for key in ("command", "code") if key in item}
+            for item in required_failures[:8] if isinstance(item, dict)
+        ]
+    if "recovery_reason" in readback:
+        compact["recovery_reason"] = str(readback.get("recovery_reason") or "")
+    first_failure = readback.get("first_failure") if isinstance(readback.get("first_failure"), dict) else {}
+    if first_failure:
+        compact["first_failure"] = {
+            key: first_failure.get(key)
+            for key in ("command", "field", "code", "value", "actual", "expected", "aux_error_code")
+            if key in first_failure
+        }
+
+
 def compact_readback(readback: Any) -> Dict[str, Any]:
     if not isinstance(readback, dict):
         return {"ok": False, "code": "BAD_READBACK_RESULT"}
-    if "attempt_count" in readback and "attempts" not in readback:
-        compact: Dict[str, Any] = {
-            "ok": bool(readback.get("ok")),
-            "attempt_count": readback.get("attempt_count"),
-            "health": compact_health(readback.get("health")),
-        }
-        if isinstance(readback.get("last_attempt"), dict):
-            last = readback.get("last_attempt") or {}
-            compact["last_attempt"] = {
-                "attempt": last.get("attempt"),
-                "read_ok": bool(last.get("read_ok")),
-                "health": compact_health(last.get("health")),
-            }
-        if isinstance(readback.get("mailbox_recovery"), dict):
-            compact["mailbox_recovery"] = readback.get("mailbox_recovery")
-        return compact
     attempts = readback.get("attempts") if isinstance(readback.get("attempts"), list) else []
     compact: Dict[str, Any] = {
         "ok": bool(readback.get("ok")),
@@ -158,8 +149,7 @@ def compact_readback(readback: Any) -> Dict[str, Any]:
             "read_ok": bool(last.get("read_ok")),
             "health": compact_health(last.get("health")),
         }
-    if isinstance(readback.get("mailbox_recovery"), dict):
-        compact["mailbox_recovery"] = readback.get("mailbox_recovery")
+    append_batch_readback_context(compact, readback)
     return compact
 
 
@@ -175,8 +165,6 @@ def compact_error_detail(detail: Any) -> Any:
                 clean[key] = compact_read_item(value)
             elif key in {"factory_reset_write", "fault_reset_write", "egear_write", "mode_write", "save_parameters_write"}:
                 clean[key] = compact_write_result(value)
-            elif key in {"post_write_op_recovery", "factory_reset_recovery", "fault_reset_after_factory_reset"}:
-                clean[key] = compact_recovery_result(value)
             elif key == "failures" and isinstance(value, list):
                 clean[key] = [compact_target_result(item) if isinstance(item, dict) else item for item in value]
             elif isinstance(value, (str, int, float, bool)) or value is None:
@@ -207,6 +195,7 @@ def compact_target_result(item: Any) -> Dict[str, Any]:
         "profile_activation_status",
         "batch_readback_attempt_count",
         "batch_recovery_attempted",
+        "slave_state",
     )
     compact = {key: item.get(key) for key in keep if key in item}
     if "target_egear" in item:
@@ -214,9 +203,6 @@ def compact_target_result(item: Any) -> Dict[str, Any]:
     for key in ("factory_reset_write", "fault_reset_write", "egear_write", "mode_write", "save_parameters_write"):
         if key in item:
             compact[key] = compact_write_result(item.get(key))
-    for key in ("post_write_op_recovery", "factory_reset_recovery", "fault_reset_after_factory_reset"):
-        if key in item:
-            compact[key] = compact_recovery_result(item.get(key))
     if "write_readback" in item:
         compact["write_readback"] = compact_readback(item.get("write_readback"))
     if "mode_pre_readback" in item and isinstance(item.get("mode_pre_readback"), dict):
@@ -228,6 +214,13 @@ def compact_target_result(item: Any) -> Dict[str, Any]:
         }
     if "readback" in item:
         compact["readback"] = compact_readback(item.get("readback"))
+    if "reads" in item and isinstance(item.get("reads"), dict):
+        compact["reads"] = {
+            str(name): compact_read_item(read_item)
+            for name, read_item in list(item.get("reads", {}).items())[:16]
+        }
+    if "health" in item:
+        compact["health"] = compact_health(item.get("health"))
     if "detail" in item:
         compact["detail"] = compact_error_detail(item.get("detail"))
     return compact
@@ -288,6 +281,8 @@ def compact_action_result_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         "raw_limit_live_verified",
         "raw_runtime_zero_verified",
         "memory_zero_verified",
+        "snapshot_generated_at",
+        "snapshot_profile_count",
     ):
         if key in payload:
             compact[key] = payload.get(key)
@@ -303,6 +298,43 @@ def compact_action_result_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         compact["prechecks"] = [compact_precheck_result(item) for item in payload.get("prechecks", [])]
     if isinstance(payload.get("scan"), dict):
         compact["scan"] = compact_scan_result(payload.get("scan"))
+    if isinstance(payload.get("recovery_positions"), list):
+        compact["recovery_positions"] = [
+            str(position) for position in payload.get("recovery_positions", [])[:16]
+        ]
+    if isinstance(payload.get("drive_write_window"), dict):
+        window = payload.get("drive_write_window") or {}
+        compact_window: Dict[str, Any] = {
+            key: window.get(key)
+            for key in (
+                "restore_requested", "restore_expected", "restore_confirmed",
+                "final_off_confirmed",
+            )
+            if key in window
+        }
+        for stage_name in ("begin", "finish"):
+            stage = window.get(stage_name)
+            if isinstance(stage, dict):
+                compact_window[stage_name] = {
+                    key: stage.get(key)
+                    for key in (
+                        "ok", "code", "run_id", "initial_machine_enabled",
+                        "final_machine_enabled",
+                    )
+                    if key in stage
+                }
+        compact["drive_write_window"] = compact_window
+    for batch_key in ("factory_reset_batch", "fault_reset_batch"):
+        batch = payload.get(batch_key)
+        if isinstance(batch, dict):
+            compact[batch_key] = {
+                "code": str(batch.get("code") or ""),
+                "message_cn": str(batch.get("message_cn") or ""),
+                "recovery_positions": [
+                    str(position)
+                    for position in (batch.get("recovery_positions") or [])[:16]
+                ],
+            }
     for key in ("settings_runtime_writeback", "disk_write", "scale_chain"):
         if key in payload:
             compact[key] = payload.get(key)

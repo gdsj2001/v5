@@ -18,7 +18,7 @@
 #define V5_TOOLPATH_GESTURE_LEFT_INSET 132
 #define V5_TOOLPATH_GESTURE_RIGHT_INSET 64
 #define V5_TOOLPATH_GESTURE_BOTTOM_INSET 58
-#define V5_TOOLPATH_PROGRAM_LINE_WIDTH 2
+#define V5_TOOLPATH_PROGRAM_LINE_WIDTH 1
 #define V5_MAIN_PAGE_SELECTION_IDLE_MS 3000U
 #define V5_MAIN_PAGE_JOG_HOLD_MS 500U
 #define V5_MAIN_PAGE_JOG_KEEPALIVE_MS 200U
@@ -48,13 +48,6 @@ void v5_main_page_internal_block_action_for_power_on_home(
     V5MainPage *page,
     V5MainPageActionKind action,
     V5MainPageActionReport *report);
-
-void v5_main_page_internal_block_home_for_safety(
-    V5MainPage *page,
-    V5MainPageActionReport *report,
-    const char *readback_code);
-
-const char *v5_main_page_internal_home_safety_precondition_code(const V5MainPage *page);
 
 lv_coord_t v5_main_page_internal_clamp_coord(double value, lv_coord_t min_value, lv_coord_t max_value);
 
@@ -88,6 +81,12 @@ void v5_main_page_internal_hide_toolpath_ac_geometry(V5MainPage *page);
 void v5_main_page_internal_hide_toolpath_line(lv_obj_t *line);
 
 void v5_main_page_internal_hide_toolpath_program_line(V5MainPage *page);
+
+int v5_main_page_internal_update_toolpath_program_segment(
+    V5MainPage *page,
+    unsigned int segment,
+    const lv_point_t *points,
+    unsigned int point_count);
 
 void v5_main_page_internal_hide_toolpath_program_wcs_objects(V5MainPage *page);
 

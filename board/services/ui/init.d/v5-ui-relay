@@ -20,6 +20,7 @@ REMOTE_INPUT=${V5_UI_REMOTE_INPUT:-layout_only}
 REMOTE_WIDTH=${V5_UI_REMOTE_WIDTH:-1024}
 REMOTE_HEIGHT=${V5_UI_REMOTE_HEIGHT:-600}
 PROJECT_ROOT=${V5_PROJECT_ROOT:-/opt/8ax/v5}
+UI_INPUT_NICE=0
 PROFILE_SNAPSHOT=/usr/libexec/8ax/drive_profile/v5_drive_profile_resident_snapshot.py
 LINUXCNCRSH_PORT=${V5_LINUXCNCRSH_PORT:-5007}
 LINUXCNCRSH_CONNECTPW=${V5_LINUXCNCRSH_CONNECTPW:-EMC}
@@ -69,18 +70,17 @@ is_running() {
 set_non_microkernel_affinity() {
   pid="$1"
   [ -n "$pid" ] || return 0
-  command -v taskset >/dev/null 2>&1 || return 0
-  if grep -qw 1 /sys/devices/system/cpu/online 2>/dev/null || grep -q '0-1' /sys/devices/system/cpu/online 2>/dev/null; then
-    taskset -pc 1 "$pid" >>"$LOGFILE" 2>&1 || true
-  fi
+  command -v taskset >/dev/null 2>&1 || return 1
+  command -v renice >/dev/null 2>&1 || return 1
+  cpu1_available || return 1
+  taskset -a -pc 1 "$pid" >>"$LOGFILE" 2>&1 || return 1
+  renice -n "$UI_INPUT_NICE" -p "$pid" >>"$LOGFILE" 2>&1 || return 1
+  nice_value=$(awk '{print $19}' /proc/"$pid"/stat 2>/dev/null || true)
+  [ "$nice_value" = "$UI_INPUT_NICE" ] || return 1
 }
 
 cpu1_available() {
   grep -qw 1 /sys/devices/system/cpu/online 2>/dev/null || grep -q '0-1' /sys/devices/system/cpu/online 2>/dev/null
-}
-
-default_route_iface() {
-  awk '$2 == "00000000" {print $1; exit}' /proc/net/route 2>/dev/null || true
 }
 
 set_irq_affinity_by_label() {
@@ -100,12 +100,8 @@ set_irq_affinity_by_label() {
   done
 }
 
-set_non_microkernel_irq_affinity() {
+set_display_irq_affinity() {
   cpu1_available || return 0
-  route_iface=$(default_route_iface)
-  if [ -n "$route_iface" ]; then
-    set_irq_affinity_by_label "$route_iface" 1
-  fi
   set_irq_affinity_by_label "xilinx_framebuffer" 1
 }
 
@@ -243,6 +239,8 @@ start_service() {
   test -x "$BOOT_READY"
   cpu1_available
   command -v taskset >/dev/null 2>&1
+  command -v nice >/dev/null 2>&1
+  command -v renice >/dev/null 2>&1
   mkdir -p /run/8ax
   mkdir -p /run/8ax_v5_product_ui
   rm -f "$PIDFILE" "$UI_PIDFILE"
@@ -258,14 +256,14 @@ start_service() {
   boot_stage profile_snapshot_ready
   wait_boot_inputs_ready
   boot_stage boot_inputs_ready
-  set_non_microkernel_irq_affinity
+  set_display_irq_affinity
 
   V5_UI_READY_PATH="$UI_READY_PATH" V5_UI_REMOTE_INPUT="$REMOTE_INPUT" \
     V5_UI_REMOTE_BIND="$REMOTE_BIND" V5_UI_REMOTE_ALLOW_CIDRS="$REMOTE_ALLOW_CIDRS" \
     V5_UI_REMOTE_PORT="$PORT" V5_UI_REMOTE_WIDTH="$REMOTE_WIDTH" V5_UI_REMOTE_HEIGHT="$REMOTE_HEIGHT" \
-    setsid taskset -c 1 "$RELAY_DAEMON" --host "$REMOTE_BIND" --port "$PORT" \
+    setsid taskset -c 1 nice -n "$UI_INPUT_NICE" "$RELAY_DAEMON" --host "$REMOTE_BIND" --port "$PORT" \
       --allow-cidrs "$REMOTE_ALLOW_CIDRS" --width "$REMOTE_WIDTH" --height "$REMOTE_HEIGHT" \
-      --ready-path "$UI_READY_PATH" >>"$LOGFILE" 2>&1 &
+      --ready-path "$UI_READY_PATH" --program-root "$PROJECT_ROOT/gcode/golden" >>"$LOGFILE" 2>&1 &
   echo "$!" >"$PIDFILE"
   i=0
   while [ "$i" -lt 50 ]; do
@@ -285,7 +283,7 @@ start_service() {
   boot_stage remote_relay_ready
 
   V5_PROJECT_ROOT="$PROJECT_ROOT" V5_UI_REMOTE_INPUT="$REMOTE_INPUT" \
-    setsid taskset -c 1 "$UI_DAEMON" --serve >>"$UI_BOOT_LOG" 2>&1 &
+    setsid taskset -c 1 nice -n "$UI_INPUT_NICE" "$UI_DAEMON" --serve >>"$UI_BOOT_LOG" 2>&1 &
   echo "$!" >"$UI_PIDFILE"
   boot_stage ui_process_spawned
   sleep 0.1
@@ -317,7 +315,7 @@ start_service() {
   boot_stage ui_ready
   set_non_microkernel_affinity "$(cat "$UI_PIDFILE")"
   set_non_microkernel_affinity "$(cat "$PIDFILE")"
-  set_non_microkernel_irq_affinity
+  set_display_irq_affinity
   echo "v5_ui_relay started relay_pid=$(cat "$PIDFILE") ui_pid=$(cat "$UI_PIDFILE") port=$PORT bind=$REMOTE_BIND allow_cidrs=$REMOTE_ALLOW_CIDRS remote_input=$REMOTE_INPUT project_root=$PROJECT_ROOT ready=$UI_READY_PATH"
   return 0
 }

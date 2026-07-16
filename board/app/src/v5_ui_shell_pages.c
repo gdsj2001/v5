@@ -425,7 +425,7 @@ lv_obj_t *shell_create_mdi_page(lv_obj_t *screen)
     g_v5_shell_mdi_line_label = shell_make_label(root, 62, 38, 450, 492, "MDI>", shell_rgb(247, 250, 252), LV_TEXT_ALIGN_LEFT);
     lv_label_set_long_mode(g_v5_shell_mdi_line_label, LV_LABEL_LONG_WRAP);
     g_v5_shell_mdi_status_label = shell_make_label(root, 62, 536, 390, 24, "Native MDI", shell_rgb(150, 162, 174), LV_TEXT_ALIGN_LEFT);
-    shell_make_label(root, 62, 558, 390, 24, "FANUC-style block input", shell_rgb(150, 162, 174), LV_TEXT_ALIGN_LEFT);
+    shell_make_label(root, 62, 558, 390, 24, "LinuxCNC RS274/NGC 原生输入", shell_rgb(150, 162, 174), LV_TEXT_ALIGN_LEFT);
 
     shell_create_cnc_keyboard_panel(root, 554, 28, 1);
     shell_text_button(root, "清空", 828, 418, 86, 54, 244, 242, 237, shell_mdi_clear_cb);

@@ -135,7 +135,8 @@ and `.gcode` files, then sends the selected file body to the board relay
 client calls `GET /remote/program/file?filename=<name>`; if the board already
 has that basename, the client must ask the operator before retrying with
 `overwrite=1`. The relay validates the basename and extension, writes atomically
-into `/opt/8ax/phase0_bus5/nc`, and returns size/SHA evidence. Upload success
+into `/opt/8ax/v5/gcode/golden`, the same directory scanned by the board
+`打开程序` page, and returns size/SHA evidence. Upload success
 does not open, run, preview, or select the program; it only makes the file
 available to the board program list, which refreshes from the same directory.
 Any later program-open/run action must still go through the existing board

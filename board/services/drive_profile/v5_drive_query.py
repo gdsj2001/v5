@@ -3,11 +3,10 @@ from __future__ import annotations
 from typing import Any, Dict, List, Tuple
 
 from v5_drive_bus_contract import AXIS_ORDER, OPTIONAL_READ_COMMANDS, REQUIRED_READ_COMMANDS, DriveActionError
-from v5_drive_health import evaluate_drive_health
+from v5_drive_health import evaluate_drive_health, recover_full_target_set_mailbox
 from v5_drive_parameter_table import (
     drive_display_update_from_health,
     load_self_slave_bindings,
-    runtime_axis_by_slave_position,
     write_drive_parameter_display_rows,
 )
 from v5_drive_runtime_store import load_settings_runtime
@@ -20,54 +19,99 @@ from v5_drive_sdo import (
     select_profile,
 )
 
+def read_targets_stage(targets: List[Dict[str, Any]], scan: Dict[str, Any]) -> Dict[str, Any]:
+    states = {
+        str(item.get("position") or ""): str(item.get("state") or "").upper()
+        for item in (scan.get("slaves") or []) if isinstance(item, dict)
+    }
+    reads_by_position: Dict[str, Dict[str, Any]] = {
+        str(target.get("position") or ""): {} for target in targets}
+    for name in REQUIRED_READ_COMMANDS:
+        for target in targets:
+            position = str(target.get("position") or "")
+            commands = target.get("commands") if isinstance(target.get("commands"), dict) else {}
+            reads_by_position[position][name] = read_command(
+                position, name, commands.get(name, {}), True)
+    for name in OPTIONAL_READ_COMMANDS:
+        for target in targets:
+            position = str(target.get("position") or "")
+            commands = target.get("commands") if isinstance(target.get("commands"), dict) else {}
+            command = commands.get(name)
+            if isinstance(command, dict) and command.get("supported") is not False:
+                reads_by_position[position][name] = read_command(position, name, command, False)
+    results: List[Dict[str, Any]] = []
+    unavailable_positions: List[str] = []
+    for target in targets:
+        position = str(target.get("position") or "")
+        reads = reads_by_position[position]
+        required_ok = all(bool(reads.get(name, {}).get("ok")) for name in REQUIRED_READ_COMMANDS)
+        slave_state = states.get(position, "")
+        target_ok = required_ok and slave_state == "OP"
+        profile = target.get("profile") if isinstance(target.get("profile"), dict) else {}
+        results.append({
+            "ok": target_ok,
+            "axis": target.get("axis"),
+            "position": target.get("position"),
+            "slave_state": slave_state,
+            "identity": target.get("identity", {}),
+            "profile_id": profile.get("profile_id", ""),
+            "selected_map_path": profile.get("profile_map_path", ""),
+            "selected_map_sha256": profile.get("profile_map_sha256", ""),
+            "map_source": profile.get("map_source", ""),
+            "reads": reads,
+            "health": evaluate_drive_health(reads),
+        })
+        if not target_ok:
+            unavailable_positions.append(position)
+    return {"targets": results, "unavailable_positions": unavailable_positions, "scan": scan}
+
+
 def read_drive(timeout_s: float) -> Dict[str, Any]:
-    scan = run_ethercat_slaves(timeout_s)
-    if not scan.get("ok"):
-        scan.update({"read_attempted": False})
-        return scan
-    if not scan.get("slaves"):
-        return {"ok": False, "code": "DRIVE_READ_NO_SLAVES", "message_cn": "未扫描到 EtherCAT 从站，读取驱动未执行。", "slaves": [], "read_attempted": False, "write_executed": False, "motion_executed": False}
     try:
-        snapshot = read_resident_snapshot()
+        targets, _runtime, scan = configured_drive_targets(timeout_s)
     except DriveActionError as exc:
         return {"ok": False, "code": exc.code, "message_cn": exc.message_cn, "detail": exc.detail, "read_attempted": False, "write_executed": False, "motion_executed": False}
-    targets: List[Dict[str, Any]] = []
-    failures: List[Dict[str, Any]] = []
-    axis_by_position = runtime_axis_by_slave_position()
+    first_stage = read_targets_stage(targets, scan)
+    final_stage = first_stage
+    recovery: Dict[str, Any] | None = None
+    recovery_positions = list(dict.fromkeys(first_stage["unavailable_positions"]))
+    if recovery_positions:
+        recovery = recover_full_target_set_mailbox(targets, timeout_s)
+        if recovery.get("ok"):
+            fresh_scan = run_ethercat_slaves(timeout_s)
+            if fresh_scan.get("ok"):
+                final_stage = read_targets_stage(targets, fresh_scan)
     display_updates: List[Dict[str, Any]] = []
-    for slave in scan.get("slaves", []):
-        position = str(slave.get("position") or "")
-        try:
-            identity = parse_slave_identity(position, min(timeout_s, 3.0))
-            if not identity.get("identity_ok"):
-                raise DriveActionError("DRIVE_SLAVE_IDENTITY_MISSING", "真实从站身份读取不完整，未选择 profile。", identity)
-            profile = select_profile(identity, snapshot)
-            commands = profile.get("commands", {}) if isinstance(profile.get("commands"), dict) else {}
-            reads: Dict[str, Any] = {}
-            target_ok = True
-            for name in REQUIRED_READ_COMMANDS:
-                item = read_command(position, name, commands.get(name, {}), True)
-                reads[name] = item
-                target_ok = target_ok and bool(item.get("ok"))
-            for name in OPTIONAL_READ_COMMANDS:
-                command = commands.get(name)
-                if isinstance(command, dict) and command.get("supported") is not False:
-                    reads[name] = read_command(position, name, command, False)
-            axis = axis_by_position.get(position, "")
-            health = evaluate_drive_health(reads)
-            display_updates.append(drive_display_update_from_health(axis, health, "读回实际" if target_ok and health.get("ok") else "读回失败", position))
-            targets.append({"ok": target_ok, "axis": axis, "position": position, "identity": identity, "profile_id": profile.get("profile_id", ""), "selected_map_path": profile.get("profile_map_path", ""), "selected_map_sha256": profile.get("profile_map_sha256", ""), "map_source": profile.get("map_source", ""), "reads": reads})
-            if not target_ok:
-                failures.append({"position": position, "code": "DRIVE_READ_PARTIAL"})
-        except DriveActionError as exc:
-            failure = {"position": position, "code": exc.code, "message_cn": exc.message_cn, "detail": exc.detail}
-            axis = axis_by_position.get(position, "")
-            display_updates.append({"axis": axis, "position": position, "write_status": "读回失败"})
-            targets.append({"ok": False, "axis": axis, **failure})
-            failures.append(failure)
-    ok = bool(targets) and not failures
+    failures: List[Dict[str, Any]] = []
+    for item in final_stage["targets"]:
+        health = item.get("health") if isinstance(item.get("health"), dict) else {}
+        display_updates.append(drive_display_update_from_health(
+            str(item.get("axis") or ""), health,
+            "读回实际" if item.get("ok") and health.get("ok") else "读回失败",
+            item.get("position")))
+        if not item.get("ok"):
+            failures.append({
+                "position": item.get("position"),
+                "code": "DRIVE_READ_PARTIAL",
+                "slave_state": item.get("slave_state"),
+            })
+    ok = bool(final_stage["targets"]) and not failures
     display_writeback = write_drive_parameter_display_rows(display_updates) if display_updates else {}
-    return {"ok": ok, "code": "DRIVE_READ_OK" if ok else "DRIVE_READ_PARTIAL", "message_cn": "读取驱动完成。" if ok else "读取驱动未完整闭合。", "targets": targets, "failures": failures, "snapshot_generated_at": snapshot.get("generated_at"), "snapshot_profile_count": snapshot.get("profile_count"), "drive_parameter_display_writeback": display_writeback, "read_attempted": True, "write_executed": False, "motion_executed": False}
+    return {
+        "ok": ok,
+        "code": "DRIVE_READ_OK" if ok else "DRIVE_READ_PARTIAL",
+        "message_cn": "读取驱动完成。" if ok else "读取驱动未完整闭合。",
+        "targets": final_stage["targets"],
+        "failures": failures,
+        "recovery_positions": recovery_positions,
+        "recovery": recovery,
+        "snapshot_generated_at": (scan.get("profile_snapshot") or {}).get("generated_at"),
+        "snapshot_profile_count": (scan.get("profile_snapshot") or {}).get("profile_count"),
+        "drive_parameter_display_writeback": display_writeback,
+        "read_attempted": True,
+        "write_executed": False,
+        "motion_executed": False,
+    }
 
 
 def configured_drive_targets(timeout_s: float) -> Tuple[List[Dict[str, Any]], Dict[str, Any], Dict[str, Any]]:
@@ -76,38 +120,74 @@ def configured_drive_targets(timeout_s: float) -> Tuple[List[Dict[str, Any]], Di
         raise DriveActionError(str(scan.get("code") or "DRIVE_SCAN_FAILED"), str(scan.get("message_cn") or "扫描从站失败，未写驱动。"), scan)
     runtime = load_settings_runtime()
     self_bindings = load_self_slave_bindings()
-    snapshot = read_resident_snapshot()
     slaves_by_position: Dict[str, Dict[str, Any]] = {}
     for slave in scan.get("slaves", []):
         if isinstance(slave, dict):
             position = parse_slave_position_token(slave.get("position"))
             if position:
                 slaves_by_position[position] = slave
-    targets: List[Dict[str, Any]] = []
     failures: List[Dict[str, Any]] = []
-    seen_positions: set[str] = set()
+    runtime_by_axis: Dict[str, Tuple[int, Dict[str, Any]]] = {}
     axes = runtime.get("axes") if isinstance(runtime.get("axes"), list) else []
     for axis_index, axis_cfg in enumerate(axes):
         if not isinstance(axis_cfg, dict):
+            failures.append({"axis": "", "code": "DRIVE_TARGET_RUNTIME_AXIS_INVALID", "message_cn": "drive runtime 轴配置非法，未写驱动。", "detail": {"axis_index": axis_index}})
             continue
-        axis = str(axis_cfg.get("axis") or (AXIS_ORDER[axis_index] if axis_index < len(AXIS_ORDER) else "AXIS_%d" % axis_index)).upper()
+        axis = str(axis_cfg.get("axis") or "").strip().upper()
+        if axis not in AXIS_ORDER:
+            failures.append({"axis": axis, "code": "DRIVE_TARGET_RUNTIME_AXIS_INVALID", "message_cn": "drive runtime 轴名非法，未写驱动。", "detail": {"axis_index": axis_index, "axis": axis}})
+            continue
+        if axis in runtime_by_axis:
+            failures.append({"axis": axis, "code": "DRIVE_TARGET_RUNTIME_AXIS_DUPLICATE", "message_cn": "drive runtime 中轴配置重复，未写驱动。", "detail": {"axis": axis, "axis_index": axis_index}})
+            continue
+        runtime_by_axis[axis] = (axis_index, axis_cfg)
+
+    candidates: List[Tuple[str, int, Dict[str, Any], str]] = []
+    seen_positions: set[str] = set()
+    for axis in AXIS_ORDER:
         try:
-            if axis in self_bindings:
-                binding_source = "self_parameter_table"
-                raw_binding = self_bindings.get(axis, "")
-            else:
-                binding_source = "settings_runtime"
-                raw_binding = axis_cfg.get("slave_index") if axis_cfg.get("slave_index") is not None else axis_cfg.get("slave")
+            if axis not in self_bindings:
+                raise DriveActionError(
+                    "DRIVE_TARGET_SELF_SLAVE_MISSING",
+                    "resident self owner 缺少轴从站绑定，未写驱动。",
+                    {"axis": axis},
+                )
+            binding_source = "resident_self_parameter_table"
+            raw_binding = self_bindings[axis]
             if str(raw_binding or "").strip().upper() == "NAT":
                 continue
+            runtime_entry = runtime_by_axis.get(axis)
+            if runtime_entry is None:
+                raise DriveActionError(
+                    "DRIVE_TARGET_RUNTIME_AXIS_MISSING",
+                    "resident self owner 中已绑定的轴缺少 drive runtime 配置，未写驱动。",
+                    {"axis": axis},
+                )
+            axis_index, axis_cfg = runtime_entry
             position = parse_slave_position_token(raw_binding)
             if not position:
-                continue
+                raise DriveActionError(
+                    "DRIVE_TARGET_SELF_SLAVE_INVALID",
+                    "resident self owner 的轴从站绑定非法，未写驱动。",
+                    {"axis": axis, "slave": raw_binding},
+                )
             if position in seen_positions:
                 raise DriveActionError("DRIVE_TARGET_DUPLICATE_SLAVE", "多个轴绑定到同一从站，未写驱动。", {"axis": axis, "slave_index": position})
             seen_positions.add(position)
             if position not in slaves_by_position:
                 raise DriveActionError("DRIVE_TARGET_SLAVE_NOT_FOUND", "轴绑定的真实 EtherCAT 从站不存在，未写驱动。", {"axis": axis, "slave_index": position})
+            candidates.append((axis, axis_index, axis_cfg, position))
+        except DriveActionError as exc:
+            failures.append({"axis": axis, "code": exc.code, "message_cn": exc.message_cn, "detail": exc.detail})
+    if failures:
+        raise DriveActionError("DRIVE_TARGET_PRECHECK_FAILED", "驱动目标轴预检失败，未写驱动。", {"failures": failures})
+    if not candidates:
+        raise DriveActionError("DRIVE_TARGETS_EMPTY", "当前 resident 轴从站绑定没有可写入的 BUS 从站，未写驱动。", {"axis_count": len(runtime_by_axis), "self_slave_bindings": self_bindings, "slaves": scan.get("slaves", [])})
+
+    snapshot = read_resident_snapshot()
+    targets: List[Dict[str, Any]] = []
+    for axis, axis_index, axis_cfg, position in candidates:
+        try:
             identity = parse_slave_identity(position, min(timeout_s, 3.0))
             if not identity.get("identity_ok"):
                 raise DriveActionError("DRIVE_SLAVE_IDENTITY_MISSING", "真实从站身份读取不完整，未写驱动。", identity)
@@ -132,6 +212,9 @@ def configured_drive_targets(timeout_s: float) -> Tuple[List[Dict[str, Any]], Di
             failures.append({"axis": axis, "code": exc.code, "message_cn": exc.message_cn, "detail": exc.detail})
     if failures:
         raise DriveActionError("DRIVE_TARGET_PRECHECK_FAILED", "驱动目标轴预检失败，未写驱动。", {"failures": failures})
-    if not targets:
-        raise DriveActionError("DRIVE_TARGETS_EMPTY", "当前轴参数从站绑定没有可写入的 BUS 从站，未写驱动。", {"axis_count": len(axes), "self_slave_bindings": self_bindings, "slaves": scan.get("slaves", [])})
-    return targets, runtime, scan
+    frozen_scan = dict(scan)
+    frozen_scan["profile_snapshot"] = {
+        "generated_at": snapshot.get("generated_at"),
+        "profile_count": snapshot.get("profile_count"),
+    }
+    return targets, runtime, frozen_scan

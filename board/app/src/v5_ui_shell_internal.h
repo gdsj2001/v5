@@ -158,7 +158,6 @@ void shell_create_top_status_layer(lv_obj_t *screen);
 void shell_create_operator_error_popup(lv_obj_t *screen);
 
 void shell_show_operator_error_popup(const V5NativeOperatorErrorStatus *status);
-void shell_show_home_failure_popup(const V5CommandGateHomeStatus *status);
 
 void shell_hide_operator_error_popup(void);
 

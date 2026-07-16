@@ -31,6 +31,8 @@ from v5_remote_ui_contract import (
     PayloadViews,
 )
 from v5_remote_ui_protocol import frame_metadata, recv_ws_frame, send_ws_frame, ws_accept_value
+from v5_remote_ui_programs import MAX_GCODE_BYTES, ProgramApiError, ProgramFileService
+from v5_remote_ui_shared_payload import PreparedDirtyFrame, SharedDirtyPayloadProducer
 from v5_remote_ui_state import DirtyReader, FrameState
 from v5_remote_ui_support import (
     CpuUsageSampler,
@@ -42,6 +44,20 @@ from v5_remote_ui_support import (
     system_metrics,
 )
 
+
+def input_ws_frame_action(opcode: int) -> str:
+    if opcode == 0x1:
+        return "message"
+    if opcode == 0x9:
+        return "pong"
+    if opcode == 0xA:
+        return "continue"
+    return "close"
+
+
+def remote_path_requires_ui(path: str) -> bool:
+    return path != "/remote/diagnostics" and not path.startswith("/remote/program/")
+
 class RemoteRelayHandler(BaseHTTPRequestHandler):
     server_version = "V5RemoteUiRelay/1"
 
@@ -51,6 +67,10 @@ class RemoteRelayHandler(BaseHTTPRequestHandler):
     @property
     def state(self) -> FrameState:
         return self.server.state
+
+    @property
+    def program_service(self) -> ProgramFileService:
+        return self.server.program_service
 
     def check_peer(self) -> bool:
         peer = self.client_address[0]
@@ -63,7 +83,7 @@ class RemoteRelayHandler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path.startswith("/remote/") and not self.check_peer():
             return
-        if parsed.path.startswith("/remote/") and parsed.path != "/remote/diagnostics" and not self.state.ui_ready():
+        if parsed.path.startswith("/remote/") and remote_path_requires_ui(parsed.path) and not self.state.ui_ready():
             self.write_json(503, {
                 "ok": False,
                 "error": "ui_not_ready",
@@ -95,8 +115,30 @@ class RemoteRelayHandler(BaseHTTPRequestHandler):
                 "cpu_samples": cpu_samples_snapshot(),
                 "process": process_diagnostics(),
             })
+        elif parsed.path == "/remote/program/list":
+            self.handle_program_list()
+        elif parsed.path == "/remote/program/file":
+            self.handle_program_file_get(parsed)
         else:
             self.write_json(404, {"ok": False, "error": "unsupported_remote_path"})
+
+    def do_POST(self) -> None:
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path.startswith("/remote/") and not self.check_peer():
+            return
+        if parsed.path == "/remote/program/upload":
+            self.handle_program_upload(parsed)
+            return
+        self.write_json(404, {"ok": False, "error": "unsupported_remote_path"})
+
+    def do_DELETE(self) -> None:
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path.startswith("/remote/") and not self.check_peer():
+            return
+        if parsed.path == "/remote/program/file":
+            self.handle_program_file_delete(parsed)
+            return
+        self.write_json(404, {"ok": False, "error": "unsupported_remote_path"})
 
     def handle_info(self) -> None:
         input_enabled = os.environ.get("V5_UI_REMOTE_INPUT", "off") == "layout_only"
@@ -104,6 +146,7 @@ class RemoteRelayHandler(BaseHTTPRequestHandler):
             "protocol_version": PROTOCOL_VERSION,
             "ui_ready": True,
             "ready_metadata": self.state.ready_metadata(),
+            "frame_id": self.state.frame_id,
             "width": self.state.width,
             "height": self.state.height,
             "pixel_format": PIXEL_FORMAT,
@@ -111,6 +154,75 @@ class RemoteRelayHandler(BaseHTTPRequestHandler):
             "view_only": not input_enabled,
             "input_enabled": input_enabled,
             "system_metrics": system_metrics(),
+            "program_api": "v5.remote_program.v1",
+            "program_dir": str(self.program_service.root),
+        })
+
+    def handle_program_list(self) -> None:
+        try:
+            self.write_json(200, self.program_service.list_files())
+        except ProgramApiError as exc:
+            self.write_program_error(exc)
+
+    def handle_program_file_get(self, parsed: urllib.parse.ParseResult) -> None:
+        query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+        file_name = self.query_value(query, "filename")
+        try:
+            if self.query_value(query, "content") in {"1", "true"}:
+                result = self.program_service.read_file(file_name)
+            else:
+                result = self.program_service.stat_file(file_name)
+            self.write_json(200, result)
+        except ProgramApiError as exc:
+            self.write_program_error(exc)
+
+    def handle_program_upload(self, parsed: urllib.parse.ParseResult) -> None:
+        query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+        file_name = self.query_value(query, "filename")
+        overwrite = self.query_value(query, "overwrite") in {"1", "true"}
+        try:
+            content_length_text = self.headers.get("Content-Length")
+            if content_length_text is None:
+                raise ProgramApiError(411, "program_content_length_required", "上传 G-code 必须提供 Content-Length。")
+            try:
+                content_length = int(content_length_text)
+            except ValueError as exc:
+                raise ProgramApiError(400, "program_content_length_invalid", "上传 G-code 的 Content-Length 无效。") from exc
+            if content_length <= 0:
+                raise ProgramApiError(400, "program_file_empty", "不能上传空的 G-code 文件。")
+            if content_length > MAX_GCODE_BYTES:
+                raise ProgramApiError(413, "program_file_size_limit_exceeded", "G-code 文件超过板端 2 MiB 上限。")
+            payload = self.rfile.read(content_length)
+            if len(payload) != content_length:
+                raise ProgramApiError(400, "program_upload_incomplete", "上传连接提前结束，板端未收到完整文件。")
+            result = self.program_service.upload(
+                file_name,
+                payload,
+                self.headers.get("X-8ax-File-Sha256", ""),
+                overwrite,
+            )
+            self.write_json(200, result)
+        except ProgramApiError as exc:
+            self.write_program_error(exc)
+
+    def handle_program_file_delete(self, parsed: urllib.parse.ParseResult) -> None:
+        query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+        file_name = self.query_value(query, "filename")
+        try:
+            self.write_json(200, self.program_service.delete(file_name))
+        except ProgramApiError as exc:
+            self.write_program_error(exc)
+
+    @staticmethod
+    def query_value(query: dict[str, list[str]], key: str) -> str:
+        values = query.get(key)
+        return values[0] if values else ""
+
+    def write_program_error(self, error: ProgramApiError) -> None:
+        self.write_json(error.status, {
+            "ok": False,
+            "error": error.code,
+            "message": error.message,
         })
 
     def handle_full_frame(self) -> None:
@@ -130,7 +242,7 @@ class RemoteRelayHandler(BaseHTTPRequestHandler):
         self.state.mark_metric("stream_sessions")
         self.state.mark_metric("stream_active_sessions")
         sock = self.connection
-        last_large_dirty_sent_at = 0.0
+        subscribed = False
         try:
             frame = self.state.full_frame()
             if frame is None:
@@ -139,13 +251,15 @@ class RemoteRelayHandler(BaseHTTPRequestHandler):
             self.state.mark_metric("stream_initial_full_frames")
             self.send_frame(sock, frame_metadata("full_frame", frame_id, 0, self.state.width, self.state.height, self.state.stride, []), payload)
             last_sent = frame_id
+            self.server.payload_producer.subscribe(frame_id)
+            subscribed = True
             while True:
-                batch = self.state.wait_dirty_batch_after(last_sent, STREAM_IDLE_PING_SECONDS, STREAM_COALESCE_SECONDS)
-                if batch is None:
+                delivery = self.server.payload_producer.wait_after(last_sent, STREAM_IDLE_PING_SECONDS)
+                if delivery is None:
                     send_ws_frame(sock, 0x9, b"")
                     self.state.mark_metric("stream_idle_pings")
                     continue
-                if batch.get("needs_full"):
+                if delivery.needs_full:
                     frame = self.state.full_frame()
                     if frame is None:
                         continue
@@ -155,21 +269,16 @@ class RemoteRelayHandler(BaseHTTPRequestHandler):
                     self.send_frame(sock, frame_metadata("full_frame", frame_id, 0, self.state.width, self.state.height, self.state.stride, []), payload)
                     last_sent = frame_id
                     continue
-                last_large_dirty_sent_at = self.state.throttle_large_dirty(batch, last_large_dirty_sent_at)
-                prepared = self.state.dirty_payload(batch)
+                prepared = delivery.frame
                 if prepared is None:
                     continue
-                payload, rects = prepared
-                merged = int(batch.get("merged_events", 1))
-                if merged > 1:
-                    self.state.mark_metric("dirty_coalesced_events", merged - 1)
-                meta = frame_metadata("dirty_rects", int(batch["frame_id"]), int(batch["base_frame_id"]), self.state.width, self.state.height, self.state.stride, rects)
-                self.state.mark_metric("dirty_rect_frames")
-                self.send_frame(sock, meta, payload)
-                last_sent = int(batch["frame_id"])
+                self.send_prepared_frame(sock, prepared)
+                last_sent = prepared.frame_id
         except (BrokenPipeError, ConnectionError, ConnectionResetError, OSError):
             self.state.mark_metric("stream_send_failures")
         finally:
+            if subscribed:
+                self.server.payload_producer.unsubscribe()
             self.state.mark_metric("stream_disconnects")
             self.state.decrement_metric_floor("stream_active_sessions")
 
@@ -184,10 +293,14 @@ class RemoteRelayHandler(BaseHTTPRequestHandler):
         try:
             while True:
                 opcode, payload = recv_ws_frame(sock)
-                if opcode == 0x8:
+                frame_action = input_ws_frame_action(opcode)
+                if frame_action == "close":
                     return
-                if opcode != 0x1:
-                    return
+                if frame_action == "pong":
+                    send_ws_frame(sock, 0xA, payload)
+                    continue
+                if frame_action == "continue":
+                    continue
                 self.state.mark_metric("input_messages")
                 try:
                     message = json.loads(payload.decode("utf-8"))
@@ -255,6 +368,10 @@ class RemoteRelayHandler(BaseHTTPRequestHandler):
         send_ws_frame(sock, 0x1, json.dumps(meta, separators=(",", ":")).encode("utf-8"))
         send_ws_frame(sock, 0x2, payload)
 
+    def send_prepared_frame(self, sock: socket.socket, prepared: PreparedDirtyFrame) -> None:
+        send_ws_frame(sock, 0x1, prepared.meta_bytes)
+        send_ws_frame(sock, 0x2, prepared.payload)
+
     def is_ws_request(self) -> bool:
         return self.headers.get("Upgrade", "").lower() == "websocket"
 
@@ -301,10 +418,19 @@ class RemoteRelayServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     allow_reuse_address = True
     daemon_threads = True
 
-    def __init__(self, address, handler, state: FrameState, allow_networks):
+    def __init__(self, address, handler, state: FrameState, allow_networks, program_service: ProgramFileService):
         super().__init__(address, handler)
         self.state = state
         self.allow_networks = allow_networks
+        self.program_service = program_service
+        self.payload_producer = SharedDirtyPayloadProducer(state)
+        self.payload_producer.start()
+
+    def server_close(self) -> None:
+        try:
+            self.payload_producer.stop()
+        finally:
+            super().server_close()
 
 
 def main() -> int:
@@ -316,13 +442,15 @@ def main() -> int:
     parser.add_argument("--width", type=int, default=int(os.environ.get("V5_UI_REMOTE_WIDTH", "1024")))
     parser.add_argument("--height", type=int, default=int(os.environ.get("V5_UI_REMOTE_HEIGHT", "600")))
     parser.add_argument("--ready-path", default=os.environ.get("V5_UI_READY_PATH", str(RUN_DIR / "ui_ready.json")))
+    parser.add_argument("--program-root", default=os.environ.get("V5_GCODE_PROGRAM_ROOT", "/opt/8ax/v5/gcode/golden"))
     args = parser.parse_args()
 
     state = FrameState(Path(args.run_dir), args.width, args.height, Path(args.ready_path))
     dirty_reader = DirtyReader(state)
     dirty_reader.start()
     allow_networks = parse_allow_cidrs(args.allow_cidrs)
-    with RemoteRelayServer((args.host, args.port), RemoteRelayHandler, state, allow_networks) as server:
+    program_service = ProgramFileService(args.program_root)
+    with RemoteRelayServer((args.host, args.port), RemoteRelayHandler, state, allow_networks, program_service) as server:
         print(f"v5_remote_ui_relay listening host={args.host} port={args.port} run_dir={state.run_dir} ready_path={state.ready_path} allow_cidrs={args.allow_cidrs}", flush=True)
         try:
             server.serve_forever()

@@ -4,6 +4,7 @@ from pathlib import Path
 import re
 
 from v5_native_operator_error_map import (
+    ALIAS_PRESENTATION,
     DISPLAY_LOG_ONLY,
     DISPLAY_POPUP,
     DISPLAY_TOP_STATUS,
@@ -106,8 +107,52 @@ def main() -> int:
     estop_home = translate_internal_alias("HOME_PRECONDITION_ESTOP")
     assert estop_home.matched and estop_home.title_cn == "请先取消急停"
     assert estop_home.display_mode == DISPLAY_POPUP
-    assert "不能执行回零" in estop_home.reason_cn
+    assert "未启动任何轴回零运动" in estop_home.reason_cn
     assert "取消急停" in estop_home.next_cn
+    required_home_aliases = {
+        "ALL_HOME_NATIVE_CONFIG_INVALID", "ALL_HOME_COUNT_READBACK_INVALID",
+        "ALL_HOME_LIMIT_ACTIVE", "HOME_CANCELLED",
+        "HOME_PRECONDITION_ESTOP", "HOME_PRECONDITION_DISABLED", "ALL_HOME_DRIVE_FAULT",
+        "ALL_HOME_RTCP_FORCE_OFF_NOT_CONFIRMED", "HOME_PRECONDITION_MOVING",
+        "HOME_PRECONDITION_SAFETY_UNAVAILABLE", "ALL_HOME_AXIS_SLAVE_MAPPING_INVALID",
+        "HOME_PRECONDITION_RTCP_STATUS_UNAVAILABLE", "ALL_HOME_MOTION_NOT_STARTED",
+        "ALL_HOME_MOTION_NOT_COMPLETE", "ALL_HOME_SEQUENCE_NOT_STARTED",
+        "ALL_HOME_DIRECT_SINGLE_JOINT_UNSUPPORTED", "ALL_HOME_ZERO_DELTA_MOVEMENT_UNPROVEN",
+        "ALL_HOME_PLAN_STALE", "ALL_HOME_NATIVE_FAILED",
+        "AXIS_ZERO_REQUEST_INVALID", "AXIS_ZERO_PARAMETERS_UNAVAILABLE",
+        "AXIS_ZERO_START_POSITION_UNAVAILABLE", "AXIS_ZERO_WCS_READBACK_UNAVAILABLE",
+        "AXIS_ZERO_MDI_MODE_REJECTED", "AXIS_ZERO_PROOF_MOVE_NOT_CONFIRMED",
+        "AXIS_ZERO_ARRIVAL_NOT_CONFIRMED", "AXIS_ZERO_REAL_MOVE_NOT_CONFIRMED",
+        "AXIS_ZERO_WCS_OFFSET_CHANGED", "AXIS_ZERO_REPORT_INVALID",
+        "HOME_RTCP_FORCE_OFF_NOT_CONFIRMED", "HOME_WCHECKPOINT_AXIS_INVALID",
+        "HOME_WCHECKPOINT_READBACK_INVALID", "HOME_WCHECKPOINT_RUNTIME_ACTUAL_INVALID",
+        "HOME_SAFE_ZERO_INPUT_INVALID", "HOME_SAFE_ZERO_RANGE_INVALID",
+        "HOME_SAFE_ZERO_TIE_AMBIGUOUS", "HOME_SAFE_ZERO_GENERATION_MISMATCH",
+        "HOME_SAFE_ZERO_LOGICAL_TARGET_COUNT_MISMATCH", "HOME_SAFE_ZERO_PHASE_COUNT_MISMATCH",
+        "HOME_SAFE_ZERO_REMAP_READBACK_INVALID", "HOME_SAFE_ZERO_REMAP_FAILED",
+    }
+    for code in sorted(required_home_aliases):
+        translated = translate_internal_alias(code)
+        assert translated.matched, code
+        assert translated.display_mode == DISPLAY_POPUP, code
+        assert translated.title_cn and translated.reason_cn and translated.next_cn, code
+        assert code not in translated.reason_cn and code not in translated.next_cn, code
+    assert required_home_aliases <= set(ALIAS_PRESENTATION)
+    retired_home_adapter_aliases = {
+        "ALL_HOME_NOT_SUBMITTED", "ALL_HOME_FAILED", "ALL_HOME_REQUEST_INVALID",
+        "ALL_HOME_NATIVE_STATUS_UNAVAILABLE", "ALL_HOME_INTERPRETER_CONTEXT_UNAVAILABLE",
+        "ALL_HOME_ABORT_NOT_CONFIRMED", "ALL_HOME_MANUAL_MODE_NOT_CONFIRMED",
+        "ALL_HOME_JOINT_MODE_NOT_CONFIRMED", "ALL_HOME_PROGRAM_IDENTITY_CHANGED",
+        "ALL_HOME_SEND_FAILED", "ALL_HOME_NATIVE_RESULT_TIMEOUT",
+        "ALL_HOME_TRANSACTION_SUPERSEDED", "ALL_HOME_NATIVE_MASK_MISMATCH",
+        "ALL_HOME_ROTARY_EQUIVALENT_TIE", "ALL_HOME_COORDINATE_CONFIG_INVALID",
+        "HOME_TRANSACTION_INVALID_OR_ACTIVE", "HOME_TRANSACTION_ALREADY_ACTIVE",
+        "HOME_TRANSACTION_START_FAILED", "HOME_TERMINAL_STATUS_MISSING",
+        "HOME_RESULT_MISSING", "HOME_STATUS_NOT_FOUND",
+    }
+    for code in sorted(retired_home_adapter_aliases):
+        assert code not in ALIAS_PRESENTATION, code
+        assert not translate_internal_alias(code).matched, code
     print(f"v5_native_operator_error_map_test PASS count={checked}")
     return 0
 

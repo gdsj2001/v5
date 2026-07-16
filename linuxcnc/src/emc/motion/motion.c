@@ -267,6 +267,7 @@ int count_names(char *names[]){
 static int module_intfc() {
     homeMotFunctions(emcmotSetRotaryUnlock
                     ,emcmotGetRotaryIsUnlocked
+                    ,v5_wcheckpoint_read_snapshot
                     );
 
     tpMotFunctions(emcmotDioWrite

@@ -1,4 +1,7 @@
 #include "v5_main_page.h"
+#include "v5_motion_model_registry.h"
+#include "v5_main_page_internal.h"
+#include "v5_lvgl_remote_display.h"
 #include "v5_lvgl_headless.h"
 #include "v5_settings_page.h"
 #include "v5_settings_page_internal.h"
@@ -235,8 +238,8 @@ int main(void)
         page.last_action.request.index_value != 100) {
         return 77;
     }
-    if (lv_obj_get_style_line_width(page.trajectory_line, 0) != 2 ||
-        lv_obj_get_style_line_width(page.toolpath_line_segments[1], 0) != 2) {
+    if (lv_obj_get_style_line_width(page.trajectory_line, 0) != 1 ||
+        lv_obj_get_style_line_width(page.toolpath_line_segments[1], 0) != 1) {
         return 33;
     }
     if (page.trajectory_point_count != 0u ||
@@ -361,6 +364,42 @@ int main(void)
         !lv_obj_has_flag(settings_page.popup_overlay, LV_OBJ_FLAG_HIDDEN)) {
         return 72;
     }
+    v5_settings_page_popup_show(
+        &settings_page,
+        "settings_save_and_restart",
+        "settings restart scheduled",
+        "SETTINGS_SAVE_RESTART_BOARD_REBOOT_SCHEDULED",
+        1,
+        1);
+    lv_event_send(settings_page.popup_close, LV_EVENT_RELEASED, 0);
+    if (settings_page.popup_active ||
+        v5_lvgl_remote_display_output_suppressed()) {
+        return 76;
+    }
+    v5_settings_page_popup_show(
+        &settings_page,
+        "settings_save_and_restart",
+        "settings restart scheduled",
+        "SETTINGS_SAVE_RESTART_BOARD_REBOOT_SCHEDULED",
+        1,
+        1);
+    settings_page.popup_restart_handoff_accepted = 1;
+    snprintf(settings_page.popup_run_id, sizeof(settings_page.popup_run_id), "%s", "smoke-run");
+    lv_event_send(settings_page.popup_close, LV_EVENT_RELEASED, 0);
+    if (!settings_page.popup_active ||
+        v5_lvgl_remote_display_output_suppressed() ||
+        settings_page.popup_restart_handoff_accepted ||
+        strstr(lv_label_get_text(settings_page.popup_message),
+               "SETTINGS_SAVE_RESTART_COMMIT_REJECTED") == 0) {
+        return 77;
+    }
+    lv_event_send(settings_page.popup_close, LV_EVENT_RELEASED, 0);
+    if (settings_page.popup_active ||
+        !v5_lvgl_remote_display_blackout_for_restart() ||
+        !v5_lvgl_remote_display_output_suppressed()) {
+        return 78;
+    }
+    (void)v5_lvgl_remote_display_set_output_suppressed(0);
     v5_native_readback_init(&settings_readback);
     v5_native_readback_set_motion_model(&settings_readback, "XYZBC_TRT");
     if (!v5_settings_page_set_native_readback(&settings_page, &settings_readback) ||
@@ -595,6 +634,74 @@ int main(void)
         page.toolpath_static_cache_hits == 0U) {
         v5_program_controller_destroy(&controller);
         return 12;
+    }
+    {
+        const unsigned int rewrite_before = page.toolpath_line_rewrite_count;
+        const unsigned int set_points_before = page.toolpath_line_set_points_count;
+        const double expected_a = page.toolpath_program_ac_a_deg + 0.001;
+        const double expected_c = page.toolpath_program_ac_c_deg - 0.001;
+        status.mcs[3] = expected_a;
+        status.mcs[4] = expected_c;
+        if (!v5_main_page_apply_status(&page, &status) ||
+            fabs(page.toolpath_program_ac_a_deg - expected_a) > 0.0000001 ||
+            fabs(page.toolpath_program_ac_c_deg - expected_c) > 0.0000001 ||
+            page.toolpath_line_rewrite_count != rewrite_before ||
+            page.toolpath_line_set_points_count != set_points_before ||
+            page.toolpath_line_last_dirty_rect_count != 0U ||
+            page.toolpath_line_last_dirty_pixels != 0U ||
+            page.toolpath_line_last_dirty_max_pixels != 0U) {
+            v5_program_controller_destroy(&controller);
+            return 68;
+        }
+    }
+    {
+        lv_point_t initial_points[2] = {{10, 10}, {20, 20}};
+        lv_point_t shifted_points[2] = {{10, 10}, {21, 20}};
+        unsigned int test_segment;
+        unsigned int set_points_after_show;
+        for (test_segment = 0U; test_segment < V5_MAIN_PAGE_TOOLPATH_DRAW_SEGMENTS; ++test_segment) {
+            if (lv_obj_has_flag(page.toolpath_line_segments[test_segment], LV_OBJ_FLAG_HIDDEN)) {
+                break;
+            }
+        }
+        if (test_segment >= V5_MAIN_PAGE_TOOLPATH_DRAW_SEGMENTS) {
+            v5_program_controller_destroy(&controller);
+            return 69;
+        }
+        page.toolpath_line_last_dirty_rect_count = 0U;
+        page.toolpath_line_last_dirty_pixels = 0U;
+        page.toolpath_line_last_dirty_max_pixels = 0U;
+        if (!v5_main_page_internal_update_toolpath_program_segment(
+                &page, test_segment, initial_points, 2U)) {
+            v5_program_controller_destroy(&controller);
+            return 70;
+        }
+        set_points_after_show = page.toolpath_line_set_points_count;
+        page.toolpath_line_last_dirty_rect_count = 0U;
+        page.toolpath_line_last_dirty_pixels = 0U;
+        page.toolpath_line_last_dirty_max_pixels = 0U;
+        if (v5_main_page_internal_update_toolpath_program_segment(
+                &page, test_segment, initial_points, 2U) ||
+            page.toolpath_line_set_points_count != set_points_after_show ||
+            page.toolpath_line_last_dirty_rect_count != 0U) {
+            v5_program_controller_destroy(&controller);
+            return 71;
+        }
+        if (!v5_main_page_internal_update_toolpath_program_segment(
+                &page, test_segment, shifted_points, 2U) ||
+            page.toolpath_line_set_points_count != set_points_after_show ||
+            page.toolpath_line_last_dirty_rect_count != 2U ||
+            page.toolpath_line_last_dirty_pixels == 0U ||
+            page.toolpath_line_last_dirty_max_pixels == 0U ||
+            page.toolpath_line_last_dirty_max_pixels >= (uint64_t)(388U * 378U)) {
+            v5_program_controller_destroy(&controller);
+            return 72;
+        }
+        if (!v5_main_page_internal_update_toolpath_program_segment(
+                &page, test_segment, 0, 0U)) {
+            v5_program_controller_destroy(&controller);
+            return 73;
+        }
     }
     {
         const double base_wcs_world[4][V5_STATUS_AXIS_COUNT] = {

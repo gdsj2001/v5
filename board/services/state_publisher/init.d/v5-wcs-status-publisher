@@ -15,6 +15,7 @@ OPERATOR_ERROR_PATH=${V5_OPERATOR_ERROR_STATUS_PATH:-/dev/shm/v5_native_operator
 OPERATOR_ERROR_MAP=${V5_OPERATOR_ERROR_MAP:-/opt/8ax/v5/config/ui/v5_native_operator_error_map.tsv}
 RETIRED_STATUS_PATHS="/run/8ax_v5_product_ui/v3_native_wcs_status.bin /run/8ax_v5_product_ui/v3_native_position_status.bin /run/8ax_v5_product_ui/v3_native_modal_tool_status.bin /run/8ax_v5_product_ui/v3_native_operator_error_status.bin"
 INTERVAL_MS=${V5_WCS_STATUS_INTERVAL_MS:-33}
+NON_MICROKERNEL_NICE=10
 PYTHONPATH=/usr/lib/python3/dist-packages${PYTHONPATH:+:$PYTHONPATH}
 LINUXCNC_PY_HOME=${V5_LINUXCNC_PY_HOME:-}
 if [ -z "$LINUXCNC_PY_HOME" ]; then
@@ -37,10 +38,15 @@ is_running() {
 set_non_microkernel_affinity() {
   pid="$1"
   [ -n "$pid" ] || return 0
-  command -v taskset >/dev/null 2>&1 || return 0
-  if grep -qw 1 /sys/devices/system/cpu/online 2>/dev/null || grep -q '0-1' /sys/devices/system/cpu/online 2>/dev/null; then
-    taskset -pc 1 "$pid" >>"$LOGFILE" 2>&1 || true
-  fi
+  command -v taskset >/dev/null 2>&1 || return 1
+  command -v renice >/dev/null 2>&1 || return 1
+  taskset -a -pc 1 "$pid" >>"$LOGFILE" 2>&1 || return 1
+  for task in /proc/"$pid"/task/[0-9]*; do
+    [ -r "$task/stat" ] || return 1
+    tid=${task##*/}
+    renice -n "$NON_MICROKERNEL_NICE" -p "$tid" >>"$LOGFILE" 2>&1 || return 1
+    [ "$(awk '{print $19}' "$task/stat" 2>/dev/null || true)" = "$NON_MICROKERNEL_NICE" ] || return 1
+  done
 }
 
 wait_linuxcnc_stat_ready() {
@@ -75,11 +81,14 @@ start_service() {
   fi
   test -x "$DAEMON"
   test -r "$OPERATOR_ERROR_MAP"
+  command -v taskset >/dev/null 2>&1
+  command -v nice >/dev/null 2>&1
+  command -v renice >/dev/null 2>&1
   mkdir -p /run/8ax /run/8ax_v5_product_ui
   rm -f "$PIDFILE" "$OPERATOR_ERROR_PATH" $RETIRED_STATUS_PATHS
   cd "$LINUXCNC_PY_HOME"
   wait_linuxcnc_stat_ready
-  setsid "$DAEMON" --path "$STATUS_PATH" --modal-tool-path "$MODAL_TOOL_PATH" --operator-error-path "$OPERATOR_ERROR_PATH" --operator-error-map "$OPERATOR_ERROR_MAP" --ini "$LINUXCNC_INI" --interval-ms "$INTERVAL_MS" >>"$LOGFILE" 2>&1 &
+  setsid taskset -c 1 nice -n "$NON_MICROKERNEL_NICE" "$DAEMON" --path "$STATUS_PATH" --modal-tool-path "$MODAL_TOOL_PATH" --operator-error-path "$OPERATOR_ERROR_PATH" --operator-error-map "$OPERATOR_ERROR_MAP" --ini "$LINUXCNC_INI" --interval-ms "$INTERVAL_MS" >>"$LOGFILE" 2>&1 &
   echo "$!" >"$PIDFILE"
   sleep 1
   if is_running; then

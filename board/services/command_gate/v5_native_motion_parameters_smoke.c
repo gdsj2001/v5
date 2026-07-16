@@ -39,7 +39,7 @@ int main(void)
         !close_enough(axis->max_acceleration, 500.0) || axis->status_slot != 0U ||
         !close_enough(axis->min_limit, -500.0001) ||
         !close_enough(axis->max_limit, 499.9999) ||
-        axis->home_sequence != 1 || !axis->bus_zero_evidence_known ||
+        !axis->bus_zero_evidence_known ||
         !close_enough(axis->bus_zero_counts, 1000.0) ||
         !close_enough(axis->bus_counts_per_unit, 100.0) ||
         !close_enough(axis->bus_home_reference, 10.0) ||
@@ -49,7 +49,7 @@ int main(void)
     axis = v5_native_motion_parameters_axis(&parameters, 'A');
     if (!axis || !close_enough(axis->max_velocity, 833.333333333) ||
         !close_enough(axis->max_acceleration, 2000.0) || axis->status_slot != 3U ||
-        axis->home_sequence != 3 || axis->min_limit > -1.0e98 ||
+        axis->min_limit > -1.0e98 ||
         axis->max_limit < 1.0e98 || !axis->slave_mapping_known || axis->slave_position != 3U) {
         return 3;
     }

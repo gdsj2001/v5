@@ -4,12 +4,14 @@ using System.Net.Http.Headers;
 using System.Net.WebSockets;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Text.Json;
 using EightAxis.WinRemote.Protocol;
 
 namespace EightAxis.WinRemote.Transport;
 
 public sealed class RemoteRelayClient : IRemoteTransport, IDisposable
 {
+    private const long MaxProgramFileBytes = 2L * 1024 * 1024;
     private static readonly TimeSpan StreamConnectTimeout = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan InputConnectTimeout = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan NetworkTimeProbeTimeout = TimeSpan.FromMilliseconds(700);
@@ -68,15 +70,13 @@ public sealed class RemoteRelayClient : IRemoteTransport, IDisposable
     public async Task<string> GetDiagnosticsJsonAsync(CancellationToken cancellationToken)
     {
         using HttpResponseMessage response = await _httpClient.GetAsync(new Uri(BaseUri, "remote/diagnostics"), cancellationToken).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
-        return await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        return await ReadRelayJsonAsync(response, "读取板端日志", cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<ProgramListResult> GetProgramListAsync(CancellationToken cancellationToken)
     {
         using HttpResponseMessage response = await _httpClient.GetAsync(new Uri(BaseUri, "remote/program/list"), cancellationToken).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
-        string json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        string json = await ReadRelayJsonAsync(response, "读取板端 G-code 列表", cancellationToken).ConfigureAwait(false);
         return RemoteProtocolJson.Deserialize<ProgramListResult>(json);
     }
 
@@ -84,8 +84,7 @@ public sealed class RemoteRelayClient : IRemoteTransport, IDisposable
     {
         string safeFileName = SafeProgramFileName(fileName);
         using HttpResponseMessage response = await _httpClient.GetAsync(new Uri(BaseUri, $"remote/program/file?filename={Uri.EscapeDataString(safeFileName)}"), cancellationToken).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
-        string json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        string json = await ReadRelayJsonAsync(response, "检查板端 G-code 文件", cancellationToken).ConfigureAwait(false);
         return RemoteProtocolJson.Deserialize<ProgramFileInfo>(json);
     }
 
@@ -93,8 +92,7 @@ public sealed class RemoteRelayClient : IRemoteTransport, IDisposable
     {
         string safeFileName = SafeProgramFileName(fileName);
         using HttpResponseMessage response = await _httpClient.GetAsync(new Uri(BaseUri, $"remote/program/file?filename={Uri.EscapeDataString(safeFileName)}&content=1"), cancellationToken).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
-        string json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        string json = await ReadRelayJsonAsync(response, "读取板端 G-code 文件", cancellationToken).ConfigureAwait(false);
         return RemoteProtocolJson.Deserialize<ProgramFileContentResult>(json);
     }
 
@@ -103,14 +101,25 @@ public sealed class RemoteRelayClient : IRemoteTransport, IDisposable
         string safeFileName = SafeProgramFileName(fileName);
         using HttpRequestMessage request = new(HttpMethod.Delete, new Uri(BaseUri, $"remote/program/file?filename={Uri.EscapeDataString(safeFileName)}"));
         using HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
-        string json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        string json = await ReadRelayJsonAsync(response, "删除板端 G-code 文件", cancellationToken).ConfigureAwait(false);
         return RemoteProtocolJson.Deserialize<ProgramDeleteResult>(json);
     }
 
     public async Task<ProgramUploadResult> UploadProgramAsync(string fileName, Stream content, long contentLength, string sha256, bool overwrite, CancellationToken cancellationToken)
     {
         string safeFileName = SafeProgramFileName(fileName);
+        if (contentLength <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(contentLength), "G-code 文件不能为空。");
+        }
+        if (contentLength > MaxProgramFileBytes)
+        {
+            throw new ArgumentOutOfRangeException(nameof(contentLength), "G-code 文件超过板端 2 MiB 上限。");
+        }
+        if (sha256.Length != 64 || sha256.Any(ch => !Uri.IsHexDigit(ch)))
+        {
+            throw new ArgumentException("G-code 文件 SHA256 无效。", nameof(sha256));
+        }
 
         Uri requestUri = new(BaseUri, $"remote/program/upload?filename={Uri.EscapeDataString(safeFileName)}&overwrite={(overwrite ? "1" : "0")}");
         using HttpRequestMessage request = new(HttpMethod.Post, requestUri);
@@ -121,8 +130,7 @@ public sealed class RemoteRelayClient : IRemoteTransport, IDisposable
         request.Content = streamContent;
 
         using HttpResponseMessage response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
-        string json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        string json = await ReadRelayJsonAsync(response, "上传 G-code 到板端", cancellationToken).ConfigureAwait(false);
         return RemoteProtocolJson.Deserialize<ProgramUploadResult>(json);
     }
 
@@ -148,12 +156,83 @@ public sealed class RemoteRelayClient : IRemoteTransport, IDisposable
     private static string SafeProgramFileName(string fileName)
     {
         string safeFileName = Path.GetFileName(fileName);
-        if (String.IsNullOrWhiteSpace(safeFileName) || !String.Equals(fileName, safeFileName, StringComparison.Ordinal))
+        if (String.IsNullOrWhiteSpace(safeFileName)
+            || !String.Equals(fileName, fileName.Trim(), StringComparison.Ordinal)
+            || fileName.Contains('/')
+            || fileName.Contains('\\')
+            || !String.Equals(fileName, safeFileName, StringComparison.Ordinal))
         {
-            throw new ArgumentException("Program file name must be a basename.", nameof(fileName));
+            throw new ArgumentException("G-code 文件名必须是 basename，不能包含路径或首尾空格。", nameof(fileName));
+        }
+
+        string extension = Path.GetExtension(safeFileName).ToLowerInvariant();
+        if (extension is not (".ngc" or ".nc" or ".tap" or ".gcode"))
+        {
+            throw new ArgumentException("只允许 .ngc、.nc、.tap、.gcode 文件。", nameof(fileName));
         }
 
         return safeFileName;
+    }
+
+    private static async Task<string> ReadRelayJsonAsync(
+        HttpResponseMessage response,
+        string operation,
+        CancellationToken cancellationToken)
+    {
+        string json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        if (response.IsSuccessStatusCode)
+        {
+            return json;
+        }
+
+        string detail = ReadRelayErrorDetail(json);
+        string reason = String.IsNullOrWhiteSpace(response.ReasonPhrase) ? String.Empty : $" {response.ReasonPhrase}";
+        throw new InvalidOperationException($"{operation}失败：HTTP {(int)response.StatusCode}{reason}；{detail}");
+    }
+
+    private static string ReadRelayErrorDetail(string body)
+    {
+        string? code = null;
+        string? message = null;
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(body);
+            JsonElement root = document.RootElement;
+            if (root.ValueKind == JsonValueKind.Object)
+            {
+                if (root.TryGetProperty("error", out JsonElement errorElement) && errorElement.ValueKind == JsonValueKind.String)
+                {
+                    code = errorElement.GetString();
+                }
+                if (root.TryGetProperty("message", out JsonElement messageElement) && messageElement.ValueKind == JsonValueKind.String)
+                {
+                    message = messageElement.GetString();
+                }
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        if (String.Equals(code, "unsupported_remote_path", StringComparison.Ordinal))
+        {
+            return "当前板端未安装 G-code 文件接口，请更新板端 remote_ui_relay。";
+        }
+        if (!String.IsNullOrWhiteSpace(message))
+        {
+            return String.IsNullOrWhiteSpace(code) ? message : $"{message}（{code}）";
+        }
+        if (!String.IsNullOrWhiteSpace(code))
+        {
+            return code;
+        }
+
+        string compact = body.Replace('\r', ' ').Replace('\n', ' ').Trim();
+        if (compact.Length > 240)
+        {
+            compact = compact[..240] + "...";
+        }
+        return String.IsNullOrWhiteSpace(compact) ? "板端没有返回错误详情。" : compact;
     }
 
     public async IAsyncEnumerable<RemoteFramePacket> ReadFrameStreamAsync([EnumeratorCancellation] CancellationToken cancellationToken)

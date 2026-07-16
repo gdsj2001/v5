@@ -2,7 +2,6 @@
 
 #include "v5_lvgl_headless.h"
 #include "v5_lvgl_remote_display.h"
-#include "v5_native_home.h"
 #include "v5_popup_layout.h"
 #include "v5_ui_first_frame_guard.h"
 
@@ -245,26 +244,6 @@ int main(void)
     }
     if (lv_obj_get_parent(estop) != main_root) {
         return 10;
-    }
-    {
-        V5CommandGateHomeStatus home_status;
-        memset(&home_status, 0, sizeof(home_status));
-        home_status.run_id = 0x390529ULL;
-        home_status.generation = 41U;
-        home_status.phase = V5_NATIVE_HOME_PHASE_FAILED;
-        home_status.failure_phase = V5_NATIVE_HOME_PHASE_RTCP_FORCE_OFF;
-        home_status.terminal = 1;
-        snprintf(home_status.direct_reason, sizeof(home_status.direct_reason), "%s", "HOME_RTCP_FORCE_OFF_NOT_CONFIRMED");
-        shell_show_home_failure_popup(&home_status);
-        text = shell_operator_error_popup_text();
-        if (!shell_operator_error_popup_visible() || !strstr(text, "RTCP") || strstr(text, "HOME_RTCP")) {
-            return 11;
-        }
-        shell_hide_operator_error_popup();
-        home_status.phase = V5_NATIVE_HOME_PHASE_CANCELLED;
-        home_status.cancelled = 1;
-        shell_show_home_failure_popup(&home_status);
-        if (shell_operator_error_popup_visible()) return 12;
     }
     puts("v5_ui_shell_operator_error_smoke PASS");
     return 0;

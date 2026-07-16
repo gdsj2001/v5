@@ -27,6 +27,14 @@
 #define V5_REMOTE_RUN_DIR "/run/8ax_v5_product_ui"
 #define V5_REMOTE_FRAMEBUFFER_PATH V5_REMOTE_RUN_DIR "/remote_framebuffer.bgra"
 #define V5_REMOTE_DIRTY_FIFO_PATH V5_REMOTE_RUN_DIR "/remote_dirty"
+#define V5_REMOTE_DIRTY_RECT_CAPACITY 16U
+
+typedef struct {
+    int x1;
+    int y1;
+    int x2;
+    int y2;
+} V5RemoteDirtyRect;
 
 static lv_color_t g_draw_buffer[V5_UI_MAX_WIDTH * 20U];
 static unsigned char g_frame[V5_UI_MAX_WIDTH * V5_UI_MAX_HEIGHT * 4U];
@@ -51,11 +59,8 @@ static int g_remote_dirty_fd = -1;
 static unsigned long long g_frame_id;
 static int g_output_suppressed = 1;
 static int g_physical_framebuffer_claimed;
-static int g_pending_dirty_valid;
-static int g_pending_dirty_x1;
-static int g_pending_dirty_y1;
-static int g_pending_dirty_x2;
-static int g_pending_dirty_y2;
+static V5RemoteDirtyRect g_pending_dirty_rects[V5_REMOTE_DIRTY_RECT_CAPACITY];
+static unsigned int g_pending_dirty_count;
 
 static int read_u32_file(const char *path, unsigned int *out)
 {
@@ -237,13 +242,58 @@ static void notify_remote_dirty(unsigned long long base_frame_id,
     if (!ensure_remote_dirty_fifo() || g_remote_dirty_fd < 0) {
         return;
     }
-    len = snprintf(line, sizeof(line), "%llu %llu %u %u %u %u\n",
+    len = snprintf(line, sizeof(line), "%llu %llu 1 %u %u %u %u\n",
                    frame_id, base_frame_id, x, y, w, h);
     if (len <= 0 || (size_t)len >= sizeof(line)) {
         return;
     }
     written = write(g_remote_dirty_fd, line, (size_t)len);
     if (written < 0 && (errno == EPIPE || errno == ENXIO)) {
+        close(g_remote_dirty_fd);
+        g_remote_dirty_fd = -1;
+    }
+}
+
+static void notify_remote_dirty_rects(unsigned long long base_frame_id,
+                                      unsigned long long frame_id,
+                                      const V5RemoteDirtyRect *rects,
+                                      unsigned int rect_count)
+{
+    char line[V5_REMOTE_DIRTY_RECT_CAPACITY * 96U];
+    size_t offset = 0U;
+    unsigned int i;
+    ssize_t written;
+    if (!rects || rect_count == 0U || rect_count > V5_REMOTE_DIRTY_RECT_CAPACITY) {
+        return;
+    }
+    {
+        int len = snprintf(line, sizeof(line), "%llu %llu %u",
+                           frame_id, base_frame_id, rect_count);
+        if (len <= 0 || (size_t)len >= sizeof(line)) {
+            return;
+        }
+        offset += (size_t)len;
+    }
+    for (i = 0U; i < rect_count; ++i) {
+        int len = snprintf(&line[offset], sizeof(line) - offset,
+                           " %d %d %d %d",
+                           rects[i].x1, rects[i].y1,
+                           rects[i].x2 - rects[i].x1 + 1,
+                           rects[i].y2 - rects[i].y1 + 1);
+        if (len <= 0 || (size_t)len >= sizeof(line) - offset) {
+            return;
+        }
+        offset += (size_t)len;
+    }
+    if (offset + 1U >= sizeof(line)) {
+        return;
+    }
+    line[offset++] = '\n';
+    if (!ensure_remote_dirty_fifo() || g_remote_dirty_fd < 0) {
+        return;
+    }
+    written = write(g_remote_dirty_fd, line, offset);
+    if (written != (ssize_t)offset) {
         close(g_remote_dirty_fd);
         g_remote_dirty_fd = -1;
     }
@@ -285,28 +335,82 @@ static void copy_row_to_fb(unsigned int x, unsigned int y, const unsigned char *
     }
 }
 
-static void accumulate_dirty_area(int x1, int y1, int x2, int y2)
+static unsigned long long dirty_rect_area(const V5RemoteDirtyRect *rect)
 {
-    if (!g_pending_dirty_valid) {
-        g_pending_dirty_x1 = x1;
-        g_pending_dirty_y1 = y1;
-        g_pending_dirty_x2 = x2;
-        g_pending_dirty_y2 = y2;
-        g_pending_dirty_valid = 1;
-        return;
+    return (unsigned long long)(rect->x2 - rect->x1 + 1) *
+           (unsigned long long)(rect->y2 - rect->y1 + 1);
+}
+
+static int dirty_rects_touch(const V5RemoteDirtyRect *left, const V5RemoteDirtyRect *right)
+{
+    return left->x1 <= right->x2 + 1 && right->x1 <= left->x2 + 1 &&
+           left->y1 <= right->y2 + 1 && right->y1 <= left->y2 + 1;
+}
+
+static void dirty_rect_union(V5RemoteDirtyRect *target, const V5RemoteDirtyRect *other)
+{
+    if (other->x1 < target->x1) {
+        target->x1 = other->x1;
     }
-    if (x1 < g_pending_dirty_x1) {
-        g_pending_dirty_x1 = x1;
+    if (other->y1 < target->y1) {
+        target->y1 = other->y1;
     }
-    if (y1 < g_pending_dirty_y1) {
-        g_pending_dirty_y1 = y1;
+    if (other->x2 > target->x2) {
+        target->x2 = other->x2;
     }
-    if (x2 > g_pending_dirty_x2) {
-        g_pending_dirty_x2 = x2;
+    if (other->y2 > target->y2) {
+        target->y2 = other->y2;
     }
-    if (y2 > g_pending_dirty_y2) {
-        g_pending_dirty_y2 = y2;
+}
+
+static void remove_pending_dirty_rect(unsigned int index)
+{
+    unsigned int i;
+    for (i = index + 1U; i < g_pending_dirty_count; ++i) {
+        g_pending_dirty_rects[i - 1U] = g_pending_dirty_rects[i];
     }
+    --g_pending_dirty_count;
+}
+
+static void add_pending_dirty_area(int x1, int y1, int x2, int y2)
+{
+    V5RemoteDirtyRect merged = {x1, y1, x2, y2};
+    unsigned int i = 0U;
+    while (i < g_pending_dirty_count) {
+        if (dirty_rects_touch(&merged, &g_pending_dirty_rects[i])) {
+            dirty_rect_union(&merged, &g_pending_dirty_rects[i]);
+            remove_pending_dirty_rect(i);
+        } else {
+            ++i;
+        }
+    }
+    if (g_pending_dirty_count >= V5_REMOTE_DIRTY_RECT_CAPACITY) {
+        unsigned int best = 0U;
+        unsigned long long best_growth = ~0ULL;
+        for (i = 0U; i < g_pending_dirty_count; ++i) {
+            V5RemoteDirtyRect candidate = merged;
+            unsigned long long growth;
+            dirty_rect_union(&candidate, &g_pending_dirty_rects[i]);
+            growth = dirty_rect_area(&candidate) - dirty_rect_area(&merged) -
+                     dirty_rect_area(&g_pending_dirty_rects[i]);
+            if (growth < best_growth) {
+                best = i;
+                best_growth = growth;
+            }
+        }
+        dirty_rect_union(&merged, &g_pending_dirty_rects[best]);
+        remove_pending_dirty_rect(best);
+        i = 0U;
+        while (i < g_pending_dirty_count) {
+            if (dirty_rects_touch(&merged, &g_pending_dirty_rects[i])) {
+                dirty_rect_union(&merged, &g_pending_dirty_rects[i]);
+                remove_pending_dirty_rect(i);
+            } else {
+                ++i;
+            }
+        }
+    }
+    g_pending_dirty_rects[g_pending_dirty_count++] = merged;
 }
 
 static void compose_area(const lv_area_t *area, const lv_color_t *color_p)
@@ -342,39 +446,41 @@ static void compose_area(const lv_area_t *area, const lv_color_t *color_p)
         memcpy(frame_row, src_bytes, (size_t)pixels * 4U);
     }
     if (!g_output_suppressed) {
-        accumulate_dirty_area(x1, y1, x2, y2);
+        add_pending_dirty_area(x1, y1, x2, y2);
     }
 }
 
 static void commit_composed_frame(void)
 {
-    int y;
-    unsigned int x;
-    unsigned int width;
-    unsigned int height;
+    unsigned int i;
+    unsigned int rect_count;
     unsigned long long base_frame_id;
-    if (g_output_suppressed || !g_pending_dirty_valid) {
-        g_pending_dirty_valid = 0;
+    if (g_output_suppressed || g_pending_dirty_count == 0U) {
+        g_pending_dirty_count = 0U;
         return;
     }
-    x = (unsigned int)g_pending_dirty_x1;
-    width = (unsigned int)(g_pending_dirty_x2 - g_pending_dirty_x1 + 1);
-    height = (unsigned int)(g_pending_dirty_y2 - g_pending_dirty_y1 + 1);
+    rect_count = g_pending_dirty_count;
     if (!ensure_remote_framebuffer() || !g_remote_fb || !lock_framebuffer_fd(g_remote_fb_fd, LOCK_EX)) {
-        g_pending_dirty_valid = 0;
+        g_pending_dirty_count = 0U;
         return;
     }
-    for (y = g_pending_dirty_y1; y <= g_pending_dirty_y2; ++y) {
-        const unsigned char *frame_row = &g_frame[((unsigned int)y * g_width + x) * 4U];
-        unsigned char *remote_row = &g_remote_fb[((unsigned int)y * g_width + x) * 4U];
-        copy_row_to_fb(x, (unsigned int)y, frame_row, width);
-        memcpy(remote_row, frame_row, (size_t)width * 4U);
+    for (i = 0U; i < rect_count; ++i) {
+        const V5RemoteDirtyRect *rect = &g_pending_dirty_rects[i];
+        unsigned int x = (unsigned int)rect->x1;
+        unsigned int width = (unsigned int)(rect->x2 - rect->x1 + 1);
+        int y;
+        for (y = rect->y1; y <= rect->y2; ++y) {
+            const unsigned char *frame_row = &g_frame[((unsigned int)y * g_width + x) * 4U];
+            unsigned char *remote_row = &g_remote_fb[((unsigned int)y * g_width + x) * 4U];
+            copy_row_to_fb(x, (unsigned int)y, frame_row, width);
+            memcpy(remote_row, frame_row, (size_t)width * 4U);
+        }
     }
     base_frame_id = g_frame_id;
     ++g_frame_id;
-    notify_remote_dirty(base_frame_id, g_frame_id, x, (unsigned int)g_pending_dirty_y1, width, height);
+    notify_remote_dirty_rects(base_frame_id, g_frame_id, g_pending_dirty_rects, rect_count);
     (void)lock_framebuffer_fd(g_remote_fb_fd, LOCK_UN);
-    g_pending_dirty_valid = 0;
+    g_pending_dirty_count = 0U;
 }
 
 static void remote_flush(lv_disp_drv_t *driver, const lv_area_t *area, lv_color_t *color_p)
@@ -496,12 +602,41 @@ int v5_lvgl_remote_display_publish_current_frame(void)
     }
     copy_full_frame_to_fb(g_frame);
     memcpy(g_remote_fb, g_frame, frame_size);
-    g_pending_dirty_valid = 0;
+    g_pending_dirty_count = 0U;
     base_frame_id = g_frame_id;
     ++g_frame_id;
     notify_remote_dirty(base_frame_id, g_frame_id, 0U, 0U, g_width, g_height);
     (void)lock_framebuffer_fd(g_remote_fb_fd, LOCK_UN);
     return 1;
+}
+
+int v5_lvgl_remote_display_blackout_for_restart(void)
+{
+    size_t frame_size;
+    unsigned long long base_frame_id;
+    int physical_black;
+    int remote_black = 0;
+
+    g_output_suppressed = 1;
+    g_pending_dirty_count = 0U;
+    if (!g_display_ready) {
+        return 0;
+    }
+    frame_size = remote_frame_size();
+    memset(g_frame, 0, frame_size);
+    copy_full_frame_to_fb(g_frame);
+    physical_black = g_fb != 0;
+
+    if (ensure_remote_framebuffer() && g_remote_fb &&
+        lock_framebuffer_fd(g_remote_fb_fd, LOCK_EX)) {
+        memcpy(g_remote_fb, g_frame, frame_size);
+        base_frame_id = g_frame_id;
+        ++g_frame_id;
+        (void)lock_framebuffer_fd(g_remote_fb_fd, LOCK_UN);
+        notify_remote_dirty(base_frame_id, g_frame_id, 0U, 0U, g_width, g_height);
+        remote_black = 1;
+    }
+    return physical_black || remote_black;
 }
 
 int v5_lvgl_remote_display_cache_valid(unsigned int slot)
@@ -526,7 +661,7 @@ int v5_lvgl_remote_display_set_output_suppressed(int suppressed)
     int previous = g_output_suppressed;
     g_output_suppressed = suppressed ? 1 : 0;
     if (g_output_suppressed) {
-        g_pending_dirty_valid = 0;
+        g_pending_dirty_count = 0U;
     }
     return previous;
 }

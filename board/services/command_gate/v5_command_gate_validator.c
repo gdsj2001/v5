@@ -101,6 +101,41 @@ static int axis_name_ok(const char *text)
     return c == 'X' || c == 'Y' || c == 'Z' || c == 'A' || c == 'B' || c == 'C';
 }
 
+static int drive_window_run_id_ok(const char *text)
+{
+    const unsigned char *p = (const unsigned char *)text;
+    size_t length = 0U;
+    if (!p || !*p) {
+        return 0;
+    }
+    while (*p) {
+        if (!(isalnum(*p) || *p == '_' || *p == '-' || *p == '.' || *p == ':')) {
+            return 0;
+        }
+        ++length;
+        if (length > 64U) {
+            return 0;
+        }
+        ++p;
+    }
+    return 1;
+}
+
+static int drive_window_numeric_payload_is_empty(const V5CommandGateIpcRequestFrame *frame)
+{
+    unsigned int i;
+    if (!frame || frame->index_value != 0 || frame->axis_mask != 0U ||
+        frame->axis_value != 0.0 || frame->increment_value != 0.0) {
+        return 0;
+    }
+    for (i = 0U; i < V5_COMMAND_AXIS_COUNT; ++i) {
+        if (frame->point_axis[i] != 0.0) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 static int finite_bounded(double value, double limit)
 {
     return isfinite(value) && value >= -limit && value <= limit;
@@ -186,7 +221,7 @@ int v5_command_gate_validate_execute_frame(
     if (!no_stray_axis_mask(frame, reason, reason_cap)) {
         return 0;
     }
-    if (frame->kind <= (int32_t)V5_COMMAND_UI_LOCAL || frame->kind > (int32_t)V5_COMMAND_AXIS_ZERO_POSITION) {
+    if (frame->kind <= (int32_t)V5_COMMAND_UI_LOCAL || frame->kind > (int32_t)V5_COMMAND_DRIVE_WRITE_ABORT) {
         set_reason(reason, reason_cap, "UNKNOWN_COMMAND_KIND");
         return 0;
     }
@@ -306,6 +341,21 @@ int v5_command_gate_validate_execute_frame(
         }
         if (strcmp(frame->mode_value, "mcs") != 0 && strcmp(frame->mode_value, "wcs") != 0) {
             set_reason(reason, reason_cap, "AXIS_ZERO_POSITION_MODE_INVALID");
+            return 0;
+        }
+        break;
+    case V5_COMMAND_DRIVE_WRITE_BEGIN:
+    case V5_COMMAND_DRIVE_WRITE_FINISH:
+    case V5_COMMAND_DRIVE_WRITE_ABORT:
+        if (!drive_window_numeric_payload_is_empty(frame) ||
+            !command_text_ok(frame->text_value, 1, 1, reason, reason_cap) ||
+            !drive_window_run_id_ok(frame->text_value) ||
+            !command_text_ok(frame->secondary_text_value, 0, 0, reason, reason_cap) ||
+            !text_is_empty(frame->mode_value) ||
+            (kind != V5_COMMAND_DRIVE_WRITE_FINISH && frame->enabled_value != 0) ||
+            (kind == V5_COMMAND_DRIVE_WRITE_FINISH &&
+             frame->enabled_value != 0 && frame->enabled_value != 1)) {
+            set_reason(reason, reason_cap, "DRIVE_WRITE_WINDOW_INVALID");
             return 0;
         }
         break;

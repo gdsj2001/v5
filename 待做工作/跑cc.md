@@ -2,7 +2,7 @@
 
 ## 目标
 
-用真实板端 UI/operator 路径验证 `cc.ngc`：继电器断电重启开发板后，AI 统一通过 Codex 内嵌浏览器的实时开发板镜像逐步点击打开程序、双击打开 `cc`、回零、启动、1 秒后急停、取消急停、再次回零，并在全过程监测编码器反馈机械坐标。监测编码器反馈的核心目的不是只证明“动了”，而是证明 G-code 中一圈内 `A0 C0` 目标是否实际走了最近 `k*360` 等效角，以及两次 `回零` 是否实际走了 A/C 的 360 度最短角差等效回零，而不是落回 raw 机器 0、坐标清零或只写 homed 标记。
+用真实板端 UI/operator 路径验证 fresh active model 对应的原始 `cc-ac.ngc` 或 `cc-bc.ngc`。上板后先通过设置页执行一次 `设置驱动 -> 保存并重启` 并完成 fresh 轴—从站/驱动/比例链回读；随后通过 Codex 内嵌浏览器至少连续三轮执行 `取消急停 -> 机械全轴回零 -> 打开程序 -> 选择并打开模型匹配程序 -> 启动 -> 1 秒后急停 -> 取消急停 -> 机械全轴回零 -> 急停`。全过程监测编码器反馈，证明程序目标和两次 Home 都走当前模型旋转轴的最近 `k*360` 等效角，而不是落回 raw 机器 0、坐标清零或只写 homed 标记。
 
 ## 硬要求
 
@@ -18,39 +18,30 @@
 
 - 测试台架处于允许真实电机运动的空载状态。
 - 板端、VM、继电器控制链路可用。
-- LinuxCNC/EtherCAT/command gate/UI relay 可在断电重启后恢复，并且必须等微内核/native 运行闭包完全起来后才自动进入 `Machine On`。这里的“微内核完全起来”至少包含 LinuxCNC/EtherCAT OP、command gate 常驻连接、RTCP/WCS/G53/native safety 状态块、State Publisher 和 UI relay 可读，不允许只在 SSH 或 LinuxCNC backend 刚起来时提前 `Machine On`。若 `linuxcncrsh Get Machine`、native safety readback 或同源 machine enable actual 显示仍为 `MACHINE OFF`/`enabled=false`，本测试不能继续点击回零或启动，必须先修复开机自动上使能链路。
-- `cc.ngc` 使用板端已部署的正式路径，不使用临时改写文件或 UI 预览结果代替。
+- LinuxCNC/EtherCAT/command gate/UI relay 在断电重启后恢复，服务启动保持 realtime latch 安全态和 `Machine Off`，不得自动 reset 或上使能。只有真实 UI `取消急停` 后 fresh native `estop_active=false && machine_enabled=true` 才允许 Home。
+- 程序只使用板端正式部署的 `cc-ac.ngc` / `cc-bc.ngc`；选择由 fresh native active model 裁决，不使用临时改写文件、旧 `cc.ngc` 或 UI 预览结果代替。
 
 ## 执行步骤
 
-1. 通过继电器断电重启开发板。
-2. 等待板端 SSH、LinuxCNC、UI relay、State Publisher、RTCP/WCS/G53/native safety 状态块全部恢复，并确认系统在这些微内核/native owner 完全起来之后已自动 `Machine On`；此处不得通过手工点 `取消急停`、direct UDS、linuxcncrsh 或测试脚本补发 `Set Machine On` 来掩盖开机链路缺陷。
-3. 启动编码器反馈采样，记录基线：`mcs/cmd_mcs/velocity/seq/valid_mask`，并记录 A/C 的 raw 角、`phase mod 360` 和到最近等效零的最短角差。
-4. 在内嵌浏览器 live frame 确认主页面可见、`打开程序` 按钮位置正确。
-5. 在内嵌浏览器点击 `打开程序`。
-6. 用新的 live frame 确认进入程序页面，并确认 `cc` 或 `cc.ngc` 列表项位置。
-7. 在内嵌浏览器对 `cc` 或 `cc.ngc` 执行双击打开；双击前必须在 live frame 确认目标项，双击后用新 frame 确认已回到主页面或程序名已载入。
-8. 在内嵌浏览器 live frame 确认主页面 `回零` 按钮位置正确。
-9. 点击 `回零`，持续采样编码器反馈，确认回零是实际运动，不是坐标清零；A/C 到位必须按 360 度最短角差判定等效零，不能按 raw 线性差值或 UI 显示 0 判定。
-10. 用内嵌浏览器新 live frame 确认回零结束、主页面稳定、`启动` 按钮位置正确。
-11. 点击 `启动`，持续采样编码器反馈。
-12. 启动后等待 1 秒，期间采样必须显示真实运动或运动开始趋势；重点观察 `cc.ngc` 中 `A0 C0` 或等效归零/normalization 段前后的 A/C 编码器反馈，确认目标是最近等效角，不是 raw 机器 0 的长距离回转。
-13. 在内嵌浏览器 live frame 确认 `急停` 按钮位置正确。
-14. 点击 `急停`，采样确认编码器反馈停止、速度归零或趋近归零，并读取 native safety/LinuxCNC machine state。
-15. 用内嵌浏览器新 live frame 确认按钮已切换为 `取消急停` 或等价恢复入口。
-16. 点击 `取消急停`，确认急停 latch 清除、machine enable actual 恢复。
-17. 在内嵌浏览器 live frame 确认 `回零` 按钮位置正确。
-18. 再次点击 `回零`，采样确认真实回零运动和最终回零状态；A/C 再次按 360 度最短角差确认等效零。
-19. 保存最终内嵌浏览器 live frame，并采集最终 `mcs/cmd_mcs/velocity/seq/valid_mask`、native safety 状态、machine state。
-20. 除非现场要求保持使能，否则采证后执行安全停机或急停收尾，确保无人值守时机器不保持可运动状态。
+1. 部署完成后在内嵌浏览器进入设置页，只点击一次 `设置驱动`；等待同一 `run_id` 的 `DRIVE_SET_OK + write_verified_readback`，按本次 fresh scan/轴—从站绑定核对全部目标的 mode/egear/statusword/error_code、全过程无报警且按钮松手退出黄色。
+2. 点击右上角 `保存并重启`，等待 canonical clean restart；回读全部当前目标轴—从站绑定、mode/egear/statusword/error_code、LinuxCNC/HAL/EtherCAT 比例链和 PDO/axis binding。缺项时停止，设置驱动不在后续每轮重复执行。
+3. 确认内嵌浏览器 `frame>0 / stream=live / input=ready`，板端为 fresh `estop_active=true / machine_enabled=false`；启动编码器反馈采样并记录 active model、`mcs/cmd_mcs/velocity/seq/valid_mask` 和当前模型旋转轴的 raw/count-domain 基线。
+4. 连续执行至少三轮；每轮开始前确认仍是同一部署 identity，并严格执行以下步骤，每次只做一个动作、动作后先看 fresh frame/readback：
+   1. 点击 `取消急停`，只在 fresh native `estop_active=false && machine_enabled=true` 后继续。
+   2. 选择 `机械全轴` 并点击 `回零`；确认新的 native Home transaction、真实编码器位移、RTCP force-off actual、各轴到位和 fresh `all_homed`。Home 未成功不得打开程序。
+   3. 点击 `打开程序`；按 fresh native active model 在程序页第一次点击 `cc-ac.ngc` 或 `cc-bc.ngc` 完成选中，第二次点击同一行完成打开；回主页面核对程序名、runtime identity 和原始 hash。
+   4. 点击 `启动`，持续采样编码器反馈；1 秒后点击 `急停`，在 owner 时限内确认 native 急停 actual、运动停止和按钮切换为 `取消急停`。
+   5. 点击 `取消急停`，确认 latch 清除和 machine enable actual；再次选择 `机械全轴` 并点击 `回零`，确认新的 transaction 和当前模型旋转轴最近等效零到位。
+   6. 点击 `急停` 收尾，确认 `estop_active=true && machine_enabled=false`，保存本轮最终 live frame 和 native/encoder evidence。
+5. 任一步失败只修第一条真实失败层并从本轮安全边界重测；不得重复点击、direct UDS/linuxcncrsh、固定延时兜底或复用旧 result。三轮通过后才进入 `功能/自动闭环测试方式.md` 的完整设置页 A-G 与 model-matched Golden Motion。
 
 ## 通过标准
 
 - 所有 AI UI 输入均有内嵌浏览器点击前/后的 live frame 截图。
-- `cc` 是通过真实程序页面双击打开，不是直接写入路径或 direct command。
-- 继电器断电重启后，LinuxCNC/微内核恢复完成时必须已经自动 `Machine On`，且右下急停/取消急停按钮状态与 native machine enable actual 一致；若重启后仍是 `MACHINE OFF`，测试失败。
-- 第一次回零、`cc.ngc` 启动后的 1 秒运动、急停停止、取消急停后的第二次回零，均有编码器反馈采样证据。
-- `cc.ngc` 中 `A0 C0` 或一圈内 A/C 绝对相位目标必须由编码器反馈证明走最近等效角；若采样显示 A/C 向 raw 机器 0 长距离回转，则测试失败。
+- 模型匹配的 `cc-ac.ngc` / `cc-bc.ngc` 是通过真实程序页面先选中、再第二次点击同一行打开，不是直接写入路径或 direct command。
+- clean restart 后保持 ESTOP / Machine Off；每次 UI `取消急停` 都由 fresh native latch 与 machine-enable actual 证明恢复，按钮显示与 actual 一致。
+- 设置驱动和 clean restart 后的全部轴—从站/驱动/比例链 readback 合格；连续三轮中的第一次 Home、程序启动后的 1 秒运动、急停停止、取消急停后的第二次 Home 均有独立 fresh transaction 和编码器证据。
+- 程序中的旋转轴目标必须由编码器反馈证明走最近等效角；若采样显示当前模型旋转轴向 raw 机器 0 长距离回转，则测试失败。
 - 两次 `回零` 必须由编码器反馈证明按 360 度最短角差回到等效零；`359.999`、`-0.001` 这类等效零只能在编码器/native 实际到位且最短角差在容差内时判定通过。
 - 急停后底层安全状态确认生效；取消急停后底层 latch 清除并恢复 machine enable actual。
 - 最终回零完成后，X/Y/Z/A/C 编码器反馈处于回零完成状态；A/C 按 360 度等效零判定。
@@ -59,7 +50,7 @@
 
 - 内嵌浏览器不是 live/ready、无法确认目标位置或页面不正确。
 - 继电器断电重启失败，或板端无法恢复 UI/LinuxCNC。
-- 断电重启恢复后未自动 `Machine On`，或 machine enable actual 与 UI 右下按钮状态不一致。
+- UI `取消急停` 后 1 秒内未取得 `estop_active=false && machine_enabled=true`，或 machine enable actual 与 UI 右下按钮状态不一致。
 - 编码器反馈 `mcs` 无效、stale、seq 不变化，或采样链路中断。
 - A/C 编码器反馈无法支持最短角差判断，或无法区分最近等效零与 raw 机器 0 长距离回转。
 - 驱动故障、急停无法取消、machine enable 无法恢复。

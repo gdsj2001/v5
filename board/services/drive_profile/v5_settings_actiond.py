@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import errno
 import grp
 import os
 import pwd
@@ -29,10 +30,12 @@ from v5_settings_action_runtime import (
     set_last_status,
     v5_drive_bus_action,
 )
-from v5_settings_restart import restart_service, run_restart_handoff, service_status
+from v5_settings_restart import abort_restart_handoff, commit_restart_handoff, release_restart_handoff
+import v5_drive_enable_window
 
 SOCKET_OWNER_NAME = "root"
 SOCKET_GROUP_NAME = "petalinux"
+DRIVE_WRITE_WINDOW_ACTIONS = frozenset({"drive_factory_reset", "drive_set_parameters"})
 
 
 def secure_socket_permissions() -> None:
@@ -71,6 +74,8 @@ lock_process_memory("v5_settings_actiond")
 stop_event = threading.Event()
 active_job_lock = threading.Lock()
 active_job: Dict[str, Any] = {}
+restart_commit_lock = threading.Lock()
+restart_committed_run_id = ""
 
 def write_pipe_payload(fd: int, payload: Dict[str, Any]) -> None:
     data = bounded_json_text(
@@ -121,6 +126,19 @@ def read_pipe_payload(read_fd: int) -> bytes:
     return b"".join(chunks)
 
 
+def cleanup_failed_drive_write_window(action: str, run_id: str, action_ok: bool) -> Dict[str, Any] | None:
+    if action_ok or action not in DRIVE_WRITE_WINDOW_ACTIONS:
+        return None
+    try:
+        return v5_drive_enable_window.abort(run_id)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "code": "DRIVE_WRITE_WINDOW_ABORT_FAILED",
+            "detail": "%s: %s" % (type(exc).__name__, exc),
+        }
+
+
 def monitor_action(pid: int, read_fd: int, action: str, run_id: str,
                    spec: Dict[str, Any], axis_hint: str) -> None:
     try:
@@ -162,6 +180,9 @@ def monitor_action(pid: int, read_fd: int, action: str, run_id: str,
                 "axis": axis_hint,
             }
         terminal_state = "success" if bool(result.get("ok")) else "failed"
+    window_abort = cleanup_failed_drive_write_window(action, run_id, bool(result.get("ok")))
+    if window_abort is not None:
+        result["drive_write_window_abort"] = window_abort
     with active_job_lock:
         if active_job.get("run_id") == run_id:
             active_job.clear()
@@ -179,6 +200,19 @@ def monitor_action(pid: int, read_fd: int, action: str, run_id: str,
 def start_action_process(action: str, run_id: str, request: Dict[str, Any]) -> Dict[str, Any]:
     spec = ACTIONS[action]
     axis_hint = str(request.get("axis") or "")
+    worker_request = dict(request)
+    worker_request["_run_id"] = run_id
+    with restart_commit_lock:
+        if restart_committed_run_id:
+            return {
+                "ok": False,
+                "accepted": False,
+                "schema": "v5.settings_actiond_response.v1",
+                "action": action,
+                "run_id": run_id,
+                "code": "SETTINGS_RESTART_COMMIT_IN_PROGRESS",
+                "restart_run_id": restart_committed_run_id,
+            }
     with active_job_lock:
         if active_job:
             return {
@@ -207,7 +241,7 @@ def start_action_process(action: str, run_id: str, request: Dict[str, Any]) -> D
             }
         if pid == 0:
             os.close(read_fd)
-            action_worker(write_fd, action, request)
+            action_worker(write_fd, action, worker_request)
         os.close(write_fd)
         active_job.update({
             "pid": pid,
@@ -290,6 +324,76 @@ def cancel_action_process(run_id: str) -> Dict[str, Any]:
     return {"ok": True, "accepted": True, "code": "SETTINGS_ACTION_CANCEL_REQUESTED", "run_id": run_id}
 
 
+def commit_restart_process(run_id: str) -> Dict[str, Any]:
+    global restart_committed_run_id
+    status = get_last_status()
+    if not run_id:
+        return {"ok": False, "accepted": False, "code": "SETTINGS_RESTART_COMMIT_RUN_ID_REQUIRED", "run_id": run_id}
+    if (str(status.get("run_id") or "") != run_id or
+            str(status.get("action") or "") != "settings_save_and_restart" or
+            str(status.get("state") or "") != "success" or
+            not bool(status.get("ok")) or
+            str(status.get("code") or "") != "SETTINGS_SAVE_RESTART_BOARD_REBOOT_SCHEDULED"):
+        return {
+            "ok": False,
+            "accepted": False,
+            "code": "SETTINGS_RESTART_COMMIT_STATUS_MISMATCH",
+            "run_id": run_id,
+            "status_run_id": str(status.get("run_id") or ""),
+        }
+    with restart_commit_lock:
+        if restart_committed_run_id == run_id:
+            return {
+                "ok": True,
+                "accepted": True,
+                "code": "SETTINGS_SAVE_RESTART_COMMIT_ACK",
+                "run_id": run_id,
+                "idempotent": True,
+            }
+        if restart_committed_run_id:
+            return {
+                "ok": False,
+                "accepted": False,
+                "code": "SETTINGS_RESTART_COMMIT_OTHER_RUN_ACTIVE",
+                "run_id": run_id,
+                "active_run_id": restart_committed_run_id,
+            }
+        with active_job_lock:
+            if active_job:
+                return {
+                    "ok": False,
+                    "accepted": False,
+                    "code": "SETTINGS_RESTART_COMMIT_ACTION_BUSY",
+                    "run_id": run_id,
+                    "active_run_id": str(active_job.get("run_id") or ""),
+                }
+        result = commit_restart_handoff()
+        if not bool(result.get("ok")) or not bool(result.get("accepted")):
+            return {
+                "ok": False,
+                "accepted": False,
+                "code": str(result.get("code") or "SETTINGS_RESTART_COMMIT_FAILED"),
+                "run_id": run_id,
+                "detail": str(result.get("detail") or ""),
+            }
+        restart_committed_run_id = run_id
+    return {
+        "ok": True,
+        "accepted": True,
+        "code": "SETTINGS_SAVE_RESTART_COMMIT_ACK",
+        "run_id": run_id,
+        "_release_after_send": True,
+    }
+
+
+def rollback_restart_commit(run_id: str) -> None:
+    global restart_committed_run_id
+    abort_restart_handoff()
+    with restart_commit_lock:
+        if restart_committed_run_id == run_id:
+            restart_committed_run_id = ""
+
+
 def handle_client(conn: socket.socket) -> None:
     with conn:
         data = b""
@@ -316,6 +420,31 @@ def handle_client(conn: socket.socket) -> None:
                     MAX_ACTIOND_RESULT_BYTES,
                     "SETTINGS_ACTIOND_RESPONSE_BUDGET_EXCEEDED").encode("utf-8"))
                 return
+            if str(request.get("action") or "") == "settings_save_restart_commit":
+                commit_run_id = str(request.get("run_id") or "")
+                response = commit_restart_process(commit_run_id)
+                release_after_send = bool(response.pop("_release_after_send", False))
+                try:
+                    conn.sendall(bounded_json_text(
+                        response,
+                        MAX_ACTIOND_RESULT_BYTES,
+                        "SETTINGS_ACTIOND_RESPONSE_BUDGET_EXCEEDED").encode("utf-8"))
+                except OSError:
+                    if release_after_send:
+                        rollback_restart_commit(commit_run_id)
+                    return
+                if release_after_send:
+                    release_result = release_restart_handoff()
+                    try:
+                        append_event({
+                            "event": "restart_commit_accepted" if release_result.get("ok") else "restart_commit_release_failed",
+                            "action": "settings_save_and_restart",
+                            "run_id": commit_run_id,
+                            "code": str(release_result.get("code") or ""),
+                        })
+                    except Exception:
+                        pass
+                return
             action = str(request.get("action") or "")
         except Exception:
             action = ""
@@ -326,6 +455,16 @@ def handle_client(conn: socket.socket) -> None:
         else:
             response = {"ok": False, "accepted": False, "schema": "v5.settings_actiond_response.v1", "action": action, "run_id": run_id, "code": "SETTINGS_ACTIOND_REQUEST_BUDGET_EXCEEDED" if oversize else "UNKNOWN_SETTINGS_ACTION"}
         conn.sendall(bounded_json_text(response, MAX_ACTIOND_RESULT_BYTES, "SETTINGS_ACTIOND_RESPONSE_BUDGET_EXCEEDED").encode("utf-8"))
+
+
+def handle_client_isolated(conn: socket.socket) -> bool:
+    try:
+        handle_client(conn)
+    except OSError as exc:
+        if exc.errno not in {errno.EPIPE, errno.ECONNRESET, errno.ECONNABORTED, errno.ENOTCONN}:
+            raise
+        return False
+    return True
 
 
 def serve() -> int:
@@ -352,7 +491,7 @@ def serve() -> int:
                 if stop_event.is_set():
                     break
                 raise
-            handle_client(conn)
+            handle_client_isolated(conn)
     with active_job_lock:
         active_run_id = str(active_job.get("run_id") or "")
     if active_run_id:

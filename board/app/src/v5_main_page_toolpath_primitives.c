@@ -145,6 +145,31 @@ static lv_point_t toolpath_local_point(const V5ToolpathScreenPoint *point)
     return out;
 }
 
+static void invalidate_toolpath_line_segment(lv_obj_t *line, const lv_point_t points[2])
+{
+    lv_area_t coords;
+    lv_area_t dirty;
+    lv_coord_t padding;
+    lv_coord_t min_x;
+    lv_coord_t max_x;
+    lv_coord_t min_y;
+    lv_coord_t max_y;
+    if (!line || !points) {
+        return;
+    }
+    lv_obj_get_coords(line, &coords);
+    padding = (lv_obj_get_style_line_width(line, 0) + 1) / 2 + 2;
+    min_x = points[0].x < points[1].x ? points[0].x : points[1].x;
+    max_x = points[0].x > points[1].x ? points[0].x : points[1].x;
+    min_y = points[0].y < points[1].y ? points[0].y : points[1].y;
+    max_y = points[0].y > points[1].y ? points[0].y : points[1].y;
+    dirty.x1 = coords.x1 + min_x - padding;
+    dirty.y1 = coords.y1 + min_y - padding;
+    dirty.x2 = coords.x1 + max_x + padding;
+    dirty.y2 = coords.y1 + max_y + padding;
+    lv_obj_invalidate_area(line, &dirty);
+}
+
 int v5_main_page_internal_clip_toolpath_segment(V5ToolpathScreenPoint *start, V5ToolpathScreenPoint *end);
 
 void v5_main_page_internal_set_toolpath_axis_line(lv_obj_t *line, lv_point_t points[2], const V5ToolpathScreenPoint *start, const V5ToolpathScreenPoint *end, int valid)
@@ -168,10 +193,15 @@ void v5_main_page_internal_set_toolpath_axis_line(lv_obj_t *line, lv_point_t poi
         lv_point_t next[2];
         next[0] = toolpath_local_point(&clipped_start);
         next[1] = toolpath_local_point(&clipped_end);
-        if (lv_obj_has_flag(line, LV_OBJ_FLAG_HIDDEN) || !v5_main_page_internal_points_equal(points, next, 2U)) {
+        if (lv_obj_has_flag(line, LV_OBJ_FLAG_HIDDEN)) {
             points[0] = next[0];
             points[1] = next[1];
             lv_line_set_points(line, points, 2);
+        } else if (!v5_main_page_internal_points_equal(points, next, 2U)) {
+            invalidate_toolpath_line_segment(line, points);
+            points[0] = next[0];
+            points[1] = next[1];
+            invalidate_toolpath_line_segment(line, points);
         }
     }
     v5_main_page_internal_clear_hidden_flag_if_hidden(line);
@@ -263,7 +293,6 @@ void v5_main_page_internal_hide_toolpath_ac_geometry(V5MainPage *page)
     }
     v5_main_page_internal_hide_toolpath_line(page->toolpath_a_axis_line);
     v5_main_page_internal_hide_toolpath_line(page->toolpath_c_axis_line);
-    v5_main_page_internal_hide_toolpath_line(page->toolpath_holder_line);
     v5_main_page_internal_add_hidden_flag_if_visible(page->toolpath_a_center_line);
     v5_main_page_internal_add_hidden_flag_if_visible(page->toolpath_c_center_line);
     v5_main_page_internal_add_hidden_flag_if_visible(page->toolpath_a_label);

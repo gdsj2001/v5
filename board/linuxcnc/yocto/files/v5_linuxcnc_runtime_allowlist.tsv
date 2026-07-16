@@ -24,10 +24,14 @@
 /usr/lib/linuxcnc/modules/trivkins.so	Pulse-mode kinematics
 /usr/lib/linuxcnc/modules/xyzac-trt-kins.so	AC active-model kinematics
 /usr/lib/linuxcnc/modules/xyzbc-trt-kins.so	BC active-model kinematics
+/usr/lib/linuxcnc/modules/and2.so	BUS RTCP force-off gate
 /usr/lib/linuxcnc/modules/bitslice.so	BUS digital-input adapter
 /usr/lib/linuxcnc/modules/mux2.so	BUS RTCP selector adapter
+/usr/lib/linuxcnc/modules/not.so	BUS RTCP force-off inverter
 /usr/lib/linuxcnc/modules/or2.so	BUS RTCP input combiner
 /usr/lib/linuxcnc/modules/v5_safety_latch.so	Realtime emergency-stop latch and heartbeat watchdog
+/usr/lib/linuxcnc/modules/v5_bus_axis_router.so	Realtime logical-axis to physical-slave router
+/usr/lib/linuxcnc/modules/v5_bus_homecomp.so	Native BUS count-domain Home owner
 /usr/bin/v5_native_hal_owner	Resident C HAL owner for safety RTCP and G53 geometry
 /usr/lib/python3/dist-packages/linuxcnc.so	State Publisher native status API
 /usr/share/linuxcnc/linuxcnc.nml	canonical NML channel layout

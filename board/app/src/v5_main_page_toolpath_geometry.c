@@ -122,6 +122,7 @@ void v5_main_page_internal_hide_toolpath_unproven_geometry(V5MainPage *page)
     }
     v5_main_page_internal_hide_toolpath_program_wcs_objects(page);
     v5_main_page_internal_hide_toolpath_ac_geometry(page);
+    v5_main_page_internal_hide_toolpath_line(page->toolpath_holder_line);
     v5_main_page_internal_add_hidden_flag_if_visible(page->toolpath_microkernel_marker_dot);
     v5_main_page_internal_add_hidden_flag_if_visible(page->toolpath_holder_marker_line);
     v5_main_page_internal_add_hidden_flag_if_visible(page->toolpath_mcs_label);

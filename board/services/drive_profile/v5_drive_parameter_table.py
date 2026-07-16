@@ -8,7 +8,6 @@ from typing import Any, Dict, List, Tuple
 import v5_drive_bus_context as context
 import v5_drive_bus_contract as contract
 from v5_drive_bus_contract import AXIS_ORDER, DriveActionError, finite_float
-from v5_drive_runtime_store import load_settings_runtime
 from v5_drive_sdo import parse_slave_position_token
 
 DRIVE_DISPLAY_FIELDS = {"egear_numerator", "egear_denominator", "write_status"}
@@ -124,23 +123,33 @@ def format_drive_display_int(value: Any) -> str:
     return "%.12g" % number
 
 
-def runtime_axis_by_slave_position() -> Dict[str, str]:
-    try:
-        runtime = load_settings_runtime()
-    except DriveActionError:
-        return {}
+def resident_axis_by_slave_position() -> Dict[str, str]:
+    bindings = load_self_slave_bindings()
     mapping: Dict[str, str] = {}
-    axes = runtime.get("axes") if isinstance(runtime.get("axes"), list) else []
-    for axis_index, axis_cfg in enumerate(axes):
-        if not isinstance(axis_cfg, dict):
+    for axis in AXIS_ORDER:
+        if axis not in bindings:
+            raise DriveActionError(
+                "DRIVE_TARGET_SELF_SLAVE_MISSING",
+                "resident self owner 缺少轴从站绑定，未访问驱动。",
+                {"axis": axis},
+            )
+        raw_binding = bindings[axis]
+        if str(raw_binding).upper() == "NAT":
             continue
-        axis = str(axis_cfg.get("axis") or (AXIS_ORDER[axis_index] if axis_index < len(AXIS_ORDER) else "AXIS_%d" % axis_index)).upper()
-        try:
-            position = parse_slave_position_token(axis_cfg.get("slave_index") if axis_cfg.get("slave_index") is not None else axis_cfg.get("slave"))
-        except DriveActionError:
-            continue
-        if axis and position:
-            mapping[position] = axis
+        position = parse_slave_position_token(raw_binding)
+        if not position:
+            raise DriveActionError(
+                "DRIVE_TARGET_SELF_SLAVE_INVALID",
+                "resident self owner 的轴从站绑定非法，未访问驱动。",
+                {"axis": axis, "slave": raw_binding},
+            )
+        if position in mapping:
+            raise DriveActionError(
+                "DRIVE_TARGET_DUPLICATE_SLAVE",
+                "resident self owner 中多个轴绑定到同一从站，未访问驱动。",
+                {"axis": axis, "other_axis": mapping[position], "slave_index": position},
+            )
+        mapping[position] = axis
     return mapping
 
 

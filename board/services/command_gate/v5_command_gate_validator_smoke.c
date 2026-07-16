@@ -40,6 +40,7 @@ static int expect_reject(V5CommandGateIpcRequestFrame *frame, const char *label)
 int main(void)
 {
     V5CommandGateIpcRequestFrame frame;
+    unsigned int i;
 
     init_frame(&frame, V5_COMMAND_WCS_SELECT);
     frame.index_value = 8;
@@ -109,6 +110,36 @@ int main(void)
     init_frame(&frame, V5_COMMAND_START);
     snprintf(frame.text_value, sizeof(frame.text_value), "/opt/8ax/v5/gcode/golden/cc-ac.ngc");
     if (!expect_accept(&frame)) return 11;
+
+    init_frame(&frame, V5_COMMAND_DRIVE_WRITE_BEGIN);
+    snprintf(frame.text_value, sizeof(frame.text_value), "settings:42");
+    if (!expect_accept(&frame)) return 16;
+
+    init_frame(&frame, V5_COMMAND_DRIVE_WRITE_FINISH);
+    snprintf(frame.text_value, sizeof(frame.text_value), "settings-42");
+    frame.enabled_value = 1;
+    if (!expect_accept(&frame)) return 17;
+
+    init_frame(&frame, V5_COMMAND_DRIVE_WRITE_ABORT);
+    snprintf(frame.text_value, sizeof(frame.text_value), "settings-42");
+    if (!expect_accept(&frame)) return 18;
+
+    init_frame(&frame, V5_COMMAND_DRIVE_WRITE_BEGIN);
+    snprintf(frame.text_value, sizeof(frame.text_value), "bad run id");
+    if (!expect_reject(&frame, "bad_drive_window_run_id")) return 19;
+
+    init_frame(&frame, V5_COMMAND_DRIVE_WRITE_FINISH);
+    snprintf(frame.text_value, sizeof(frame.text_value), "settings-42");
+    frame.enabled_value = 2;
+    if (!expect_reject(&frame, "bad_drive_window_restore")) return 20;
+
+    init_frame(&frame, V5_COMMAND_DRIVE_WRITE_BEGIN);
+    for (i = 0U; i < 64U; ++i) frame.text_value[i] = i == 8U ? ':' : 'a';
+    frame.text_value[64] = '\0';
+    if (!expect_accept(&frame)) return 21;
+    frame.text_value[64] = 'a';
+    frame.text_value[65] = '\0';
+    if (!expect_reject(&frame, "drive_window_run_id_too_long")) return 22;
 
     printf("v5 command gate validator smoke passed\n");
     return 0;

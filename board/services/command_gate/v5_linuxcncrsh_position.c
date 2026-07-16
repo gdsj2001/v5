@@ -156,6 +156,78 @@ int v5_linuxcncrsh_get_joint_position(
 #endif
 }
 
+int v5_linuxcncrsh_parse_joint_state_response(
+    const char *response,
+    unsigned int expected_joint,
+    V5LinuxcncrshJointState *state_out)
+{
+    const char *scan;
+    unsigned int response_joint = 0U;
+    unsigned int heartbeat = 0U;
+    int echo_serial = 0;
+    double actual = 0.0;
+    char state[16];
+    if (state_out) {
+        memset(state_out, 0, sizeof(*state_out));
+    }
+    if (!response || !state_out) {
+        return 0;
+    }
+    scan = response;
+    while ((scan = strstr(scan, "JOINT_STATE")) != 0) {
+        if (sscanf(scan, "JOINT_STATE %u %lf %15s %u %d",
+                   &response_joint, &actual, state, &heartbeat, &echo_serial) == 5 &&
+            response_joint == expected_joint &&
+            isfinite(actual) &&
+            (strcasecmp(state, "YES") == 0 || strcasecmp(state, "NO") == 0)) {
+            state_out->actual = actual;
+            state_out->in_position = strcasecmp(state, "YES") == 0;
+            state_out->heartbeat = heartbeat;
+            state_out->echo_serial = echo_serial;
+            return 1;
+        }
+        scan += strlen("JOINT_STATE");
+    }
+    return 0;
+}
+
+int v5_linuxcncrsh_get_joint_state(
+    const V5LinuxcncrshConfig *config,
+    unsigned int joint,
+    V5LinuxcncrshJointState *state_out)
+{
+#ifdef _WIN32
+    (void)config;
+    (void)joint;
+    if (state_out) {
+        memset(state_out, 0, sizeof(*state_out));
+    }
+    return 0;
+#else
+    int fd;
+    int rc;
+    char command[64];
+    char response[512];
+    if (state_out) {
+        memset(state_out, 0, sizeof(*state_out));
+    }
+    if (!state_out) {
+        return 0;
+    }
+    fd = v5_linuxcncrsh_gate_connect(config);
+    if (fd < 0) {
+        return 0;
+    }
+    rc = snprintf(command, sizeof(command), "Get Joint_State %u", joint);
+    if (!v5_linuxcncrsh_format_ok(rc, sizeof(command)) ||
+        !v5_linuxcncrsh_send_request_text(fd, command, response, sizeof(response))) {
+        v5_linuxcncrsh_gate_close();
+        return 0;
+    }
+    return v5_linuxcncrsh_parse_joint_state_response(response, joint, state_out);
+#endif
+}
+
 #ifndef _WIN32
 static int v5_linuxcncrsh_parse_joint_homed(
     const char *response,

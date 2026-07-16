@@ -1,0 +1,88 @@
+#!/bin/sh
+set -eu
+
+DAEMON=/usr/libexec/8ax/remote_ssh/v5_remote_ssh_tunnel.py
+SSH_BINARY=/usr/bin/ssh.openssh
+PIDFILE=/run/8ax/v5_remote_ssh.pid
+LOGFILE=/run/8ax/v5_remote_ssh.log
+
+is_running() {
+  [ -r "$PIDFILE" ] || return 1
+  pid=$(cat "$PIDFILE" 2>/dev/null || true)
+  [ -n "$pid" ] || return 1
+  kill -0 "$pid" 2>/dev/null
+}
+
+set_non_microkernel_affinity() {
+  pid="$1"
+  command -v taskset >/dev/null 2>&1 || return 0
+  if grep -qw 1 /sys/devices/system/cpu/online 2>/dev/null || grep -q '0-1' /sys/devices/system/cpu/online 2>/dev/null; then
+    taskset -pc 1 "$pid" >>"$LOGFILE" 2>&1 || true
+  fi
+}
+
+start_service() {
+  if is_running; then
+    echo "v5_remote_ssh already running pid=$(cat "$PIDFILE")"
+    return 0
+  fi
+  test -x "$DAEMON"
+  test -x "$SSH_BINARY"
+  test -r /etc/6x-cnc/vps_remote_ssh_known_hosts
+  mkdir -p /run/8ax /run/8ax_v5_remote_ssh
+  rm -f "$PIDFILE"
+  : >"$LOGFILE"
+  setsid "$DAEMON" --ssh-binary "$SSH_BINARY" >>"$LOGFILE" 2>&1 &
+  echo "$!" >"$PIDFILE"
+  sleep 0.2
+  if ! is_running; then
+    echo "v5_remote_ssh failed to start" >&2
+    tail -n 40 "$LOGFILE" 2>/dev/null || true
+    return 1
+  fi
+  set_non_microkernel_affinity "$(cat "$PIDFILE")"
+  echo "v5_remote_ssh started pid=$(cat "$PIDFILE")"
+}
+
+stop_service() {
+  if ! is_running; then
+    rm -f "$PIDFILE"
+    echo "v5_remote_ssh not running"
+    return 0
+  fi
+  pid=$(cat "$PIDFILE")
+  kill "$pid" 2>/dev/null || true
+  i=0
+  while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 50 ]; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -KILL "$pid" 2>/dev/null || true
+    sleep 0.1
+  fi
+  if kill -0 "$pid" 2>/dev/null; then
+    echo "v5_remote_ssh did not stop pid=$pid" >&2
+    return 1
+  fi
+  rm -f "$PIDFILE"
+  echo "v5_remote_ssh stopped pid=$pid"
+}
+
+case "${1:-}" in
+  start) start_service ;;
+  stop) stop_service ;;
+  restart) stop_service; start_service ;;
+  status)
+    if is_running; then
+      echo "v5_remote_ssh running pid=$(cat "$PIDFILE")"
+    else
+      echo "v5_remote_ssh not running"
+      exit 1
+    fi
+    ;;
+  *)
+    echo "usage: $0 {start|stop|restart|status}" >&2
+    exit 2
+    ;;
+esac

@@ -637,8 +637,15 @@ int sendJogIncr(int ja, int jjogmode, double speed, double incr)
     emc_jog_incr_msg.incr = incr;
 
     emcCommandSend(emc_jog_incr_msg);
+    if (emcWaitType == EMC_WAIT_DONE) {
+	return emcCommandWaitDone();
+    }
 
-    return 0;
+    /* A jog increment must at least be accepted by the NML command
+       channel before callers begin polling motion state.  Returning
+       immediately allowed a following joint command to race the command
+       that had only been queued by linuxcncrsh. */
+    return emcCommandWaitReceived();
 }
 
 int sendMistOn()
@@ -1333,6 +1340,3 @@ int checkStatus ()
     if (emcStatus) return 1;    
     return 0;
 }
-
-
-

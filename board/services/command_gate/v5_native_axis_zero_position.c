@@ -71,6 +71,36 @@ static double target_error(char axis, double current, double target)
     return error;
 }
 
+static int send_target(
+    const V5LinuxcncrshConfig *config,
+    char axis,
+    int relative,
+    double target);
+
+static int read_safe_zero_snapshot(
+    const V5LinuxcncrshConfig *config,
+    const V5NativeMotionAxisParameters *axis_parameters,
+    V5NativeWcheckpointSnapshot *snapshot,
+    char *owner_code,
+    size_t owner_code_cap)
+{
+    double runtime_position;
+    if (!config || !axis_parameters || !snapshot ||
+        !v5_native_home_wcheckpoint_read(
+            axis_parameters->axis, snapshot, owner_code, owner_code_cap)) {
+        return 0;
+    }
+    if (!v5_linuxcncrsh_get_joint_position(
+            config, axis_parameters->status_slot, &runtime_position)) {
+        if (owner_code && owner_code_cap > 0U) {
+            snprintf(owner_code, owner_code_cap, "%s", "HOME_WCHECKPOINT_RUNTIME_ACTUAL_INVALID");
+        }
+        return 0;
+    }
+    return v5_native_home_wcheckpoint_bind_runtime_actual(
+        axis_parameters, runtime_position, snapshot, owner_code, owner_code_cap);
+}
+
 static int wait_position(
     const V5LinuxcncrshConfig *config,
     char axis,
@@ -79,6 +109,10 @@ static int wait_position(
     double target,
     int *moved,
     double *position_out,
+    V5NativeSafeZeroPlan *safe_zero_plan,
+    const V5NativeMotionAxisParameters *axis_parameters,
+    char *owner_code,
+    size_t owner_code_cap,
     V5NativeHomeProgress *progress,
     V5NativeHomeProgressCallback progress_cb,
     void *progress_user_data)
@@ -91,6 +125,10 @@ static int wait_position(
     (void)target;
     (void)moved;
     (void)position_out;
+    (void)safe_zero_plan;
+    (void)axis_parameters;
+    (void)owner_code;
+    (void)owner_code_cap;
     (void)progress;
     (void)progress_cb;
     (void)progress_user_data;
@@ -112,6 +150,56 @@ static int wait_position(
                 if (progress_cb) progress_cb(progress, progress_user_data);
             }
             return 0;
+        }
+        if (safe_zero_plan) {
+            V5NativeWcheckpointSnapshot snapshot;
+            int64_t logical_error = 0;
+            if (!axis_parameters ||
+                !read_safe_zero_snapshot(
+                    config, axis_parameters, &snapshot, owner_code, owner_code_cap)) {
+                return 0;
+            }
+            current = (double)snapshot.runtime_counts / axis_parameters->bus_counts_per_unit;
+            if (fabs(current - before) > V5_AXIS_ZERO_MOTION_TOLERANCE && moved) *moved = 1;
+            if (snapshot.generation != safe_zero_plan->generation) {
+                double remaining_delta;
+                (void)v5_linuxcncrsh_send_line(config, "Set Abort");
+                if (!v5_native_home_safe_zero_remap(
+                        safe_zero_plan, &snapshot, owner_code, owner_code_cap)) return 0;
+                target = (double)safe_zero_plan->runtime_target_counts /
+                         axis_parameters->bus_counts_per_unit;
+                remaining_delta = (double)(safe_zero_plan->logical_target_counts -
+                                           snapshot.logical_counts) /
+                                  axis_parameters->bus_counts_per_unit;
+                if (progress) {
+                    progress->actual = current;
+                    progress->target = target;
+                    snprintf(progress->direct_reason, sizeof(progress->direct_reason), "%s", "HOME_SAFE_ZERO_REMAPPED");
+                    if (progress_cb) progress_cb(progress, progress_user_data);
+                }
+                if (fabs(remaining_delta) > axis_parameters->positioning_resolution_units &&
+                    (v5_linuxcncrsh_send_line(config, "Set Mode MDI") != V5_LINUXCNCRSH_SEND_SENT ||
+                     !send_target(config, axis, 0, target))) {
+                    if (owner_code && owner_code_cap > 0U) {
+                        snprintf(owner_code, owner_code_cap, "%s", "HOME_SAFE_ZERO_REMAP_FAILED");
+                    }
+                    return 0;
+                }
+                before = current;
+                stable = 0U;
+            }
+            if (v5_native_home_safe_zero_arrived(
+                    safe_zero_plan, &snapshot, &logical_error, owner_code, owner_code_cap)) {
+                ++stable;
+                if (stable >= 3U) {
+                    if (position_out) *position_out = current;
+                    return 1;
+                }
+            } else {
+                stable = 0U;
+            }
+            usleep(V5_AXIS_ZERO_WAIT_US);
+            continue;
         }
         if (v5_linuxcncrsh_get_axis_position(config, axis, relative, &current)) {
             if (fabs(current - before) > V5_AXIS_ZERO_MOTION_TOLERANCE && moved) {
@@ -222,7 +310,7 @@ V5LinuxcncrshSendStatus v5_native_axis_zero_position_send(
     V5NativeHomeProgress progress;
     V5NativeWcheckpointSnapshot wcheckpoint;
     V5NativeSafeZeroPlan safe_plan;
-    char owner_code[64];
+    char owner_code[64] = "";
     double final_target = 0.0;
 
     memset(&progress, 0, sizeof(progress));
@@ -258,6 +346,9 @@ V5LinuxcncrshSendStatus v5_native_axis_zero_position_send(
         if (progress_cb) progress_cb(&progress, progress_user_data);
         return V5_LINUXCNCRSH_SEND_IO_ERROR;
     }
+    progress.phase = V5_NATIVE_HOME_PHASE_PREPARING;
+    snprintf(progress.direct_reason, sizeof(progress.direct_reason), "%s", "HOME_PREPARING");
+    if (progress_cb) progress_cb(&progress, progress_user_data);
     if (!v5_linuxcncrsh_get_axis_position(config, axis, 0, &before_abs) ||
         !v5_linuxcncrsh_get_axis_position(config, axis, relative, &before_position)) {
         result_code(result, "AXIS_ZERO_START_POSITION_UNAVAILABLE");
@@ -269,7 +360,8 @@ V5LinuxcncrshSendStatus v5_native_axis_zero_position_send(
         return V5_LINUXCNCRSH_SEND_IO_ERROR;
     }
     if (!relative && rotary_axis(axis)) {
-        if (!v5_native_home_wcheckpoint_read(axis, &wcheckpoint, owner_code, sizeof(owner_code)) ||
+        if (!read_safe_zero_snapshot(
+                config, axis_parameters, &wcheckpoint, owner_code, sizeof(owner_code)) ||
             !v5_native_home_safe_zero_plan(axis_parameters, &wcheckpoint, &safe_plan, owner_code, sizeof(owner_code))) {
             result_code(result, owner_code);
             return V5_LINUXCNCRSH_SEND_IO_ERROR;
@@ -282,15 +374,17 @@ V5LinuxcncrshSendStatus v5_native_axis_zero_position_send(
     }
     if (target_error(axis, before_position, final_target) <=
         V5_AXIS_ZERO_TARGET_TOLERANCE + V5_AXIS_ZERO_COMPARE_EPSILON) {
-        double delta = rotary_axis(axis) ? V5_AXIS_ZERO_ROTARY_PROOF : V5_AXIS_ZERO_LINEAR_PROOF;
-        double proof_target = before_position + delta;
-        if (before_abs + delta >= axis_parameters->max_limit) {
-            proof_target = -delta;
+        double proof_delta = rotary_axis(axis) ? V5_AXIS_ZERO_ROTARY_PROOF : V5_AXIS_ZERO_LINEAR_PROOF;
+        double proof_target;
+        if (before_abs + proof_delta >= axis_parameters->max_limit) {
+            proof_delta = -proof_delta;
         }
-        if (before_abs + proof_target <= axis_parameters->min_limit ||
-            before_abs + proof_target >= axis_parameters->max_limit ||
+        proof_target = before_position + proof_delta;
+        if (before_abs + proof_delta <= axis_parameters->min_limit ||
+            before_abs + proof_delta >= axis_parameters->max_limit ||
             !send_target(config, axis, relative, proof_target) ||
             !wait_position(config, axis, relative, before_position, proof_target, &moved, 0,
+                           0, 0, 0, 0U,
                            &progress, progress_cb, progress_user_data)) {
             result_code(result, "AXIS_ZERO_PROOF_MOVE_NOT_CONFIRMED");
             return V5_LINUXCNCRSH_SEND_IO_ERROR;
@@ -301,40 +395,20 @@ V5LinuxcncrshSendStatus v5_native_axis_zero_position_send(
     progress.detail_valid = 1;
     progress.actual = before_position;
     progress.target = final_target;
-    progress.tolerance = rotary_axis(axis) ? 1.0 / fabs(axis_parameters->bus_counts_per_unit) : V5_AXIS_ZERO_TARGET_TOLERANCE;
     snprintf(progress.direct_reason, sizeof(progress.direct_reason), "%s", "HOME_ZERO_RETURN");
     if (progress_cb) progress_cb(&progress, progress_user_data);
+    owner_code[0] = '\0';
     if (!send_target(config, axis, relative, final_target) ||
         !wait_position(config, axis, relative, before_position, final_target, &moved, &after_position,
+                       (!relative && rotary_axis(axis)) ? &safe_plan : 0,
+                       (!relative && rotary_axis(axis)) ? axis_parameters : 0,
+                       owner_code, sizeof(owner_code),
                        &progress, progress_cb, progress_user_data)) {
-        result_code(result, "AXIS_ZERO_ARRIVAL_NOT_CONFIRMED");
+        result_code(result,
+                    (!relative && rotary_axis(axis) && owner_code[0])
+                        ? owner_code
+                        : "AXIS_ZERO_ARRIVAL_NOT_CONFIRMED");
         return V5_LINUXCNCRSH_SEND_IO_ERROR;
-    }
-    if (!relative && rotary_axis(axis)) {
-        int64_t logical_error = 0;
-        V5NativeWcheckpointSnapshot after;
-        if (!v5_native_home_wcheckpoint_read(axis, &after, owner_code, sizeof(owner_code))) {
-            result_code(result, owner_code);
-            return V5_LINUXCNCRSH_SEND_IO_ERROR;
-        }
-        if (after.generation != safe_plan.generation) {
-            if (!v5_native_home_safe_zero_remap(&safe_plan, &after, owner_code, sizeof(owner_code))) {
-                result_code(result, owner_code);
-                return V5_LINUXCNCRSH_SEND_IO_ERROR;
-            }
-            final_target = (double)safe_plan.runtime_target_counts / axis_parameters->bus_counts_per_unit;
-            if (!send_target(config, axis, 0, final_target) ||
-                !wait_position(config, axis, 0, after_position, final_target, &moved, &after_position,
-                               &progress, progress_cb, progress_user_data) ||
-                !v5_native_home_wcheckpoint_read(axis, &after, owner_code, sizeof(owner_code))) {
-                result_code(result, "HOME_SAFE_ZERO_REMAP_FAILED");
-                return V5_LINUXCNCRSH_SEND_IO_ERROR;
-            }
-        }
-        if (!v5_native_home_safe_zero_arrived(&safe_plan, &after, &logical_error, owner_code, sizeof(owner_code))) {
-            result_code(result, owner_code);
-            return V5_LINUXCNCRSH_SEND_IO_ERROR;
-        }
     }
     if (!moved) {
         result_code(result, "AXIS_ZERO_REAL_MOVE_NOT_CONFIRMED");

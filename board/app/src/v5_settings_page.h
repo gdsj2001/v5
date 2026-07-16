@@ -39,6 +39,8 @@ typedef struct V5SettingsPage {
     V5UiFirstFrameGuard popup_frame_guard;
     int popup_active;
     int popup_final;
+    int popup_ok;
+    int popup_restart_handoff_accepted;
     double popup_started_s;
     int popup_eta_seconds;
     char popup_action[64];

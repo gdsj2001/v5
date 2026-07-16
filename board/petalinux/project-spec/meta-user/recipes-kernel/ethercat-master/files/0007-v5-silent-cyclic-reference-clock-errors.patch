@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: V5 Project <v5@example.invalid>
+Date: Wed, 15 Jul 2026 20:20:00 +0800
+Subject: [PATCH] v5: keep cyclic reference clock errors out of RT logging
+
+LinuxCNC-EtherCAT samples ecrt_master_reference_clock_time() from the 2 ms
+realtime write function. The userspace library currently fprintfs every
+failed ioctl before returning the errno, creating hundreds of synchronous
+log writes per second when the DC datagram is temporarily unavailable. The
+V5 lcec owner exports the fresh validity, success sequence, age, and error
+count as HAL pins, so this cyclic API must only return the errno. Startup and
+operator diagnostics consume those pins outside the realtime thread.
+---
+ lib/master.c | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/lib/master.c b/lib/master.c
+index 2a9018e54..aa277e592 100644
+--- a/lib/master.c
++++ b/lib/master.c
+@@ -768,8 +768,6 @@ int ecrt_master_reference_clock_time(const ec_master_t *master,
+ 
+     ret = ioctl(master->fd, EC_IOCTL_REF_CLOCK_TIME, time);
+     if (EC_IOCTL_IS_ERROR(ret)) {
+-        fprintf(stderr, "Failed to get reference clock time: %s\n",
+-                strerror(EC_IOCTL_ERRNO(ret)));
+         return -EC_IOCTL_ERRNO(ret);
+     }
+ 
+-- 
+2.39.2

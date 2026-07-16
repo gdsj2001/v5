@@ -46,10 +46,27 @@ public sealed class ProgramDirectoryDialog : Window
         UseLayoutRounding = true;
 
         Content = BuildContent();
-        Loaded += async (_, _) => await RefreshAsync();
+        Loaded += async (_, _) => await LoadInitialListAsync();
     }
 
     private ProgramFileDisplay? SelectedFile => _list.SelectedItem as ProgramFileDisplay;
+
+    private async Task LoadInitialListAsync()
+    {
+        try
+        {
+            await RefreshAsync();
+        }
+        catch (OperationCanceledException ex)
+        {
+            _status.Text = Compact(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _status.Text = Compact(ex.Message);
+            MessageBox.Show(this, Compact(ex.Message), "打开系统G代码", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
 
     private Grid BuildContent()
     {

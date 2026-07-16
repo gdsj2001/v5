@@ -163,32 +163,21 @@ static void update_rtcp_button_visuals(V5MainPage *page)
     }
 }
 
-static void update_home_button_visuals(V5MainPage *page)
-{
-    unsigned int i;
-    if (!page) {
-        return;
-    }
-    for (i = 0U; i < page->button_count; ++i) {
-        if (page->button_actions[i] == V5_MAIN_PAGE_ACTION_HOME) {
-            set_button_state_color(page->buttons[i], page->home_transaction_active, 29, 151, 104, 42, 63, 85);
-            return;
-        }
-    }
-}
-
 void v5_main_page_internal_set_home_transaction_active(V5MainPage *page, int active, int flush)
 {
     unsigned int i;
-    (void)flush;
     if (!page) {
         return;
     }
     page->home_transaction_active = active ? 1 : 0;
-    update_home_button_visuals(page);
     for (i = 0U; i < page->button_count; ++i) {
         if (page->button_actions[i] == V5_MAIN_PAGE_ACTION_HOME) {
-            v5_button_visual_set_transaction_active(page->buttons[i], active);
+            /* Home progress belongs to the top status line.  An action button
+             * must not remain highlighted after the input is released. */
+            v5_button_visual_set_transaction_active(page->buttons[i], 0);
+            if (flush) {
+                v5_button_visual_release_now(page->buttons[i]);
+            }
             return;
         }
     }
@@ -201,7 +190,6 @@ void v5_main_page_internal_update_main_page_state_button_visuals(V5MainPage *pag
     update_jog_step_button_visuals(page);
     v5_main_page_internal_update_axis_all_button_visuals(page);
     update_rtcp_button_visuals(page);
-    update_home_button_visuals(page);
 }
 
 void v5_main_page_internal_make_v3_main_buttons(V5MainPage *page)

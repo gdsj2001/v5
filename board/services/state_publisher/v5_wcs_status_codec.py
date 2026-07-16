@@ -53,6 +53,4 @@ def atomic_write(path: str, payload: bytes) -> None:
     tmp = f'{path}.tmp.{os.getpid()}'
     with open(tmp, 'wb') as fp:
         fp.write(payload)
-        fp.flush()
-        os.fsync(fp.fileno())
     os.replace(tmp, path)

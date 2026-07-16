@@ -50,6 +50,13 @@ static void result_from_frame(V5CommandGateResult *result, const V5CommandGateIp
     result->safety_estop_active = frame->safety_estop_active;
     result->machine_enable_known = frame->machine_enable_known;
     result->machine_enabled = frame->machine_enabled;
+    result->drive_window_initial_machine_enabled = frame->machine_on_requested;
+    result->drive_window_final_machine_enabled = frame->machine_enabled;
+    result->estop_clean_generation = frame->estop_clean_generation;
+    result->estop_clean_active = frame->estop_clean_active;
+    result->estop_clean_terminal = frame->estop_clean_terminal;
+    result->estop_clean_ok = frame->estop_clean_ok;
+    copy_cstr(result->estop_clean_code, sizeof(result->estop_clean_code), frame->estop_clean_code);
     copy_cstr(result->command_line, sizeof(result->command_line), frame->command_line);
     copy_cstr(result->readback_code, sizeof(result->readback_code), frame->readback_code);
 }
@@ -307,7 +314,6 @@ int v5_command_gate_probe_home_status(
     status->detail_valid = response.home_detail_valid;
     status->actual = response.home_actual;
     status->target = response.home_target;
-    status->tolerance = response.home_tolerance;
     copy_cstr(status->mode, sizeof(status->mode), response.home_mode);
     copy_cstr(status->current_axes, sizeof(status->current_axes), response.home_current_axes);
     copy_cstr(status->direct_reason, sizeof(status->direct_reason), response.home_direct_reason);
@@ -325,6 +331,35 @@ int v5_command_gate_probe_safety(V5CommandGateResult *result, unsigned int timeo
     V5CommandGateIpcRequestFrame frame;
     init_request_frame(&frame, V5_COMMAND_GATE_IPC_OP_PROBE_SAFETY);
     return transact(&frame, result, timeout_ms);
+#endif
+}
+
+int v5_command_gate_probe_estop_clean(
+    unsigned int generation,
+    V5CommandGateEstopCleanStatus *status,
+    unsigned int timeout_ms)
+{
+#ifdef _WIN32
+    (void)generation; (void)timeout_ms;
+    if (status) memset(status, 0, sizeof(*status));
+    return 0;
+#else
+    V5CommandGateIpcRequestFrame frame;
+    V5CommandGateIpcResponseFrame response;
+    if (!status) return 0;
+    memset(status, 0, sizeof(*status));
+    init_request_frame(&frame, V5_COMMAND_GATE_IPC_OP_PROBE_ESTOP_CLEAN);
+    frame.estop_clean_generation = generation;
+    if (!transact_response(&frame, &response, timeout_ms) ||
+        (generation != 0U && response.estop_clean_generation != generation)) {
+        return 0;
+    }
+    status->generation = response.estop_clean_generation;
+    status->active = response.estop_clean_active;
+    status->terminal = response.estop_clean_terminal;
+    status->ok = response.estop_clean_ok;
+    copy_cstr(status->code, sizeof(status->code), response.estop_clean_code);
+    return response.send_status == V5_COMMAND_GATE_SEND_SENT;
 #endif
 }
 

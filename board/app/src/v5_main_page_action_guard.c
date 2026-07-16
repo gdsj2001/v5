@@ -43,43 +43,6 @@ int v5_main_page_internal_action_needs_native_readback_refresh(V5MainPageActionK
     }
 }
 
-const char *v5_main_page_internal_home_safety_precondition_code(const V5MainPage *page)
-{
-    if (!page) {
-        return 0;
-    }
-    if (v5_native_readback_safety_estop_known(&page->native_readback) &&
-        page->native_readback.safety_estop_active) {
-        return "HOME_PRECONDITION_ESTOP";
-    }
-    if (v5_native_readback_machine_enable_known(&page->native_readback) &&
-        !page->native_readback.machine_enabled) {
-        return "HOME_PRECONDITION_DISABLED";
-    }
-    return 0;
-}
-
-void v5_main_page_internal_block_home_for_safety(
-    V5MainPage *page,
-    V5MainPageActionReport *report,
-    const char *readback_code)
-{
-    if (!page || !report || !readback_code) {
-        return;
-    }
-    memset(report, 0, sizeof(*report));
-    report->action = V5_MAIN_PAGE_ACTION_HOME;
-    report->local_only = 1;
-    report->send_status = V5_COMMAND_GATE_SEND_INVALID;
-    report->request.kind = V5_COMMAND_UI_LOCAL;
-    report->command.kind = V5_COMMAND_UI_LOCAL;
-    report->command.name = "home_safety_precondition";
-    report->command.owner = "native_home_precondition";
-    snprintf(report->readback_code, sizeof(report->readback_code), "%s", readback_code);
-    v5_main_page_internal_show_home_precondition_popup(page, readback_code);
-    page->last_action = *report;
-}
-
 int v5_main_page_internal_action_requires_power_on_home(
     const V5MainPage *page,
     V5MainPageActionKind action)

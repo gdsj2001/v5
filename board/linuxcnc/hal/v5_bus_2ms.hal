@@ -1,11 +1,9 @@
-# v5_bus_2ms.hal
-# v5 BUS/EtherCAT native HAL. Motion feedback is lcec/CiA402 actual position.
+# v5 BUS/EtherCAT native HAL.  Physical slots stay s0..s4; the resident
+# clean-restart mapping atomically routes them to logical LinuxCNC joints.
 
 loadrt [RTCP]KINS_MODULE coordinates=[RTCP]KINS_COORDINATES sparm=identityfirst
 loadrt [EMCMOT]TPMOD
 loadrt [EMCMOT]HOMEMOD
-# Active model equivalent target mask contains EmcPose rotary-axis bits only:
-# AC=A/C => 0x28; BC=B/C => 0x30. BUS raw joint/motor state stays continuous.
 loadrt [EMCMOT]EMCMOT \
     servo_period_nsec=[EMCMOT]SERVO_PERIOD \
     num_joints=[KINS]JOINTS \
@@ -23,9 +21,10 @@ loadrt [EMCMOT]EMCMOT \
     v5_wcheckpoint_reducer_den=[AXIS_A]LOAD_REV,[AXIS_B]LOAD_REV,[AXIS_C]LOAD_REV \
     v5_wcheckpoint_drive_periodic=[AXIS_A]WCHECKPOINT_DRIVE_PERIODIC,[AXIS_B]WCHECKPOINT_DRIVE_PERIODIC,[AXIS_C]WCHECKPOINT_DRIVE_PERIODIC
 loadrt cia402 count=5
-loadrt bitslice names=x-din,y-din,z-din,a-din,c-din personality=31,31,31,31,31
+loadrt v5_bus_axis_router
+loadrt bitslice names=j0-din,j1-din,j2-din,j3-din,j4-din personality=31,31,31,31,31
 loadrt mux2 count=1
-loadrt or2 count=1
+loadrt or2 count=2
 loadrt not count=1
 loadrt and2 count=1
 loadrt v5_safety_latch
@@ -42,19 +41,23 @@ loadusr -Wn v5_native_hal_owner /usr/bin/v5_native_hal_owner \
     --g53-c-y=[RTCP]G53_C_Y
 loadrt lcec
 
+# Physical feedback is routed before logical cia402 read; logical commands are
+# routed after cia402 write and before the physical EtherCAT write.
 addf lcec.read-all servo-thread
+addf v5-bus-axis-router.read servo-thread
 addf cia402.0.read-all servo-thread
 addf cia402.1.read-all servo-thread
 addf cia402.2.read-all servo-thread
 addf cia402.3.read-all servo-thread
 addf cia402.4.read-all servo-thread
-addf x-din servo-thread
-addf y-din servo-thread
-addf z-din servo-thread
-addf a-din servo-thread
-addf c-din servo-thread
+addf j0-din servo-thread
+addf j1-din servo-thread
+addf j2-din servo-thread
+addf j3-din servo-thread
+addf j4-din servo-thread
 addf v5-safety-latch.0 servo-thread
 addf or2.0 servo-thread
+addf or2.1 servo-thread
 addf not.0 servo-thread
 addf and2.0 servo-thread
 addf mux2.0 servo-thread
@@ -65,14 +68,16 @@ addf cia402.1.write-all servo-thread
 addf cia402.2.write-all servo-thread
 addf cia402.3.write-all servo-thread
 addf cia402.4.write-all servo-thread
+addf v5-bus-axis-router.write servo-thread
 addf lcec.write-all servo-thread
 
 net v5-safety-force v5-native-hal-owner.safety-force => v5-safety-latch.0.force
 net v5-safety-reset v5-native-hal-owner.safety-reset => v5-safety-latch.0.reset
 net v5-safety-heartbeat v5-native-hal-owner.heartbeat => v5-safety-latch.0.heartbeat
-net v5-safety-estop-active v5-safety-latch.0.estop-active => v5-native-hal-owner.safety-estop-active
+net v5-safety-estop-active v5-safety-latch.0.estop-active => v5-native-hal-owner.safety-estop-active motion.v5-bus-home-estop-active
+net v5-safety-actual-valid v5-native-hal-owner.safety-actual-valid => motion.v5-bus-home-safety-actual-valid
 net estop-loop v5-safety-latch.0.estop-ok => iocontrol.0.emc-enable-in
-net v5-machine-enabled motion.motion-enabled => v5-native-hal-owner.machine-enabled
+net v5-machine-enabled motion.motion-enabled => v5-native-hal-owner.machine-enabled motion.v5-bus-home-machine-enabled
 
 net tool-change-loop iocontrol.0.tool-change => iocontrol.0.tool-changed
 net tool-prepare-loop iocontrol.0.tool-prepare => iocontrol.0.tool-prepared
@@ -82,27 +87,147 @@ setp motion.digital-in-00 TRUE
 setp mux2.0.in0 0
 setp mux2.0.in1 1
 net v5-rtcp-ui-request v5-native-hal-owner.rtcp-ui-request => or2.0.in0
-net v5-rtcp-gcode-request motion.digital-out-00 => or2.0.in1
-net v5-rtcp-force-off v5-native-hal-owner.rtcp-force-off => not.0.in
+net v5-rtcp-gcode-request motion.digital-out-00 => v5-native-hal-owner.rtcp-gcode-request or2.0.in1
+net v5-rtcp-owner-force-off v5-native-hal-owner.rtcp-force-off => motion.v5-bus-home-rtcp-force-latched or2.1.in0
+net v5-home-rtcp-force-off motion.v5-bus-home-rtcp-force-off => v5-native-hal-owner.home-rtcp-force-off or2.1.in1
+net v5-home-rtcp-request-transaction motion.v5-bus-home-rtcp-request-transaction => v5-native-hal-owner.home-rtcp-req-txn
+net v5-home-rtcp-ack-transaction v5-native-hal-owner.home-rtcp-ack-transaction => motion.v5-bus-home-rtcp-latched-transaction
+net v5-rtcp-force-off or2.1.out => not.0.in
 net v5-rtcp-allow not.0.out => and2.0.in1
 net v5-rtcp-requested or2.0.out => and2.0.in0
 net v5-rtcp-selected and2.0.out => mux2.0.sel
-net re-switchkins-select mux2.0.out => motion.switchkins-type v5-native-hal-owner.rtcp-actual
-net v5-wcheckpoint-a-logical motion.v5-wcheckpoint-a-logical-counts => v5-native-hal-owner.wcheckpoint-a-logical-counts
-net v5-wcheckpoint-a-base motion.v5-wcheckpoint-a-base-counts => v5-native-hal-owner.wcheckpoint-a-base-counts
-net v5-wcheckpoint-a-runtime motion.v5-wcheckpoint-a-runtime-counts => v5-native-hal-owner.wcheckpoint-a-runtime-counts
-net v5-wcheckpoint-a-generation motion.v5-wcheckpoint-a-generation => v5-native-hal-owner.wcheckpoint-a-generation
-net v5-wcheckpoint-a-valid motion.v5-wcheckpoint-a-valid => v5-native-hal-owner.wcheckpoint-a-valid
-net v5-wcheckpoint-b-logical motion.v5-wcheckpoint-b-logical-counts => v5-native-hal-owner.wcheckpoint-b-logical-counts
-net v5-wcheckpoint-b-base motion.v5-wcheckpoint-b-base-counts => v5-native-hal-owner.wcheckpoint-b-base-counts
-net v5-wcheckpoint-b-runtime motion.v5-wcheckpoint-b-runtime-counts => v5-native-hal-owner.wcheckpoint-b-runtime-counts
-net v5-wcheckpoint-b-generation motion.v5-wcheckpoint-b-generation => v5-native-hal-owner.wcheckpoint-b-generation
-net v5-wcheckpoint-b-valid motion.v5-wcheckpoint-b-valid => v5-native-hal-owner.wcheckpoint-b-valid
-net v5-wcheckpoint-c-logical motion.v5-wcheckpoint-c-logical-counts => v5-native-hal-owner.wcheckpoint-c-logical-counts
-net v5-wcheckpoint-c-base motion.v5-wcheckpoint-c-base-counts => v5-native-hal-owner.wcheckpoint-c-base-counts
-net v5-wcheckpoint-c-runtime motion.v5-wcheckpoint-c-runtime-counts => v5-native-hal-owner.wcheckpoint-c-runtime-counts
-net v5-wcheckpoint-c-generation motion.v5-wcheckpoint-c-generation => v5-native-hal-owner.wcheckpoint-c-generation
-net v5-wcheckpoint-c-valid motion.v5-wcheckpoint-c-valid => v5-native-hal-owner.wcheckpoint-c-valid
+net re-switchkins-select mux2.0.out => motion.switchkins-type v5-native-hal-owner.rtcp-actual motion.v5-bus-home-rtcp-active
+net v5-rtcp-actual-valid v5-native-hal-owner.rtcp-actual-valid => motion.v5-bus-home-rtcp-actual-valid
+
+net v5-wcheckpoint-a-logical motion.v5-wcheckpoint-a-logical-counts => v5-native-hal-owner.wcp-a-logical-counts
+net v5-wcheckpoint-a-base motion.v5-wcheckpoint-a-base-counts => v5-native-hal-owner.wcp-a-base-counts motion.v5-bus-home-wcp-a-base-counts
+net v5-wcheckpoint-a-runtime motion.v5-wcheckpoint-a-runtime-counts => v5-native-hal-owner.wcp-a-runtime-counts
+net v5-wcheckpoint-a-generation motion.v5-wcheckpoint-a-generation => v5-native-hal-owner.wcp-a-generation motion.v5-bus-home-wcp-a-generation
+net v5-wcheckpoint-a-valid motion.v5-wcheckpoint-a-valid => v5-native-hal-owner.wcp-a-valid motion.v5-bus-home-wcp-a-valid
+net v5-wcheckpoint-b-logical motion.v5-wcheckpoint-b-logical-counts => v5-native-hal-owner.wcp-b-logical-counts
+net v5-wcheckpoint-b-base motion.v5-wcheckpoint-b-base-counts => v5-native-hal-owner.wcp-b-base-counts motion.v5-bus-home-wcp-b-base-counts
+net v5-wcheckpoint-b-runtime motion.v5-wcheckpoint-b-runtime-counts => v5-native-hal-owner.wcp-b-runtime-counts
+net v5-wcheckpoint-b-generation motion.v5-wcheckpoint-b-generation => v5-native-hal-owner.wcp-b-generation motion.v5-bus-home-wcp-b-generation
+net v5-wcheckpoint-b-valid motion.v5-wcheckpoint-b-valid => v5-native-hal-owner.wcp-b-valid motion.v5-bus-home-wcp-b-valid
+net v5-wcheckpoint-c-logical motion.v5-wcheckpoint-c-logical-counts => v5-native-hal-owner.wcp-c-logical-counts
+net v5-wcheckpoint-c-base motion.v5-wcheckpoint-c-base-counts => v5-native-hal-owner.wcp-c-base-counts motion.v5-bus-home-wcp-c-base-counts
+net v5-wcheckpoint-c-runtime motion.v5-wcheckpoint-c-runtime-counts => v5-native-hal-owner.wcp-c-runtime-counts
+net v5-wcheckpoint-c-generation motion.v5-wcheckpoint-c-generation => v5-native-hal-owner.wcp-c-generation motion.v5-bus-home-wcp-c-generation
+net v5-wcheckpoint-c-valid motion.v5-wcheckpoint-c-valid => v5-native-hal-owner.wcp-c-valid motion.v5-bus-home-wcp-c-valid
+
+# One atomically committed resident table feeds both the crossbar and Home.
+net v5-home-table-valid v5-native-hal-owner.home-table-mapping-valid => v5-bus-axis-router.table-mapping-valid motion.v5-bus-home-config-mapping-valid
+net v5-home-table-generation v5-native-hal-owner.home-table-map-gen => v5-bus-axis-router.staged-mapping-generation motion.v5-bus-home-config-mapping-generation
+net v5-home-table-active-mask v5-native-hal-owner.home-table-active-mask => v5-bus-axis-router.expected-active-mask motion.v5-bus-home-config-active-mask
+net v5-home-table-commit v5-native-hal-owner.home-table-commit-seq => v5-bus-axis-router.mapping-commit-seq motion.v5-bus-home-config-commit-seq
+
+net v5-router-valid v5-bus-axis-router.mapping-valid => v5-native-hal-owner.home-router-mapping-valid motion.v5-bus-home-router-mapping-valid
+net v5-router-generation v5-bus-axis-router.latched-mapping-generation => v5-native-hal-owner.home-router-map-gen motion.v5-bus-home-router-mapping-generation
+net v5-router-active-mask v5-bus-axis-router.latched-active-mask => v5-native-hal-owner.home-router-active-mask motion.v5-bus-home-router-active-mask
+net v5-router-commit v5-bus-axis-router.latched-commit-seq => v5-native-hal-owner.home-router-commit-seq motion.v5-bus-home-router-commit-seq
+net v5-router-rejected-commit v5-bus-axis-router.rejected-commit-seq => v5-native-hal-owner.home-router-reject-seq
+
+net v5-home-j0-config-valid v5-native-hal-owner.home-config-valid-00 => v5-bus-axis-router.joint-config-valid-00 joint.0.v5-bus-home-config-valid
+net v5-home-j0-status-slot v5-native-hal-owner.home-status-slot-00 => joint.0.v5-bus-home-status-slot
+net v5-home-j0-axis-code v5-native-hal-owner.home-axis-code-00 => joint.0.v5-bus-home-axis-code
+net v5-home-j0-slave v5-native-hal-owner.home-slave-position-00 => v5-bus-axis-router.joint-slave-position-00 joint.0.v5-bus-home-slave-position
+net v5-home-j0-generation v5-native-hal-owner.home-mapping-generation-00 => v5-bus-axis-router.joint-mapping-generation-00 joint.0.v5-bus-home-mapping-generation
+net v5-home-j0-zero v5-native-hal-owner.home-zero-counts-00 => v5-bus-axis-router.joint-zero-counts-00
+net v5-home-j0-scale v5-native-hal-owner.home-counts-per-unit-00 => joint.0.v5-bus-home-counts-per-unit
+net v5-home-j1-config-valid v5-native-hal-owner.home-config-valid-01 => v5-bus-axis-router.joint-config-valid-01 joint.1.v5-bus-home-config-valid
+net v5-home-j1-status-slot v5-native-hal-owner.home-status-slot-01 => joint.1.v5-bus-home-status-slot
+net v5-home-j1-axis-code v5-native-hal-owner.home-axis-code-01 => joint.1.v5-bus-home-axis-code
+net v5-home-j1-slave v5-native-hal-owner.home-slave-position-01 => v5-bus-axis-router.joint-slave-position-01 joint.1.v5-bus-home-slave-position
+net v5-home-j1-generation v5-native-hal-owner.home-mapping-generation-01 => v5-bus-axis-router.joint-mapping-generation-01 joint.1.v5-bus-home-mapping-generation
+net v5-home-j1-zero v5-native-hal-owner.home-zero-counts-01 => v5-bus-axis-router.joint-zero-counts-01
+net v5-home-j1-scale v5-native-hal-owner.home-counts-per-unit-01 => joint.1.v5-bus-home-counts-per-unit
+net v5-home-j2-config-valid v5-native-hal-owner.home-config-valid-02 => v5-bus-axis-router.joint-config-valid-02 joint.2.v5-bus-home-config-valid
+net v5-home-j2-status-slot v5-native-hal-owner.home-status-slot-02 => joint.2.v5-bus-home-status-slot
+net v5-home-j2-axis-code v5-native-hal-owner.home-axis-code-02 => joint.2.v5-bus-home-axis-code
+net v5-home-j2-slave v5-native-hal-owner.home-slave-position-02 => v5-bus-axis-router.joint-slave-position-02 joint.2.v5-bus-home-slave-position
+net v5-home-j2-generation v5-native-hal-owner.home-mapping-generation-02 => v5-bus-axis-router.joint-mapping-generation-02 joint.2.v5-bus-home-mapping-generation
+net v5-home-j2-zero v5-native-hal-owner.home-zero-counts-02 => v5-bus-axis-router.joint-zero-counts-02
+net v5-home-j2-scale v5-native-hal-owner.home-counts-per-unit-02 => joint.2.v5-bus-home-counts-per-unit
+net v5-home-j3-config-valid v5-native-hal-owner.home-config-valid-03 => v5-bus-axis-router.joint-config-valid-03 joint.3.v5-bus-home-config-valid
+net v5-home-j3-status-slot v5-native-hal-owner.home-status-slot-03 => joint.3.v5-bus-home-status-slot
+net v5-home-j3-axis-code v5-native-hal-owner.home-axis-code-03 => joint.3.v5-bus-home-axis-code
+net v5-home-j3-slave v5-native-hal-owner.home-slave-position-03 => v5-bus-axis-router.joint-slave-position-03 joint.3.v5-bus-home-slave-position
+net v5-home-j3-generation v5-native-hal-owner.home-mapping-generation-03 => v5-bus-axis-router.joint-mapping-generation-03 joint.3.v5-bus-home-mapping-generation
+net v5-home-j3-zero v5-native-hal-owner.home-zero-counts-03 => v5-bus-axis-router.joint-zero-counts-03
+net v5-home-j3-scale v5-native-hal-owner.home-counts-per-unit-03 => joint.3.v5-bus-home-counts-per-unit
+net v5-home-j4-config-valid v5-native-hal-owner.home-config-valid-04 => v5-bus-axis-router.joint-config-valid-04 joint.4.v5-bus-home-config-valid
+net v5-home-j4-status-slot v5-native-hal-owner.home-status-slot-04 => joint.4.v5-bus-home-status-slot
+net v5-home-j4-axis-code v5-native-hal-owner.home-axis-code-04 => joint.4.v5-bus-home-axis-code
+net v5-home-j4-slave v5-native-hal-owner.home-slave-position-04 => v5-bus-axis-router.joint-slave-position-04 joint.4.v5-bus-home-slave-position
+net v5-home-j4-generation v5-native-hal-owner.home-mapping-generation-04 => v5-bus-axis-router.joint-mapping-generation-04 joint.4.v5-bus-home-mapping-generation
+net v5-home-j4-zero v5-native-hal-owner.home-zero-counts-04 => v5-bus-axis-router.joint-zero-counts-04
+net v5-home-j4-scale v5-native-hal-owner.home-counts-per-unit-04 => joint.4.v5-bus-home-counts-per-unit
+
+net v5-home-global-transaction motion.v5-bus-home-transaction => v5-native-hal-owner.home-global-transaction
+net v5-home-runtime-mask motion.v5-bus-home-run-active-mask => v5-native-hal-owner.home-runtime-active-mask
+net v5-home-completed-mask motion.v5-bus-home-completed-mask => v5-native-hal-owner.home-completed-mask
+net v5-home-terminal-mask motion.v5-bus-home-terminal-mask => v5-native-hal-owner.home-terminal-mask
+net v5-home-failed-joint motion.v5-bus-home-failed-joint => v5-native-hal-owner.home-failed-joint
+net v5-home-failure-code motion.v5-bus-home-failure-code => v5-native-hal-owner.home-failure-code
+net v5-home-failure-phase motion.v5-bus-home-failure-phase => v5-native-hal-owner.home-failure-phase
+net v5-home-failure-current-mask motion.v5-bus-home-failure-current-mask => v5-native-hal-owner.home-failure-current-mask
+net v5-home-failure-actual motion.v5-bus-home-failure-actual-counts => v5-native-hal-owner.home-failure-actual-counts
+net v5-home-failure-target motion.v5-bus-home-failure-target-counts => v5-native-hal-owner.home-failure-target-counts
+net v5-home-failure-error motion.v5-bus-home-failure-error-counts => v5-native-hal-owner.home-failure-error-counts
+net v5-home-failure-generation motion.v5-bus-home-failure-generation => v5-native-hal-owner.home-failure-generation
+net v5-home-failure-readback-valid motion.v5-bus-home-failure-readback-valid => v5-native-hal-owner.home-failure-readback-valid
+net v5-home-failure-motion-active motion.v5-bus-home-failure-motion-active => v5-native-hal-owner.home-failure-motion-active
+net v5-home-j0-phase joint.0.v5-bus-home-phase => v5-native-hal-owner.home-phase-00
+net v5-home-j0-failure joint.0.v5-bus-home-failure => v5-native-hal-owner.home-failure-00
+net v5-home-j0-start joint.0.v5-bus-home-start-counts => v5-native-hal-owner.home-start-counts-00
+net v5-home-j0-target joint.0.v5-bus-home-target-counts => v5-native-hal-owner.home-target-counts-00
+net v5-home-j0-readback joint.0.v5-bus-home-readback-counts => v5-native-hal-owner.home-readback-counts-00
+net v5-home-j0-error joint.0.v5-bus-home-error-counts => v5-native-hal-owner.home-error-counts-00
+net v5-home-j0-readback-generation joint.0.v5-bus-home-readback-generation => v5-native-hal-owner.home-readback-generation-00
+net v5-home-j0-readback-valid joint.0.v5-bus-home-readback-valid => v5-native-hal-owner.home-readback-valid-00
+net v5-home-j0-motion-active joint.0.v5-bus-home-motion-active => v5-native-hal-owner.home-motion-active-00
+net v5-home-j0-transaction joint.0.v5-bus-home-transaction => v5-native-hal-owner.home-transaction-00
+net v5-home-j1-phase joint.1.v5-bus-home-phase => v5-native-hal-owner.home-phase-01
+net v5-home-j1-failure joint.1.v5-bus-home-failure => v5-native-hal-owner.home-failure-01
+net v5-home-j1-start joint.1.v5-bus-home-start-counts => v5-native-hal-owner.home-start-counts-01
+net v5-home-j1-target joint.1.v5-bus-home-target-counts => v5-native-hal-owner.home-target-counts-01
+net v5-home-j1-readback joint.1.v5-bus-home-readback-counts => v5-native-hal-owner.home-readback-counts-01
+net v5-home-j1-error joint.1.v5-bus-home-error-counts => v5-native-hal-owner.home-error-counts-01
+net v5-home-j1-readback-generation joint.1.v5-bus-home-readback-generation => v5-native-hal-owner.home-readback-generation-01
+net v5-home-j1-readback-valid joint.1.v5-bus-home-readback-valid => v5-native-hal-owner.home-readback-valid-01
+net v5-home-j1-motion-active joint.1.v5-bus-home-motion-active => v5-native-hal-owner.home-motion-active-01
+net v5-home-j1-transaction joint.1.v5-bus-home-transaction => v5-native-hal-owner.home-transaction-01
+net v5-home-j2-phase joint.2.v5-bus-home-phase => v5-native-hal-owner.home-phase-02
+net v5-home-j2-failure joint.2.v5-bus-home-failure => v5-native-hal-owner.home-failure-02
+net v5-home-j2-start joint.2.v5-bus-home-start-counts => v5-native-hal-owner.home-start-counts-02
+net v5-home-j2-target joint.2.v5-bus-home-target-counts => v5-native-hal-owner.home-target-counts-02
+net v5-home-j2-readback joint.2.v5-bus-home-readback-counts => v5-native-hal-owner.home-readback-counts-02
+net v5-home-j2-error joint.2.v5-bus-home-error-counts => v5-native-hal-owner.home-error-counts-02
+net v5-home-j2-readback-generation joint.2.v5-bus-home-readback-generation => v5-native-hal-owner.home-readback-generation-02
+net v5-home-j2-readback-valid joint.2.v5-bus-home-readback-valid => v5-native-hal-owner.home-readback-valid-02
+net v5-home-j2-motion-active joint.2.v5-bus-home-motion-active => v5-native-hal-owner.home-motion-active-02
+net v5-home-j2-transaction joint.2.v5-bus-home-transaction => v5-native-hal-owner.home-transaction-02
+net v5-home-j3-phase joint.3.v5-bus-home-phase => v5-native-hal-owner.home-phase-03
+net v5-home-j3-failure joint.3.v5-bus-home-failure => v5-native-hal-owner.home-failure-03
+net v5-home-j3-start joint.3.v5-bus-home-start-counts => v5-native-hal-owner.home-start-counts-03
+net v5-home-j3-target joint.3.v5-bus-home-target-counts => v5-native-hal-owner.home-target-counts-03
+net v5-home-j3-readback joint.3.v5-bus-home-readback-counts => v5-native-hal-owner.home-readback-counts-03
+net v5-home-j3-error joint.3.v5-bus-home-error-counts => v5-native-hal-owner.home-error-counts-03
+net v5-home-j3-readback-generation joint.3.v5-bus-home-readback-generation => v5-native-hal-owner.home-readback-generation-03
+net v5-home-j3-readback-valid joint.3.v5-bus-home-readback-valid => v5-native-hal-owner.home-readback-valid-03
+net v5-home-j3-motion-active joint.3.v5-bus-home-motion-active => v5-native-hal-owner.home-motion-active-03
+net v5-home-j3-transaction joint.3.v5-bus-home-transaction => v5-native-hal-owner.home-transaction-03
+net v5-home-j4-phase joint.4.v5-bus-home-phase => v5-native-hal-owner.home-phase-04
+net v5-home-j4-failure joint.4.v5-bus-home-failure => v5-native-hal-owner.home-failure-04
+net v5-home-j4-start joint.4.v5-bus-home-start-counts => v5-native-hal-owner.home-start-counts-04
+net v5-home-j4-target joint.4.v5-bus-home-target-counts => v5-native-hal-owner.home-target-counts-04
+net v5-home-j4-readback joint.4.v5-bus-home-readback-counts => v5-native-hal-owner.home-readback-counts-04
+net v5-home-j4-error joint.4.v5-bus-home-error-counts => v5-native-hal-owner.home-error-counts-04
+net v5-home-j4-readback-generation joint.4.v5-bus-home-readback-generation => v5-native-hal-owner.home-readback-generation-04
+net v5-home-j4-readback-valid joint.4.v5-bus-home-readback-valid => v5-native-hal-owner.home-readback-valid-04
+net v5-home-j4-motion-active joint.4.v5-bus-home-motion-active => v5-native-hal-owner.home-motion-active-04
+net v5-home-j4-transaction joint.4.v5-bus-home-transaction => v5-native-hal-owner.home-transaction-04
+
 net re-kins-tool-offset motion.tooloffset.z => [RTCP]KINS_TOOL_OFFSET_PIN
 net v5-kins-x-rot-point v5-native-hal-owner.kins-x-rot-point => [RTCP]KINS_X_ROT_POINT_PIN
 net v5-kins-y-rot-point v5-native-hal-owner.kins-y-rot-point => [RTCP]KINS_Y_ROT_POINT_PIN
@@ -127,78 +252,99 @@ setp cia402.2.velo-scale [JOINT_2]SCALE
 setp cia402.3.velo-scale [JOINT_3]SCALE
 setp cia402.4.velo-scale [JOINT_4]SCALE
 
-net x-statusword        lcec.0.x.statusword        => cia402.0.statusword
-net x-actual-position  lcec.0.x.actual-position   => cia402.0.drv-actual-position
-net x-controlword      cia402.0.controlword       => lcec.0.x.controlword
-net x-target-position  cia402.0.drv-target-position => lcec.0.x.target-position
-net x-digital-inputs   lcec.0.x.digital-inputs    => x-din.in
+# Physical PDOs are named only by immutable bus slot.
+net bus-s0-status lcec.0.s0.statusword => v5-bus-axis-router.slave-statusword-00
+net bus-s0-actual lcec.0.s0.actual-position => v5-bus-axis-router.slave-actual-position-00
+net bus-s0-din lcec.0.s0.digital-inputs => v5-bus-axis-router.slave-digital-inputs-00
+net bus-s0-control v5-bus-axis-router.slave-controlword-00 => lcec.0.s0.controlword
+net bus-s0-target v5-bus-axis-router.slave-target-position-00 => lcec.0.s0.target-position
+net bus-s1-status lcec.0.s1.statusword => v5-bus-axis-router.slave-statusword-01
+net bus-s1-actual lcec.0.s1.actual-position => v5-bus-axis-router.slave-actual-position-01
+net bus-s1-din lcec.0.s1.digital-inputs => v5-bus-axis-router.slave-digital-inputs-01
+net bus-s1-control v5-bus-axis-router.slave-controlword-01 => lcec.0.s1.controlword
+net bus-s1-target v5-bus-axis-router.slave-target-position-01 => lcec.0.s1.target-position
+net bus-s2-status lcec.0.s2.statusword => v5-bus-axis-router.slave-statusword-02
+net bus-s2-actual lcec.0.s2.actual-position => v5-bus-axis-router.slave-actual-position-02
+net bus-s2-din lcec.0.s2.digital-inputs => v5-bus-axis-router.slave-digital-inputs-02
+net bus-s2-control v5-bus-axis-router.slave-controlword-02 => lcec.0.s2.controlword
+net bus-s2-target v5-bus-axis-router.slave-target-position-02 => lcec.0.s2.target-position
+net bus-s3-status lcec.0.s3.statusword => v5-bus-axis-router.slave-statusword-03
+net bus-s3-actual lcec.0.s3.actual-position => v5-bus-axis-router.slave-actual-position-03
+net bus-s3-din lcec.0.s3.digital-inputs => v5-bus-axis-router.slave-digital-inputs-03
+net bus-s3-control v5-bus-axis-router.slave-controlword-03 => lcec.0.s3.controlword
+net bus-s3-target v5-bus-axis-router.slave-target-position-03 => lcec.0.s3.target-position
+net bus-s4-status lcec.0.s4.statusword => v5-bus-axis-router.slave-statusword-04
+net bus-s4-actual lcec.0.s4.actual-position => v5-bus-axis-router.slave-actual-position-04
+net bus-s4-din lcec.0.s4.digital-inputs => v5-bus-axis-router.slave-digital-inputs-04
+net bus-s4-control v5-bus-axis-router.slave-controlword-04 => lcec.0.s4.controlword
+net bus-s4-target v5-bus-axis-router.slave-target-position-04 => lcec.0.s4.target-position
 
-net y-statusword        lcec.0.y.statusword        => cia402.1.statusword
-net y-actual-position  lcec.0.y.actual-position   => cia402.1.drv-actual-position
-net y-controlword      cia402.1.controlword       => lcec.0.y.controlword
-net y-target-position  cia402.1.drv-target-position => lcec.0.y.target-position
-net y-digital-inputs   lcec.0.y.digital-inputs    => y-din.in
+# cia402 instances and LinuxCNC joints remain logical.  The crossbar routes
+# their complete PDO command/feedback pair to the selected physical slot.
+net j0-status v5-bus-axis-router.joint-statusword-00 => cia402.0.statusword
+net j0-actual v5-bus-axis-router.joint-actual-position-00 => cia402.0.drv-actual-position joint.0.v5-bus-home-actual-counts
+net j0-digital v5-bus-axis-router.joint-digital-inputs-00 => j0-din.in
+net j0-control cia402.0.controlword => v5-bus-axis-router.joint-controlword-00
+net j0-target cia402.0.drv-target-position => v5-bus-axis-router.joint-target-position-00
+net j1-status v5-bus-axis-router.joint-statusword-01 => cia402.1.statusword
+net j1-actual v5-bus-axis-router.joint-actual-position-01 => cia402.1.drv-actual-position joint.1.v5-bus-home-actual-counts
+net j1-digital v5-bus-axis-router.joint-digital-inputs-01 => j1-din.in
+net j1-control cia402.1.controlword => v5-bus-axis-router.joint-controlword-01
+net j1-target cia402.1.drv-target-position => v5-bus-axis-router.joint-target-position-01
+net j2-status v5-bus-axis-router.joint-statusword-02 => cia402.2.statusword
+net j2-actual v5-bus-axis-router.joint-actual-position-02 => cia402.2.drv-actual-position joint.2.v5-bus-home-actual-counts
+net j2-digital v5-bus-axis-router.joint-digital-inputs-02 => j2-din.in
+net j2-control cia402.2.controlword => v5-bus-axis-router.joint-controlword-02
+net j2-target cia402.2.drv-target-position => v5-bus-axis-router.joint-target-position-02
+net j3-status v5-bus-axis-router.joint-statusword-03 => cia402.3.statusword
+net j3-actual v5-bus-axis-router.joint-actual-position-03 => cia402.3.drv-actual-position joint.3.v5-bus-home-actual-counts
+net j3-digital v5-bus-axis-router.joint-digital-inputs-03 => j3-din.in
+net j3-control cia402.3.controlword => v5-bus-axis-router.joint-controlword-03
+net j3-target cia402.3.drv-target-position => v5-bus-axis-router.joint-target-position-03
+net j4-status v5-bus-axis-router.joint-statusword-04 => cia402.4.statusword
+net j4-actual v5-bus-axis-router.joint-actual-position-04 => cia402.4.drv-actual-position joint.4.v5-bus-home-actual-counts
+net j4-digital v5-bus-axis-router.joint-digital-inputs-04 => j4-din.in
+net j4-control cia402.4.controlword => v5-bus-axis-router.joint-controlword-04
+net j4-target cia402.4.drv-target-position => v5-bus-axis-router.joint-target-position-04
 
-net z-statusword        lcec.0.z.statusword        => cia402.2.statusword
-net z-actual-position  lcec.0.z.actual-position   => cia402.2.drv-actual-position
-net z-controlword      cia402.2.controlword       => lcec.0.z.controlword
-net z-target-position  cia402.2.drv-target-position => lcec.0.z.target-position
-net z-digital-inputs   lcec.0.z.digital-inputs    => z-din.in
+net j0-enable joint.0.amp-enable-out => cia402.0.enable
+net j1-enable joint.1.amp-enable-out => cia402.1.enable
+net j2-enable joint.2.amp-enable-out => cia402.2.enable
+net j3-enable joint.3.amp-enable-out => cia402.3.enable
+net j4-enable joint.4.amp-enable-out => cia402.4.enable
+net j0-pos-cmd joint.0.motor-pos-cmd => cia402.0.pos-cmd
+net j1-pos-cmd joint.1.motor-pos-cmd => cia402.1.pos-cmd
+net j2-pos-cmd joint.2.motor-pos-cmd => cia402.2.pos-cmd
+net j3-pos-cmd joint.3.motor-pos-cmd => cia402.3.pos-cmd
+net j4-pos-cmd joint.4.motor-pos-cmd => cia402.4.pos-cmd
+net j0-pos-fb cia402.0.pos-fb => joint.0.motor-pos-fb
+net j1-pos-fb cia402.1.pos-fb => joint.1.motor-pos-fb
+net j2-pos-fb cia402.2.pos-fb => joint.2.motor-pos-fb
+net j3-pos-fb cia402.3.pos-fb => joint.3.motor-pos-fb
+net j4-pos-fb cia402.4.pos-fb => joint.4.motor-pos-fb
+net j0-vel-cmd joint.0.vel-cmd => cia402.0.velocity-cmd
+net j1-vel-cmd joint.1.vel-cmd => cia402.1.velocity-cmd
+net j2-vel-cmd joint.2.vel-cmd => cia402.2.velocity-cmd
+net j3-vel-cmd joint.3.vel-cmd => cia402.3.velocity-cmd
+net j4-vel-cmd joint.4.vel-cmd => cia402.4.velocity-cmd
+net j0-amp-fault cia402.0.drv-fault => joint.0.amp-fault-in
+net j1-amp-fault cia402.1.drv-fault => joint.1.amp-fault-in
+net j2-amp-fault cia402.2.drv-fault => joint.2.amp-fault-in
+net j3-amp-fault cia402.3.drv-fault => joint.3.amp-fault-in
+net j4-amp-fault cia402.4.drv-fault => joint.4.amp-fault-in
 
-net a-statusword        lcec.0.a.statusword        => cia402.3.statusword
-net a-actual-position  lcec.0.a.actual-position   => cia402.3.drv-actual-position
-net a-controlword      cia402.3.controlword       => lcec.0.a.controlword
-net a-target-position  cia402.3.drv-target-position => lcec.0.a.target-position
-net a-digital-inputs   lcec.0.a.digital-inputs    => a-din.in
-
-net c-statusword        lcec.0.c.statusword        => cia402.4.statusword
-net c-actual-position  lcec.0.c.actual-position   => cia402.4.drv-actual-position
-net c-controlword      cia402.4.controlword       => lcec.0.c.controlword
-net c-target-position  cia402.4.drv-target-position => lcec.0.c.target-position
-net c-digital-inputs   lcec.0.c.digital-inputs    => c-din.in
-
-net x-enable joint.0.amp-enable-out => cia402.0.enable
-net y-enable joint.1.amp-enable-out => cia402.1.enable
-net z-enable joint.2.amp-enable-out => cia402.2.enable
-net a-enable joint.3.amp-enable-out => cia402.3.enable
-net c-enable joint.4.amp-enable-out => cia402.4.enable
-
-net x-pos-cmd joint.0.motor-pos-cmd => cia402.0.pos-cmd
-net y-pos-cmd joint.1.motor-pos-cmd => cia402.1.pos-cmd
-net z-pos-cmd joint.2.motor-pos-cmd => cia402.2.pos-cmd
-net a-pos-cmd joint.3.motor-pos-cmd => cia402.3.pos-cmd
-net c-pos-cmd joint.4.motor-pos-cmd => cia402.4.pos-cmd
-
-net x-pos-fb cia402.0.pos-fb => joint.0.motor-pos-fb
-net y-pos-fb cia402.1.pos-fb => joint.1.motor-pos-fb
-net z-pos-fb cia402.2.pos-fb => joint.2.motor-pos-fb
-net a-pos-fb cia402.3.pos-fb => joint.3.motor-pos-fb
-net c-pos-fb cia402.4.pos-fb => joint.4.motor-pos-fb
-
-net x-vel-cmd joint.0.vel-cmd => cia402.0.velocity-cmd
-net y-vel-cmd joint.1.vel-cmd => cia402.1.velocity-cmd
-net z-vel-cmd joint.2.vel-cmd => cia402.2.velocity-cmd
-net a-vel-cmd joint.3.vel-cmd => cia402.3.velocity-cmd
-net c-vel-cmd joint.4.vel-cmd => cia402.4.velocity-cmd
-
-net x-amp-fault cia402.0.drv-fault => joint.0.amp-fault-in
-net y-amp-fault cia402.1.drv-fault => joint.1.amp-fault-in
-net z-amp-fault cia402.2.drv-fault => joint.2.amp-fault-in
-net a-amp-fault cia402.3.drv-fault => joint.3.amp-fault-in
-net c-amp-fault cia402.4.drv-fault => joint.4.amp-fault-in
-
-net x-neg-limit x-din.out-00 => joint.0.neg-lim-sw-in
-net x-pos-limit x-din.out-01 => joint.0.pos-lim-sw-in
-net x-home-sw   x-din.out-02 => joint.0.home-sw-in
-net y-neg-limit y-din.out-00 => joint.1.neg-lim-sw-in
-net y-pos-limit y-din.out-01 => joint.1.pos-lim-sw-in
-net y-home-sw   y-din.out-02 => joint.1.home-sw-in
-net z-neg-limit z-din.out-00 => joint.2.neg-lim-sw-in
-net z-pos-limit z-din.out-01 => joint.2.pos-lim-sw-in
-net z-home-sw   z-din.out-02 => joint.2.home-sw-in
-net a-neg-limit a-din.out-00 => joint.3.neg-lim-sw-in
-net a-pos-limit a-din.out-01 => joint.3.pos-lim-sw-in
-net a-home-sw   a-din.out-02 => joint.3.home-sw-in
-net c-neg-limit c-din.out-00 => joint.4.neg-lim-sw-in
-net c-pos-limit c-din.out-01 => joint.4.pos-lim-sw-in
-net c-home-sw   c-din.out-02 => joint.4.home-sw-in
+net j0-neg-limit j0-din.out-00 => joint.0.neg-lim-sw-in
+net j0-pos-limit j0-din.out-01 => joint.0.pos-lim-sw-in
+net j0-home-sw j0-din.out-02 => joint.0.home-sw-in
+net j1-neg-limit j1-din.out-00 => joint.1.neg-lim-sw-in
+net j1-pos-limit j1-din.out-01 => joint.1.pos-lim-sw-in
+net j1-home-sw j1-din.out-02 => joint.1.home-sw-in
+net j2-neg-limit j2-din.out-00 => joint.2.neg-lim-sw-in
+net j2-pos-limit j2-din.out-01 => joint.2.pos-lim-sw-in
+net j2-home-sw j2-din.out-02 => joint.2.home-sw-in
+net j3-neg-limit j3-din.out-00 => joint.3.neg-lim-sw-in
+net j3-pos-limit j3-din.out-01 => joint.3.pos-lim-sw-in
+net j3-home-sw j3-din.out-02 => joint.3.home-sw-in
+net j4-neg-limit j4-din.out-00 => joint.4.neg-lim-sw-in
+net j4-pos-limit j4-din.out-01 => joint.4.pos-lim-sw-in
+net j4-home-sw j4-din.out-02 => joint.4.home-sw-in

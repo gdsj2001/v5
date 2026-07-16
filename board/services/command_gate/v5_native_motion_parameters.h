@@ -10,6 +10,7 @@ extern "C" {
 #endif
 
 #define V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT 6U
+#define V5_NATIVE_MOTION_HOME_JOINT_COUNT 5U
 
 typedef enum V5NativeDriverMode {
     V5_NATIVE_DRIVER_MODE_UNKNOWN = 0,
@@ -30,8 +31,7 @@ typedef struct V5NativeMotionAxisParameters {
     double bus_zero_counts;
     double bus_counts_per_unit;
     double bus_home_reference;
-    double arrival_tolerance_units;
-    int home_sequence;
+    double positioning_resolution_units;
     int bus_zero_evidence_known;
     unsigned int valid_mask;
 } V5NativeMotionAxisParameters;
@@ -43,6 +43,7 @@ typedef struct V5NativeMotionParameters {
     int pulse_runtime_selectable;
     char pulse_contract_status[64];
     unsigned int active_axis_count;
+    unsigned int mapping_generation;
     V5NativeMotionAxisParameters axes[V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT];
 } V5NativeMotionParameters;
 

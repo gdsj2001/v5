@@ -1,0 +1,274 @@
+component v5_bus_axis_router "V5 realtime BUS logical-joint to physical-slave router";
+
+option singleton yes;
+
+description """
+Routes five logical LinuxCNC joints to five physical EtherCAT slots from the
+  resident clean-restart mapping.  The same table owns each joint's saved
+  physical zero count: feedback is continuously translated into zero-relative
+  LinuxCNC counts and commands are continuously translated back to physical
+  counts.  A complete table is staged in HAL pins and a single non-zero commit
+  sequence atomically latches it in one servo cycle.
+Incomplete, duplicate, out-of-range, zero-generation, mixed-generation, or
+non-advancing commits cannot replace the last complete committed table.  An
+explicit canonical validity withdrawal fails closed in the same servo cycle.
+Schedule read after lcec.read and before cia402.read; schedule write after
+cia402.write and before lcec.write.
+""";
+
+pin in bit joint-config-valid-##[5]
+    "True only when this logical joint mapping came from the resident owner";
+pin in u32 joint-slave-position-##[5]
+    "Physical slave position (0..4) selected for this logical joint";
+pin in u32 joint-mapping-generation-##[5]
+    "Staged clean-restart mapping generation for this logical joint";
+pin in float joint-zero-counts-##[5]
+    "Exact signed-32 physical count that represents LinuxCNC count zero";
+pin in u32 expected-active-mask
+    "Staged logical-joint active mask; only bits 0..4 are legal";
+pin in u32 staged-mapping-generation
+    "Staged non-zero generation shared by every active logical joint";
+pin in u32 mapping-commit-seq
+    "Advance last, after staging the complete table, to request one atomic commit";
+pin in bit table-mapping-valid
+    "Canonical committed-table validity; false explicitly revokes routing";
+
+pin in u32 slave-statusword-##[5]
+    "Statusword read from physical slave position ##";
+pin in s32 slave-actual-position-##[5]
+    "Position count read from physical slave position ##";
+pin in u32 slave-digital-inputs-##[5]
+    "Digital inputs read from physical slave position ##";
+pin in u32 joint-controlword-##[5]
+    "Controlword requested by logical joint ##";
+pin in s32 joint-target-position-##[5]
+    "Target position count requested by logical joint ##";
+
+pin out u32 joint-statusword-##[5]
+    "Statusword routed back to logical joint ##";
+pin out s32 joint-actual-position-##[5]
+    "Actual position count routed back to logical joint ##";
+pin out u32 joint-digital-inputs-##[5]
+    "Digital inputs routed back to logical joint ##";
+pin out u32 slave-controlword-##[5]
+    "Controlword routed to physical slave position ##";
+pin out s32 slave-target-position-##[5]
+    "Target position count routed to physical slave position ##";
+
+pin out bit mapping-valid
+    "True only while an atomically committed mapping is active";
+pin out u32 latched-mapping-generation
+    "Generation of the active mapping, otherwise zero";
+pin out u32 latched-active-mask
+    "Logical-joint active mask of the active mapping, otherwise zero";
+pin out u32 latched-commit-seq
+    "Commit sequence of the active mapping, otherwise zero";
+pin out u32 rejected-commit-seq
+    "Most recent commit sequence rejected as an incomplete or invalid table";
+
+variable hal_u32_t slave_for_joint_state[5] = 0;
+variable hal_s32_t zero_for_joint_state[5] = 0;
+variable hal_u32_t active_mask_state = 0;
+variable hal_u32_t generation_state = 0;
+variable hal_u32_t commit_seq_state = 0;
+variable hal_u32_t last_seen_commit_seq = 0;
+variable hal_bit_t mapping_latched = 0;
+
+function read fp;
+function write nofp;
+
+license "GPL";
+author "V5 project";
+;;
+
+#include <stdint.h>
+
+#define V5_BUS_AXIS_ROUTER_JOINTS 5
+#define V5_BUS_AXIS_ROUTER_LEGAL_MASK 0x1fu
+
+static int v5_bus_router_exact_s32(hal_float_t value, hal_s32_t *result)
+{
+    hal_s32_t converted;
+    if (!result || value != value || value < -2147483648.0 ||
+        value > 2147483647.0) return 0;
+    converted = (hal_s32_t)value;
+    if ((hal_float_t)converted != value) return 0;
+    *result = converted;
+    return 1;
+}
+
+static hal_s32_t v5_bus_router_from_u32(hal_u32_t value)
+{
+    if (value <= 0x7fffffffu) return (hal_s32_t)value;
+    return (hal_s32_t)((int64_t)value - 4294967296LL);
+}
+
+static hal_s32_t v5_bus_router_add_offset(hal_s32_t value, hal_s32_t offset)
+{
+    return v5_bus_router_from_u32((hal_u32_t)value + (hal_u32_t)offset);
+}
+
+static hal_s32_t v5_bus_router_sub_offset(hal_s32_t value, hal_s32_t offset)
+{
+    return v5_bus_router_from_u32((hal_u32_t)value - (hal_u32_t)offset);
+}
+
+FUNCTION(read) {
+    int joint;
+    int slave;
+
+    /*
+     * The read phase runs after lcec.read and before cia402.read.  It owns the
+     * atomic staged commit and never exposes feedback from an unlatched table.
+     */
+    for (joint = 0; joint < V5_BUS_AXIS_ROUTER_JOINTS; joint++) {
+        joint_statusword(joint) = 0;
+        joint_actual_position(joint) = 0;
+        joint_digital_inputs(joint) = 0;
+    }
+
+    /* A canonical validity withdrawal revokes the active route immediately. */
+    if (!table_mapping_valid) {
+        mapping_latched = 0;
+        active_mask_state = 0;
+        generation_state = 0;
+        commit_seq_state = 0;
+        last_seen_commit_seq = 0;
+        rejected_commit_seq = 0;
+        mapping_valid = 0;
+        latched_mapping_generation = 0;
+        latched_active_mask = 0;
+        latched_commit_seq = 0;
+        return;
+    }
+
+    /*
+     * Inputs are staging pins.  They are read only when commit-seq advances;
+     * a partially written table therefore cannot leak into the active route.
+     */
+    if (mapping_commit_seq != 0 &&
+        (hal_s32_t)(mapping_commit_seq - last_seen_commit_seq) > 0) {
+        hal_u32_t candidate_slave_for_joint[V5_BUS_AXIS_ROUTER_JOINTS];
+        hal_s32_t candidate_zero_for_joint[V5_BUS_AXIS_ROUTER_JOINTS];
+        hal_u32_t candidate_mask = expected_active_mask;
+        hal_u32_t candidate_generation = staged_mapping_generation;
+        hal_u32_t seen_slaves = 0;
+        int candidate_valid = 1;
+
+        if (mapping_commit_seq == 0 || candidate_mask == 0 ||
+            (candidate_mask & ~V5_BUS_AXIS_ROUTER_LEGAL_MASK) != 0 ||
+            candidate_generation == 0) {
+            candidate_valid = 0;
+        }
+
+        for (joint = 0;
+             candidate_valid && joint < V5_BUS_AXIS_ROUTER_JOINTS;
+             joint++) {
+            hal_u32_t joint_bit = 1u << joint;
+            int expected_active = (candidate_mask & joint_bit) != 0;
+
+            if (!expected_active) {
+                if (joint_config_valid(joint)) {
+                    candidate_valid = 0;
+                }
+                continue;
+            }
+
+            if (!joint_config_valid(joint) ||
+                joint_mapping_generation(joint) != candidate_generation ||
+                joint_slave_position(joint) >= V5_BUS_AXIS_ROUTER_JOINTS ||
+                !v5_bus_router_exact_s32(
+                    joint_zero_counts(joint), &candidate_zero_for_joint[joint])) {
+                candidate_valid = 0;
+                break;
+            }
+
+            {
+                hal_u32_t slave_position = joint_slave_position(joint);
+                hal_u32_t slave_bit = 1u << slave_position;
+
+                if (seen_slaves & slave_bit) {
+                    candidate_valid = 0;
+                    break;
+                }
+                seen_slaves |= slave_bit;
+                candidate_slave_for_joint[joint] = slave_position;
+            }
+        }
+
+        if (candidate_valid) {
+            for (joint = 0; joint < V5_BUS_AXIS_ROUTER_JOINTS; joint++) {
+                if (candidate_mask & (1u << joint)) {
+                    slave_for_joint_state[joint] =
+                        candidate_slave_for_joint[joint];
+                    zero_for_joint_state[joint] =
+                        candidate_zero_for_joint[joint];
+                }
+            }
+            active_mask_state = candidate_mask;
+            generation_state = candidate_generation;
+            commit_seq_state = mapping_commit_seq;
+            mapping_latched = 1;
+            rejected_commit_seq = 0;
+        } else {
+            rejected_commit_seq = mapping_commit_seq;
+        }
+        last_seen_commit_seq = mapping_commit_seq;
+    }
+
+    if (!table_mapping_valid || !mapping_latched) {
+        mapping_valid = 0;
+        latched_mapping_generation = 0;
+        latched_active_mask = 0;
+        latched_commit_seq = 0;
+        return;
+    }
+
+    /* Route physical feedback to logical joints from one latched snapshot. */
+    for (joint = 0; joint < V5_BUS_AXIS_ROUTER_JOINTS; joint++) {
+        if (!(active_mask_state & (1u << joint))) {
+            continue;
+        }
+
+        slave = (int)slave_for_joint_state[joint];
+
+        joint_statusword(joint) = slave_statusword(slave);
+        joint_actual_position(joint) = v5_bus_router_sub_offset(
+            slave_actual_position(slave), zero_for_joint_state[joint]);
+        joint_digital_inputs(joint) = slave_digital_inputs(slave);
+    }
+
+    latched_mapping_generation = generation_state;
+    latched_active_mask = active_mask_state;
+    latched_commit_seq = commit_seq_state;
+    mapping_valid = 1;
+}
+
+FUNCTION(write) {
+    int joint;
+    int slave;
+
+    /*
+     * The write phase runs after cia402.write.  Establish safe physical
+     * outputs every cycle before consulting the snapshot latched by read.
+     */
+    for (slave = 0; slave < V5_BUS_AXIS_ROUTER_JOINTS; slave++) {
+        slave_controlword(slave) = 0;
+        slave_target_position(slave) = slave_actual_position(slave);
+    }
+
+    if (!table_mapping_valid || !mapping_latched) {
+        return;
+    }
+
+    for (joint = 0; joint < V5_BUS_AXIS_ROUTER_JOINTS; joint++) {
+        if (!(active_mask_state & (1u << joint))) {
+            continue;
+        }
+
+        slave = (int)slave_for_joint_state[joint];
+        slave_controlword(slave) = joint_controlword(joint);
+        slave_target_position(slave) = v5_bus_router_add_offset(
+            joint_target_position(joint), zero_for_joint_state[joint]);
+    }
+}

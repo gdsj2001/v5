@@ -5,7 +5,6 @@
 
 #include <ctype.h>
 #include <float.h>
-#include <limits.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,9 +14,8 @@
 #define V5_MOTION_VALUE_ACCELERATION 0x02U
 #define V5_MOTION_VALUE_MIN_LIMIT 0x04U
 #define V5_MOTION_VALUE_MAX_LIMIT 0x08U
-#define V5_MOTION_VALUE_HOME_SEQUENCE 0x10U
 #define V5_MOTION_VALUE_SCALE 0x20U
-#define V5_MOTION_VALUE_ALL 0x3fU
+#define V5_MOTION_VALUE_ALL 0x2fU
 
 static const char k_axes[V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT] = {'X', 'Y', 'Z', 'A', 'B', 'C'};
 
@@ -74,7 +72,6 @@ void v5_native_motion_parameters_init(V5NativeMotionParameters *parameters)
     memset(parameters, 0, sizeof(*parameters));
     for (i = 0U; i < V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT; ++i) {
         parameters->axes[i].axis = k_axes[i];
-        parameters->axes[i].home_sequence = -1;
     }
 }
 
@@ -96,27 +93,6 @@ static int parse_double(const char *text, double *value)
         return 0;
     }
     *value = parsed;
-    return 1;
-}
-
-static int parse_int(const char *text, int *value)
-{
-    char *end = 0;
-    long parsed;
-    if (!text || !value) {
-        return 0;
-    }
-    parsed = strtol(text, &end, 10);
-    if (end == text || parsed < INT_MIN || parsed > INT_MAX) {
-        return 0;
-    }
-    while (*end && isspace((unsigned char)*end)) {
-        ++end;
-    }
-    if (*end && *end != '#' && *end != ';') {
-        return 0;
-    }
-    *value = (int)parsed;
     return 1;
 }
 
@@ -192,16 +168,13 @@ static void parse_joint_value(
     char *end = 0;
     unsigned long joint;
     unsigned int i;
-    int home_sequence = 0;
     double scale = 0.0;
-    int is_home_sequence;
     int is_scale;
     if (!parameters || !section || strncmp(section, "JOINT_", 6U) != 0) {
         return;
     }
-    is_home_sequence = strcmp(key, "HOME_SEQUENCE") == 0 && parse_int(value, &home_sequence);
     is_scale = strcmp(key, "SCALE") == 0 && parse_double(value, &scale) && isfinite(scale) && scale != 0.0;
-    if (!is_home_sequence && !is_scale) return;
+    if (!is_scale) return;
     joint = strtoul(section + 6, &end, 10);
     if (end == section + 6 || *end || joint >= V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT) {
         return;
@@ -209,13 +182,8 @@ static void parse_joint_value(
     for (i = 0U; i < V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT; ++i) {
         V5NativeMotionAxisParameters *axis = &parameters->axes[i];
         if (axis->active && axis->status_slot == (unsigned int)joint) {
-            if (is_home_sequence) {
-                axis->home_sequence = home_sequence;
-                axis->valid_mask |= V5_MOTION_VALUE_HOME_SEQUENCE;
-            } else {
-                axis->arrival_tolerance_units = 1.0 / fabs(scale);
-                axis->valid_mask |= V5_MOTION_VALUE_SCALE;
-            }
+            axis->positioning_resolution_units = 1.0 / fabs(scale);
+            axis->valid_mask |= V5_MOTION_VALUE_SCALE;
             return;
         }
     }
@@ -235,7 +203,7 @@ static int parameters_complete(const V5NativeMotionParameters *parameters)
         }
         if (axis->valid_mask != V5_MOTION_VALUE_ALL || axis->max_velocity <= 0.0 ||
             axis->max_acceleration <= 0.0 || axis->min_limit >= axis->max_limit ||
-            axis->home_sequence < 0 || axis->arrival_tolerance_units <= 0.0) {
+            axis->positioning_resolution_units <= 0.0) {
             return 0;
         }
     }

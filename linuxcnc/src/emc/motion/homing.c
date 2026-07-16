@@ -32,13 +32,18 @@ static int extra_joints;   // motmod num_extrajoints
 // motmod provided ptrs for functions called by homing:
 static void(*SetRotaryUnlock)(int,int);
 static int (*GetRotaryIsUnlocked)(int);
+static int (*ReadWcheckpointSnapshot)(
+    unsigned int, struct v5_wcheckpoint_snapshot *);
 
 void homeMotFunctions(void(*pSetRotaryUnlock)(int,int)
                      ,int (*pGetRotaryIsUnlocked)(int)
+                     ,int (*pReadWcheckpointSnapshot)(
+                         unsigned int, struct v5_wcheckpoint_snapshot *)
                      )
 {
     SetRotaryUnlock     = *pSetRotaryUnlock;
     GetRotaryIsUnlocked = *pGetRotaryIsUnlocked;
+    ReadWcheckpointSnapshot = *pReadWcheckpointSnapshot;
 }
 
 //========================================================
@@ -1427,6 +1432,7 @@ int homing_init(int id,
 }
 
 bool do_homing(void)                      { return base_do_homing(); }
+bool homing_wcheckpoint_reset_required(void) { return 1; }
 bool get_allhomed(void)                   { return base_get_allhomed(); }
 bool get_homed(int jno)                   { return base_get_homed(jno); }
 bool get_home_is_idle(int jno)            { return base_get_home_is_idle(jno); }
@@ -1481,6 +1487,7 @@ EXPORT_SYMBOL(homeMotFunctions);
 
 EXPORT_SYMBOL(homing_init);
 EXPORT_SYMBOL(do_homing);
+EXPORT_SYMBOL(homing_wcheckpoint_reset_required);
 EXPORT_SYMBOL(get_allhomed);
 EXPORT_SYMBOL(get_homed);
 EXPORT_SYMBOL(get_home_is_idle);

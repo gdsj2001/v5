@@ -262,7 +262,28 @@ def check_settings_actiond_socket_policy() -> int:
 
 def check_linuxcnc_rtapi_affinity_owner() -> int:
     init = ROOT / "services" / "command_gate" / "init.d" / "v5-linuxcnc-command-gate"
+    backend_lifecycle = ROOT / "services" / "command_gate" / "v5_ethercat_backend_lifecycle.sh"
+    board_runtime_policy = ROOT / "tools" / "deploy" / "check_v5_board_runtime_policy.py"
     ui_init = ROOT / "services" / "ui" / "init.d" / "v5-ui-relay"
+    net_core = (
+        ROOT
+        / "petalinux"
+        / "project-spec"
+        / "meta-user"
+        / "recipes-apps"
+        / "v5-base-overlay"
+        / "files"
+        / "network"
+        / "v5_net_core.sh"
+    )
+    publisher_inits = (
+        ROOT / "services" / "state_publisher" / "init.d" / "v5-state-publisher",
+        ROOT / "services" / "state_publisher" / "init.d" / "v5-wcs-status-publisher",
+    )
+    relay_producer = ROOT / "services" / "ui" / "v5_remote_ui_shared_payload.py"
+    deploy_manifest = ROOT / "config" / "deploy" / "v5_runtime_deploy_manifest.tsv"
+    runtime_installer = ROOT / "tools" / "deploy" / "install_v5_runtime.sh"
+    usb_wifi_apply = net_core.with_name("v5_usb_wifi_apply.sh")
     probe = ROOT / "services" / "command_gate" / "v5_linuxcncrsh_probe.c"
     if not init.exists():
         print("LINUXCNC_RTAPI_AFFINITY_INIT_MISSING: services/command_gate/init.d/v5-linuxcnc-command-gate", file=sys.stderr)
@@ -273,10 +294,30 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
     if not ui_init.exists():
         print("LINUXCNC_MACHINE_ON_UI_INIT_MISSING: services/ui/init.d/v5-ui-relay", file=sys.stderr)
         return 1
+    if (
+        not backend_lifecycle.exists()
+        or not board_runtime_policy.exists()
+        or not net_core.exists()
+        or not usb_wifi_apply.exists()
+        or not relay_producer.exists()
+        or not deploy_manifest.exists()
+        or not runtime_installer.exists()
+        or any(not path.exists() for path in publisher_inits)
+    ):
+        print("CPU_ISOLATION_OWNER_MISSING", file=sys.stderr)
+        return 1
     text = init.read_text(encoding="utf-8", errors="ignore")
     required = (
         "linuxcnc_realtime_pids",
         "linuxcnc_realtime_affinity_ok",
+        "linuxcnc_privileged_helpers_ok",
+        "linuxcnc_realtime_scheduler_ok",
+        "/usr/bin/linuxcnc_module_helper",
+        "rtapi_app:T*",
+        "policy=$(awk '{print $41; exit}' \"$task/stat\"",
+        "1|2",
+        "LinuxCNC privileged helpers must be root:root 4755; refusing backend start",
+        "realtime-scheduler",
         "set_linuxcnc_realtime_affinity",
         "rtapi_app",
         "taskset -a -pc 0",
@@ -284,13 +325,52 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         "ethercat_irq_affinity_ok",
         "ethercat_kernel_affinity_ok",
         "set_ethercat_realtime_affinity",
-        "RTAPI and EtherCAT realtime paths pinned to CPU0",
+        "network_cpu_isolation_ok",
+        "network_iface_irq_affinity_ok",
+        "network_iface_rps_ok",
+        "Network CPU isolation readback invalid; refusing LinuxCNC start",
+        "Network CPU isolation readback invalid; refusing native-gate-only restart",
+        "linuxcnc_non_realtime_pids",
+        "linuxcnc_non_realtime_affinity_ok",
+        "set_linuxcnc_non_realtime_affinity",
+        "MICROKERNEL_NON_RT_NICE=-5",
+        "linuxcnc_non_realtime_priority_ok",
+        "set_linuxcnc_non_realtime_priority",
+        'renice -n "$MICROKERNEL_NON_RT_NICE"',
+        "linuxcncsvr milltask io linuxcncrsh v5_native_hal_owner",
+        "taskset -a -pc 1",
+        "EtherCAT IRQ affinity is not CPU0; network affinity owner must establish it before LinuxCNC starts",
+        "RTAPI and EtherCAT realtime paths pinned to CPU0; LinuxCNC non-realtime motion paths protected on CPU1",
     )
     rc = 0
     for token in required:
         if token not in text:
             print(f"LINUXCNC_RTAPI_AFFINITY_OWNER_MISSING: {init.relative_to(ROOT)} lacks {token}", file=sys.stderr)
             rc = 1
+    if '"$task/sched"' in text:
+        print("LINUXCNC_RTAPI_SCHED_READER_SURVIVOR", file=sys.stderr)
+        rc = 1
+    lifecycle_text = backend_lifecycle.read_text(encoding="utf-8", errors="ignore")
+    for token in (
+        "linuxcnc_realtime_scheduler_ok",
+        "LinuxCNC RTAPI servo thread remained outside the realtime scheduler",
+    ):
+        if token not in lifecycle_text:
+            print(f"LINUXCNC_RTAPI_SCHEDULER_READINESS_MISSING: {token}", file=sys.stderr)
+            rc = 1
+    board_runtime_text = board_runtime_policy.read_text(encoding="utf-8", errors="ignore")
+    for token in (
+        "audit_linuxcnc_privileged_helpers",
+        "OK_LINUXCNC_RTAPI_SCHEDULER",
+        "no rtapi_app:T realtime thread found",
+        "tail[38]",
+    ):
+        if token not in board_runtime_text:
+            print(f"LINUXCNC_RTAPI_BOARD_AUDIT_MISSING: {token}", file=sys.stderr)
+            rc = 1
+    if 'echo 0 >"/proc/irq/$irq/smp_affinity_list"' in text:
+        print("LINUXCNC_DUPLICATE_NETWORK_IRQ_WRITER_PRESENT", file=sys.stderr)
+        rc = 1
     status_reset_tokens = (
         "LinuxCNC backend residue remained before native status reset",
         "/dev/shm/v5_native_safety_latch.bin",
@@ -311,11 +391,104 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
             print(f"LINUXCNC_MACHINE_ON_EARLY_INIT_SURVIVOR: {init.relative_to(ROOT)} contains {token}", file=sys.stderr)
             rc = 1
     ui_text = ui_init.read_text(encoding="utf-8", errors="ignore")
-    required_ui = ("wait_boot_inputs_ready", "boot_stage ui_ready")
+    required_ui = (
+        "wait_boot_inputs_ready",
+        "boot_stage ui_ready",
+        "UI_INPUT_NICE=0",
+        'nice -n "$UI_INPUT_NICE"',
+        'renice -n "$UI_INPUT_NICE" -p "$pid"',
+        "set_display_irq_affinity",
+    )
     for token in required_ui:
         if token not in ui_text:
             print(f"LINUXCNC_MACHINE_ON_UI_INIT_CONTRACT_MISSING: {ui_init.relative_to(ROOT)} lacks {token}", file=sys.stderr)
             rc = 1
+    for token in ("default_route_iface", "set_non_microkernel_irq_affinity"):
+        if token in ui_text:
+            print(f"UI_DUPLICATE_NETWORK_AFFINITY_OWNER_PRESENT: {token}", file=sys.stderr)
+            rc = 1
+    if 'for task in /proc/"$pid"/task/[0-9]*' in ui_text:
+        print("UI_FRAME_PRODUCER_NICE_OVERRIDE_SURVIVOR", file=sys.stderr)
+        rc = 1
+    net_text = net_core.read_text(encoding="utf-8", errors="ignore")
+    required_net = (
+        "apply_network_cpu_isolation",
+        "set_iface_irq_affinity",
+        "set_iface_queue_masks",
+        "disable_irqbalance",
+        'set_iface_irq_affinity "$ethercat_iface" 0 1',
+        'set_iface_queue_masks "$ethercat_iface" 0 1',
+        'set_iface_irq_affinity "$management_iface" 1 1',
+        'set_iface_queue_masks "$management_iface" 2 2',
+        "/proc/irq/$irq/smp_affinity_list",
+        "rps_cpus",
+        "xps_cpus",
+    )
+    for token in required_net:
+        if token not in net_text:
+            print(f"NETWORK_CPU_ISOLATION_OWNER_MISSING: {net_core.relative_to(ROOT)} lacks {token}", file=sys.stderr)
+            rc = 1
+    if "apply_network_cpu_isolation" not in usb_wifi_apply.read_text(encoding="utf-8", errors="ignore"):
+        print("USB_WIFI_CPU_ISOLATION_OWNER_MISSING", file=sys.stderr)
+        rc = 1
+    for publisher_init in publisher_inits:
+        publisher_text = publisher_init.read_text(encoding="utf-8", errors="ignore")
+        for token in (
+            "NON_MICROKERNEL_NICE=10",
+            'taskset -c 1 nice -n "$NON_MICROKERNEL_NICE"',
+            'renice -n "$NON_MICROKERNEL_NICE"',
+        ):
+            if token not in publisher_text:
+                print(
+                    f"DISPLAY_PUBLISHER_CPU_BUDGET_POLICY_MISSING: "
+                    f"{publisher_init.relative_to(ROOT)} lacks {token}",
+                    file=sys.stderr,
+                )
+                rc = 1
+    relay_producer_text = relay_producer.read_text(encoding="utf-8", errors="ignore")
+    for token in (
+        "FRAME_PRODUCER_NICE = 10",
+        "os.nice(FRAME_PRODUCER_NICE)",
+        "dirty_payload_shared_producer_priority_errors",
+    ):
+        if token not in relay_producer_text:
+            print(f"REMOTE_FRAME_PRODUCER_PRIORITY_POLICY_MISSING: {token}", file=sys.stderr)
+            rc = 1
+    for token in ("threading.get_native_id", "/proc/self/task/"):
+        if token in relay_producer_text:
+            print(f"REMOTE_FRAME_PRODUCER_UNSUPPORTED_THREAD_ID_SURVIVOR: {token}", file=sys.stderr)
+            rc = 1
+    manifest_text = deploy_manifest.read_text(encoding="utf-8", errors="ignore")
+    required_cpu_policy_rows = (
+        "services/ui/v5_remote_ui_shared_payload.py\t/usr/libexec/8ax/v5_remote_ui_shared_payload.py\t0644",
+        "petalinux/project-spec/meta-user/recipes-apps/v5-base-overlay/files/network/v5_net_core.sh\t/usr/local/sbin/v5_net_core.sh\t0644",
+        "petalinux/project-spec/meta-user/recipes-apps/v5-base-overlay/files/network/v5_usb_wifi_apply.sh\t/usr/local/sbin/v5_usb_wifi_apply.sh\t0755",
+    )
+    for row in required_cpu_policy_rows:
+        if row not in manifest_text:
+            print(f"CPU_POLICY_DEPLOY_ROW_MISSING: {row}", file=sys.stderr)
+            rc = 1
+    installer_text = runtime_installer.read_text(encoding="utf-8", errors="ignore")
+    required_cpu_policy_installer = (
+        "manifest_cpu_policy_only=1",
+        "restart_scope=cpu_policy",
+        'LOG=/run/8ax/v5_cpu_policy.log',
+        "apply_network_cpu_isolation",
+        "/etc/init.d/v5-linuxcnc-command-gate restart-native",
+        "/etc/init.d/v5-wcs-status-publisher restart",
+        "/etc/init.d/v5-state-publisher restart",
+        "/etc/init.d/v5-ui-relay restart",
+    )
+    for token in required_cpu_policy_installer:
+        if token not in installer_text:
+            print(f"CPU_POLICY_DEPLOY_SCOPE_MISSING: {token}", file=sys.stderr)
+            rc = 1
+    cpu_scope_start = installer_text.find('elif [ "$restart_scope" = "cpu_policy" ]')
+    cpu_scope_end = installer_text.find('elif [ "$restart_scope" = "settings" ]', cpu_scope_start)
+    cpu_scope = installer_text[cpu_scope_start:cpu_scope_end] if cpu_scope_start >= 0 and cpu_scope_end > cpu_scope_start else ""
+    if not cpu_scope or "/etc/init.d/v5-linuxcnc-command-gate restart\n" in cpu_scope:
+        print("CPU_POLICY_SCOPE_RESTARTS_LINUXCNC_BACKEND", file=sys.stderr)
+        rc = 1
     for token in (
         "drive_faults_clear",
         "wait_drive_faults_clear_for_machine_on",
@@ -524,6 +697,7 @@ def check_linuxcnc_source_rebuild_policy() -> int:
         ROOT / "tools" / "linuxcnc" / "verify_v5_linuxcnc_minimal_runtime.py"
     )
     build_path = ROOT / "tools" / "linuxcnc" / "build_v5_linuxcnc_petalinux.sh"
+    installer_path = ROOT / "tools" / "deploy" / "install_v5_runtime.sh"
     rootfs_config_path = ROOT / "petalinux" / "project-spec" / "configs" / "rootfs_config"
     custom_rootfs_allowlist_path = (
         ROOT
@@ -545,6 +719,7 @@ def check_linuxcnc_source_rebuild_policy() -> int:
         verifier_path,
         minimal_verifier_path,
         build_path,
+        installer_path,
         rootfs_config_path,
         custom_rootfs_allowlist_path,
     )
@@ -585,6 +760,11 @@ def check_linuxcnc_source_rebuild_policy() -> int:
         "V5 headless Python native status binding owner missing",
         'PACKAGEFUNCS_prepend = "v5_refresh_runtime_hashes "',
         'package_root="${PKGDEST}/${PN}"',
+        'package_rtapi_app="$package_root${bindir}/rtapi_app"',
+        'final LinuxCNC package rtapi_app must remain root:root 4755',
+        'chown root:root "$rtapi_app_path"',
+        'chmod 4755 "$rtapi_app_path"',
+        'stat -c \'%u:%g:%a\' "$rtapi_app_path"',
         'FILES_${PN}-dev += "',
         'RDEPENDS_${PN}-dev += "python3-core"',
         "linuxcnc-runtime-files.sha256",
@@ -604,6 +784,31 @@ def check_linuxcnc_source_rebuild_policy() -> int:
         if forbidden in recipe:
             print(f"LINUXCNC_REBUILD_RETIRED_PATH: {forbidden}", file=sys.stderr)
             return 1
+    installer = installer_path.read_text(encoding="utf-8", errors="strict")
+    for required in (
+        'linuxcnc_rtapi_app="$linuxcnc_package_root/usr/bin/rtapi_app"',
+        'stat -c \'%a\' "$linuxcnc_rtapi_app"',
+        'LinuxCNC deploy bundle rtapi_app must retain setuid mode 4755',
+        'source_mode=$(stat -c \'%a\' "$source_path")',
+        'chmod "$source_mode" "$temporary"',
+        'linuxcnc_rtapi_app=/usr/bin/rtapi_app',
+        'stat -c \'%u:%g:%a\' "$linuxcnc_rtapi_app"',
+    ):
+        if required not in installer:
+            print(f"LINUXCNC_RTAPI_APP_DEPLOY_MODE_GATE_MISSING: {required}", file=sys.stderr)
+            return 1
+    install_order = (
+        'cp -p "$source_path" "$temporary"',
+        'chown root:root "$temporary"',
+        'chmod "$source_mode" "$temporary"',
+        'mv -f "$temporary" "$destination"',
+    )
+    install_order_positions = tuple(installer.find(token) for token in install_order)
+    if any(position < 0 for position in install_order_positions) or tuple(
+        sorted(install_order_positions)
+    ) != install_order_positions:
+        print("LINUXCNC_DEPLOY_MODE_RESTORE_ORDER_INVALID", file=sys.stderr)
+        return 1
     allowlist_rows = {}
     for line_number, raw in enumerate(
         allowlist_path.read_text(encoding="utf-8", errors="strict").splitlines(), 1
@@ -618,12 +823,19 @@ def check_linuxcnc_source_rebuild_policy() -> int:
             print(f"LINUXCNC_MINIMAL_ALLOWLIST_DUPLICATE: {fields[0]}", file=sys.stderr)
             return 1
         allowlist_rows[fields[0]] = fields[1]
-    if len(allowlist_rows) != 32:
-        print(
-            f"LINUXCNC_MINIMAL_ALLOWLIST_COUNT_INVALID: {len(allowlist_rows)}",
-            file=sys.stderr,
-        )
+    if not allowlist_rows:
+        print("LINUXCNC_MINIMAL_ALLOWLIST_EMPTY", file=sys.stderr)
         return 1
+    for required_runtime in (
+        "/usr/lib/linuxcnc/modules/v5_bus_axis_router.so",
+        "/usr/lib/linuxcnc/modules/v5_bus_homecomp.so",
+    ):
+        if required_runtime not in allowlist_rows:
+            print(
+                f"LINUXCNC_MINIMAL_ALLOWLIST_REQUIRED_RUNTIME_MISSING: {required_runtime}",
+                file=sys.stderr,
+            )
+            return 1
     files_match = re.search(r'FILES_\$\{PN\}\s*=\s*"(.*?)"', recipe, re.DOTALL)
     rdepends_match = re.search(r'RDEPENDS_\$\{PN\}\s*\+=\s*"(.*?)"', recipe, re.DOTALL)
     depends_match = re.search(r'DEPENDS\s*\+=\s*"(.*?)"', recipe, re.DOTALL)
@@ -883,6 +1095,80 @@ def _strip_gcode_comment(line: str) -> str:
     return "".join(out)
 
 
+def _gcode_numeric_words(line: str) -> dict[str, float]:
+    words: dict[str, float] = {}
+    for match in re.finditer(r"(?<![A-Z])([A-Z])\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+))", line):
+        words[match.group(1)] = float(match.group(2))
+    return words
+
+
+def _check_cc_golden_arc_chain(
+    program: Path,
+    expected_axis: str,
+    spring_arcs: list[tuple[int, dict[str, float]]],
+) -> int:
+    if len(spring_arcs) != 20:
+        print(
+            f"CC_GOLDEN_HELIX_ARC_COUNT: {program.relative_to(ROOT)}: expected=20 actual={len(spring_arcs)}",
+            file=sys.stderr,
+        )
+        return 1
+    start_x = 0.0
+    start_y = 10.0
+    quarter_xy = ((-10.0, 0.0), (0.0, -10.0), (10.0, 0.0), (0.0, 10.0))
+    quarter_axis = (55.0, 45.0, 35.0, 45.0)
+    tolerance = 1e-6
+    for index, (line_no, words) in enumerate(spring_arcs):
+        required_words = ("X", "Y", "Z", expected_axis, "C", "I", "J")
+        missing = [word for word in required_words if word not in words]
+        if missing:
+            print(
+                f"CC_GOLDEN_HELIX_WORD_MISSING: {program.relative_to(ROOT)}:{line_no}: "
+                f"missing={','.join(missing)}",
+                file=sys.stderr,
+            )
+            return 1
+        expected_x, expected_y = quarter_xy[index % 4]
+        expected_z = -2.5 * (index + 1)
+        expected_rotary = quarter_axis[index % 4]
+        expected_c = -90.0 * (index + 1)
+        expected_values = {
+            "X": expected_x,
+            "Y": expected_y,
+            "Z": expected_z,
+            expected_axis: expected_rotary,
+            "C": expected_c,
+        }
+        for word, expected in expected_values.items():
+            if abs(words[word] - expected) > tolerance:
+                print(
+                    f"CC_GOLDEN_HELIX_VALUE_MISMATCH: {program.relative_to(ROOT)}:{line_no}: "
+                    f"word={word} expected={expected:.3f} actual={words[word]:.3f}",
+                    file=sys.stderr,
+                )
+                return 1
+        center_x = start_x + words["I"]
+        center_y = start_y + words["J"]
+        start_radius_sq = (start_x - center_x) ** 2 + (start_y - center_y) ** 2
+        end_radius_sq = (words["X"] - center_x) ** 2 + (words["Y"] - center_y) ** 2
+        if (
+            abs(center_x) > tolerance
+            or abs(center_y) > tolerance
+            or abs(start_radius_sq - 100.0) > tolerance
+            or abs(end_radius_sq - 100.0) > tolerance
+        ):
+            print(
+                f"CC_GOLDEN_HELIX_GEOMETRY_INVALID: {program.relative_to(ROOT)}:{line_no}: "
+                f"center=({center_x:.3f},{center_y:.3f}) "
+                f"radius_sq=({start_radius_sq:.3f},{end_radius_sq:.3f})",
+                file=sys.stderr,
+            )
+            return 1
+        start_x = words["X"]
+        start_y = words["Y"]
+    return 0
+
+
 def _check_cc_golden_program(program: Path, expected_axis: str, forbidden_axis: str) -> int:
     pending_spring_anchor = False
     seen_spring_anchor = False
@@ -892,6 +1178,7 @@ def _check_cc_golden_program(program: Path, expected_axis: str, forbidden_axis: 
     seen_program_rtcp_off = False
     seen_machine_return = False
     seen_expected_axis = False
+    spring_arcs: list[tuple[int, dict[str, float]]] = []
     for line_no, raw in enumerate(program.read_text(encoding="ascii", errors="ignore").splitlines(), 1):
         raw_upper = raw.upper()
         if "SPRING ANCHOR" in raw_upper:
@@ -921,8 +1208,9 @@ def _check_cc_golden_program(program: Path, expected_axis: str, forbidden_axis: 
         if re.search(r"\bG43\.4\b", line):
             print(f"CC_GOLDEN_UNSUPPORTED_G43_4: {program.relative_to(ROOT)}:{line_no}: {raw.strip()}", file=sys.stderr)
             return 1
-        has_motion = re.search(r"\bG(?:0|00|1|01)\b", line) is not None
-        has_spring_feed = re.search(r"\bG(?:1|01)\b", line) is not None
+        has_motion = re.search(r"\bG(?:0|00|1|01|2|02|3|03)\b", line) is not None
+        has_linear_feed = re.search(r"\bG(?:1|01)\b", line) is not None
+        has_spring_feed = re.search(r"\bG(?:3|03)\b", line) is not None
         has_g53 = re.search(r"\bG53\b", line) is not None
         if pending_spring_anchor and has_motion:
             seen_spring_anchor = True
@@ -967,6 +1255,12 @@ def _check_cc_golden_program(program: Path, expected_axis: str, forbidden_axis: 
             seen_program_rtcp_off = True
             continue
         has_z_zero = re.search(r"(?<![A-Z])Z\s*[-+]?0(?:\.0*)?(?![0-9.])", line) is not None
+        if seen_cutting_trajectory and has_linear_feed and not seen_program_rtcp_off:
+            print(
+                f"CC_GOLDEN_G1_POLYLINE_FORBIDDEN: {program.relative_to(ROOT)}:{line_no}: {raw.strip()}",
+                file=sys.stderr,
+            )
+            return 1
         if seen_cutting_trajectory and has_spring_feed:
             if not seen_program_rtcp_on:
                 print(
@@ -974,6 +1268,7 @@ def _check_cc_golden_program(program: Path, expected_axis: str, forbidden_axis: 
                     file=sys.stderr,
                 )
                 return 1
+            spring_arcs.append((line_no, _gcode_numeric_words(line)))
             seen_spring_feed = True
         if seen_machine_return and has_motion and has_z_zero and has_g53 and not seen_program_rtcp_off:
             print(
@@ -998,7 +1293,7 @@ def _check_cc_golden_program(program: Path, expected_axis: str, forbidden_axis: 
         if not present:
             print(f"CC_GOLDEN_PROGRAM_{code}: {program.relative_to(ROOT)}", file=sys.stderr)
             return 1
-    return 0
+    return _check_cc_golden_arc_chain(program, expected_axis, spring_arcs)
 
 
 def check_cc_golden_model_specific_motion() -> int:
@@ -1042,10 +1337,16 @@ def check_cc_golden_model_specific_motion() -> int:
         "v5_native_rtcp_control_set(1",
         "ensure_rtcp_on_before_golden_motion",
         "rtcp on confirmed before golden motion",
+        "--start",
+        "V5_ALLOW_MOTION",
+        "V5_COMMAND_PROGRAM_OPEN",
+        "V5_COMMAND_START",
+        "v5_linuxcncrsh_send_line",
+        "v5_native_home_send",
     )
     for token in forbidden_runner:
         if token in runner_text:
-            print(f"CC_GOLDEN_RUNNER_EXTERNAL_RTCP_SURVIVOR: {runner.relative_to(ROOT)} contains {token}", file=sys.stderr)
+            print(f"CC_GOLDEN_RUNNER_CONTROL_BYPASS_SURVIVOR: {runner.relative_to(ROOT)} contains {token}", file=sys.stderr)
             rc = 1
     required_runner = (
         "--print-active-model",
@@ -1062,14 +1363,16 @@ def check_cc_golden_model_specific_motion() -> int:
             rc = 1
 
     acceptance_text = acceptance.read_text(encoding="utf-8", errors="ignore")
-    required_acceptance = ("--print-active-model", "cc-ac.ngc", "cc-bc.ngc", "XYZAC_TRT", "XYZBC_TRT")
-    for token in required_acceptance:
-        if token not in acceptance_text:
-            print(f"CC_GOLDEN_ACCEPTANCE_MODEL_SELECTION_MISSING: {acceptance.relative_to(ROOT)} lacks {token}", file=sys.stderr)
-            rc = 1
-    for token in ("V5_GOLDEN_PROGRAM", "V5_REMOTE_GOLDEN_PROGRAM"):
+    for token in (
+        "--motion",
+        "V5_ALLOW_MOTION",
+        "v5_linuxcncrsh_golden_run --program",
+        "v5_linuxcncrsh_golden_run --start",
+        "V5_GOLDEN_PROGRAM",
+        "V5_REMOTE_GOLDEN_PROGRAM",
+    ):
         if token in acceptance_text:
-            print(f"CC_GOLDEN_ACCEPTANCE_LEGACY_FALLBACK: {acceptance.relative_to(ROOT)} contains {token}", file=sys.stderr)
+            print(f"CC_GOLDEN_ACCEPTANCE_CONTROL_BYPASS: {acceptance.relative_to(ROOT)} contains {token}", file=sys.stderr)
             rc = 1
 
     manifest_text = manifest.read_text(encoding="utf-8", errors="ignore")
@@ -1083,15 +1386,19 @@ def check_cc_golden_model_specific_motion() -> int:
 
     hal_text = hal.read_text(encoding="utf-8", errors="ignore")
     required_hal = (
-        "loadrt or2 count=1",
+        "loadrt or2 count=2",
         "loadrt v5_safety_latch",
         "loadusr -Wn v5_native_hal_owner /usr/bin/v5_native_hal_owner",
         "addf or2.0 servo-thread",
+        "addf or2.1 servo-thread",
         "addf v5-safety-latch.0 servo-thread",
         "v5-safety-force v5-native-hal-owner.safety-force => v5-safety-latch.0.force",
         "v5-rtcp-ui-request",
-        "v5-rtcp-gcode-request motion.digital-out-00 => or2.0.in1",
-        "v5-rtcp-selected or2.0.out => mux2.0.sel",
+        "v5-rtcp-gcode-request motion.digital-out-00 => v5-native-hal-owner.rtcp-gcode-request or2.0.in1",
+        "v5-rtcp-owner-force-off v5-native-hal-owner.rtcp-force-off => motion.v5-bus-home-rtcp-force-latched or2.1.in0",
+        "v5-home-rtcp-force-off motion.v5-bus-home-rtcp-force-off => v5-native-hal-owner.home-rtcp-force-off or2.1.in1",
+        "v5-rtcp-force-off or2.1.out => not.0.in",
+        "v5-rtcp-selected and2.0.out => mux2.0.sel",
         "re-switchkins-select mux2.0.out => motion.switchkins-type",
         "v5-kins-x-rot-point v5-native-hal-owner.kins-x-rot-point",
         "v5-kins-x-offset v5-native-hal-owner.kins-x-offset",
@@ -1279,6 +1586,7 @@ def check_product_runtime_closure_policy() -> int:
     file_manifest_path = ROOT / "tools" / "deploy" / "v5_product_file_manifest.py"
     write_sd_path = ROOT / "tools" / "petalinux" / "write_v5_sd_card.sh"
     acceptance_path = ROOT / "tools" / "deploy" / "run_v5_board_acceptance.sh"
+    installer_path = ROOT / "tools" / "deploy" / "install_v5_runtime.sh"
     required_paths = (
         manifest_path,
         cmake_path,
@@ -1286,17 +1594,25 @@ def check_product_runtime_closure_policy() -> int:
         file_manifest_path,
         write_sd_path,
         acceptance_path,
+        installer_path,
     )
     for path in required_paths:
         if not path.is_file():
             print(f"PRODUCT_RUNTIME_CLOSURE_OWNER_MISSING: {path}", file=sys.stderr)
             return 1
 
+    manifest_text = manifest_path.read_text(encoding="utf-8", errors="strict")
+    for row in (
+        "binary\tbuild/board/app/v5_command_gate_drive_window\t/usr/libexec/8ax/v5_command_gate_drive_window\t0755",
+        "module\tservices/drive_profile/v5_drive_enable_window.py\t/usr/libexec/8ax/drive_profile/v5_drive_enable_window.py\t0644",
+    ):
+        if row not in manifest_text.splitlines():
+            print(f"DRIVE_ENABLE_WINDOW_DEPLOY_ROW_MISSING: {row}", file=sys.stderr)
+            return 1
+
     binary_targets = []
     destinations = set()
-    for line_number, raw in enumerate(
-        manifest_path.read_text(encoding="utf-8", errors="strict").splitlines(), 1
-    ):
+    for line_number, raw in enumerate(manifest_text.splitlines(), 1):
         if not raw or raw.startswith("#"):
             continue
         fields = raw.split("\t")
@@ -1345,7 +1661,7 @@ def check_product_runtime_closure_policy() -> int:
             return 1
     acceptance = acceptance_path.read_text(encoding="utf-8", errors="strict")
     for token in (
-        'V5_BOARD_BUILD_TARGETS:-v5_lvgl_shell v5_state_publisher v5_touch_diagnostics v5_linuxcncrsh_probe v5_command_gate_server v5_linuxcncrsh_golden_run',
+        'V5_BOARD_BUILD_TARGETS:-v5_lvgl_shell v5_state_publisher v5_touch_diagnostics v5_linuxcncrsh_probe v5_command_gate_server v5_command_gate_drive_window v5_linuxcncrsh_golden_run',
         "CMAKE_C_COMPILER:FILEPATH=",
         "arm-xilinx-linux-gnueabi-gcc",
         "verify_v5_product_source_closure.py",
@@ -1355,6 +1671,29 @@ def check_product_runtime_closure_policy() -> int:
         if token not in acceptance:
             print(f"PRODUCT_RUNTIME_ACCEPTANCE_GATE_MISSING: {token}", file=sys.stderr)
             return 1
+    installer = installer_path.read_text(encoding="utf-8", errors="strict")
+    for token in (
+        "/usr/libexec/8ax/v5_command_gate_drive_window|\\",
+        "manifest_command_gate_only=1",
+        "restart_scope=command_gate",
+        "Command-gate restart scope requires a non-empty command-gate-only manifest and no LinuxCNC bundle",
+        "/etc/init.d/v5-linuxcnc-command-gate restart-native",
+    ):
+        if token not in installer:
+            print(f"DRIVE_ENABLE_WINDOW_COMMAND_GATE_SCOPE_MISSING: {token}", file=sys.stderr)
+            return 1
+    command_gate_scope_start = installer.find('elif [ "$restart_scope" = "command_gate" ]')
+    command_gate_scope_end = installer.find(
+        'elif [ "$restart_scope" = "wcs" ]', command_gate_scope_start
+    )
+    command_gate_scope = (
+        installer[command_gate_scope_start:command_gate_scope_end]
+        if command_gate_scope_start >= 0 and command_gate_scope_end > command_gate_scope_start
+        else ""
+    )
+    if not command_gate_scope or "/etc/init.d/v5-linuxcnc-command-gate restart\n" in command_gate_scope:
+        print("DRIVE_ENABLE_WINDOW_COMMAND_GATE_SCOPE_RESTARTS_BACKEND", file=sys.stderr)
+        return 1
     for script in (closure_path, file_manifest_path):
         compile(
             script.read_text(encoding="utf-8", errors="strict"),

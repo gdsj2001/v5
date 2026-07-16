@@ -64,7 +64,7 @@ internal sealed class MockRelayServer
     private const int Stride = Width * 4;
     private const int StreamTargetFps = 30;
     private static readonly long StreamFrameIntervalTicks = (long)Math.Round(Stopwatch.Frequency / (double)StreamTargetFps);
-    private const string ProgramDir = "/opt/8ax/phase0_bus5/nc";
+    private const string ProgramDir = "/opt/8ax/v5/gcode/golden";
     private const long ProgramEditMaxBytes = 1024 * 1024;
     private readonly FrameStore _frameStore = new(Width, Height);
     private readonly HttpListener _listener = new();
@@ -130,7 +130,7 @@ internal sealed class MockRelayServer
             {
                 await WriteJsonAsync(context.Response, new
                 {
-                    Schema = "re.v3.remote_diagnostics.v1",
+                    Schema = "re.v5.remote_diagnostics.v1",
                     ProtocolVersion = "8ax-remote-ui/1",
                     CollectedAtUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                     ProgramDir,
@@ -228,7 +228,7 @@ internal sealed class MockRelayServer
         await WriteJsonAsync(
             context.Response,
             new ProgramUploadResult(
-                "re.v3.remote_program_upload.v1",
+                "v5.remote_program_upload.v1",
                 fileName,
                 ProgramDir + "/" + fileName,
                 payload.Length,
@@ -246,7 +246,7 @@ internal sealed class MockRelayServer
             .ToArray();
         await WriteJsonAsync(
             context.Response,
-            new ProgramListResult("re.v3.remote_program_list.v1", ProgramDir, files.Length, files),
+            new ProgramListResult("v5.remote_program_list.v1", ProgramDir, files.Length, files),
             cancellationToken);
     }
 
@@ -266,7 +266,7 @@ internal sealed class MockRelayServer
             await WriteJsonAsync(
                 context.Response,
                 new ProgramDeleteResult(
-                    "re.v3.remote_program_delete.v1",
+                    "v5.remote_program_delete.v1",
                     fileName,
                     ProgramDir + "/" + fileName,
                     deleted,
@@ -303,7 +303,7 @@ internal sealed class MockRelayServer
         await WriteJsonAsync(
             context.Response,
             new ProgramFileContentResult(
-                "re.v3.remote_program_file.v1",
+                "v5.remote_program_file.v1",
                 file.FileName,
                 ProgramDir + "/" + file.FileName,
                 file.Payload.Length,
