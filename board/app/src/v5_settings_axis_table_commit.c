@@ -152,38 +152,10 @@ int v5_settings_axis_table_commit_g53_value(unsigned int row, unsigned int col, 
 static void apply_motion_model_binding_readback(const char *value)
 {
     const V5MotionModelDescriptor *target = v5_motion_model_find(value);
-    const V5MotionModelDescriptor *alternate = 0;
-    char target_axis[2];
-    char alternate_axis[2];
-    char target_slave[V5_AXIS_VALUE_CAP];
-    char alternate_slave[V5_AXIS_VALUE_CAP];
-    const char *new_target = 0;
-    const char *new_alternate = 0;
-    int target_row;
-    int alternate_row;
+    unsigned char refreshed[256] = {0};
     unsigned int slave_col;
-    size_t i;
-    if (!target) {
-        return;
-    }
-    for (i = 0U; i < v5_motion_model_registry_count(); ++i) {
-        const V5MotionModelDescriptor *candidate = v5_motion_model_registry_at(i);
-        if (candidate && candidate->first_status_slot == target->first_status_slot &&
-            candidate->first_rotary_axis != target->first_rotary_axis) {
-            alternate = candidate;
-            break;
-        }
-    }
-    if (!alternate) {
-        return;
-    }
-    target_axis[0] = target->first_rotary_axis;
-    target_axis[1] = '\0';
-    alternate_axis[0] = alternate->first_rotary_axis;
-    alternate_axis[1] = '\0';
-    target_row = v5_settings_axis_row_index_for_axis_name(target_axis);
-    alternate_row = v5_settings_axis_row_index_for_axis_name(alternate_axis);
-    if (target_row < 0 || alternate_row < 0) {
+    size_t model_i;
+    if (!v5_motion_model_descriptor_valid(target)) {
         return;
     }
     for (slave_col = 0U; slave_col < v5_settings_axis_table_column_count(); ++slave_col) {
@@ -194,29 +166,38 @@ static void apply_motion_model_binding_readback(const char *value)
     if (slave_col >= v5_settings_axis_table_column_count()) {
         return;
     }
-    snprintf(target_slave, sizeof(target_slave), "%s", v5_settings_axis_table_value((unsigned int)target_row, slave_col));
-    snprintf(alternate_slave, sizeof(alternate_slave), "%s", v5_settings_axis_table_value((unsigned int)alternate_row, slave_col));
-    if (strcmp(target_slave, "NAT") == 0 && strcmp(alternate_slave, "NAT") != 0) {
-        new_target = alternate_slave;
-        new_alternate = "NAT";
-    } else if (strcmp(target_slave, "NAT") != 0 && strcmp(alternate_slave, target_slave) == 0) {
-        new_target = target_slave;
-        new_alternate = "NAT";
-    } else {
-        return;
+    for (model_i = 0U; model_i < v5_motion_model_registry_count(); ++model_i) {
+        const V5MotionModelDescriptor *model = v5_motion_model_registry_at(model_i);
+        unsigned int axis_i;
+        if (!v5_motion_model_descriptor_valid(model)) {
+            continue;
+        }
+        for (axis_i = 0U; axis_i < model->active_axis_count; ++axis_i) {
+            unsigned char axis_code = (unsigned char)model->active_axes[axis_i];
+            char axis[2];
+            char slave[V5_AXIS_VALUE_CAP];
+            int row;
+            if (refreshed[axis_code]) {
+                continue;
+            }
+            refreshed[axis_code] = 1U;
+            axis[0] = (char)axis_code;
+            axis[1] = '\0';
+            row = v5_settings_axis_row_index_for_axis_name(axis);
+            if (row < 0 || !v5_settings_parameter_store_read_axis(
+                    g_v5_axis_table_project_root, V5_SETTINGS_PARAMETER_DISK_SELF,
+                    axis, "slave", slave, sizeof(slave))) {
+                continue;
+            }
+            if (!v5_settings_axis_resident_parameter_table_set_axis(
+                    V5_SETTINGS_PARAMETER_DISK_SELF, axis, "slave", slave)) {
+                continue;
+            }
+            v5_settings_axis_set_value((unsigned int)row, "slave", slave, 1);
+            v5_settings_axis_apply_drive_display_for_row((unsigned int)row);
+            v5_settings_axis_refresh_axis_row_refs((unsigned int)row);
+        }
     }
-    if (!v5_settings_axis_resident_parameter_table_set_axis(
-            V5_SETTINGS_PARAMETER_DISK_SELF, target_axis, "slave", new_target) ||
-        !v5_settings_axis_resident_parameter_table_set_axis(
-            V5_SETTINGS_PARAMETER_DISK_SELF, alternate_axis, "slave", new_alternate)) {
-        return;
-    }
-    v5_settings_axis_set_value((unsigned int)target_row, "slave", new_target, 1);
-    v5_settings_axis_set_value((unsigned int)alternate_row, "slave", new_alternate, 1);
-    v5_settings_axis_apply_drive_display_for_row((unsigned int)target_row);
-    v5_settings_axis_apply_drive_display_for_row((unsigned int)alternate_row);
-    v5_settings_axis_refresh_axis_row_refs((unsigned int)target_row);
-    v5_settings_axis_refresh_axis_row_refs((unsigned int)alternate_row);
 }
 
 int v5_settings_axis_table_commit_motion_model(const char *value)

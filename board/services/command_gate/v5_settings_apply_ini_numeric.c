@@ -126,16 +126,19 @@ int v5_settings_apply_ini_read_section_number(
 
 int v5_settings_apply_ini_read_preferred_number(const char *path, const char *primary_section, const char *fallback_section, const char *key, double *out)
 {
-    if (v5_settings_apply_ini_read_section_number(path, primary_section, key, out)) {
+    if (primary_section && primary_section[0] &&
+        v5_settings_apply_ini_read_section_number(path, primary_section, key, out)) {
         return 1;
     }
-    return v5_settings_apply_ini_read_section_number(path, fallback_section, key, out);
+    return fallback_section && fallback_section[0] &&
+        v5_settings_apply_ini_read_section_number(path, fallback_section, key, out);
 }
 
 int v5_settings_apply_ini_write_scale_and_limits(
     const char *path,
     const char *axis_section,
     const char *joint_section,
+    int joint_active,
     int write_scale,
     double scale,
     double raw_min,
@@ -153,7 +156,9 @@ int v5_settings_apply_ini_write_scale_and_limits(
     int touched_scale = 0;
     int n;
 
-    if (!path || !axis_section || !joint_section || !isfinite(raw_min) || !isfinite(raw_max) ||
+    if (!path || !axis_section || !axis_section[0] ||
+        (joint_active && (!joint_section || !joint_section[0])) ||
+        !isfinite(raw_min) || !isfinite(raw_max) ||
         (raw_min != 0.0 && raw_max != 0.0 && raw_min >= raw_max)) {
         return 0;
     }
@@ -180,7 +185,8 @@ int v5_settings_apply_ini_write_scale_and_limits(
             fputs(raw, out);
             continue;
         }
-        if (strcmp(section, axis_section) == 0 || strcmp(section, joint_section) == 0) {
+        if (strcmp(section, axis_section) == 0 ||
+            (joint_active && strcmp(section, joint_section) == 0)) {
             if (v5_settings_apply_ini_key_line(raw, "MIN_LIMIT", 0)) {
                 fprintf(out, "MIN_LIMIT = %.12g\n", raw_min);
                 if (strcmp(section, axis_section) == 0) touched_axis_min = 1;
@@ -193,7 +199,10 @@ int v5_settings_apply_ini_write_scale_and_limits(
                 if (strcmp(section, joint_section) == 0) touched_joint_max = 1;
                 continue;
             }
-            if (write_scale && strcmp(section, joint_section) == 0 && v5_settings_apply_ini_key_line(raw, "SCALE", 0)) {
+            if (write_scale &&
+                ((!joint_active && strcmp(section, axis_section) == 0) ||
+                 (joint_active && strcmp(section, joint_section) == 0)) &&
+                v5_settings_apply_ini_key_line(raw, "SCALE", 0)) {
                 fprintf(out, "SCALE = %.12g\n", scale);
                 touched_scale = 1;
                 continue;
@@ -206,7 +215,8 @@ int v5_settings_apply_ini_write_scale_and_limits(
         remove(tmp_path);
         return 0;
     }
-    if (!(touched_axis_min && touched_axis_max) && !(touched_joint_min && touched_joint_max)) {
+    if (!(touched_axis_min && touched_axis_max) ||
+        (joint_active && !(touched_joint_min && touched_joint_max))) {
         remove(tmp_path);
         return 0;
     }

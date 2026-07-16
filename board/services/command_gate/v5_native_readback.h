@@ -29,6 +29,7 @@ typedef struct V5NativeReadback {
     unsigned int wcs_offsets_epoch;
     double wcs_offsets[V5_NATIVE_READBACK_WCS_COUNT][V5_NATIVE_READBACK_WCS_AXIS_COUNT];
     int g53_geometry_available;
+    int g53_geometry_stale;
     unsigned int g53_geometry_epoch;
     double g53_centers[V5_NATIVE_READBACK_G53_CENTER_COUNT][V5_NATIVE_READBACK_G53_AXIS_COUNT];
     int motion_model_available;
@@ -83,6 +84,7 @@ void v5_native_readback_set_g53_geometry(
     size_t center_count,
     size_t axis_count,
     unsigned int epoch);
+void v5_native_readback_set_g53_geometry_stale(V5NativeReadback *readback);
 const double *v5_native_readback_g53_center(const V5NativeReadback *readback, unsigned int center_index);
 void v5_native_readback_set_motion_model(V5NativeReadback *readback, const char *motion_model);
 void v5_native_readback_set_interpreter_paused(V5NativeReadback *readback, int paused);

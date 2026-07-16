@@ -49,7 +49,8 @@ static int settings_apply_motion_model_values(
 }
 
 #define V5_MODEL_JOINT_KEY_COUNT 10U
-#define V5_MODEL_INI_UPDATE_MAX 48U
+#define V5_MODEL_INI_UPDATE_MAX 192U
+#define V5_MODEL_MIGRATION_MAX V5_MOTION_MODEL_MAX_ACTIVE_AXES
 
 static const char *const k_model_joint_keys[V5_MODEL_JOINT_KEY_COUNT] = {
     "TYPE",
@@ -63,6 +64,22 @@ static const char *const k_model_joint_keys[V5_MODEL_JOINT_KEY_COUNT] = {
     "HOME_SEQUENCE",
     "BACKLASH",
 };
+
+typedef struct V5ModelSlotMigration {
+    unsigned int status_slot;
+    char current_axis[2];
+    char target_axis[2];
+    char current_axis_section[32];
+    char target_axis_section[32];
+    char joint_section[32];
+    char current_slave[64];
+    char target_slave[64];
+    char final_current_slave[64];
+    char final_target_slave[64];
+    char joint_snapshot[V5_MODEL_JOINT_KEY_COUNT][64];
+    char target_joint[V5_MODEL_JOINT_KEY_COUNT][64];
+    int binding_written;
+} V5ModelSlotMigration;
 
 static int ini_update_add(
     V5IniTextUpdate *updates,
@@ -84,26 +101,149 @@ static int ini_update_add(
     return 1;
 }
 
-static const V5MotionModelDescriptor *settings_apply_alternate_model(
-    const V5MotionModelDescriptor *target,
-    const V5MotionModelDescriptor *current)
+static int settings_apply_read_axis_binding(
+    const char *project_root,
+    char axis,
+    char *out,
+    size_t out_cap)
 {
-    size_t i;
-    if (!target) {
+    char axis_name[2];
+    axis_name[0] = axis;
+    axis_name[1] = '\0';
+    if (!v5_settings_parameter_store_read_axis(
+            project_root, V5_SETTINGS_PARAMETER_DISK_SELF,
+            axis_name, "slave", out, out_cap) ||
+        !out[0]) {
         return 0;
     }
-    if (current && current->first_status_slot == target->first_status_slot &&
-        current->first_rotary_axis != target->first_rotary_axis) {
-        return current;
+    return 1;
+}
+
+static int settings_apply_read_current_model(
+    const char *ini_path,
+    const V5MotionModelDescriptor **model_out)
+{
+    char model_text[64];
+    char kins_module[64];
+    char kins_coordinates[64];
+    char traj_coordinates[64];
+    const V5MotionModelDescriptor *model;
+
+    if (model_out) {
+        *model_out = 0;
     }
-    for (i = 0U; i < v5_motion_model_registry_count(); ++i) {
-        const V5MotionModelDescriptor *candidate = v5_motion_model_registry_at(i);
-        if (candidate && candidate->first_status_slot == target->first_status_slot &&
-            candidate->first_rotary_axis != target->first_rotary_axis) {
-            return candidate;
+    if (!ini_path || !model_out ||
+        !v5_settings_apply_ini_read_section_text(
+            ini_path, "RTCP", "MODEL", model_text, sizeof(model_text)) ||
+        !v5_settings_apply_ini_read_section_text(
+            ini_path, "RTCP", "KINS_MODULE", kins_module, sizeof(kins_module)) ||
+        !v5_settings_apply_ini_read_section_text(
+            ini_path, "RTCP", "KINS_COORDINATES", kins_coordinates, sizeof(kins_coordinates)) ||
+        !v5_settings_apply_ini_read_section_text(
+            ini_path, "TRAJ", "COORDINATES", traj_coordinates, sizeof(traj_coordinates))) {
+        return 0;
+    }
+    model = v5_motion_model_find(model_text);
+    if (!v5_motion_model_descriptor_valid(model) ||
+        strcmp(kins_module, model->kins_module) != 0 ||
+        strcmp(kins_coordinates, model->kins_coordinates) != 0 ||
+        strcmp(traj_coordinates, model->traj_coordinates) != 0) {
+        return 0;
+    }
+    *model_out = model;
+    return 1;
+}
+
+static int settings_apply_prepare_slot_migrations(
+    const V5SettingsApplyAxisCommitRequest *request,
+    const char *ini_path,
+    const V5MotionModelDescriptor *current,
+    const V5MotionModelDescriptor *target,
+    V5ModelSlotMigration *migrations,
+    size_t *migration_count_out)
+{
+    size_t migration_count = 0U;
+    unsigned int i;
+
+    if (migration_count_out) {
+        *migration_count_out = 0U;
+    }
+    if (!request || !ini_path || !migrations || !migration_count_out ||
+        !v5_motion_model_same_status_slots(current, target)) {
+        return 0;
+    }
+    for (i = 0U; i < current->active_axis_count; ++i) {
+        char binding[64];
+        if (!settings_apply_read_axis_binding(
+                request->project_root, current->active_axes[i],
+                binding, sizeof(binding)) ||
+            strcmp(binding, "NAT") == 0) {
+            return 0;
         }
     }
-    return 0;
+    for (i = 0U; i < target->active_axis_count; ++i) {
+        V5ModelSlotMigration *migration;
+        char current_axis = '\0';
+        char target_axis = target->active_axes[i];
+        unsigned int slot = target->active_status_slots[i];
+        unsigned int key_i;
+
+        if (!v5_motion_model_axis_for_status_slot(current, slot, &current_axis)) {
+            return 0;
+        }
+        if (current_axis == target_axis) {
+            continue;
+        }
+        if (migration_count >= V5_MODEL_MIGRATION_MAX) {
+            return 0;
+        }
+        migration = &migrations[migration_count];
+        memset(migration, 0, sizeof(*migration));
+        migration->status_slot = slot;
+        migration->current_axis[0] = current_axis;
+        migration->current_axis[1] = '\0';
+        migration->target_axis[0] = target_axis;
+        migration->target_axis[1] = '\0';
+        snprintf(migration->current_axis_section, sizeof(migration->current_axis_section),
+                 "AXIS_%c", current_axis);
+        snprintf(migration->target_axis_section, sizeof(migration->target_axis_section),
+                 "AXIS_%c", target_axis);
+        snprintf(migration->joint_section, sizeof(migration->joint_section),
+                 "JOINT_%u", slot);
+        if (!settings_apply_read_axis_binding(
+                request->project_root, current_axis,
+                migration->current_slave, sizeof(migration->current_slave)) ||
+            !settings_apply_read_axis_binding(
+                request->project_root, target_axis,
+                migration->target_slave, sizeof(migration->target_slave)) ||
+            strcmp(migration->current_slave, "NAT") == 0) {
+            return 0;
+        }
+        if (strcmp(migration->target_slave, "NAT") == 0) {
+            snprintf(migration->final_target_slave, sizeof(migration->final_target_slave),
+                     "%s", migration->current_slave);
+        } else {
+            if (strcmp(migration->target_slave, migration->current_slave) != 0) {
+                return 0;
+            }
+            snprintf(migration->final_target_slave, sizeof(migration->final_target_slave),
+                     "%s", migration->target_slave);
+        }
+        snprintf(migration->final_current_slave, sizeof(migration->final_current_slave), "NAT");
+        for (key_i = 0U; key_i < V5_MODEL_JOINT_KEY_COUNT; ++key_i) {
+            if (!v5_settings_apply_ini_read_section_text(
+                    ini_path, migration->joint_section, k_model_joint_keys[key_i],
+                    migration->joint_snapshot[key_i], sizeof(migration->joint_snapshot[key_i])) ||
+                !v5_settings_apply_ini_read_section_text(
+                    ini_path, migration->target_axis_section, k_model_joint_keys[key_i],
+                    migration->target_joint[key_i], sizeof(migration->target_joint[key_i]))) {
+                return 0;
+            }
+        }
+        ++migration_count;
+    }
+    *migration_count_out = migration_count;
+    return 1;
 }
 
 int v5_settings_apply_commit_motion_model(
@@ -112,11 +252,11 @@ int v5_settings_apply_commit_motion_model(
 {
     const V5MotionModelDescriptor *target_model;
     const V5MotionModelDescriptor *current_model = 0;
-    const V5MotionModelDescriptor *alternate_model;
+    V5ModelSlotMigration migrations[V5_MODEL_MIGRATION_MAX];
+    size_t migration_count = 0U;
     V5IniTextUpdate updates[V5_MODEL_INI_UPDATE_MAX];
     size_t update_count = 0U;
     char ini_path[512];
-    char current_model_text[64];
     char canonical[32];
     char display[32];
     char kins_module[32];
@@ -132,27 +272,10 @@ int v5_settings_apply_commit_motion_model(
     char traj_coordinates[32];
     char kinematics[96];
     char wrapped_mask[16];
-    char target_axis[2];
-    char alternate_axis[2] = "";
-    char snapshot_axis[2];
-    char target_axis_section[32];
-    char snapshot_axis_section[32];
-    char joint_section[32];
-    char target_slave[64] = "";
-    char alternate_slave[64] = "";
-    char final_target_slave[64] = "";
-    char final_alternate_slave[64] = "";
-    char joint_snapshot[V5_MODEL_JOINT_KEY_COUNT][64];
-    char target_joint[V5_MODEL_JOINT_KEY_COUNT][64];
-    char target_slave_readback[64];
-    char alternate_slave_readback[64];
     char *original_ini;
     unsigned int wrapped_rotary_mask = 0U;
     unsigned int i;
-    int pair_needed = 0;
-    int pair_written = 0;
-    int target_is_nat = 0;
-    int alternate_is_nat = 1;
+    size_t migration_i;
     int ok = 0;
     if (!request || !request->value_text ||
         !settings_apply_motion_model_values(
@@ -175,64 +298,11 @@ int v5_settings_apply_commit_motion_model(
     if (!target_model) {
         return 0;
     }
-    if (v5_settings_apply_ini_read_section_text(ini_path, "RTCP", "MODEL", current_model_text, sizeof(current_model_text))) {
-        current_model = v5_motion_model_find(current_model_text);
-    }
-    alternate_model = settings_apply_alternate_model(target_model, current_model);
-    target_axis[0] = target_model->first_rotary_axis;
-    target_axis[1] = '\0';
-    snapshot_axis[0] = target_axis[0];
-    snapshot_axis[1] = '\0';
-    if (alternate_model) {
-        alternate_axis[0] = alternate_model->first_rotary_axis;
-        alternate_axis[1] = '\0';
-        if (!v5_settings_parameter_store_read_axis(
-                request->project_root, V5_SETTINGS_PARAMETER_DISK_SELF,
-                target_axis, "slave", target_slave, sizeof(target_slave)) ||
-            !v5_settings_parameter_store_read_axis(
-                request->project_root, V5_SETTINGS_PARAMETER_DISK_SELF,
-                alternate_axis, "slave", alternate_slave, sizeof(alternate_slave))) {
-            return 0;
-        }
-        snprintf(final_target_slave, sizeof(final_target_slave), "%s", target_slave);
-        snprintf(final_alternate_slave, sizeof(final_alternate_slave), "%s", alternate_slave);
-        target_is_nat = strcmp(target_slave, "NAT") == 0;
-        alternate_is_nat = strcmp(alternate_slave, "NAT") == 0;
-        if (target_is_nat && !alternate_is_nat) {
-            snprintf(final_target_slave, sizeof(final_target_slave), "%s", alternate_slave);
-            snprintf(final_alternate_slave, sizeof(final_alternate_slave), "%s", "NAT");
-            snapshot_axis[0] = alternate_axis[0];
-            pair_needed = 1;
-        } else if (!target_is_nat && alternate_is_nat) {
-            snapshot_axis[0] = target_axis[0];
-        } else if (!target_is_nat && !alternate_is_nat) {
-            if (strcmp(target_slave, alternate_slave) != 0) {
-                return 0;
-            }
-            snprintf(final_alternate_slave, sizeof(final_alternate_slave), "%s", "NAT");
-            snapshot_axis[0] = current_model &&
-                current_model->first_rotary_axis == alternate_axis[0] ? alternate_axis[0] : target_axis[0];
-            pair_needed = 1;
-        } else if (current_model && current_model->first_status_slot == target_model->first_status_slot) {
-            snapshot_axis[0] = current_model->first_rotary_axis;
-        }
-    }
-    snprintf(target_axis_section, sizeof(target_axis_section), "AXIS_%c", target_axis[0]);
-    snprintf(snapshot_axis_section, sizeof(snapshot_axis_section), "AXIS_%c", snapshot_axis[0]);
-    snprintf(joint_section, sizeof(joint_section), "JOINT_%u", target_model->first_status_slot);
-    for (i = 0U; i < V5_MODEL_JOINT_KEY_COUNT; ++i) {
-        if (!v5_settings_apply_ini_read_section_text(
-                ini_path, joint_section, k_model_joint_keys[i],
-                joint_snapshot[i], sizeof(joint_snapshot[i]))) {
-            return 0;
-        }
-        if (snapshot_axis[0] == target_axis[0]) {
-            snprintf(target_joint[i], sizeof(target_joint[i]), "%s", joint_snapshot[i]);
-        } else if (!v5_settings_apply_ini_read_section_text(
-                       ini_path, target_axis_section, k_model_joint_keys[i],
-                       target_joint[i], sizeof(target_joint[i]))) {
-            return 0;
-        }
+    if (!settings_apply_read_current_model(ini_path, &current_model) ||
+        !settings_apply_prepare_slot_migrations(
+            request, ini_path, current_model, target_model,
+            migrations, &migration_count)) {
+        return 0;
     }
     snprintf(kins_prefix, sizeof(kins_prefix), "%s", kins_module);
     snprintf(kins_tool_offset_pin, sizeof(kins_tool_offset_pin), "%s.tool-offset", kins_prefix);
@@ -261,14 +331,19 @@ int v5_settings_apply_commit_motion_model(
         !ini_update_add(updates, &update_count, V5_MODEL_INI_UPDATE_MAX, "TRAJ", "COORDINATES", traj_coordinates)) {
         return 0;
     }
-    for (i = 0U; i < V5_MODEL_JOINT_KEY_COUNT; ++i) {
-        if (!ini_update_add(
-                updates, &update_count, V5_MODEL_INI_UPDATE_MAX,
-                snapshot_axis_section, k_model_joint_keys[i], joint_snapshot[i]) ||
-            !ini_update_add(
-                updates, &update_count, V5_MODEL_INI_UPDATE_MAX,
-                joint_section, k_model_joint_keys[i], target_joint[i])) {
-            return 0;
+    for (migration_i = 0U; migration_i < migration_count; ++migration_i) {
+        V5ModelSlotMigration *migration = &migrations[migration_i];
+        for (i = 0U; i < V5_MODEL_JOINT_KEY_COUNT; ++i) {
+            if (!ini_update_add(
+                    updates, &update_count, V5_MODEL_INI_UPDATE_MAX,
+                    migration->current_axis_section, k_model_joint_keys[i],
+                    migration->joint_snapshot[i]) ||
+                !ini_update_add(
+                    updates, &update_count, V5_MODEL_INI_UPDATE_MAX,
+                    migration->joint_section, k_model_joint_keys[i],
+                    migration->target_joint[i])) {
+                return 0;
+            }
         }
     }
     original_ini = v5_settings_apply_read_text_file_limited(ini_path);
@@ -276,33 +351,52 @@ int v5_settings_apply_commit_motion_model(
         free(original_ini);
         return 0;
     }
-    if (pair_needed) {
-        pair_written = v5_settings_parameter_store_write_axis_pair(
+    for (migration_i = 0U; migration_i < migration_count; ++migration_i) {
+        V5ModelSlotMigration *migration = &migrations[migration_i];
+        migration->binding_written = v5_settings_parameter_store_write_axis_pair(
             request->project_root, V5_SETTINGS_PARAMETER_DISK_SELF,
-            target_axis, alternate_axis, "slave", final_target_slave, final_alternate_slave);
-        if (!pair_written) {
+            migration->target_axis, migration->current_axis, "slave",
+            migration->final_target_slave, migration->final_current_slave);
+        if (!migration->binding_written) {
+            size_t rollback_i;
             (void)v5_settings_apply_write_text_file_atomic(ini_path, original_ini);
+            for (rollback_i = 0U; rollback_i < migration_i; ++rollback_i) {
+                V5ModelSlotMigration *written = &migrations[rollback_i];
+                if (written->binding_written) {
+                    (void)v5_settings_parameter_store_write_axis_pair(
+                        request->project_root, V5_SETTINGS_PARAMETER_DISK_SELF,
+                        written->target_axis, written->current_axis, "slave",
+                        written->target_slave, written->current_slave);
+                }
+            }
             free(original_ini);
             return 0;
         }
     }
     ok = v5_settings_apply_ini_updates_readback_match(ini_path, updates, update_count);
-    if (ok && alternate_model) {
-        ok = v5_settings_parameter_store_read_axis(
-                 request->project_root, V5_SETTINGS_PARAMETER_DISK_SELF,
-                 target_axis, "slave", target_slave_readback, sizeof(target_slave_readback)) &&
-             v5_settings_parameter_store_read_axis(
-                 request->project_root, V5_SETTINGS_PARAMETER_DISK_SELF,
-                 alternate_axis, "slave", alternate_slave_readback, sizeof(alternate_slave_readback)) &&
-             strcmp(target_slave_readback, final_target_slave) == 0 &&
-             strcmp(alternate_slave_readback, final_alternate_slave) == 0;
+    for (migration_i = 0U; ok && migration_i < migration_count; ++migration_i) {
+        V5ModelSlotMigration *migration = &migrations[migration_i];
+        char target_readback[64];
+        char current_readback[64];
+        ok = settings_apply_read_axis_binding(
+                 request->project_root, migration->target_axis[0],
+                 target_readback, sizeof(target_readback)) &&
+             settings_apply_read_axis_binding(
+                 request->project_root, migration->current_axis[0],
+                 current_readback, sizeof(current_readback)) &&
+             strcmp(target_readback, migration->final_target_slave) == 0 &&
+             strcmp(current_readback, migration->final_current_slave) == 0;
     }
     if (!ok) {
         (void)v5_settings_apply_write_text_file_atomic(ini_path, original_ini);
-        if (pair_written) {
-            (void)v5_settings_parameter_store_write_axis_pair(
-                request->project_root, V5_SETTINGS_PARAMETER_DISK_SELF,
-                target_axis, alternate_axis, "slave", target_slave, alternate_slave);
+        for (migration_i = 0U; migration_i < migration_count; ++migration_i) {
+            V5ModelSlotMigration *migration = &migrations[migration_i];
+            if (migration->binding_written) {
+                (void)v5_settings_parameter_store_write_axis_pair(
+                    request->project_root, V5_SETTINGS_PARAMETER_DISK_SELF,
+                    migration->target_axis, migration->current_axis, "slave",
+                    migration->target_slave, migration->current_slave);
+            }
         }
         free(original_ini);
         return 0;

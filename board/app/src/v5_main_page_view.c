@@ -238,6 +238,8 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
     int program_refresh_due = 0;
     int fit_overflow_checked = 0;
     int fit_overflow_changed = 0;
+    int model_projection_fresh = 0;
+    int model_scene_stale = 0;
     int runtime_has_program = runtime && v5_program_runtime_has_open_program(runtime);
     unsigned int i;
 
@@ -249,6 +251,10 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
         page->last_status = *status;
     }
     v5_main_page_internal_main_page_resolve_active_model_scene(page, status);
+    model_projection_fresh =
+        page->toolpath_model_scene_valid && page->toolpath_model_scene_fresh;
+    model_scene_stale =
+        page->toolpath_model_scene_valid && !page->toolpath_model_scene_fresh;
     if (refresh_flags == 0U) {
         return 1;
     }
@@ -311,9 +317,10 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
             page->toolpath_program_view_generation != page->toolpath_view_generation;
         program_model_changed = v5_main_page_internal_main_page_program_model_projection_changed(page);
         static_pose_changed = v5_main_page_internal_main_page_static_pose_changed(page);
-        program_refresh_due = static_toolpath_due || program_model_changed;
+        program_refresh_due =
+            (static_toolpath_due || program_model_changed) && model_projection_fresh;
 
-        if (!page->toolpath_fit.valid && status) {
+        if (!page->toolpath_fit.valid && status && !model_scene_stale) {
             if (v5_toolpath_display_fit_from_status(status, page->view_plane, &page->toolpath_fit)) {
                 v5_main_page_internal_main_page_expand_visible_toolpath_fit(page, status, &page->toolpath_fit);
                 page->toolpath_static_cache_misses += 1U;
@@ -412,7 +419,10 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
             } else {
                 v5_main_page_internal_hide_toolpath_program_line(page);
             }
-    } else if (static_toolpath_due) {
+    } else if (static_toolpath_due &&
+               (!runtime_has_program ||
+                !page->toolpath_model_scene_valid ||
+                v5_program_runtime_loaded_epoch(runtime) != page->toolpath_program_generation)) {
         v5_main_page_internal_hide_toolpath_program_line(page);
         page->toolpath_program_generation = 0U;
         page->toolpath_program_view_generation = 0U;
@@ -428,7 +438,7 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
             sizeof(page->toolpath_program_model_scene));
     }
 
-    if (!fit_overflow_checked &&
+    if (!model_scene_stale && !fit_overflow_checked &&
         (v5_main_page_internal_main_page_dynamic_toolpath_outside_fit_window(page, status) ||
          ((static_toolpath_due || static_pose_changed) &&
           v5_main_page_internal_main_page_static_geometry_outside_fit_window(page, status)))) {

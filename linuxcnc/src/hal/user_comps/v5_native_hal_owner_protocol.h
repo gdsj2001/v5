@@ -155,7 +155,7 @@ typedef struct V5NativeG53StatusBlockWire {
     uint32_t center_count;
     uint32_t axis_count;
     uint32_t epoch;
-    uint32_t reserved0;
+    uint32_t active_field_mask;
     uint64_t monotonic_ns;
     double centers[V5_NATIVE_G53_CENTER_COUNT][V5_NATIVE_G53_AXIS_COUNT];
     char motion_model[V5_NATIVE_G53_MODEL_CAP];

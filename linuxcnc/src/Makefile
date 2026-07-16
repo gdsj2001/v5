@@ -1206,6 +1206,7 @@ genserkins-objs += $(USERKFUNCS)
 
 obj-m += xyzac-trt-kins.o
 xyzac-trt-kins-objs := emc/kinematics/xyzac-trt-kins.o
+xyzac-trt-kins-objs += emc/kinematics/xyzac-trt-funcs.o
 xyzac-trt-kins-objs += emc/kinematics/trtfuncs.o
 xyzac-trt-kins-objs += emc/kinematics/kins_util.o
 xyzac-trt-kins-objs += emc/kinematics/switchkins.o
@@ -1213,6 +1214,7 @@ xyzac-trt-kins-objs += $(USERKFUNCS)
 
 obj-m += xyzbc-trt-kins.o
 xyzbc-trt-kins-objs := emc/kinematics/xyzbc-trt-kins.o
+xyzbc-trt-kins-objs += emc/kinematics/xyzbc-trt-funcs.o
 xyzbc-trt-kins-objs += emc/kinematics/trtfuncs.o
 xyzbc-trt-kins-objs += emc/kinematics/kins_util.o
 xyzbc-trt-kins-objs += emc/kinematics/switchkins.o

@@ -114,6 +114,7 @@ static int read_machine_enabled_pin(void)
 #undef machine_enabled
 
 #include "hal/user_comps/v5_native_hal_owner_protocol.h"
+#include "hal/user_comps/v5_native_g53_model.h"
 
 typedef struct OwnerConfig {
     char model[V5_NATIVE_G53_MODEL_CAP];
@@ -123,6 +124,8 @@ typedef struct OwnerConfig {
     double g53_b_z;
     double g53_c_x;
     double g53_c_y;
+    uint32_t g53_active_field_mask;
+    V5NativeG53KinsPins kins;
     int rtcp_default;
 } OwnerConfig;
 
@@ -542,6 +545,11 @@ static void publish_status(void)
     V5NativeSafetyStatusBlock safety;
     V5NativeRtcpStatusBlockWire rtcp;
     V5NativeG53StatusBlockWire geometry;
+    struct GeometryEpochInput {
+        uint32_t active_field_mask;
+        char motion_model[V5_NATIVE_G53_MODEL_CAP];
+        double centers[V5_NATIVE_G53_CENTER_COUNT][V5_NATIVE_G53_AXIS_COUNT];
+    } geometry_epoch_input;
     uint64_t now = monotonic_ns();
 
     memset(&safety, 0, sizeof(safety));
@@ -574,6 +582,7 @@ static void publish_status(void)
     geometry.valid = 1U;
     geometry.center_count = V5_NATIVE_G53_CENTER_COUNT;
     geometry.axis_count = V5_NATIVE_G53_AXIS_COUNT;
+    geometry.active_field_mask = g_config.g53_active_field_mask;
     geometry.monotonic_ns = now;
     geometry.centers[0][1] = g_config.g53_a_y;
     geometry.centers[0][2] = g_config.g53_a_z;
@@ -581,11 +590,34 @@ static void publish_status(void)
     geometry.centers[1][2] = g_config.g53_b_z;
     geometry.centers[2][0] = g_config.g53_c_x;
     geometry.centers[2][1] = g_config.g53_c_y;
-    geometry.epoch = fnv1a(geometry.centers, sizeof(geometry.centers));
+    snprintf(geometry.motion_model, sizeof(geometry.motion_model), "%s", g_config.model);
+    memset(&geometry_epoch_input, 0, sizeof(geometry_epoch_input));
+    geometry_epoch_input.active_field_mask = geometry.active_field_mask;
+    snprintf(geometry_epoch_input.motion_model,
+             sizeof(geometry_epoch_input.motion_model),
+             "%s", geometry.motion_model);
+    if (geometry.active_field_mask & V5_NATIVE_G53_FIELD_A_Y) {
+        geometry_epoch_input.centers[0][1] = geometry.centers[0][1];
+    }
+    if (geometry.active_field_mask & V5_NATIVE_G53_FIELD_A_Z) {
+        geometry_epoch_input.centers[0][2] = geometry.centers[0][2];
+    }
+    if (geometry.active_field_mask & V5_NATIVE_G53_FIELD_B_X) {
+        geometry_epoch_input.centers[1][0] = geometry.centers[1][0];
+    }
+    if (geometry.active_field_mask & V5_NATIVE_G53_FIELD_B_Z) {
+        geometry_epoch_input.centers[1][2] = geometry.centers[1][2];
+    }
+    if (geometry.active_field_mask & V5_NATIVE_G53_FIELD_C_X) {
+        geometry_epoch_input.centers[2][0] = geometry.centers[2][0];
+    }
+    if (geometry.active_field_mask & V5_NATIVE_G53_FIELD_C_Y) {
+        geometry_epoch_input.centers[2][1] = geometry.centers[2][1];
+    }
+    geometry.epoch = fnv1a(&geometry_epoch_input, sizeof(geometry_epoch_input));
     if (!geometry.epoch) {
         geometry.epoch = 1U;
     }
-    snprintf(geometry.motion_model, sizeof(geometry.motion_model), "%s", g_config.model);
     geometry.crc32 = fnv1a(&geometry, offsetof(V5NativeG53StatusBlockWire, crc32));
     (void)write_block_atomic(V5_NATIVE_G53_STATUS_PATH, &geometry, sizeof(geometry));
 }
@@ -860,22 +892,75 @@ static double required_double(int argc, char **argv, const char *name)
     return value;
 }
 
+static double optional_double(int argc, char **argv, const char *name)
+{
+    const char *text = arg_value(argc, argv, name);
+    char *end = 0;
+    double value;
+
+    if (!text) {
+        return 0.0;
+    }
+    value = strtod(text, &end);
+    return end && !*end && isfinite(value) ? value : 0.0;
+}
+
+static double active_geometry_double(
+    int argc,
+    char **argv,
+    const V5NativeG53ModelBranch *branch,
+    uint32_t field,
+    const char *name)
+{
+    if (!v5_native_g53_model_field_active(branch, field)) {
+        return optional_double(argc, argv, name);
+    }
+    return required_double(argc, argv, name);
+}
+
 static void userinit(int argc, char **argv)
 {
     const char *model = arg_value(argc, argv, "--model");
+    const char *kins_module = arg_value(argc, argv, "--kins-module");
     const char *rtcp_default = arg_value(argc, argv, "--rtcp-default");
-    if (!model || (strcmp(model, "XYZAC_TRT") != 0 && strcmp(model, "XYZBC_TRT") != 0)) {
-        fprintf(stderr, "v5_native_hal_owner invalid --model\n");
+    const V5NativeG53ModelBranch *branch;
+    const V5NativeG53ModelBranch *resolved_branch;
+    V5NativeG53GeometryInput geometry;
+
+    branch = v5_native_g53_model_find(model);
+    if (!v5_native_g53_model_branch_valid(branch) ||
+        !kins_module || strcmp(kins_module, branch->kinematics_module) != 0) {
+        fprintf(stderr, "v5_native_hal_owner invalid --model/kins-module branch\n");
         exit(2);
     }
-    snprintf(g_config.model, sizeof(g_config.model), "%s", model);
     g_config.rtcp_default = rtcp_default && strcmp(rtcp_default, "1") == 0;
-    g_config.g53_a_y = required_double(argc, argv, "--g53-a-y");
-    g_config.g53_a_z = required_double(argc, argv, "--g53-a-z");
-    g_config.g53_b_x = required_double(argc, argv, "--g53-b-x");
-    g_config.g53_b_z = required_double(argc, argv, "--g53-b-z");
-    g_config.g53_c_x = required_double(argc, argv, "--g53-c-x");
-    g_config.g53_c_y = required_double(argc, argv, "--g53-c-y");
+    g_config.g53_active_field_mask = branch->active_field_mask;
+    g_config.g53_a_y = active_geometry_double(
+        argc, argv, branch, V5_NATIVE_G53_FIELD_A_Y, "--g53-a-y");
+    g_config.g53_a_z = active_geometry_double(
+        argc, argv, branch, V5_NATIVE_G53_FIELD_A_Z, "--g53-a-z");
+    g_config.g53_b_x = active_geometry_double(
+        argc, argv, branch, V5_NATIVE_G53_FIELD_B_X, "--g53-b-x");
+    g_config.g53_b_z = active_geometry_double(
+        argc, argv, branch, V5_NATIVE_G53_FIELD_B_Z, "--g53-b-z");
+    g_config.g53_c_x = active_geometry_double(
+        argc, argv, branch, V5_NATIVE_G53_FIELD_C_X, "--g53-c-x");
+    g_config.g53_c_y = active_geometry_double(
+        argc, argv, branch, V5_NATIVE_G53_FIELD_C_Y, "--g53-c-y");
+    geometry.a_y = g_config.g53_a_y;
+    geometry.a_z = g_config.g53_a_z;
+    geometry.b_x = g_config.g53_b_x;
+    geometry.b_z = g_config.g53_b_z;
+    geometry.c_x = g_config.g53_c_x;
+    geometry.c_y = g_config.g53_c_y;
+    resolved_branch = 0;
+    if (!v5_native_g53_model_resolve(
+            model, &geometry, &g_config.kins, &resolved_branch) ||
+        resolved_branch != branch) {
+        fprintf(stderr, "v5_native_hal_owner invalid --model/kins-module branch\n");
+        exit(2);
+    }
+    snprintf(g_config.model, sizeof(g_config.model), "%s", branch->canonical);
 }
 
 static void on_signal(int signo)
@@ -947,18 +1032,12 @@ void user_mainloop(void)
             home_counts_per_unit(joint) = 0.0;
         }
     }
-    kins_x_rot_point = g_config.g53_c_x;
-    kins_y_rot_point = g_config.g53_c_y;
-    kins_z_rot_point = 0.0;
-    if (strcmp(g_config.model, "XYZAC_TRT") == 0) {
-        kins_x_offset = 0.0;
-        kins_y_offset = g_config.g53_a_y - g_config.g53_c_y;
-        kins_z_offset = g_config.g53_a_z;
-    } else {
-        kins_x_offset = g_config.g53_b_x - g_config.g53_c_x;
-        kins_y_offset = 0.0;
-        kins_z_offset = g_config.g53_b_z;
-    }
+    kins_x_rot_point = g_config.kins.x_rot_point;
+    kins_y_rot_point = g_config.kins.y_rot_point;
+    kins_z_rot_point = g_config.kins.z_rot_point;
+    kins_x_offset = g_config.kins.x_offset;
+    kins_y_offset = g_config.kins.y_offset;
+    kins_z_offset = g_config.kins.z_offset;
     server_fd = prepare_socket();
     if (server_fd < 0) {
         fprintf(stderr, "v5_native_hal_owner socket initialization failed errno=%d\n", errno);

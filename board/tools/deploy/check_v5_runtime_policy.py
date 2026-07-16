@@ -546,7 +546,8 @@ def check_rotary_native_target_policy() -> int:
                 "second_slot": int(match.group("second_slot")),
             }
             for match in re.finditer(
-                r'\{\s*\d+U,\s*"(?P<canonical>[^"]+)",\s*"(?P<display>[^"]+)",\s*'
+                r'\{\s*(?:\d+U|V5_MOTION_MODEL_ID_[A-Z0-9_]+),\s*'
+                r'"(?P<canonical>[^"]+)",\s*"(?P<display>[^"]+)",\s*'
                 r'\{[^}]*\},\s*"(?P<module>[^"]+)",\s*"(?P<coordinates>[^"]+)",\s*'
                 r'"(?P<traj>[^"]+)",\s*\d+U,\s*'
                 r"'(?P<first_axis>[ABC])',\s*'(?P<second_axis>[ABC])',\s*"
@@ -622,6 +623,7 @@ def check_rotary_native_target_policy() -> int:
             "motion.tooloffset.z => [RTCP]KINS_TOOL_OFFSET_PIN",
             "loadusr -Wn v5_native_hal_owner /usr/bin/v5_native_hal_owner",
             "--model=[RTCP]MODEL",
+            "--kins-module=[RTCP]KINS_MODULE",
             "--g53-a-y=[RTCP]G53_A_Y",
             "--g53-a-z=[RTCP]G53_A_Z",
             "--g53-b-x=[RTCP]G53_B_X",

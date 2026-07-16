@@ -72,7 +72,8 @@ int v5_settings_apply_scale_chain_commit(
     const char *project_root,
     const char *settings_runtime_json_path,
     const char *axis,
-    unsigned int axis_index,
+    int joint_active,
+    unsigned int status_slot,
     const char *field_name,
     V5SettingsApplyScaleChainResult *result);
 

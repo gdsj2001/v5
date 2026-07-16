@@ -335,16 +335,17 @@ int shell_refresh_native_readback(int force)
         }
     }
     if (v5_native_g53_geometry_status_read(0, V5_NATIVE_G53_GEOMETRY_STATUS_DEFAULT_MAX_AGE_MS, &g53_geometry_readback) &&
-        v5_native_readback_g53_geometry_known(&g53_geometry_readback)) {
+        v5_native_readback_g53_geometry_known(&g53_geometry_readback) &&
+        v5_native_readback_motion_model_known(&g53_geometry_readback)) {
         v5_native_readback_set_g53_geometry(
             &readback,
             &g53_geometry_readback.g53_centers[0][0],
             V5_NATIVE_READBACK_G53_CENTER_COUNT,
             V5_NATIVE_READBACK_G53_AXIS_COUNT,
             g53_geometry_readback.g53_geometry_epoch);
-        if (v5_native_readback_motion_model_known(&g53_geometry_readback)) {
-            v5_native_readback_set_motion_model(&readback, g53_geometry_readback.motion_model);
-        }
+        v5_native_readback_set_motion_model(&readback, g53_geometry_readback.motion_model);
+    } else {
+        v5_native_readback_set_g53_geometry_stale(&readback);
     }
     if (v5_native_modal_tool_status_read(0, V5_NATIVE_MODAL_TOOL_STATUS_DEFAULT_MAX_AGE_MS, &modal_tool_readback)) {
         shell_apply_modal_tool_readback(&readback, &modal_tool_readback);

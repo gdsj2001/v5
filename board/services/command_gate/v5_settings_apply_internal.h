@@ -39,7 +39,8 @@ int v5_settings_apply_ini_read_section_number(
     const char *path, const char *section_name, const char *key, double *out);
 int v5_settings_apply_ini_write_scale_and_limits(
     const char *path, const char *axis_section, const char *joint_section,
-    int write_scale, double scale, double raw_min, double raw_max);
+    int joint_active, int write_scale,
+    double scale, double raw_min, double raw_max);
 void v5_settings_apply_scale_chain_result_code(
     V5SettingsApplyScaleChainResult *result, const char *code);
 double v5_settings_apply_nearest_integer(double value);

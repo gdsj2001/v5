@@ -140,7 +140,8 @@ int v5_settings_apply_scale_chain_commit(
     const char *project_root,
     const char *settings_runtime_json_path,
     const char *axis,
-    unsigned int axis_index,
+    int joint_active,
+    unsigned int status_slot,
     const char *field_name,
     V5SettingsApplyScaleChainResult *result)
 {
@@ -210,7 +211,10 @@ int v5_settings_apply_scale_chain_commit(
         return 0;
     }
     snprintf(axis_section, sizeof(axis_section), "AXIS_%s", axis);
-    snprintf(joint_section, sizeof(joint_section), "JOINT_%u", axis_index);
+    joint_section[0] = '\0';
+    if (joint_active) {
+        snprintf(joint_section, sizeof(joint_section), "JOINT_%u", status_slot);
+    }
     if (!v5_settings_apply_runtime_axis_object(json, axis, &axis_obj_start, &axis_obj_end) ||
         !v5_settings_apply_json_object_for_key(
             axis_obj_start, axis_obj_end, "zero_model", &zero_obj_start, &zero_obj_end)) {
@@ -232,7 +236,9 @@ int v5_settings_apply_scale_chain_commit(
         v5_settings_apply_scale_chain_result_code(result, "ZERO_MODEL_COUNTS_MISSING");
         return 0;
     }
-    if (!v5_settings_apply_ini_read_preferred_number(ini_path, joint_section, axis_section, "SCALE", &current_scale) ||
+    if (!v5_settings_apply_ini_read_preferred_number(
+            ini_path, joint_active ? joint_section : axis_section,
+            joint_active ? axis_section : 0, "SCALE", &current_scale) ||
         current_scale <= 0.0 || !isfinite(current_scale)) {
         free(json);
         v5_settings_apply_scale_chain_result_code(result, "RUNTIME_SCALE_MISSING");
@@ -241,14 +247,17 @@ int v5_settings_apply_scale_chain_commit(
     effective_scale = current_scale;
     precision_field = strstr(field_name, "_precision") != 0;
     if (!precision_field &&
-        compute_scale_from_chain(ini_path, axis_section, joint_section, axis_obj_start, axis_obj_end, axis, &chain_scale)) {
+        compute_scale_from_chain(
+            ini_path, axis_section, joint_active ? joint_section : 0,
+            axis_obj_start, axis_obj_end, axis, &chain_scale)) {
         effective_scale = chain_scale;
         write_scale = fabs(chain_scale - current_scale) > 1.0e-9;
     }
     if (!v5_settings_apply_json_number_value(zero_obj_start, zero_obj_end, "raw_zero_position", &old_zero)) {
         old_zero = zero_counts / current_scale;
     }
-    if (!(v5_settings_apply_ini_read_section_number(
+    if (!(joint_active &&
+          v5_settings_apply_ini_read_section_number(
               ini_path, joint_section, "MIN_LIMIT", &raw_min_current) &&
           v5_settings_apply_ini_read_section_number(
               ini_path, joint_section, "MAX_LIMIT", &raw_max_current)) &&
@@ -285,7 +294,9 @@ int v5_settings_apply_scale_chain_commit(
     }
     original_ini = v5_settings_apply_read_text_file_limited(ini_path);
     if (!original_ini ||
-        !v5_settings_apply_ini_write_scale_and_limits(ini_path, axis_section, joint_section, write_scale, effective_scale, new_min, new_max)) {
+        !v5_settings_apply_ini_write_scale_and_limits(
+            ini_path, axis_section, joint_section, joint_active,
+            write_scale, effective_scale, new_min, new_max)) {
         free(original_ini);
         free(json);
         v5_settings_apply_scale_chain_result_code(result, "RAW_LIMIT_WRITE_FAILED");

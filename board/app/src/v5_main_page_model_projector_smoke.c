@@ -253,6 +253,24 @@ int main(void)
         v5_main_page_model_scene_resolve(&invalid, &readback, &status, &invalid_scene)) {
         return 15;
     }
+    v5_native_readback_set_motion_model(&readback, "XYZAC_TRT");
+    v5_native_readback_set_g53_geometry_stale(&readback);
+    v5_native_readback_set_motion_model(&readback, "XYZBC_TRT");
+    if (!readback.g53_geometry_stale ||
+        readback.g53_geometry_available ||
+        readback.g53_geometry_epoch != 0U ||
+        !readback.motion_model_available ||
+        readback.motion_model[0] == '\0' ||
+        v5_native_readback_motion_model_known(&readback) ||
+        v5_main_page_model_scene_resolve(ac, &readback, &status, &invalid_scene)) {
+        return 16;
+    }
+    prepare_readback(&readback);
+    v5_native_readback_set_motion_model(&readback, "XYZBC_TRT");
+    if (readback.g53_geometry_stale ||
+        !v5_main_page_model_scene_resolve(bc, &readback, &status, &invalid_scene)) {
+        return 17;
+    }
     printf("v5 main page model projector smoke ok\n");
     return 0;
 }

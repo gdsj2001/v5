@@ -31,6 +31,7 @@ static void main_page_expand_static_geometry_fit(
     const V5MainPageModelScene *wcs_follow_scene = 0;
     V5MainPageModelGeometry geometry;
     int wcs_follow_model;
+    int rtcp_requires_model_scene;
     unsigned int i;
     unsigned int axis_i;
     unsigned int component_i;
@@ -38,7 +39,11 @@ static void main_page_expand_static_geometry_fit(
     if (!page || !fit || !fit->valid) {
         return;
     }
-    if (v5_native_readback_wcs_offset_known(&page->native_readback)) {
+    rtcp_requires_model_scene =
+        v5_native_readback_rtcp_known(&page->native_readback) &&
+        page->native_readback.rtcp_enabled;
+    if (v5_native_readback_wcs_offset_known(&page->native_readback) &&
+        !(rtcp_requires_model_scene && !page->toolpath_model_scene_fresh)) {
         const double *active_offsets = v5_native_readback_active_wcs_offsets(&page->native_readback);
         if (!active_offsets) {
             return;
@@ -69,6 +74,7 @@ static void main_page_expand_static_geometry_fit(
         }
     }
     if (page->toolpath_model_scene_valid &&
+        page->toolpath_model_scene_fresh &&
         v5_main_page_model_scene_build_geometry(
             &page->toolpath_model_scene,
             &geometry)) {

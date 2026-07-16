@@ -1,5 +1,6 @@
 #include "v5_settings_axis_table.h"
 #include "v5_command_gate_ipc.h"
+#include "v5_motion_model_registry.h"
 #include "v5_settings_apply.h"
 #include "v5_settings_parameter_store.h"
 
@@ -19,6 +20,76 @@
 static int same_text(const char *a, const char *b)
 {
     return a && b && strcmp(a, b) == 0;
+}
+
+static int active_model_registry_smoke(void)
+{
+    const V5MotionModelDescriptor *ac = v5_motion_model_find("XYZAC_TRT");
+    const V5MotionModelDescriptor *bc = v5_motion_model_find("XYZBC_TRT");
+    V5MotionModelDescriptor invalid;
+    unsigned int slot = 0U;
+    char axis = '\0';
+
+    if (!v5_motion_model_registry_valid() ||
+        !v5_motion_model_descriptor_valid(ac) ||
+        !v5_motion_model_descriptor_valid(bc) ||
+        !v5_motion_model_same_status_slots(ac, bc) ||
+        !v5_motion_model_status_slot_for_axis(ac, 'A', &slot) || slot != 3U ||
+        v5_motion_model_status_slot_for_axis(ac, 'B', &slot) ||
+        !v5_motion_model_status_slot_for_axis(bc, 'B', &slot) || slot != 3U ||
+        v5_motion_model_status_slot_for_axis(bc, 'A', &slot) ||
+        !v5_motion_model_axis_for_status_slot(ac, 4U, &axis) || axis != 'C') {
+        return 0;
+    }
+    invalid = *ac;
+    invalid.active_status_slots[0] = V5_MOTION_MODEL_MAX_STATUS_SLOTS;
+    if (v5_motion_model_descriptor_valid(&invalid)) {
+        return 0;
+    }
+    invalid = *ac;
+    invalid.first_rotary_axis = 'B';
+    if (v5_motion_model_descriptor_valid(&invalid)) {
+        return 0;
+    }
+    invalid = *ac;
+    invalid.wrapped_rotary_mask = 48U;
+    if (v5_motion_model_descriptor_valid(&invalid)) {
+        return 0;
+    }
+    invalid = *ac;
+    invalid.second_g53_center = invalid.first_g53_center;
+    if (v5_motion_model_descriptor_valid(&invalid)) {
+        return 0;
+    }
+    return 1;
+}
+
+static int commit_axis_direct_smoke(
+    const char *axis,
+    unsigned int axis_index,
+    const char *field_key,
+    const char *field_name,
+    const char *value)
+{
+    V5SettingsApplyAxisCommitRequest request;
+    V5SettingsApplyAxisCommitResult result;
+    memset(&request, 0, sizeof(request));
+    memset(&result, 0, sizeof(result));
+    request.project_root = ".";
+    request.axis = axis;
+    request.axis_index = axis_index;
+    request.field_key = field_key;
+    request.field_name = field_name;
+    request.value_text = value;
+    request.owner_generation = 1U;
+    request.readback_token = 1U;
+    return v5_settings_apply_commit_axis_value(&request, &result);
+}
+
+static int commit_motion_model_direct_smoke(const char *value)
+{
+    return commit_axis_direct_smoke(
+        "RTCP", 0U, "motion_model", "motion_model", value);
 }
 
 static int dropdown_has_line(const char *options, const char *line)
@@ -322,6 +393,10 @@ int main(void)
     char ini_src[768];
     char tmp_root[] = "/tmp/v5_axis_table_smoke_XXXXXX";
     FILE *fp;
+    if (!active_model_registry_smoke()) {
+        fprintf(stderr, "active model descriptor axis/status-slot registry mismatch\n");
+        return 56;
+    }
     if (!getcwd(source_root, sizeof(source_root)) || !mkdtemp(tmp_root) || chdir(tmp_root) != 0) {
         return 7;
     }
@@ -346,6 +421,32 @@ int main(void)
           "        \"raw_zero_position\": 10,\n"
           "        \"drive_position\": {\"actual_position_counts\": 100000, \"write_status\": \"write_verified_readback\"}\n"
           "      }\n"
+          "    },\n"
+          "    {\n"
+          "      \"axis\": \"A\",\n"
+          "      \"actual_counts_per_motor_rev\": 12000,\n"
+          "      \"position_command_raw_bits\": 32,\n"
+          "      \"position_feedback_raw_bits\": 32,\n"
+          "      \"position_command_raw_signed\": 1,\n"
+          "      \"position_feedback_raw_signed\": 1,\n"
+          "      \"position_command_raw_modulus\": 4294967296,\n"
+          "      \"position_feedback_raw_modulus\": 4294967296,\n"
+          "      \"rotary_load_counts_per_rev\": 720000,\n"
+          "      \"drive_wrapped_rotary_support_flag\": 0,\n"
+          "      \"zero_model\": {\"zero_anchor_counts\": 0, \"raw_zero_position\": 0}\n"
+          "    },\n"
+          "    {\n"
+          "      \"axis\": \"B\",\n"
+          "      \"actual_counts_per_motor_rev\": 12000,\n"
+          "      \"position_command_raw_bits\": 32,\n"
+          "      \"position_feedback_raw_bits\": 32,\n"
+          "      \"position_command_raw_signed\": 1,\n"
+          "      \"position_feedback_raw_signed\": 1,\n"
+          "      \"position_command_raw_modulus\": 4294967296,\n"
+          "      \"position_feedback_raw_modulus\": 4294967296,\n"
+          "      \"rotary_load_counts_per_rev\": 1080000,\n"
+          "      \"drive_wrapped_rotary_support_flag\": 0,\n"
+          "      \"zero_model\": {\"zero_anchor_counts\": 0, \"raw_zero_position\": 0}\n"
           "    }\n"
           "  ]\n"
           "}\n", fp);
@@ -430,6 +531,27 @@ int main(void)
     unsigned int select_cols = 0U;
 
     v5_settings_axis_table_load_readback(".");
+    {
+        char model_before[64];
+        char model_after[64];
+        if (!read_rtcp_ini_key(
+                "linuxcnc/ini/v5_bus.ini", "MODEL",
+                model_before, sizeof(model_before)) ||
+            !v5_settings_parameter_store_write_axis_pair(
+                ".", V5_SETTINGS_PARAMETER_DISK_SELF,
+                "A", "B", "slave", "NAT", "NAT") ||
+            commit_motion_model_direct_smoke("XYZBC_TRT") ||
+            !read_rtcp_ini_key(
+                "linuxcnc/ini/v5_bus.ini", "MODEL",
+                model_after, sizeof(model_after)) ||
+            strcmp(model_before, model_after) != 0 ||
+            !v5_settings_parameter_store_write_axis_pair(
+                ".", V5_SETTINGS_PARAMETER_DISK_SELF,
+                "A", "B", "slave", "3", "NAT")) {
+            fprintf(stderr, "active rotary both-NAT must fail closed without changing model\n");
+            return 57;
+        }
+    }
     if (!v5_settings_axis_table_motion_model_value_is_real() ||
         v5_settings_axis_table_motion_model_value()[0] == '\0' ||
         strcmp(v5_settings_axis_table_motion_model_value(), "--") == 0) {
@@ -512,6 +634,29 @@ int main(void)
         }
     }
     {
+        char joint_before[64];
+        char joint_after[64];
+        char inactive_axis_scale[64];
+        if (!read_section_ini_key(
+                "linuxcnc/ini/v5_bus.ini", "JOINT_3", "SCALE",
+                joint_before, sizeof(joint_before)) ||
+            !commit_axis_direct_smoke(
+                "A", 3U, "motor_rev", "axis_A_motor_rev", "2") ||
+            !read_section_ini_key(
+                "linuxcnc/ini/v5_bus.ini", "AXIS_A", "SCALE",
+                inactive_axis_scale, sizeof(inactive_axis_scale)) ||
+            !read_section_ini_key(
+                "linuxcnc/ini/v5_bus.ini", "JOINT_3", "SCALE",
+                joint_after, sizeof(joint_after)) ||
+            strcmp(inactive_axis_scale, "2000") != 0 ||
+            strcmp(joint_before, joint_after) != 0) {
+            fprintf(stderr,
+                    "BC inactive A scale-chain must update AXIS_A only: axis=%s joint_before=%s joint_after=%s\n",
+                    inactive_axis_scale, joint_before, joint_after);
+            return 58;
+        }
+    }
+    {
         if (!v5_settings_axis_table_commit_motion_model("XYZAC_TRT") ||
             strcmp(v5_settings_axis_table_value(3U, 2U), "3") != 0 ||
             strcmp(v5_settings_axis_table_value(4U, 2U), "NAT") != 0) {
@@ -519,6 +664,29 @@ int main(void)
                     v5_settings_axis_table_value(3U, 2U),
                     v5_settings_axis_table_value(4U, 2U));
             return 54;
+        }
+    }
+    {
+        char joint_before[64];
+        char joint_after[64];
+        char inactive_axis_scale[64];
+        if (!read_section_ini_key(
+                "linuxcnc/ini/v5_bus.ini", "JOINT_3", "SCALE",
+                joint_before, sizeof(joint_before)) ||
+            !commit_axis_direct_smoke(
+                "B", 4U, "motor_rev", "axis_B_motor_rev", "2") ||
+            !read_section_ini_key(
+                "linuxcnc/ini/v5_bus.ini", "AXIS_B", "SCALE",
+                inactive_axis_scale, sizeof(inactive_axis_scale)) ||
+            !read_section_ini_key(
+                "linuxcnc/ini/v5_bus.ini", "JOINT_3", "SCALE",
+                joint_after, sizeof(joint_after)) ||
+            strcmp(inactive_axis_scale, "3000") != 0 ||
+            strcmp(joint_before, joint_after) != 0) {
+            fprintf(stderr,
+                    "AC inactive B scale-chain must update AXIS_B only: axis=%s joint_before=%s joint_after=%s\n",
+                    inactive_axis_scale, joint_before, joint_after);
+            return 59;
         }
     }
     if (!v5_settings_axis_table_commit_motion_model("XYZBC_TRT") ||

@@ -24,6 +24,7 @@ void v5_native_readback_set_unavailable(V5NativeReadback *readback, const char *
     readback->wcs_table_available = 0;
     readback->wcs_offsets_epoch = 0U;
     readback->g53_geometry_available = 0;
+    readback->g53_geometry_stale = 0;
     readback->g53_geometry_epoch = 0U;
     memset(readback->g53_centers, 0, sizeof(readback->g53_centers));
     readback->motion_model_available = 0;
@@ -170,6 +171,7 @@ void v5_native_readback_set_g53_geometry(
         return;
     }
     readback->g53_geometry_available = 0;
+    readback->g53_geometry_stale = 0;
     readback->g53_geometry_epoch = 0U;
     memset(readback->g53_centers, 0, sizeof(readback->g53_centers));
     if (!centers || center_count != V5_NATIVE_READBACK_G53_CENTER_COUNT ||
@@ -188,6 +190,19 @@ void v5_native_readback_set_g53_geometry(
     }
     readback->g53_geometry_available = 1;
     readback->g53_geometry_epoch = epoch ? epoch : 1U;
+}
+
+void v5_native_readback_set_g53_geometry_stale(V5NativeReadback *readback)
+{
+    if (!readback) {
+        return;
+    }
+    readback->g53_geometry_available = 0;
+    readback->g53_geometry_stale = 1;
+    readback->g53_geometry_epoch = 0U;
+    memset(readback->g53_centers, 0, sizeof(readback->g53_centers));
+    readback->motion_model_available = 0;
+    readback->motion_model[0] = '\0';
 }
 
 const double *v5_native_readback_g53_center(const V5NativeReadback *readback, unsigned int center_index)
@@ -380,12 +395,14 @@ int v5_native_readback_wcs_table_known(const V5NativeReadback *readback)
 
 int v5_native_readback_g53_geometry_known(const V5NativeReadback *readback)
 {
-    return readback && readback->g53_geometry_available && readback->g53_geometry_epoch != 0U;
+    return readback && !readback->g53_geometry_stale &&
+           readback->g53_geometry_available && readback->g53_geometry_epoch != 0U;
 }
 
 int v5_native_readback_motion_model_known(const V5NativeReadback *readback)
 {
-    return readback && readback->motion_model_available && readback->motion_model[0];
+    return readback && !readback->g53_geometry_stale &&
+           readback->motion_model_available && readback->motion_model[0];
 }
 
 int v5_native_readback_interpreter_known(const V5NativeReadback *readback)

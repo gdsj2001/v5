@@ -7,9 +7,10 @@ from v5_drive_health import evaluate_drive_health, recover_full_target_set_mailb
 from v5_drive_parameter_table import (
     drive_display_update_from_health,
     load_self_slave_bindings,
+    resident_axis_by_slave_position,
     write_drive_parameter_display_rows,
 )
-from v5_drive_runtime_store import load_settings_runtime
+from v5_drive_runtime_store import active_model_axes_from_runtime_ini, load_settings_runtime
 from v5_drive_sdo import (
     parse_slave_identity,
     parse_slave_position_token,
@@ -119,14 +120,25 @@ def configured_drive_targets(timeout_s: float) -> Tuple[List[Dict[str, Any]], Di
     if not scan.get("ok"):
         raise DriveActionError(str(scan.get("code") or "DRIVE_SCAN_FAILED"), str(scan.get("message_cn") or "扫描从站失败，未写驱动。"), scan)
     runtime = load_settings_runtime()
+    active_axes = active_model_axes_from_runtime_ini()
+    active_axis_set = set(active_axes)
     self_bindings = load_self_slave_bindings()
+    failures: List[Dict[str, Any]] = []
+    try:
+        resident_axis_by_slave_position()
+    except DriveActionError as exc:
+        failures.append({
+            "axis": str((exc.detail or {}).get("axis") or "") if isinstance(exc.detail, dict) else "",
+            "code": exc.code,
+            "message_cn": exc.message_cn,
+            "detail": exc.detail,
+        })
     slaves_by_position: Dict[str, Dict[str, Any]] = {}
     for slave in scan.get("slaves", []):
         if isinstance(slave, dict):
             position = parse_slave_position_token(slave.get("position"))
             if position:
                 slaves_by_position[position] = slave
-    failures: List[Dict[str, Any]] = []
     runtime_by_axis: Dict[str, Tuple[int, Dict[str, Any]]] = {}
     axes = runtime.get("axes") if isinstance(runtime.get("axes"), list) else []
     for axis_index, axis_cfg in enumerate(axes):
@@ -142,9 +154,26 @@ def configured_drive_targets(timeout_s: float) -> Tuple[List[Dict[str, Any]], Di
             continue
         runtime_by_axis[axis] = (axis_index, axis_cfg)
 
+    for axis in (name for name in AXIS_ORDER if len(name) == 1 and name not in active_axis_set):
+        raw_binding = self_bindings.get(axis)
+        if raw_binding is None:
+            failures.append({
+                "axis": axis,
+                "code": "DRIVE_TARGET_INACTIVE_AXIS_BINDING_MISSING",
+                "message_cn": "非 active-model 运动轴缺少 resident 从站绑定，未写驱动。",
+                "detail": {"axis": axis, "active_axes": list(active_axes)},
+            })
+        elif str(raw_binding).strip().upper() != "NAT":
+            failures.append({
+                "axis": axis,
+                "code": "DRIVE_TARGET_INACTIVE_AXIS_BOUND",
+                "message_cn": "非 active-model 运动轴仍绑定真实从站，未写驱动。",
+                "detail": {"axis": axis, "binding": raw_binding, "active_axes": list(active_axes)},
+            })
+
     candidates: List[Tuple[str, int, Dict[str, Any], str]] = []
     seen_positions: set[str] = set()
-    for axis in AXIS_ORDER:
+    for axis in active_axes:
         try:
             if axis not in self_bindings:
                 raise DriveActionError(
@@ -155,7 +184,11 @@ def configured_drive_targets(timeout_s: float) -> Tuple[List[Dict[str, Any]], Di
             binding_source = "resident_self_parameter_table"
             raw_binding = self_bindings[axis]
             if str(raw_binding or "").strip().upper() == "NAT":
-                continue
+                raise DriveActionError(
+                    "DRIVE_TARGET_ACTIVE_AXIS_NAT",
+                    "active-model 生效轴不能绑定 NAT，未写驱动。",
+                    {"axis": axis, "active_axes": list(active_axes)},
+                )
             runtime_entry = runtime_by_axis.get(axis)
             if runtime_entry is None:
                 raise DriveActionError(
@@ -213,6 +246,7 @@ def configured_drive_targets(timeout_s: float) -> Tuple[List[Dict[str, Any]], Di
     if failures:
         raise DriveActionError("DRIVE_TARGET_PRECHECK_FAILED", "驱动目标轴预检失败，未写驱动。", {"failures": failures})
     frozen_scan = dict(scan)
+    frozen_scan["active_model_axes"] = list(active_axes)
     frozen_scan["profile_snapshot"] = {
         "generated_at": snapshot.get("generated_at"),
         "profile_count": snapshot.get("profile_count"),

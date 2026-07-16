@@ -80,19 +80,17 @@ int v5_main_page_internal_main_page_resolve_active_model_scene(
 {
     const V5MotionModelDescriptor *model;
     V5MainPageModelScene scene;
-    int model_name_known;
 
     if (!page) {
         return 0;
     }
     page->toolpath_model_scene_fresh = 0;
-    model_name_known =
-        v5_native_readback_motion_model_known(&page->native_readback);
+    if (page->native_readback.g53_geometry_stale) {
+        return 0;
+    }
     model = v5_main_page_internal_main_page_active_motion_model(page);
     if (!model) {
-        if (model_name_known || !page->toolpath_model_scene_valid) {
-            v5_main_page_clear_active_model_scene(page);
-        }
+        v5_main_page_clear_active_model_scene(page);
         return 0;
     }
     if (!v5_main_page_model_projector_descriptor_supported(model)) {
@@ -131,6 +129,9 @@ int v5_main_page_internal_main_page_program_model_projection_changed(const V5Mai
     if (!page->toolpath_model_scene_valid) {
         return 0;
     }
+    if (!page->toolpath_model_scene_fresh) {
+        return 0;
+    }
     return !v5_main_page_model_scene_pose_equal(
         &page->toolpath_model_scene,
         &page->toolpath_program_model_scene,
@@ -148,6 +149,9 @@ int v5_main_page_internal_main_page_static_pose_changed(const V5MainPage *page)
     if (!page->toolpath_model_scene_valid) {
         return 0;
     }
+    if (!page->toolpath_model_scene_fresh) {
+        return 0;
+    }
     return !v5_main_page_model_scene_pose_equal(
         &page->toolpath_model_scene,
         &page->toolpath_static_model_scene,
@@ -157,6 +161,10 @@ int v5_main_page_internal_main_page_static_pose_changed(const V5MainPage *page)
 void v5_main_page_internal_main_page_store_static_pose(V5MainPage *page)
 {
     if (!page) {
+        return;
+    }
+    if (page->toolpath_model_scene_valid &&
+        !page->toolpath_model_scene_fresh) {
         return;
     }
     page->toolpath_static_model_scene_valid = page->toolpath_model_scene_valid;
@@ -177,7 +185,8 @@ int v5_main_page_internal_main_page_rtcp_wcs_follow_model_scene_available(
     if (!page ||
         !v5_native_readback_rtcp_known(&page->native_readback) ||
         !page->native_readback.rtcp_enabled ||
-        !page->toolpath_model_scene_valid) {
+        !page->toolpath_model_scene_valid ||
+        !page->toolpath_model_scene_fresh) {
         return 0;
     }
     if (scene) {
@@ -195,20 +204,17 @@ int v5_main_page_internal_main_page_update_program_project_points(
     if (!page) {
         return 0;
     }
+    if (!page->toolpath_model_scene_valid ||
+        !page->toolpath_model_scene_fresh) {
+        return 0;
+    }
     if (count > V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT) {
         count = V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT;
     }
     for (i = 0U; i < count; ++i) {
         page->toolpath_program_project_points[i] = page->toolpath_program_points[i];
     }
-    page->toolpath_program_model_scene_valid = page->toolpath_model_scene_valid;
-    if (!page->toolpath_model_scene_valid) {
-        memset(
-            &page->toolpath_program_model_scene,
-            0,
-            sizeof(page->toolpath_program_model_scene));
-        return 0;
-    }
+    page->toolpath_program_model_scene_valid = 1;
     page->toolpath_program_model_scene = page->toolpath_model_scene;
     for (i = 0U; i < count; ++i) {
         if (!v5_main_page_model_scene_transform_world_point(

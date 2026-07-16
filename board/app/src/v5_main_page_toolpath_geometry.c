@@ -129,6 +129,20 @@ static int set_toolpath_active_model_geometry(
     return 1;
 }
 
+static void hide_current_wcs_geometry(V5MainPage *page)
+{
+    unsigned int i;
+
+    if (!page) {
+        return;
+    }
+    v5_main_page_internal_hide_toolpath_line(page->toolpath_wcs_origin_line);
+    for (i = 0U; i < 3U; ++i) {
+        v5_main_page_internal_hide_toolpath_line(page->toolpath_wcs_axis_lines[i]);
+    }
+    v5_main_page_internal_add_hidden_flag_if_visible(page->toolpath_wcs_label);
+}
+
 void v5_main_page_internal_hide_toolpath_unproven_geometry(V5MainPage *page)
 {
     unsigned int i;
@@ -170,6 +184,7 @@ void v5_main_page_internal_update_toolpath_state_lines(V5MainPage *page, const V
     int mcs_valid;
     int wcs_valid;
     int wcs_follow_active_model;
+    int rtcp_requires_model_scene;
     unsigned int i;
 
     if (!page) {
@@ -191,16 +206,26 @@ void v5_main_page_internal_update_toolpath_state_lines(V5MainPage *page, const V
             v5_main_page_internal_set_toolpath_axis_line(page->toolpath_mcs_axis_lines[i], page->toolpath_mcs_axis_points[i], &origin_point, &axis_point[i], ok);
         }
         if (page->toolpath_model_scene_valid &&
+            page->toolpath_model_scene_fresh &&
             v5_main_page_model_scene_build_geometry(
                 &page->toolpath_model_scene,
                 &model_geometry)) {
             set_toolpath_active_model_geometry(page, &model_geometry);
-        } else {
+        } else if (!page->toolpath_model_scene_valid) {
             v5_main_page_internal_hide_toolpath_model_geometry(page);
         }
     }
 
     v5_main_page_internal_hide_toolpath_program_wcs_objects(page);
+    rtcp_requires_model_scene =
+        v5_native_readback_rtcp_known(&page->native_readback) &&
+        page->native_readback.rtcp_enabled;
+    if (rtcp_requires_model_scene && !page->toolpath_model_scene_fresh) {
+        if (!page->toolpath_model_scene_valid) {
+            hide_current_wcs_geometry(page);
+        }
+        return;
+    }
     wcs_valid = mcs_valid && v5_native_readback_wcs_offset_known(&page->native_readback);
     if (!wcs_valid) {
         if (page->toolpath_wcs_label) {

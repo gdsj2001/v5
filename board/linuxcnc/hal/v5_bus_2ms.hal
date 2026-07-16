@@ -32,6 +32,7 @@ loadrt v5_safety_latch
 loadusr -W lcec_conf /opt/8ax/v5/linuxcnc/hal/ethercat-conf-2ms.xml
 loadusr -Wn v5_native_hal_owner /usr/bin/v5_native_hal_owner \
     --model=[RTCP]MODEL \
+    --kins-module=[RTCP]KINS_MODULE \
     --rtcp-default=[RTCP]DEFAULT_ACTIVE \
     --g53-a-y=[RTCP]G53_A_Y \
     --g53-a-z=[RTCP]G53_A_Z \

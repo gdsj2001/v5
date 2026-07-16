@@ -168,7 +168,9 @@ static int format_toolpath_g53_active_model_text(
 {
     const V5MainPageModelScene *scene;
 
-    if (!out || out_size == 0U || !page || !page->toolpath_model_scene_valid) {
+    if (!out || out_size == 0U || !page ||
+        !page->toolpath_model_scene_valid ||
+        !page->toolpath_model_scene_fresh) {
         return 0;
     }
     scene = &page->toolpath_model_scene;
@@ -194,7 +196,9 @@ static int format_toolpath_wcs_offset_text(
 {
     const double *offsets;
 
-    if (!out || out_size == 0U || !page || !page->toolpath_model_scene_valid) {
+    if (!out || out_size == 0U || !page ||
+        !page->toolpath_model_scene_valid ||
+        !page->toolpath_model_scene_fresh) {
         return 0;
     }
     offsets = v5_native_readback_active_wcs_offsets(&page->native_readback);

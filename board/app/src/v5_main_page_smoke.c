@@ -896,16 +896,61 @@ int main(void)
         {
             const V5MainPageModelScene last_good_ac_scene = page.toolpath_model_scene;
             V5NativeReadback transient_readback = readback;
+            lv_point_t stale_model_axes[2][2];
+            lv_point_t stale_wcs_axes[3][2];
+            double stale_projected_point[3];
+            unsigned int stale_fit_generation = page.toolpath_fit.generation;
+            unsigned int stale_rewrite_count = page.toolpath_line_rewrite_count;
+            char stale_summary[128];
+            char stale_detail[128];
 
-            v5_native_readback_set_g53_geometry(&transient_readback, 0, 0U, 0U, 0U);
+            memcpy(stale_model_axes, page.toolpath_model_axis_points, sizeof(stale_model_axes));
+            memcpy(stale_wcs_axes, page.toolpath_wcs_axis_points, sizeof(stale_wcs_axes));
+            stale_projected_point[0] = page.toolpath_program_project_points[0].axis[0];
+            stale_projected_point[1] = page.toolpath_program_project_points[0].axis[1];
+            stale_projected_point[2] = page.toolpath_program_project_points[0].axis[2];
+            snprintf(
+                stale_summary,
+                sizeof(stale_summary),
+                "%s",
+                lv_label_get_text(page.toolpath_summary_label));
+            snprintf(
+                stale_detail,
+                sizeof(stale_detail),
+                "%s",
+                lv_label_get_text(page.toolpath_detail_label));
+
+            v5_native_readback_set_g53_geometry_stale(&transient_readback);
             v5_main_page_set_native_readback(&page, &transient_readback);
-            if (!page.toolpath_model_scene_valid ||
+            status.mcs[3] += 7.0;
+            status.mcs[4] -= 9.0;
+            if (transient_readback.g53_geometry_available ||
+                !transient_readback.g53_geometry_stale ||
+                transient_readback.g53_geometry_epoch != 0U ||
+                transient_readback.motion_model_available ||
+                transient_readback.motion_model[0] != '\0' ||
+                !page.toolpath_model_scene_valid ||
                 page.toolpath_model_scene_fresh ||
                 !v5_main_page_model_scene_pose_equal(
                     &page.toolpath_model_scene,
                     &last_good_ac_scene,
                     0.0) ||
-                !page.toolpath_program_visible) {
+                !page.toolpath_program_visible ||
+                v5_main_page_internal_main_page_rtcp_wcs_follow_model_scene_available(
+                    &page,
+                    0) ||
+                !v5_main_page_apply_status(&page, &status) ||
+                !page.toolpath_model_scene_valid ||
+                page.toolpath_model_scene_fresh ||
+                page.toolpath_fit.generation != stale_fit_generation ||
+                page.toolpath_line_rewrite_count != stale_rewrite_count ||
+                memcmp(stale_model_axes, page.toolpath_model_axis_points, sizeof(stale_model_axes)) != 0 ||
+                memcmp(stale_wcs_axes, page.toolpath_wcs_axis_points, sizeof(stale_wcs_axes)) != 0 ||
+                fabs(page.toolpath_program_project_points[0].axis[0] - stale_projected_point[0]) > 0.000001 ||
+                fabs(page.toolpath_program_project_points[0].axis[1] - stale_projected_point[1]) > 0.000001 ||
+                fabs(page.toolpath_program_project_points[0].axis[2] - stale_projected_point[2]) > 0.000001 ||
+                strcmp(lv_label_get_text(page.toolpath_summary_label), stale_summary) != 0 ||
+                strcmp(lv_label_get_text(page.toolpath_detail_label), stale_detail) != 0) {
                 v5_program_controller_destroy(&controller);
                 return 76;
             }
@@ -934,6 +979,38 @@ int main(void)
                 !page.toolpath_program_visible) {
                 v5_program_controller_destroy(&controller);
                 return 78;
+            }
+
+            transient_readback = readback;
+            v5_native_readback_set_unavailable(
+                &transient_readback,
+                "model_readback_unavailable");
+            v5_main_page_set_native_readback(&page, &transient_readback);
+            if (transient_readback.g53_geometry_stale ||
+                page.toolpath_model_scene_valid ||
+                page.toolpath_model_scene_fresh ||
+                page.toolpath_program_visible ||
+                strcmp(lv_label_get_text(page.axis_labels[3]), "-") != 0 ||
+                strcmp(lv_label_get_text(page.axis_labels[4]), "-") != 0 ||
+                !lv_obj_has_flag(
+                    page.toolpath_model_primary_axis_line,
+                    LV_OBJ_FLAG_HIDDEN) ||
+                !lv_obj_has_flag(
+                    page.toolpath_model_child_axis_line,
+                    LV_OBJ_FLAG_HIDDEN) ||
+                lv_label_get_text(page.toolpath_summary_label)[0] != '\0' ||
+                lv_label_get_text(page.toolpath_detail_label)[0] != '\0') {
+                v5_program_controller_destroy(&controller);
+                return 79;
+            }
+
+            v5_main_page_set_native_readback(&page, &readback);
+            if (!v5_main_page_apply_status(&page, &status) ||
+                !page.toolpath_model_scene_valid ||
+                !page.toolpath_model_scene_fresh ||
+                !page.toolpath_program_visible) {
+                v5_program_controller_destroy(&controller);
+                return 80;
             }
         }
         fit_generation_after_program = page.toolpath_fit.generation;

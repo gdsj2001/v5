@@ -10,7 +10,7 @@
     "tree": "cbadbb8d029aefe7a8d0e3218885aaa59798337b"
   },
   "v5_source_tree": "c1f4c53315c8e614fafbe48992afa91e8aef8014",
-  "content_sha256": "d69c6430ddd1855dd4f4ba294ffc241e4985595820f1ace8f74bdb4923f3be07",
+  "content_sha256": "967d9228c87440087fc55c71c5bf2edec9caf097b29b9df3cf90df6628179d3b",
   "implementation": "in_tree",
   "changed_files": [
     "scripts/linuxcnc.in",
@@ -18,6 +18,13 @@
     "src/configure.ac",
     "src/emc/ini/iniaxis.cc",
     "src/emc/ini/inijoint.cc",
+    "src/emc/kinematics/kinematics.h",
+    "src/emc/kinematics/trtfuncs.c",
+    "src/emc/kinematics/trtfuncs.h",
+    "src/emc/kinematics/xyzac-trt-funcs.c",
+    "src/emc/kinematics/xyzac-trt-kins.c",
+    "src/emc/kinematics/xyzbc-trt-funcs.c",
+    "src/emc/kinematics/xyzbc-trt-kins.c",
     "src/emc/motion/command.c",
     "src/emc/motion/control.c",
     "src/emc/motion/homing.c",
@@ -40,6 +47,11 @@
     "src/hal/components/v5_bus_home_state_smoke.c",
     "src/hal/components/v5_bus_homecomp.comp",
     "src/hal/components/v5_safety_latch.comp",
+    "src/hal/user_comps/v5_native_g53_model.h",
+    "src/hal/user_comps/v5_native_g53_model_ac.h",
+    "src/hal/user_comps/v5_native_g53_model_bc.h",
+    "src/hal/user_comps/v5_native_g53_model_smoke.c",
+    "src/hal/user_comps/v5_native_g53_model_types.h",
     "src/hal/user_comps/v5_native_hal_owner.comp",
     "src/hal/user_comps/v5_native_hal_owner_protocol.h",
     "src/hal/utils/Submakefile"
@@ -55,7 +67,9 @@
     "src/Makefile": [
       "install-software: install-kernel-dep install-v5-headless",
       "install-v5-headless:",
-      "../bin/v5_native_hal_owner"
+      "../bin/v5_native_hal_owner",
+      "xyzac-trt-kins-objs += emc/kinematics/xyzac-trt-funcs.o",
+      "xyzbc-trt-kins-objs += emc/kinematics/xyzbc-trt-funcs.o"
     ],
     "src/configure.ac": [
       "--enable-v5-headless-runtime",
@@ -68,6 +82,39 @@
     "src/emc/ini/inijoint.cc": [
       "if (limit == 0.0)",
       "zero disables this direction"
+    ],
+    "src/emc/kinematics/trtfuncs.c": [
+      "const TrtKinematicsContext *trtKinematicsGetContext(void)",
+      "strcmp(coordinates, kp->required_coordinates) != 0",
+      "trt_context.joint_x",
+      "trt_context.x_rot_point"
+    ],
+    "src/emc/kinematics/trtfuncs.h": [
+      "typedef struct TrtKinematicsContext",
+      "trtKinematicsSetup",
+      "trtKinematicsGetContext"
+    ],
+    "src/emc/kinematics/xyzac-trt-funcs.c": [
+      "xyzacKinematicsForward",
+      "xyzacKinematicsInverse",
+      "ctx->joint_a"
+    ],
+    "src/emc/kinematics/xyzac-trt-kins.c": [
+      "kp->kinsname    = \"xyzac-trt-kins\"",
+      "kp->required_coordinates = \"XYZAC\"",
+      "kp->allow_duplicates     = 0",
+      "*kfwd1 = xyzacKinematicsForward"
+    ],
+    "src/emc/kinematics/xyzbc-trt-funcs.c": [
+      "xyzbcKinematicsForward",
+      "xyzbcKinematicsInverse",
+      "ctx->joint_b"
+    ],
+    "src/emc/kinematics/xyzbc-trt-kins.c": [
+      "kp->kinsname    = \"xyzbc-trt-kins\"",
+      "kp->required_coordinates = \"XYZBC\"",
+      "kp->allow_duplicates     = 0",
+      "*kfwd1 = xyzbcKinematicsForward"
     ],
     "src/emc/motion/command.c": [
       "v5_prepare_wrapped_rotary_target",
@@ -170,19 +217,60 @@
       "pin out bit safety_force;",
       "pin out bit rtcp_ui_request;",
       "V5_NATIVE_HAL_OWNER_SOCKET_PATH",
-      "chmod(address.sun_path, 0660)"
+      "chmod(address.sun_path, 0660)",
+      "v5_native_g53_model_resolve",
+      "strcmp(kins_module, branch->kinematics_module)",
+      "g_config.g53_active_field_mask = branch->active_field_mask",
+      "g_config.kins.x_rot_point"
+    ],
+    "src/hal/user_comps/v5_native_g53_model.h": [
+      "v5_native_g53_model_branches",
+      "v5_native_g53_model_resolve",
+      "XYZAC_TRT",
+      "XYZBC_TRT"
+    ],
+    "src/hal/user_comps/v5_native_g53_model_ac.h": [
+      "v5_native_g53_model_ac_project",
+      "input->a_y - input->c_y"
+    ],
+    "src/hal/user_comps/v5_native_g53_model_bc.h": [
+      "v5_native_g53_model_bc_project",
+      "input->b_x - input->c_x"
+    ],
+    "src/hal/user_comps/v5_native_g53_model_smoke.c": [
+      "v5 native G53 model branch smoke ok"
     ],
     "src/hal/user_comps/v5_native_hal_owner_protocol.h": [
       "V5_NATIVE_HAL_OWNER_OP_ESTOP_FORCE",
       "V5_NATIVE_HAL_OWNER_OP_ESTOP_RESET",
       "V5_NATIVE_HAL_OWNER_OP_RTCP_SET",
-      "V5_NATIVE_G53_STATUS_PATH"
+      "V5_NATIVE_G53_STATUS_PATH",
+      "uint32_t active_field_mask"
     ],
     "src/hal/utils/Submakefile": [
       "ifeq ($(V5_HEADLESS_RUNTIME),1)"
     ]
   },
   "forbidden_tokens": {
+    "src/emc/kinematics/trtfuncs.c": [
+      "xyzacKinematicsForward",
+      "xyzbcKinematicsForward"
+    ],
+    "src/emc/kinematics/xyzac-trt-funcs.c": [
+      "xyzbcKinematics"
+    ],
+    "src/emc/kinematics/xyzbc-trt-funcs.c": [
+      "xyzacKinematics"
+    ],
+    "src/hal/user_comps/v5_native_g53_model_ac.h": [
+      "input->b_"
+    ],
+    "src/hal/user_comps/v5_native_g53_model_bc.h": [
+      "input->a_"
+    ],
+    "src/hal/user_comps/v5_native_hal_owner.comp": [
+      "strcmp(g_config.model"
+    ],
     "src/emc/task/taskintf.cc": [
       "z20_wrap_public_degrees",
       "z20_wrap_public_pose",
@@ -228,9 +316,32 @@
       "required_ascii": [
         "v5_native_hal_owner",
         "/run/8ax_v5_product_ui/v5_native_hal_owner.sock",
-        "/dev/shm/v5_native_g53_geometry_status.bin"
+        "/dev/shm/v5_native_g53_geometry_status.bin",
+        "v5_native_hal_owner invalid --model/kins-module branch",
+        "XYZAC_TRT",
+        "XYZBC_TRT",
+        "xyzac-trt-kins",
+        "xyzbc-trt-kins"
       ],
       "forbidden_ascii": []
+    },
+    {
+      "path": "usr/lib/linuxcnc/modules/xyzac-trt-kins.so",
+      "required_ascii": [
+        "xyzac-trt-kins"
+      ],
+      "forbidden_ascii": [
+        "xyzbc-trt-kins"
+      ]
+    },
+    {
+      "path": "usr/lib/linuxcnc/modules/xyzbc-trt-kins.so",
+      "required_ascii": [
+        "xyzbc-trt-kins"
+      ],
+      "forbidden_ascii": [
+        "xyzac-trt-kins"
+      ]
     },
     {
       "path": "usr/lib/linuxcnc/modules/v5_safety_latch.so",

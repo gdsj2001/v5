@@ -185,31 +185,3 @@ extern int userkKinematicsInverse(const struct EmcPose * world,
                                   const KINEMATICS_INVERSE_FLAGS * iflags,
                                   KINEMATICS_FORWARD_FLAGS * fflags);
 #endif
-//*********************************************************************
-// xyzac,xyzbc;
-extern int trtKinematicsSetup(const int   comp_id,
-                              const char* coordinates,
-                              kparms*     ksetup_parms);
-
-extern int xyzacKinematicsForward(const double *joints,
-                                  EmcPose * pos,
-                                  const KINEMATICS_FORWARD_FLAGS * fflags,
-                                  KINEMATICS_INVERSE_FLAGS * iflags);
-
-extern int xyzacKinematicsInverse(const EmcPose * pos,
-                                  double *joints,
-                                  const KINEMATICS_INVERSE_FLAGS * iflags,
-                                  KINEMATICS_FORWARD_FLAGS * fflags);
-
-
-extern int xyzbcKinematicsForward(const double *joints,
-                                  EmcPose * pos,
-                                  const KINEMATICS_FORWARD_FLAGS * fflags,
-                                  KINEMATICS_INVERSE_FLAGS * iflags);
-
-extern int xyzbcKinematicsInverse(const EmcPose * pos,
-                                  double *joints,
-                                  const KINEMATICS_INVERSE_FLAGS * iflags,
-                                  KINEMATICS_FORWARD_FLAGS * fflags);
-
-//*********************************************************************
