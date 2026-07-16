@@ -277,8 +277,8 @@ def test_enable_window_precedes_all_sdo_and_restores_initial_enabled() -> None:
         ("batch_readback",),
         ("window_finish", "enable-window-smoke", "1"),
     ]
-    assert result["restart_required"] is False
-    assert result["restart_deferred"] is False
+    assert result["restart_required"] is True
+    assert result["restart_deferred"] is True
     assert result["drive_write_window"]["restore_requested"] is True
     assert result["drive_write_window"]["restore_expected"] is True
     assert result["drive_write_window"]["restore_confirmed"] is True
@@ -294,6 +294,8 @@ def test_enable_window_success_preserves_initial_machine_off() -> None:
     assert result["drive_write_window"]["restore_expected"] is False
     assert result["drive_write_window"]["restore_confirmed"] is True
     assert result["drive_write_window"]["finish"]["final_machine_enabled"] is False
+    assert result["restart_required"] is True
+    assert result["restart_deferred"] is True
 
 
 def test_enable_window_restore_not_confirmed_fails_closed() -> None:
@@ -305,6 +307,8 @@ def test_enable_window_restore_not_confirmed_fails_closed() -> None:
     assert result["drive_write_window"]["restore_requested"] is True
     assert result["drive_write_window"]["restore_expected"] is True
     assert result["drive_write_window"]["restore_confirmed"] is False
+    assert result["restart_required"] is False
+    assert result["restart_deferred"] is False
 
 
 def test_enable_window_write_failure_never_restores() -> None:
@@ -316,6 +320,8 @@ def test_enable_window_write_failure_never_restores() -> None:
     assert result["code"] == "DRIVE_SET_PARTIAL"
     assert result["drive_write_window"]["restore_requested"] is False
     assert result["drive_write_window"]["restore_confirmed"] is True
+    assert result["restart_required"] is False
+    assert result["restart_deferred"] is False
 
 
 def test_window_begin_failure_prevents_all_sdo() -> None:

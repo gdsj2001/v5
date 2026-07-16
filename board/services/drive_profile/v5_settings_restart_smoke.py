@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
+import v5_drive_bus_contract as contract
 import v5_settings_restart as restart
 
 
@@ -15,8 +17,25 @@ class SettingsRestartSmoke(unittest.TestCase):
         self.run_dir = Path(self.temporary.name) / "run"
         self.run_dir_patch = mock.patch.object(restart, "RUN_DIR", self.run_dir)
         self.run_dir_patch.start()
+        self.zero_binding_patch = mock.patch.object(
+            restart,
+            "ensure_active_rotary_zero_binding_for_restart",
+            return_value={
+                "ok": True,
+                "code": "SETTINGS_MODEL_ROTARY_ZERO_BINDING_VALID",
+                "axis": "A",
+                "inactive_axis": "B",
+                "slave_position": 3,
+                "zero_counts": 5.0,
+                "counts_per_unit": 1000.0,
+                "raw_zero_position": 0.005,
+                "changed": False,
+            },
+        )
+        self.zero_binding_patch.start()
 
     def tearDown(self) -> None:
+        self.zero_binding_patch.stop()
         self.run_dir_patch.stop()
         self.temporary.cleanup()
 
@@ -82,6 +101,90 @@ class SettingsRestartSmoke(unittest.TestCase):
         _script, _log, armed_marker, go_marker = restart.restart_handoff_paths()
         self.assertFalse(armed_marker.exists())
         self.assertFalse(go_marker.exists())
+
+
+class SettingsModelZeroBindingSmoke(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.path_patches = [
+            mock.patch.object(contract, "SETTINGS_RUNTIME_JSON", self.root / "settings_runtime.json"),
+            mock.patch.object(contract, "RUNTIME_SETTINGS_INI", self.root / "v5_bus.ini"),
+            mock.patch.object(contract, "SELF_PARAMETER_TABLE", self.root / "self_parameter_table.tsv"),
+            mock.patch.object(restart, "RUN_DIR", self.root / "run"),
+        ]
+        for patcher in self.path_patches:
+            patcher.start()
+        self.write(contract.RUNTIME_SETTINGS_INI, "[TRAJ]\nCOORDINATES = X Y Z B C\n")
+        self.write(contract.SELF_PARAMETER_TABLE, "A\tslave\tNAT\nB\tslave\t3\n")
+
+    def tearDown(self) -> None:
+        for patcher in reversed(self.path_patches):
+            patcher.stop()
+        self.temporary.cleanup()
+
+    @staticmethod
+    def write(path: Path, text: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    @staticmethod
+    def b_zero(position: str = "3") -> dict:
+        return {
+            "zero_counts": 0.0,
+            "counts_per_unit": 1000.0,
+            "raw_zero_position": 0.0,
+            "drive_position": {
+                "axis": "B",
+                "actual_position_counts": 0.0,
+                "readback": {"upload": {"argv": [
+                    "ethercat", "upload", "-p", position,
+                    "-t", "int32", "0x6064", "0x00",
+                ]}},
+            },
+        }
+
+    def runtime(self, b_zero: dict) -> dict:
+        return {
+            "schema": contract.SETTINGS_RUNTIME_SCHEMA,
+            "axes": [
+                {"axis": "A", "zero_model": {
+                    "zero_counts": 5.0,
+                    "counts_per_unit": 1000.0,
+                    "raw_zero_position": 0.005,
+                    "slave_position": 3,
+                }},
+                {"axis": "B", "zero_model": b_zero},
+            ],
+        }
+
+    def test_bc_rebind_uses_b_evidence_without_copying_a_zero(self) -> None:
+        self.write(contract.SETTINGS_RUNTIME_JSON, json.dumps(self.runtime(self.b_zero())))
+        result = restart.ensure_active_rotary_zero_binding_for_restart()
+        self.assertTrue(result["changed"])
+        self.assertEqual("B", result["axis"])
+        self.assertEqual(3, result["slave_position"])
+        reread = json.loads(contract.SETTINGS_RUNTIME_JSON.read_text(encoding="utf-8"))
+        a_axis = next(item for item in reread["axes"] if item["axis"] == "A")
+        b_axis = next(item for item in reread["axes"] if item["axis"] == "B")
+        self.assertEqual(5.0, a_axis["zero_model"]["zero_counts"])
+        self.assertEqual(0.0, b_axis["zero_model"]["zero_counts"])
+        self.assertEqual(3, b_axis["zero_model"]["slave_position"])
+        idempotent = restart.ensure_active_rotary_zero_binding_for_restart()
+        self.assertFalse(idempotent["changed"])
+        handoff = restart.run_restart_handoff(
+            "settings_save_and_restart", {"owner": "settings_restart"})
+        self.assertTrue(handoff["ok"])
+        self.assertTrue(Path(handoff["handoff_script"]).is_file())
+
+    def test_conflicting_b_evidence_rejects_restart(self) -> None:
+        self.write(contract.SETTINGS_RUNTIME_JSON, json.dumps(self.runtime(self.b_zero("4"))))
+        result = restart.run_restart_handoff(
+            "settings_save_and_restart", {"owner": "settings_restart"})
+        self.assertFalse(result["ok"])
+        self.assertEqual("SETTINGS_MODEL_ROTARY_ZERO_SLAVE_MISMATCH", result["code"])
+        self.assertFalse(result["restart_commit_required"])
+        self.assertFalse((restart.RUN_DIR / "settings_clean_restart_handoff.sh").exists())
 
 
 if __name__ == "__main__":

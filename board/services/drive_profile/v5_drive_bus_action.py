@@ -506,6 +506,8 @@ def _run_set_drive_impl(timeout_s: float, request: Dict[str, Any] | None = None)
             },
         }]
     elif result["ok"]:
+        result["restart_required"] = True
+        result["restart_deferred"] = True
         result["message_cn"] = (
             "设置驱动完成，电子齿轮和 CSP 模式 fresh readback 一致，已恢复进入动作前的使能状态。"
             if restore_expected else
