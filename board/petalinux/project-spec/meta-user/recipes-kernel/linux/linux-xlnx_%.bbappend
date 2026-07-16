@@ -39,8 +39,10 @@ do_v5_linux_projection() {
         --project-root ${V5_PROJECT_SOURCE_ROOT} \
         --build-root ${V5_VM_BUILD_ROOT} \
         --output-root ${V5_SOURCE_PROJECTION_ROOT}
-    [ ! -e "${WORKDIR}/v5-owner-projection" ] || \
-        bbfatal "BitBake work projection was not cleared by do_unpack"
+    case "${WORKDIR}/v5-owner-projection" in
+        "${WORKDIR}"/*) rm -rf "${WORKDIR}/v5-owner-projection" ;;
+        *) bbfatal "BitBake work projection cleanup escaped WORKDIR" ;;
+    esac
     cp -a --reflink=auto ${V5_SOURCE_PROJECTION_ROOT}/. \
         ${WORKDIR}/v5-owner-projection/
     [ ! -e "${V5_SOURCE_PROJECTION_ROOT}/linux/kernel/.git" ] || \
@@ -60,6 +62,23 @@ do_v5_linux_projection[file-checksums] = " \
     ${V5_PROJECT_SOURCE_ROOT}/board/tools/petalinux/verify_v5_linux_source.py:True \
 "
 addtask v5_linux_projection after do_unpack before do_kernel_checkout do_kernel_metadata do_symlink_kernsrc
+
+# do_symlink_kernsrc replaces S with a link to work-shared/kernel-source after
+# a successful build.  A later forced checkout must not ask BitBake's dirs
+# helper to mkdir that existing link; do_kernel_checkout already cd's to S.
+do_kernel_checkout[dirs] = "${WORKDIR}"
+
+python v5_prepare_symlink_kernsrc() {
+    import os
+
+    kernsrc = os.path.abspath(d.getVar("STAGING_KERNEL_DIR"))
+    tmpdir = os.path.abspath(d.getVar("TMPDIR"))
+    if os.path.commonpath((kernsrc, tmpdir)) != tmpdir:
+        bb.fatal("staging kernel link escaped TMPDIR: %s" % kernsrc)
+    if os.path.islink(kernsrc):
+        os.unlink(kernsrc)
+}
+do_symlink_kernsrc[prefuncs] += "v5_prepare_symlink_kernsrc"
 
 do_patch_append() {
     install -m 0644 ${WORKDIR}/xlnx_atk_lcd.c ${S}/drivers/gpu/drm/xlnx/xlnx_atk_lcd.c

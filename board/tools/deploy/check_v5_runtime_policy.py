@@ -39,7 +39,10 @@ BOARD_OWNER_DEPLOY_ROWS = {
 def iter_sources(root: Path):
     for path in root.rglob("*"):
         if path.is_file() and path.suffix in SOURCE_SUFFIXES:
-            if path.name == "check_v5_runtime_policy.py":
+            if path.name in {
+                "check_v5_runtime_policy.py",
+                "check_v5_board_runtime_policy.py",
+            }:
                 continue
             rel = path.relative_to(ROOT)
             if "repo_ignored" in rel.parts:
