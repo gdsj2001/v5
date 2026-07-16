@@ -10,7 +10,7 @@
     "tree": "cbadbb8d029aefe7a8d0e3218885aaa59798337b"
   },
   "v5_source_tree": "c1f4c53315c8e614fafbe48992afa91e8aef8014",
-  "content_sha256": "450fae5bb06d6e341f8bdf4658e17ef8fcc238cd387211869525e76c5fc183ba",
+  "content_sha256": "d69c6430ddd1855dd4f4ba294ffc241e4985595820f1ace8f74bdb4923f3be07",
   "implementation": "in_tree",
   "changed_files": [
     "scripts/linuxcnc.in",
@@ -137,7 +137,8 @@
     "src/hal/components/v5_bus_home_motion.h": [
       "v5_joint_common_guard",
       "v5_terminal_readback_ready",
-      "v5_restart_after_rebase"
+      "v5_restart_after_rebase",
+      "*P->rtcp_force_off = 0;"
     ],
     "src/hal/components/homecomp.comp": [
       "pReadWcheckpointSnapshot"
