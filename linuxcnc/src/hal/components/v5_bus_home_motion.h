@@ -182,7 +182,12 @@ static void finish_transaction(void)
     homing_active = 0;
     *P->completed_mask = physical_complete_mask;
     *P->terminal_mask = run_mask;
-    /* The request remains asserted: Home never restores the prior RTCP state. */
+    /*
+     * Release only the Home transaction request.  The native owner keeps
+     * RTCP OFF after Home, but a new UI request or G-code low->high edge must
+     * be able to re-arm it.
+     */
+    *P->rtcp_force_off = 0;
     context_started = 0;
 }
 

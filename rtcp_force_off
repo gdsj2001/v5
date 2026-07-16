@@ -1,0 +1,121 @@
+188-{
+189-    unsigned int r;
+190-    int64_t raw;
+191-    if (!rotary_index(C[j].axis_code, &r)) {
+192:        *logical = (int64_t)*P->joint[j].actual_counts;
+193-        *base = 0;
+194-        *runtime = *logical;
+195-        *generation = 0;
+196-        return 1;
+197-    }
+198:    if (!*P->rotary[r].valid || !*P->rotary[r].generation ||
+199:        !v5_home_exact_i64(*P->rotary[r].base_counts, base)) return 0;
+200:    raw = (int64_t)*P->joint[j].actual_counts;
+201-    *runtime = raw;
+202-    if (!v5_home_bind_runtime_actual(*base, raw, logical)) return 0;
+203:    *generation = *P->rotary[r].generation;
+204-    return 1;
+205-}
+206-
+207-static void publish_sample(
+--
+213-    unsigned int generation = run_generation;
+214-    unsigned int mask = active_mask();
+215-    int j;
+216-    if (failed_joint) *failed_joint = -1;
+217:    if (!*P->safety_actual_valid) return V5_SAFETY_UNKNOWN;
+218:    if (*P->estop_active) return V5_ESTOP;
+219:    if (!*P->machine_enabled) return V5_DISABLED;
+220:    if (!*P->config_mapping_valid || !*P->router_mapping_valid ||
+221-        generation == 0 || mask == 0 || mask != mapping_mask ||
+222-        run_mask == 0 || (run_mask & ~mapping_mask) != 0 ||
+223:        mask != *P->config_active_mask || mask != *P->router_active_mask ||
+224:        generation != *P->router_mapping_generation ||
+225:        generation != *P->config_mapping_generation ||
+226:        *P->config_commit_seq == 0 ||
+227:        *P->config_commit_seq != run_commit_seq ||
+228:        *P->config_commit_seq != *P->router_commit_seq) return V5_MAPPING;
+229-    for (j = 0; j < all_joints && j < V5_HOME_JOINTS; ++j) {
+230-        v5_config_snapshot *cfg = &C[j];
+231-        int64_t logical, base, runtime;
+232-        unsigned int axis, wgen;
+--
+267-
+268-static int snapshot_config(void)
+269-{
+270-    int j;
+271:    unsigned int generation = *P->config_mapping_generation;
+272:    unsigned int mask = *P->config_active_mask;
+273:    unsigned int commit = *P->config_commit_seq;
+274-    for (j = 0; j < V5_HOME_JOINTS; ++j) {
+275:        C[j].valid = *P->joint[j].config_valid ? 1 : 0;
+276:        C[j].status_slot = *P->joint[j].status_slot;
+277:        C[j].axis_code = *P->joint[j].axis_code;
+278:        C[j].slave_position = *P->joint[j].slave_position;
+279:        C[j].mapping_generation = *P->joint[j].mapping_generation;
+280:        C[j].counts_per_unit = *P->joint[j].counts_per_unit;
+281-    }
+282:    if (!commit || commit != *P->config_commit_seq ||
+283:        generation != *P->config_mapping_generation ||
+284:        mask != *P->config_active_mask) return 0;
+285-    run_generation = generation;
+286-    run_commit_seq = commit;
+287-    mapping_mask = mask;
+288-    run_mask = native_home_run_mask(mapping_mask);
+--
+300-    rc = base_homing_init(id, period, njoints, nextra, pjoints);
+301-    if (rc) return rc;
+302-    servo_period_seconds = period;
+303-    rc = v5_home_make_pins(id, njoints);
+304:    if (!rc) *P->failed_joint = UINT32_MAX;
+305-    return rc;
+306-}
+307-
+308-void read_homing_in_pins(int n) { base_read_homing_in_pins(n); }
+--
+328-        }
+329-        txn_timeout = 0;
+330-        if (!v5_home_precheck_sample(
+331-                0, V5_HOME_STABLE_CYCLES, &precheck_stable)) return 0;
+332:        *P->rtcp_request_transaction = txn_id;
+333:        *P->rtcp_force_off = 1;
+334-        txn_phase = V5_TXN_RTCP;
+335-        txn_timeout = 0;
+336-        precheck_stable = 0;
+337-        publish_run(V5_RTCP_WAIT, V5_OK);
+338-    }
+339-    if (txn_phase == V5_TXN_RTCP) {
+340:        if (!*P->safety_actual_valid || *P->estop_active || !*P->machine_enabled) {
+341:            failure = !*P->safety_actual_valid ? V5_SAFETY_UNKNOWN :
+342:                (*P->estop_active ? V5_ESTOP : V5_DISABLED);
+343:            fail_transaction(-1, *P->estop_active ? V5_CANCEL : failure,
+344:                             *P->estop_active ? 1 : 0);
+345-            return 0;
+346-        }
+347:        if (!*P->rtcp_actual_valid) {
+348-            fail_transaction(-1, V5_RTCP_UNKNOWN, 0);
+349-            return 0;
+350-        }
+351-        if (!v5_home_rtcp_ack_matches(
+352:                txn_id, *P->rtcp_latched_transaction,
+353:                *P->rtcp_actual_valid, *P->rtcp_force_latched,
+354:                *P->rtcp_active)) {
+355-            if (++txn_timeout > V5_HOME_WAIT_CYCLES)
+356-                fail_transaction(-1, V5_RTCP, 0);
+357-            return 0;
+358-        }
+--
+519-        S[i].sample_valid = S[i].plan_valid = 0;
+520-        S[i].plan_sample_valid = 0;
+521-        S[i].plan_sample_stable = S[i].settle_timeout = 0;
+522-        S[i].terminal_sample_valid = 0;
+523:        *P->joint[i].readback_valid = 0;
+524:        *P->joint[i].motion_active = 0;
+525-    }
+526-    txn_phase = V5_TXN_PRECHECK;
+527-    publish_run(V5_PRECHECK, V5_OK);
+528:    if (*P->safety_actual_valid && *P->estop_active)
+529-        fail_transaction(-1, V5_ESTOP, v5_home_estop_is_cancel(0));
+530-    else if (!snapshot_valid)
+531-        fail_transaction(-1, V5_MAPPING, 0);
+532-}

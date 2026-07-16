@@ -252,6 +252,14 @@ def main() -> int:
     if home_component.count("freeze_execution_plan(") != 1:
         raise AssertionError("Home execution plan must have one post-RTCP freeze owner")
 
+    if home_component.count("*P->rtcp_force_off = 1;") != 1:
+        raise AssertionError("Home must assert one transaction-scoped RTCP force-off request")
+    finish_block = home_motion.split("static void finish_transaction(void)", 1)[1].split(
+        "static void fail_transaction", 1)[0]
+    require(finish_block, "*P->rtcp_force_off = 0;")
+    if "*P->rtcp_force_off = 1;" in finish_block:
+        raise AssertionError("Home terminal must release, not reassert, RTCP force-off")
+
     for token in (
         "failure = update_stage_start_barrier(&failed_joint);",
         "physical_complete_mask != run_mask",
