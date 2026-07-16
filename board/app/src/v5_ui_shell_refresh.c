@@ -152,6 +152,45 @@ static int shell_settings_status_equal(const V5UiStatusView *before, const V5UiS
     return !before_valid || shell_axis_values_equal(before->mcs, after->mcs, 1000.0);
 }
 
+static int g_v5_shell_structure_signature_valid;
+static unsigned int g_v5_shell_structure_view_generation;
+static unsigned int g_v5_shell_structure_program_epoch;
+static int g_v5_shell_structure_program_present;
+
+int shell_main_page_structure_refresh_pending(void)
+{
+    const V5ProgramRuntime *runtime =
+        v5_program_controller_runtime(&g_v5_shell_program_controller);
+    int runtime_has_program = runtime && v5_program_runtime_has_open_program(runtime);
+
+    return v5_ui_structure_event_pending(
+        g_v5_shell_structure_signature_valid,
+        g_v5_shell_structure_view_generation,
+        g_v5_shell_main_page.toolpath_view_generation,
+        g_v5_shell_structure_program_present,
+        runtime_has_program,
+        g_v5_shell_structure_program_epoch,
+        runtime_has_program ? v5_program_runtime_loaded_epoch(runtime) : 0U,
+        !runtime_has_program ||
+            (g_v5_shell_main_page.toolpath_model_scene_valid &&
+             g_v5_shell_main_page.toolpath_model_scene_fresh));
+}
+
+void shell_main_page_structure_refresh_consume(void)
+{
+    const V5ProgramRuntime *runtime =
+        v5_program_controller_runtime(&g_v5_shell_program_controller);
+    const int runtime_has_program =
+        runtime && v5_program_runtime_has_open_program(runtime);
+
+    g_v5_shell_structure_view_generation =
+        g_v5_shell_main_page.toolpath_view_generation;
+    g_v5_shell_structure_program_present = runtime_has_program;
+    g_v5_shell_structure_program_epoch =
+        runtime_has_program ? v5_program_runtime_loaded_epoch(runtime) : 0U;
+    g_v5_shell_structure_signature_valid = 1;
+}
+
 int v5_ui_shell_refresh_once(void)
 {
     unsigned long long now;
@@ -191,6 +230,10 @@ int v5_ui_shell_refresh_once(void)
             settings_projection_changed = 1;
         }
     }
+    if (g_v5_shell_current_page == V5_SHELL_PAGE_MAIN &&
+        (flags & V5_MAIN_PAGE_REFRESH_DYNAMIC) != 0U) {
+        flags |= V5_MAIN_PAGE_REFRESH_POSE;
+    }
     if (shell_refresh_due(now, &g_v5_shell_ui_estop_last_refresh_ns, V5_UI_ESTOP_REFRESH_NS)) {
         if (shell_refresh_safety_readback(0)) {
             main_cache_changed = 1;
@@ -205,6 +248,10 @@ int v5_ui_shell_refresh_once(void)
             main_cache_changed = 1;
         }
         flags |= V5_MAIN_PAGE_REFRESH_SLOW;
+    }
+    if (g_v5_shell_current_page == V5_SHELL_PAGE_MAIN &&
+        shell_main_page_structure_refresh_pending()) {
+        flags |= V5_MAIN_PAGE_REFRESH_STRUCTURE;
     }
 
     overlay_active = v5_ui_first_frame_guard_overlay_active();
@@ -224,6 +271,9 @@ int v5_ui_shell_refresh_once(void)
     if (!overlay_active && flags != 0U) {
         if (g_v5_shell_current_page == V5_SHELL_PAGE_MAIN) {
             (void)v5_main_page_apply_status_flags(&g_v5_shell_main_page, &g_v5_shell_model.status_view, flags);
+            if ((flags & V5_MAIN_PAGE_REFRESH_STRUCTURE) != 0U) {
+                shell_main_page_structure_refresh_consume();
+            }
         }
         if (g_v5_shell_current_page == V5_SHELL_PAGE_SETTINGS &&
             (settings_projection_changed || settings_cache_changed)) {

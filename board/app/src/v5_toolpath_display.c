@@ -104,6 +104,11 @@ static V5ToolpathScreenPoint project(double u, double v, V5ToolpathDisplayBounds
         double pad_y = height * 0.10;
         double draw_w = width - (pad_x * 2.0);
         double draw_h = height - (pad_y * 2.0);
+        double scale;
+        double content_w;
+        double content_h;
+        double origin_x;
+        double origin_y;
         if (draw_w < 1.0) {
             draw_w = width;
             pad_x = 0.0;
@@ -112,8 +117,16 @@ static V5ToolpathScreenPoint project(double u, double v, V5ToolpathDisplayBounds
             draw_h = height;
             pad_y = 0.0;
         }
-        point.x = pad_x + (((u - bounds.min_u) / span_u) * draw_w);
-        point.y = pad_y + (draw_h - (((v - bounds.min_v) / span_v) * draw_h));
+        scale = draw_w / span_u;
+        if ((draw_h / span_v) < scale) {
+            scale = draw_h / span_v;
+        }
+        content_w = span_u * scale;
+        content_h = span_v * scale;
+        origin_x = pad_x + ((draw_w - content_w) * 0.5);
+        origin_y = pad_y + ((draw_h - content_h) * 0.5);
+        point.x = origin_x + ((u - bounds.min_u) * scale);
+        point.y = origin_y + content_h - ((v - bounds.min_v) * scale);
     }
     return point;
 }

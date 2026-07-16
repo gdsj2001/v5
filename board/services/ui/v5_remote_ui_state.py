@@ -21,6 +21,7 @@ from v5_remote_ui_contract import (
     LARGE_DIRTY_PIXEL_RATIO,
     MAX_DIRTY_RECTS_PER_FRAME,
     FramePayload,
+    PayloadViews,
 )
 
 LOCK_SH = 1
@@ -312,8 +313,8 @@ class FrameState:
             return None
         total_bytes = sum(int(rect["w"]) * int(rect["h"]) * 4 for rect in rects)
         total_rows = sum(int(rect["h"]) for rect in rects)
-        payload = bytearray(total_bytes)
-        payload_offset = 0
+        payload_parts: list[memoryview] = []
+        captured_bytes = 0
         locked = False
         try:
             flock(fd, LOCK_SH)
@@ -329,8 +330,9 @@ class FrameState:
                     end = start + (row_bytes * h)
                     if end > self.frame_size:
                         return None
-                    payload[payload_offset:payload_offset + (end - start)] = mapped[start:end]
-                    payload_offset += end - start
+                    part = memoryview(mapped[start:end])
+                    payload_parts.append(part)
+                    captured_bytes += len(part)
                     self.mark_metric("dirty_payload_contiguous_frames")
                     continue
                 for row in range(h):
@@ -338,8 +340,9 @@ class FrameState:
                     src_end = src_start + row_bytes
                     if src_end > self.frame_size:
                         return None
-                    payload[payload_offset:payload_offset + row_bytes] = mapped[src_start:src_end]
-                    payload_offset += row_bytes
+                    part = memoryview(mapped[src_start:src_end])
+                    payload_parts.append(part)
+                    captured_bytes += len(part)
         except OSError:
             return None
         finally:
@@ -348,12 +351,12 @@ class FrameState:
                     flock(fd, LOCK_UN)
                 except OSError:
                     pass
-        if payload_offset != total_bytes:
+        if captured_bytes != total_bytes:
             return None
         self.mark_metric("dirty_payload_bytes", total_bytes)
         self.mark_metric("dirty_payload_rows", total_rows)
         self.mark_metric("dirty_payload_rects", len(rects))
-        return bytes(payload), rects
+        return PayloadViews(payload_parts, total_bytes), rects
 
     def publish_dirty(self, event: dict) -> None:
         with self.condition:

@@ -52,6 +52,9 @@ int main(void)
     V5ToolpathScreenPoint x_axis;
     V5ToolpathScreenPoint y_axis;
     V5ToolpathScreenPoint z_axis;
+    double x_len;
+    double y_len;
+    double z_len;
     double origin_world[V5_STATUS_AXIS_COUNT] = {0.0, 0.0, 0.0, 0.0, 0.0};
     double x_axis_world[V5_STATUS_AXIS_COUNT] = {40.0, 0.0, 0.0, 0.0, 0.0};
     double y_axis_world[V5_STATUS_AXIS_COUNT] = {0.0, 40.0, 0.0, 0.0, 0.0};
@@ -112,6 +115,28 @@ int main(void)
     }
     if (!(x_axis.y > origin.y && y_axis.y < origin.y && z_axis.y < origin.y)) {
         return 10;
+    }
+    x_len = hypot(x_axis.x - origin.x, x_axis.y - origin.y);
+    y_len = hypot(y_axis.x - origin.x, y_axis.y - origin.y);
+    z_len = hypot(z_axis.x - origin.x, z_axis.y - origin.y);
+    if (fabs(x_len - y_len) > 1.0e-9 || fabs(x_len - z_len) > 1.0e-9) {
+        return 13;
+    }
+    fit.plane = V5_TOOLPATH_DISPLAY_XZ;
+    if (!v5_toolpath_display_project_world_point(origin_world, &fit, 200.0, 100.0, &origin) ||
+        !v5_toolpath_display_project_world_point(x_axis_world, &fit, 200.0, 100.0, &x_axis) ||
+        !v5_toolpath_display_project_world_point(z_axis_world, &fit, 200.0, 100.0, &z_axis) ||
+        fabs(hypot(x_axis.x - origin.x, x_axis.y - origin.y) -
+             hypot(z_axis.x - origin.x, z_axis.y - origin.y)) > 1.0e-9) {
+        return 14;
+    }
+    fit.plane = V5_TOOLPATH_DISPLAY_YZ;
+    if (!v5_toolpath_display_project_world_point(origin_world, &fit, 200.0, 100.0, &origin) ||
+        !v5_toolpath_display_project_world_point(y_axis_world, &fit, 200.0, 100.0, &y_axis) ||
+        !v5_toolpath_display_project_world_point(z_axis_world, &fit, 200.0, 100.0, &z_axis) ||
+        fabs(hypot(y_axis.x - origin.x, y_axis.y - origin.y) -
+             hypot(z_axis.x - origin.x, z_axis.y - origin.y)) > 1.0e-9) {
+        return 15;
     }
 
     printf(

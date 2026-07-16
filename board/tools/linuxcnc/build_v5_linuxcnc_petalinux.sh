@@ -156,9 +156,10 @@ cleanup() {
     if mountpoint -q "$overlay_merged"; then
         umount "$overlay_merged" || true
     fi
-    if [ "$package_only" -eq 0 ]; then
-        case "$overlay_root" in "$build_root"/*) rm -rf "$overlay_root" ;; esac
-    fi
+    # The LinuxCNC writable view is disposable.  Keeping upper/work across
+    # invocations can shadow changed canonical source files with stale copy-up
+    # files (notably src/Makefile), producing a package from the wrong graph.
+    case "$overlay_root" in "$build_root"/*) rm -rf "$overlay_root" ;; esac
     case "$recipe_target" in
         "$petalinux_root"/project-spec/meta-user/recipes-apps/linuxcnc-prebuilt)
             rm -rf "$recipe_target"
@@ -244,6 +245,10 @@ if [ "$package_only" -eq 1 ]; then
         echo "package-only LinuxCNC build view is already mounted: $overlay_merged" >&2
         exit 12
     }
+    case "$overlay_root" in
+        "$build_root"/*) rm -rf "$overlay_root" ;;
+        *) echo "LinuxCNC overlay cleanup escaped V5_BUILD_ROOT: $overlay_root" >&2; exit 12 ;;
+    esac
     mkdir -p "$overlay_upper" "$overlay_work" "$overlay_merged"
     chown "$build_user:$build_group" "$overlay_root" "$overlay_upper" "$overlay_work" "$overlay_merged"
     mount -t overlay v5-linuxcnc-package-only \

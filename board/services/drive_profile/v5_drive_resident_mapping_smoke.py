@@ -8,7 +8,7 @@ import v5_drive_bus_context as context
 import v5_drive_bus_contract as contract
 import v5_drive_parameter_table as parameter_table
 import v5_drive_query as query
-import v5_drive_runtime_store as runtime_store
+import v5_active_model_descriptor as active_model
 import v5_drive_sdo as sdo
 from v5_drive_bus_contract import AXIS_ORDER
 
@@ -52,11 +52,19 @@ PROFILE = {
     },
 }
 AC_SECTIONS = {
-    "RTCP": {"MODEL": "XYZAC_TRT", "KINS_COORDINATES": "XYZAC"},
+    "RTCP": {
+        "MODEL": "XYZAC_TRT",
+        "KINS_MODULE": "xyzac-trt-kins",
+        "KINS_COORDINATES": "XYZAC",
+    },
     "TRAJ": {"COORDINATES": "X Y Z A C"},
 }
 BC_SECTIONS = {
-    "RTCP": {"MODEL": "XYZBC_TRT", "KINS_COORDINATES": "XYZBC"},
+    "RTCP": {
+        "MODEL": "XYZBC_TRT",
+        "KINS_MODULE": "xyzbc-trt-kins",
+        "KINS_COORDINATES": "XYZBC",
+    },
     "TRAJ": {"COORDINATES": "X Y Z B C"},
 }
 
@@ -97,18 +105,17 @@ def full_scan_and_candidate_smoke() -> None:
             }
 
         sdo.run_command = fake_run_command
-        scan = sdo.run_ethercat_slaves(1.0)
-        if calls != [["ethercat", "slaves"]] or not scan.get("ok"):
-            raise AssertionError((calls, scan))
-        if [str(item.get("position")) for item in scan.get("slaves", [])] != ["4", "1", "6", "0", "5", "3", "2"]:
-            raise AssertionError(scan)
         parameter_table.read_parameter_tsv = lambda _path: list(existing_rows)
         parameter_table.write_parameter_tsv = lambda _path, rows: written_rows.extend(rows)
-        parameter_table.write_scan_self_parameter_table(scan)
+        result = action.run_action("scan", timeout_s=1.0, write_result_file=False)
     finally:
         sdo.run_command = original_run_command
         parameter_table.read_parameter_tsv = original_read_table
         parameter_table.write_parameter_tsv = original_write_table
+    if calls != [["ethercat", "slaves"]] or not result.get("ok"):
+        raise AssertionError((calls, result))
+    if [str(item.get("position")) for item in result.get("slaves", [])] != ["4", "1", "6", "0", "5", "3", "2"]:
+        raise AssertionError(result)
     persisted = [row for row in written_rows if row[:2] != ("SETTINGS", "slave_options")]
     if persisted != existing_rows[:-1]:
         raise AssertionError((persisted, existing_rows))
@@ -137,7 +144,7 @@ def set_query_inputs(bindings: Dict[str, str], runtime: Dict[str, Any] = RUNTIME
 
 def expect_active_model_error(sections: Dict[str, Dict[str, str]], expected_code: str) -> None:
     try:
-        runtime_store.active_model_axes_from_sections(sections)
+        active_model.active_model_axes_from_sections(sections)
     except contract.DriveActionError as exc:
         if exc.code != expected_code:
             raise AssertionError((expected_code, exc.code, exc.detail))
@@ -204,35 +211,58 @@ def expect_precheck_failure(
 
 def main() -> int:
     full_scan_and_candidate_smoke()
-    if runtime_store.active_model_axes_from_sections(AC_SECTIONS) != tuple("XYZAC"):
+    if active_model.active_model_axes_from_sections(AC_SECTIONS) != tuple("XYZAC"):
         raise AssertionError(AC_SECTIONS)
-    if runtime_store.active_model_axes_from_sections(BC_SECTIONS) != tuple("XYZBC"):
+    if active_model.active_model_axes_from_sections(BC_SECTIONS) != tuple("XYZBC"):
         raise AssertionError(BC_SECTIONS)
+    ac_descriptor = active_model.active_model_descriptor_from_sections(AC_SECTIONS)
+    bc_descriptor = active_model.active_model_descriptor_from_sections(BC_SECTIONS)
+    if (dict(zip(ac_descriptor["active_axes"], ac_descriptor["active_status_slots"])) !=
+            {"X": 0, "Y": 1, "Z": 2, "A": 3, "C": 4}):
+        raise AssertionError(ac_descriptor)
+    if (dict(zip(bc_descriptor["active_axes"], bc_descriptor["active_status_slots"])) !=
+            {"X": 0, "Y": 1, "Z": 2, "B": 3, "C": 4}):
+        raise AssertionError(bc_descriptor)
     unregistered_sections = {
-        "RTCP": {"MODEL": "TABLE_TRT_V3", "KINS_COORDINATES": "XYZABC"},
+        "RTCP": {
+            "MODEL": "TABLE_TRT_V3",
+            "KINS_MODULE": "table-trt-kins",
+            "KINS_COORDINATES": "XYZABC",
+        },
         "TRAJ": {"COORDINATES": "X Y Z A B C"},
     }
     expect_active_model_error(unregistered_sections, "ACTIVE_MODEL_UNSUPPORTED")
     expect_active_model_error(
-        {"RTCP": {"KINS_COORDINATES": "XYZAC"}, "TRAJ": {"COORDINATES": "X Y Z A C"}},
+        {"RTCP": {"KINS_MODULE": "xyzac-trt-kins", "KINS_COORDINATES": "XYZAC"},
+         "TRAJ": {"COORDINATES": "X Y Z A C"}},
         "ACTIVE_MODEL_MISSING",
     )
     expect_active_model_error(
         {"RTCP": {"MODEL": "XYZAC_TRT"}, "TRAJ": {"COORDINATES": "X Y Z A C"}},
+        "ACTIVE_MODEL_KINS_MODULE_MISSING",
+    )
+    expect_active_model_error(
+        {"RTCP": {"MODEL": "XYZAC_TRT", "KINS_MODULE": "xyzbc-trt-kins", "KINS_COORDINATES": "XYZAC"},
+         "TRAJ": {"COORDINATES": "X Y Z A C"}},
+        "ACTIVE_MODEL_KINS_MODULE_MISMATCH",
+    )
+    expect_active_model_error(
+        {"RTCP": {"MODEL": "XYZAC_TRT", "KINS_MODULE": "xyzac-trt-kins"},
+         "TRAJ": {"COORDINATES": "X Y Z A C"}},
         "ACTIVE_MODEL_COORDINATES_MISSING",
     )
     expect_active_model_error(
-        {"RTCP": {"MODEL": "XYZAC_TRT", "KINS_COORDINATES": "XYZAC"},
+        {"RTCP": {"MODEL": "XYZAC_TRT", "KINS_MODULE": "xyzac-trt-kins", "KINS_COORDINATES": "XYZAC"},
          "TRAJ": {"COORDINATES": "X Y Z A A C"}},
         "ACTIVE_MODEL_COORDINATES_DUPLICATE",
     )
     expect_active_model_error(
-        {"RTCP": {"MODEL": "XYZAC_TRT", "KINS_COORDINATES": "XYZBC"},
+        {"RTCP": {"MODEL": "XYZAC_TRT", "KINS_MODULE": "xyzac-trt-kins", "KINS_COORDINATES": "XYZBC"},
          "TRAJ": {"COORDINATES": "X Y Z A C"}},
         "ACTIVE_MODEL_COORDINATES_MISMATCH",
     )
     expect_active_model_error(
-        {"RTCP": {"MODEL": "XYZAC_TRT", "KINS_COORDINATES": "XYZBC"},
+        {"RTCP": {"MODEL": "XYZAC_TRT", "KINS_MODULE": "xyzac-trt-kins", "KINS_COORDINATES": "XYZBC"},
          "TRAJ": {"COORDINATES": "X Y Z B C"}},
         "ACTIVE_MODEL_DESCRIPTOR_MISMATCH",
     )
@@ -246,6 +276,11 @@ def main() -> int:
     if any(target.get("axis_slave_binding_source") != "resident_self_parameter_table" for target in targets):
         raise AssertionError(targets)
     if _scan.get("active_model_axes") != list("XYZAC"):
+        raise AssertionError(_scan)
+    if _scan.get("active_model_status_slots") != [
+            {"axis": "X", "status_slot": 0}, {"axis": "Y", "status_slot": 1},
+            {"axis": "Z", "status_slot": 2}, {"axis": "A", "status_slot": 3},
+            {"axis": "C", "status_slot": 4}]:
         raise AssertionError(_scan)
     if len(_scan.get("slaves", [])) != 7:
         raise AssertionError(_scan)
@@ -265,6 +300,25 @@ def main() -> int:
             ("4", "drive.set_egear"),
             ("3", "drive.set_egear")]:
         raise AssertionError((result, writes))
+
+    bc_bindings = complete_bindings(X="2", Y="1", Z="0", B="4", C="3")
+    set_query_inputs(bc_bindings, BC_RUNTIME, BC_SECTIONS)
+    bc_targets, _runtime, bc_scan = query.configured_drive_targets(1.0)
+    bc_positions = {str(target["axis"]): str(target["position"]) for target in bc_targets}
+    if bc_positions != {"X": "2", "Y": "1", "Z": "0", "B": "4", "C": "3"}:
+        raise AssertionError(bc_positions)
+    if any(target.get("axis") == "A" for target in bc_targets):
+        raise AssertionError(bc_targets)
+    if bc_scan.get("active_model") != "XYZBC_TRT":
+        raise AssertionError(bc_scan)
+    bc_result, bc_writes = run_set_drive_with(bc_targets)
+    if not bc_result.get("ok") or bc_writes != [
+            ("2", "drive.set_egear"),
+            ("1", "drive.set_egear"),
+            ("0", "drive.set_egear"),
+            ("4", "drive.set_egear"),
+            ("3", "drive.set_egear")]:
+        raise AssertionError((bc_result, bc_writes))
 
     context.resident_preload_active = True
     context.self_slave_binding_cache = swapped
@@ -290,7 +344,6 @@ def main() -> int:
     active_nat = dict(swapped)
     active_nat["C"] = "NAT"
     expect_precheck_failure(active_nat, "DRIVE_TARGET_PRECHECK_FAILED", "DRIVE_TARGET_ACTIVE_AXIS_NAT")
-    bc_bindings = complete_bindings(X="2", Y="1", Z="0", B="4", C="3")
     bc_inactive_bound = dict(bc_bindings)
     bc_inactive_bound["A"] = "6"
     expect_precheck_failure(
@@ -301,6 +354,13 @@ def main() -> int:
         sections=BC_SECTIONS,
     )
     expect_precheck_failure(complete_bindings(), "DRIVE_TARGET_PRECHECK_FAILED", "DRIVE_TARGET_ACTIVE_AXIS_NAT")
+    missing_physical = dict(swapped)
+    missing_physical["C"] = "99"
+    expect_precheck_failure(
+        missing_physical,
+        "DRIVE_TARGET_PRECHECK_FAILED",
+        "DRIVE_TARGET_SLAVE_NOT_FOUND",
+    )
     runtime_missing_z = {"axes": [item for item in RUNTIME["axes"] if item["axis"] != "Z"]}
     expect_precheck_failure(
         swapped,

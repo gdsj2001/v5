@@ -29,6 +29,10 @@ void v5_main_page_internal_update_coordinate_target_axes(V5MainPage *page)
     new_fourth = v5_main_page_internal_main_page_axis_display_char(page, 3U);
     for (i = 0U; i < V5_MAIN_PAGE_AXIS_COUNT; ++i) {
         char axis = v5_main_page_internal_main_page_axis_display_char(page, i);
+        if (page->axis_labels[i]) {
+            char text[2] = {axis, '\0'};
+            v5_main_page_internal_set_label_text_if_changed(page->axis_labels[i], text);
+        }
         page->mcs_targets[i].axis = axis;
         page->wcs_targets[i].axis = axis;
     }
@@ -85,7 +89,9 @@ int v5_main_page_internal_main_page_resolve_active_model_scene(
         return 0;
     }
     page->toolpath_model_scene_fresh = 0;
-    if (page->native_readback.g53_geometry_stale) {
+    if (page->native_readback.g53_geometry_stale &&
+        (!page->native_readback.motion_model_available ||
+         !page->native_readback.motion_model[0])) {
         return 0;
     }
     model = v5_main_page_internal_main_page_active_motion_model(page);
@@ -100,6 +106,9 @@ int v5_main_page_internal_main_page_resolve_active_model_scene(
     if (page->toolpath_model_scene_valid &&
         page->toolpath_model_scene.registry_id != model->registry_id) {
         v5_main_page_clear_active_model_scene(page);
+    }
+    if (page->native_readback.g53_geometry_stale) {
+        return 0;
     }
     if (!v5_main_page_model_scene_resolve(
             model,

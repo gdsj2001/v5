@@ -222,7 +222,8 @@ void v5_main_page_refresh_program_status(V5MainPage *page)
 {
     const V5ProgramRuntime *runtime;
 
-    if (!page) {
+    if (!page || !page->root ||
+        lv_obj_has_flag(page->root, LV_OBJ_FLAG_HIDDEN)) {
         return;
     }
     runtime = page->program_controller ? v5_program_controller_runtime(page->program_controller) : 0;
@@ -335,7 +336,107 @@ void v5_main_page_set_command_execution_enabled(V5MainPage *page, int enabled)
     page->command_execution_enabled = enabled ? 1 : 0;
 }
 
-void v5_main_page_set_native_readback(V5MainPage *page, const V5NativeReadback *readback)
+static int v5_main_page_native_model_equal(
+    const V5NativeReadback *left,
+    const V5NativeReadback *right)
+{
+    return left->motion_model_available == right->motion_model_available &&
+        strcmp(left->motion_model, right->motion_model) == 0 &&
+        left->g53_geometry_available == right->g53_geometry_available &&
+        left->g53_geometry_stale == right->g53_geometry_stale &&
+        left->g53_geometry_epoch == right->g53_geometry_epoch &&
+        memcmp(left->g53_centers, right->g53_centers, sizeof(left->g53_centers)) == 0;
+}
+
+static int v5_main_page_native_wcs_equal(
+    const V5NativeReadback *left,
+    const V5NativeReadback *right)
+{
+    return left->wcs_actual_available == right->wcs_actual_available &&
+        left->wcs_index == right->wcs_index &&
+        left->wcs_offset_available == right->wcs_offset_available &&
+        left->wcs_table_available == right->wcs_table_available &&
+        left->wcs_offsets_epoch == right->wcs_offsets_epoch &&
+        memcmp(left->wcs_offsets, right->wcs_offsets, sizeof(left->wcs_offsets)) == 0;
+}
+
+static int v5_main_page_native_program_equal(
+    const V5NativeReadback *left,
+    const V5NativeReadback *right)
+{
+    return left->interpreter_state_available == right->interpreter_state_available &&
+        left->interpreter_paused == right->interpreter_paused &&
+        left->interpreter_idle_available == right->interpreter_idle_available &&
+        left->interpreter_idle == right->interpreter_idle &&
+        left->current_line_available == right->current_line_available &&
+        left->current_line == right->current_line &&
+        left->motion_line_available == right->motion_line_available &&
+        left->motion_line == right->motion_line &&
+        left->mdi_run_available == right->mdi_run_available &&
+        left->mdi_run_active == right->mdi_run_active &&
+        left->mdi_run_line == right->mdi_run_line &&
+        strcmp(left->mdi_run_command, right->mdi_run_command) == 0;
+}
+
+static int v5_main_page_native_safety_equal(
+    const V5NativeReadback *left,
+    const V5NativeReadback *right)
+{
+    return left->homed_available == right->homed_available &&
+        left->all_homed == right->all_homed &&
+        left->safety_estop_available == right->safety_estop_available &&
+        left->safety_estop_active == right->safety_estop_active &&
+        left->machine_enable_available == right->machine_enable_available &&
+        left->machine_enabled == right->machine_enabled;
+}
+
+static int v5_main_page_native_modal_equal(
+    const V5NativeReadback *left,
+    const V5NativeReadback *right)
+{
+    return left->rtcp_actual_available == right->rtcp_actual_available &&
+        left->rtcp_enabled == right->rtcp_enabled &&
+        left->modal_actual_available == right->modal_actual_available &&
+        strcmp(left->modal_text, right->modal_text) == 0 &&
+        left->tool_actual_available == right->tool_actual_available &&
+        left->tool_number == right->tool_number &&
+        left->tool_length_available == right->tool_length_available &&
+        left->tool_length_mm == right->tool_length_mm;
+}
+
+unsigned int v5_main_page_native_readback_change_flags(
+    const V5NativeReadback *before,
+    const V5NativeReadback *after)
+{
+    unsigned int flags = 0U;
+    if (!before || !after) {
+        return V5_MAIN_PAGE_NATIVE_READBACK_ALL;
+    }
+    if (!v5_main_page_native_model_equal(before, after)) {
+        flags |= V5_MAIN_PAGE_NATIVE_READBACK_MODEL;
+    }
+    if (!v5_main_page_native_wcs_equal(before, after)) {
+        flags |= V5_MAIN_PAGE_NATIVE_READBACK_WCS;
+    }
+    if (!v5_main_page_native_program_equal(before, after)) {
+        flags |= V5_MAIN_PAGE_NATIVE_READBACK_PROGRAM;
+    }
+    if (!v5_main_page_native_safety_equal(before, after)) {
+        flags |= V5_MAIN_PAGE_NATIVE_READBACK_SAFETY;
+    }
+    if (!v5_main_page_native_modal_equal(before, after)) {
+        flags |= V5_MAIN_PAGE_NATIVE_READBACK_MODAL;
+    }
+    if (strcmp(before->unavailable_reason, after->unavailable_reason) != 0) {
+        flags = V5_MAIN_PAGE_NATIVE_READBACK_ALL;
+    }
+    return flags;
+}
+
+void v5_main_page_set_native_readback_flags(
+    V5MainPage *page,
+    const V5NativeReadback *readback,
+    unsigned int change_flags)
 {
     unsigned int previous_model_id;
     int previous_model_valid;
@@ -351,31 +452,64 @@ void v5_main_page_set_native_readback(V5MainPage *page, const V5NativeReadback *
     } else {
         v5_native_readback_set_unavailable(&page->native_readback, "native_readback_unavailable");
     }
-    v5_main_page_internal_main_page_resolve_active_model_scene(
-        page,
-        page->last_status_valid ? &page->last_status : 0);
-    if ((previous_model_valid &&
-         (!page->toolpath_model_scene_valid ||
-          page->toolpath_model_scene.registry_id != previous_model_id)) ||
-        (!previous_model_valid && !page->toolpath_model_scene_valid)) {
-        v5_main_page_internal_hide_toolpath_program_line(page);
-        page->toolpath_program_model_scene_valid = 0;
-        memset(
-            &page->toolpath_program_model_scene,
-            0,
-            sizeof(page->toolpath_program_model_scene));
+    if (!page->root || lv_obj_has_flag(page->root, LV_OBJ_FLAG_HIDDEN)) {
+        return;
     }
-    v5_main_page_internal_update_coordinate_target_axes(page);
-    v5_main_page_internal_update_coordinate_selection_style(page);
-    v5_main_page_internal_update_estop_button_text(page);
-    v5_main_page_internal_update_main_page_state_button_visuals(page);
-    v5_main_page_internal_update_main_page_wcs_header(page);
-    v5_main_page_internal_update_main_page_modal_label(page);
-    v5_main_page_internal_update_toolpath_status_text(page);
-    v5_main_page_refresh_program_status(page);
-    if (page->last_status_valid) {
+    if ((change_flags & V5_MAIN_PAGE_NATIVE_READBACK_MODEL) != 0U) {
+        v5_main_page_internal_main_page_resolve_active_model_scene(
+            page,
+            page->last_status_valid ? &page->last_status : 0);
+        if ((previous_model_valid &&
+             (!page->toolpath_model_scene_valid ||
+              page->toolpath_model_scene.registry_id != previous_model_id)) ||
+            (!previous_model_valid && !page->toolpath_model_scene_valid)) {
+            v5_main_page_internal_hide_toolpath_program_line(page);
+            page->toolpath_program_model_scene_valid = 0;
+            memset(
+                &page->toolpath_program_model_scene,
+                0,
+                sizeof(page->toolpath_program_model_scene));
+        }
+        v5_main_page_internal_update_coordinate_target_axes(page);
+        v5_main_page_internal_update_coordinate_selection_style(page);
+    }
+    if ((change_flags & V5_MAIN_PAGE_NATIVE_READBACK_SAFETY) != 0U) {
+        v5_main_page_internal_update_estop_button_text(page);
+    }
+    if ((change_flags & (V5_MAIN_PAGE_NATIVE_READBACK_MODEL |
+                         V5_MAIN_PAGE_NATIVE_READBACK_WCS |
+                         V5_MAIN_PAGE_NATIVE_READBACK_SAFETY |
+                         V5_MAIN_PAGE_NATIVE_READBACK_MODAL)) != 0U) {
+        v5_main_page_internal_update_main_page_state_button_visuals(page);
+    }
+    if ((change_flags & V5_MAIN_PAGE_NATIVE_READBACK_WCS) != 0U) {
+        v5_main_page_internal_update_main_page_wcs_header(page);
+    }
+    if ((change_flags & V5_MAIN_PAGE_NATIVE_READBACK_MODAL) != 0U) {
+        v5_main_page_internal_update_main_page_modal_label(page);
+    }
+    if ((change_flags & (V5_MAIN_PAGE_NATIVE_READBACK_MODEL |
+                         V5_MAIN_PAGE_NATIVE_READBACK_WCS |
+                         V5_MAIN_PAGE_NATIVE_READBACK_MODAL)) != 0U) {
+        v5_main_page_internal_update_toolpath_status_text(page);
+    }
+    if ((change_flags & V5_MAIN_PAGE_NATIVE_READBACK_PROGRAM) != 0U) {
+        v5_main_page_refresh_program_status(page);
+    }
+    if (page->last_status_valid &&
+        (change_flags & (V5_MAIN_PAGE_NATIVE_READBACK_MODEL |
+                         V5_MAIN_PAGE_NATIVE_READBACK_WCS |
+                         V5_MAIN_PAGE_NATIVE_READBACK_MODAL)) != 0U) {
         v5_main_page_internal_update_toolpath_state_lines(page, &page->last_status);
     }
+}
+
+void v5_main_page_set_native_readback(V5MainPage *page, const V5NativeReadback *readback)
+{
+    v5_main_page_set_native_readback_flags(
+        page,
+        readback,
+        V5_MAIN_PAGE_NATIVE_READBACK_ALL);
 }
 
 void v5_main_page_store_native_readback_during_modal(

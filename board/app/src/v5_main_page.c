@@ -305,20 +305,17 @@ const V5MotionModelDescriptor *v5_main_page_internal_main_page_active_motion_mod
 char v5_main_page_internal_main_page_axis_display_char(const V5MainPage *page, unsigned int axis_index)
 {
     static const char linear_axes[3] = {'X', 'Y', 'Z'};
+    const V5MotionModelDescriptor *model;
+    char axis = '\0';
     if (axis_index >= V5_MAIN_PAGE_AXIS_COUNT) {
         return '-';
     }
     if (axis_index < 3U) {
         return linear_axes[axis_index];
     }
-    if (!page || !page->toolpath_model_scene_valid) {
+    model = v5_main_page_internal_main_page_active_motion_model(page);
+    if (!model || !v5_motion_model_axis_for_status_slot(model, axis_index, &axis)) {
         return '-';
     }
-    if (axis_index == page->toolpath_model_scene.primary_status_slot) {
-        return page->toolpath_model_scene.primary_axis;
-    }
-    if (axis_index == page->toolpath_model_scene.child_status_slot) {
-        return page->toolpath_model_scene.child_axis;
-    }
-    return '-';
+    return axis;
 }

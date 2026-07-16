@@ -32,7 +32,7 @@ def make_block(makefile, name):
     return "\n".join(rows)
 
 
-def c_registry_axes(text):
+def c_registry_descriptors(text):
     marker = "static const V5MotionModelDescriptor v5_motion_model_registry[] ="
     begin = text.find(marker)
     if begin < 0:
@@ -57,25 +57,90 @@ def c_registry_axes(text):
             depth -= 1
         index += 1
 
-    models = {}
-    axes_pattern = re.compile(
-        r"(\d+)U,\s*\n\s*\{((?:\s*'[A-Z]'\s*,?)+)\},\s*\n\s*\{"
+    id_values = {
+        name: int(value)
+        for name, value in re.findall(
+            r"^#define\s+(V5_MOTION_MODEL_ID_[A-Z0-9_]+)\s+(\d+)U\s*$",
+            text,
+            re.MULTILINE,
+        )
+    }
+    descriptor_pattern = re.compile(
+        r'''^\{\s*
+        (?P<registry_id>V5_MOTION_MODEL_ID_[A-Z0-9_]+|\d+U)\s*,\s*
+        "(?P<canonical>[^"]+)"\s*,\s*"(?P<display>[^"]+)"\s*,\s*
+        \{(?P<aliases>[^}]*)\}\s*,\s*
+        "(?P<kins_module>[^"]+)"\s*,\s*
+        "(?P<kins_coordinates>[^"]+)"\s*,\s*
+        "(?P<traj_coordinates>[^"]+)"\s*,\s*
+        (?P<wrapped_rotary_mask>\d+)U\s*,\s*
+        '(?P<first_rotary_axis>[A-Z])'\s*,\s*'(?P<second_rotary_axis>[A-Z])'\s*,\s*
+        (?P<first_status_slot>\d+)U\s*,\s*(?P<second_status_slot>\d+)U\s*,\s*
+        (?P<first_g53_center>\d+)U\s*,\s*(?P<second_g53_center>\d+)U\s*,\s*
+        (?P<first_center_wcs_component>\d+)U\s*,\s*(?P<second_center_wcs_component>\d+)U\s*,\s*
+        (?P<active_axis_count>\d+)U\s*,\s*
+        \{(?P<active_axes>[^}]*)\}\s*,\s*
+        \{(?P<active_status_slots>[^}]*)\}\s*,?\s*\}$''',
+        re.DOTALL | re.VERBOSE,
     )
+    models = {}
     for entry in entries:
-        strings = re.findall(r'"([^"\\]*(?:\\.[^"\\]*)*)"', entry)
-        axes_match = axes_pattern.search(entry)
-        if not strings or not axes_match:
+        match = descriptor_pattern.fullmatch(entry.strip())
+        if not match:
             raise SystemExit("cannot parse C active-model descriptor")
-        canonical = strings[0]
-        active_count = int(axes_match.group(1))
-        axes = "".join(re.findall(r"'([A-Z])'", axes_match.group(2)))
-        if len(axes) != active_count or canonical in models:
-            raise SystemExit(f"invalid C active-model axes: {canonical}={axes}")
-        models[canonical] = axes
+        raw_id = match.group("registry_id")
+        registry_id = id_values.get(raw_id) if not raw_id.endswith("U") else int(raw_id[:-1])
+        canonical = match.group("canonical")
+        active_axes = tuple(re.findall(r"'([A-Z])'", match.group("active_axes")))
+        active_status_slots = tuple(
+            int(value) for value in re.findall(r"(\d+)U", match.group("active_status_slots")))
+        active_count = int(match.group("active_axis_count"))
+        if (registry_id is None or canonical in models or
+                len(active_axes) != active_count or len(active_status_slots) != active_count):
+            raise SystemExit(f"invalid C active-model descriptor: {canonical}")
+        models[canonical] = {
+            "registry_id": registry_id,
+            "display": match.group("display"),
+            "aliases": tuple(re.findall(r'"([^"]+)"', match.group("aliases"))),
+            "kins_module": match.group("kins_module"),
+            "kins_coordinates": match.group("kins_coordinates"),
+            "traj_coordinates": match.group("traj_coordinates"),
+            "wrapped_rotary_mask": int(match.group("wrapped_rotary_mask")),
+            "first_rotary_axis": match.group("first_rotary_axis"),
+            "second_rotary_axis": match.group("second_rotary_axis"),
+            "first_status_slot": int(match.group("first_status_slot")),
+            "second_status_slot": int(match.group("second_status_slot")),
+            "first_g53_center": int(match.group("first_g53_center")),
+            "second_g53_center": int(match.group("second_g53_center")),
+            "first_center_wcs_component": int(match.group("first_center_wcs_component")),
+            "second_center_wcs_component": int(match.group("second_center_wcs_component")),
+            "active_axes": active_axes,
+            "active_status_slots": active_status_slots,
+        }
     return models
 
 
-def python_runtime_axes(text):
+def _python_descriptor_literal(node):
+    if isinstance(node, ast.Constant):
+        return node.value
+    if isinstance(node, ast.Tuple):
+        return tuple(_python_descriptor_literal(item) for item in node.elts)
+    if isinstance(node, ast.List):
+        return [_python_descriptor_literal(item) for item in node.elts]
+    if isinstance(node, ast.Dict):
+        return {
+            _python_descriptor_literal(key): _python_descriptor_literal(value)
+            for key, value in zip(node.keys, node.values)
+        }
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and
+            node.func.id == "tuple" and len(node.args) == 1 and not node.keywords):
+        value = _python_descriptor_literal(node.args[0])
+        if isinstance(value, str):
+            return tuple(value)
+    raise SystemExit("runtime active-model descriptor must be a literal projection")
+
+
+def python_runtime_descriptors(text):
     tree = ast.parse(text)
     mapping = None
     for node in tree.body:
@@ -83,40 +148,25 @@ def python_runtime_axes(text):
             continue
         if not any(
             isinstance(target, ast.Name)
-            and target.id == "ACTIVE_MODEL_AXES_BY_CANONICAL"
+            and target.id == "ACTIVE_MODEL_REGISTRY_PROJECTION_BY_CANONICAL"
             for target in node.targets
         ):
             continue
-        if not isinstance(node.value, ast.Dict):
-            raise SystemExit("runtime active-model axes owner must be a dict")
-        mapping = {}
-        for key_node, value_node in zip(node.value.keys, node.value.values):
-            if not isinstance(key_node, ast.Constant) or not isinstance(key_node.value, str):
-                raise SystemExit("runtime active-model key must be a string")
-            if not (
-                isinstance(value_node, ast.Call)
-                and isinstance(value_node.func, ast.Name)
-                and value_node.func.id == "tuple"
-                and len(value_node.args) == 1
-                and isinstance(value_node.args[0], ast.Constant)
-                and isinstance(value_node.args[0].value, str)
-                and not value_node.keywords
-            ):
-                raise SystemExit(
-                    f"runtime active-model axes must use tuple(string): {key_node.value}"
-                )
-            mapping[key_node.value] = value_node.args[0].value
+        mapping = _python_descriptor_literal(node.value)
         break
     if mapping is None:
-        raise SystemExit("missing runtime ACTIVE_MODEL_AXES_BY_CANONICAL")
+        raise SystemExit("missing runtime ACTIVE_MODEL_REGISTRY_PROJECTION_BY_CANONICAL")
+    if not isinstance(mapping, dict) or not mapping:
+        raise SystemExit("runtime active-model descriptor projection must be a non-empty dict")
     return mapping
 
 
 def main():
     makefile = read("linuxcnc/src/Makefile")
     registry = read("board/services/command_gate/v5_motion_model_registry.h")
-    runtime_store = read("board/services/drive_profile/v5_drive_runtime_store.py")
+    runtime_descriptor = read("board/services/drive_profile/v5_active_model_descriptor.py")
     common = read("linuxcnc/src/emc/kinematics/trtfuncs.c")
+    switchkins = read("linuxcnc/src/emc/kinematics/switchkins.c")
     ac_wrapper = read("linuxcnc/src/emc/kinematics/xyzac-trt-kins.c")
     ac_branch = read("linuxcnc/src/emc/kinematics/xyzac-trt-funcs.c")
     bc_wrapper = read("linuxcnc/src/emc/kinematics/xyzbc-trt-kins.c")
@@ -136,15 +186,12 @@ def main():
     require(bc_objects, "xyzbc-trt-funcs.o", "linuxcnc/src/Makefile:xyzbc")
     forbid(bc_objects, "xyzac-trt-funcs.o", "linuxcnc/src/Makefile:xyzbc")
 
-    expected_axes = {"XYZAC_TRT": "XYZAC", "XYZBC_TRT": "XYZBC"}
-    registry_axes = c_registry_axes(registry)
-    runtime_axes = python_runtime_axes(runtime_store)
-    if registry_axes != expected_axes:
-        raise SystemExit(f"unexpected C active-model registry axes: {registry_axes!r}")
-    if runtime_axes != registry_axes:
+    registry_descriptors = c_registry_descriptors(registry)
+    runtime_descriptors = python_runtime_descriptors(runtime_descriptor)
+    if runtime_descriptors != registry_descriptors:
         raise SystemExit(
-            "runtime/C active-model axes registry mismatch: "
-            f"runtime={runtime_axes!r} C={registry_axes!r}"
+            "runtime/C active-model descriptor registry mismatch: "
+            f"runtime={runtime_descriptors!r} C={registry_descriptors!r}"
         )
 
     for token in ("xyzacKinematicsForward", "xyzacKinematicsInverse",
@@ -155,6 +202,17 @@ def main():
         "strcmp(coordinates, kp->required_coordinates) != 0",
         "linuxcnc/src/emc/kinematics/trtfuncs.c",
     )
+    require(common, "static TrtKinematicsContext *trt_context;", "TRT HAL context")
+    require(common, "trt_context = hal_malloc(sizeof(*trt_context));", "TRT HAL context")
+    require(common, "&(trt_context->x_rot_point)", "TRT HAL context")
+    require(common, "&(trt_context->tool_offset)", "TRT HAL context")
+    forbid(common, "static TrtKinematicsContext trt_context", "TRT HAL context")
+    for setup_index in range(3):
+        require(
+            switchkins,
+            f"if (ksetup{setup_index}(comp_id,coordinates,&kp))",
+            f"switchkins setup type {setup_index}",
+        )
     for token in ("TO_RAD", "cos(", "sin("):
         forbid(common, token, "linuxcnc/src/emc/kinematics/trtfuncs.c")
     require(ac_wrapper, 'kp->required_coordinates = "XYZAC"', "xyzac wrapper")
@@ -209,7 +267,7 @@ def main():
 
     print(
         "V5_ACTIVE_MODEL_BRANCHES_OK "
-        "kinematics=2 native_g53=2 ui=2 runtime_axes=2"
+        f"kinematics=2 native_g53=2 ui=2 runtime_descriptors={len(runtime_descriptors)}"
     )
 
 

@@ -197,18 +197,46 @@ int v5_settings_parameter_store_write_axis_pair(
     const char *first_value,
     const char *second_value)
 {
+    V5SettingsParameterAxisValue values[2];
+    values[0].axis = first_axis;
+    values[0].value = first_value;
+    values[1].axis = second_axis;
+    values[1].value = second_value;
+    return v5_settings_parameter_store_write_axis_values(
+        project_root, table, field_key, values, 2U);
+}
+
+int v5_settings_parameter_store_write_axis_values(
+    const char *project_root,
+    V5SettingsParameterDiskTable table,
+    const char *field_key,
+    const V5SettingsParameterAxisValue *values,
+    size_t value_count)
+{
     char dir[V5_STORE_PATH_CAP];
     char parent[V5_STORE_PATH_CAP];
     char path[V5_STORE_PATH_CAP];
     V5StoreRow rows[V5_STORE_MAX_ROWS];
+    unsigned char updated[V5_STORE_MAX_ROWS];
     size_t count = 0U;
     size_t i;
-    int first_updated = 0;
-    int second_updated = 0;
-    if (!first_axis || !first_axis[0] || !second_axis || !second_axis[0] ||
-        strcmp(first_axis, second_axis) == 0 || !field_key || !field_key[0] ||
-        !first_value || !first_value[0] || !second_value || !second_value[0]) {
+    size_t value_i;
+    if (!field_key || !field_key[0] || !values || value_count == 0U ||
+        value_count > V5_STORE_MAX_ROWS) {
         return 0;
+    }
+    memset(updated, 0, sizeof(updated));
+    for (value_i = 0U; value_i < value_count; ++value_i) {
+        size_t other_i;
+        if (!values[value_i].axis || !values[value_i].axis[0] ||
+            !values[value_i].value || !values[value_i].value[0]) {
+            return 0;
+        }
+        for (other_i = 0U; other_i < value_i; ++other_i) {
+            if (strcmp(values[value_i].axis, values[other_i].axis) == 0) {
+                return 0;
+            }
+        }
     }
     if (!build_paths(project_root, table, dir, sizeof(dir), path, sizeof(path))) {
         return 0;
@@ -218,16 +246,25 @@ int v5_settings_parameter_store_write_axis_pair(
         return 0;
     }
     for (i = 0U; i < count; ++i) {
+        size_t match_count = 0U;
         if (strcmp(rows[i].field, field_key) != 0) {
             continue;
         }
-        if (strcmp(rows[i].axis, first_axis) == 0) {
-            snprintf(rows[i].value, sizeof(rows[i].value), "%s", first_value);
-            first_updated = 1;
-        } else if (strcmp(rows[i].axis, second_axis) == 0) {
-            snprintf(rows[i].value, sizeof(rows[i].value), "%s", second_value);
-            second_updated = 1;
+        for (value_i = 0U; value_i < value_count; ++value_i) {
+            if (strcmp(rows[i].axis, values[value_i].axis) == 0) {
+                snprintf(rows[i].value, sizeof(rows[i].value), "%s", values[value_i].value);
+                ++updated[value_i];
+                ++match_count;
+            }
+        }
+        if (match_count > 1U) {
+            return 0;
         }
     }
-    return first_updated && second_updated && save_rows(path, rows, count);
+    for (value_i = 0U; value_i < value_count; ++value_i) {
+        if (updated[value_i] != 1U) {
+            return 0;
+        }
+    }
+    return save_rows(path, rows, count);
 }

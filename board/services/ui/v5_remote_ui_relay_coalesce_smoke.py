@@ -116,11 +116,6 @@ def check_refresh_commit_boundary() -> int:
     if axis_line_body.count("lv_line_set_points(line, points, 2);") != 1:
         print("visible dynamic toolpath line still uses whole-object invalidation")
         return 30
-    hide_ac_start = toolpath_source.index("void v5_main_page_internal_hide_toolpath_ac_geometry")
-    hide_ac_end = toolpath_source.index("void v5_main_page_internal_hide_toolpath_program_wcs_objects", hide_ac_start)
-    if "toolpath_holder_line" in toolpath_source[hide_ac_start:hide_ac_end]:
-        print("AC geometry refresh still hides and re-shows the holder line")
-        return 37
     hide_unproven_start = toolpath_geometry_source.index("void v5_main_page_internal_hide_toolpath_unproven_geometry")
     hide_unproven_end = toolpath_geometry_source.index("void v5_main_page_internal_update_toolpath_state_lines", hide_unproven_start)
     if "v5_main_page_internal_hide_toolpath_line(page->toolpath_holder_line);" not in toolpath_geometry_source[hide_unproven_start:hide_unproven_end]:
@@ -139,8 +134,17 @@ def check_refresh_commit_boundary() -> int:
     dirty_start = state_source.index("    def dirty_payload(")
     dirty_end = state_source.index("    def publish_dirty(", dirty_start)
     dirty_body = state_source[dirty_start:dirty_end]
-    required_dirty_snapshot = ["payload = bytearray(total_bytes)", "flock(fd, LOCK_SH)", "return bytes(payload), rects"]
-    if any(token not in dirty_body for token in required_dirty_snapshot) or "memoryview(mapped)" in dirty_body:
+    required_dirty_snapshot = [
+        "payload_parts: list[memoryview] = []",
+        "flock(fd, LOCK_SH)",
+        "memoryview(mapped[start:end])",
+        "memoryview(mapped[src_start:src_end])",
+        "return PayloadViews(payload_parts, total_bytes), rects",
+    ]
+    retired_dirty_copy = ["payload = bytearray(total_bytes)", "return bytes(payload), rects", "memoryview(mapped)"]
+    if any(token not in dirty_body for token in required_dirty_snapshot) or any(
+        token in dirty_body for token in retired_dirty_copy
+    ):
         print("dirty payload is not an owned framebuffer snapshot")
         return 32
     mirror_tokens = [
@@ -272,6 +276,17 @@ def check_dirty_payload_is_owned_snapshot(root: Path) -> int:
         print("dirty payload snapshot missing")
         return 35
     payload, _ = prepared
+    parts = getattr(payload, "parts", ())
+    if not parts or not isinstance(parts, tuple) or any(not part.readonly for part in parts):
+        print("dirty payload is not an immutable owned scatter snapshot")
+        return 53
+    try:
+        payload.parts = ()
+    except AttributeError:
+        pass
+    else:
+        print("dirty payload scatter container is still mutable")
+        return 57
     captured = payload_bytes(payload)
     replacement = bytes((31, 37, 41, 255)) * (state.width * state.height)
     writer_fd = os.open(state.framebuffer_path, os.O_RDWR)
@@ -296,6 +311,7 @@ class ProducerTestState:
         self.events: list[dict] = []
         self.metrics: dict[str, int] = {}
         self.build_count = 0
+        self.last_payload = None
 
     def mark_metric(self, name: str, delta: int = 1) -> None:
         self.metrics[name] = self.metrics.get(name, 0) + int(delta)
@@ -339,6 +355,8 @@ class ProducerTestState:
         return last_sent_at
 
     def dirty_payload(self, batch: dict):
+        from v5_remote_ui_contract import PayloadViews
+
         self.build_count += 1
         rects = [
             {
@@ -351,7 +369,9 @@ class ProducerTestState:
             for rect in batch["rects"]
         ]
         payload_size = sum(rect["w"] * rect["h"] * 4 for rect in rects)
-        return bytes([int(batch["frame_id"]) & 0xFF]) * payload_size, rects
+        payload = bytes([int(batch["frame_id"]) & 0xFF]) * payload_size
+        self.last_payload = PayloadViews([memoryview(payload)], payload_size)
+        return self.last_payload, rects
 
 
 def check_global_producer_source_contract() -> int:
@@ -365,7 +385,10 @@ def check_global_producer_source_contract() -> int:
         "self.server.payload_producer.subscribe(frame_id)",
         "self.server.payload_producer.wait_after(last_sent",
         "self.server.payload_producer.unsubscribe()",
-        "deque(maxlen=max(1, int(history_limit)))",
+        "SHARED_DIRTY_FRAME_HISTORY_LIMIT",
+        "SHARED_DIRTY_PAYLOAD_HISTORY_BYTES",
+        "self.history_limit = max(1, int(history_limit))",
+        "self.history_payload_bytes > self.history_byte_budget",
     ]
     if any(token not in relay_source + producer_source for token in required):
         print("global dirty payload producer contract is incomplete")
@@ -374,7 +397,13 @@ def check_global_producer_source_contract() -> int:
     if any(token in producer_source for token in unsupported_thread_id_tokens):
         print("global producer still depends on a Python 3.8 thread-id API")
         return 52
-    retired = ["SharedDirtyPayloadCache", "payload_cache", "self.state.wait_dirty_batch_after(last_sent"]
+    retired = [
+        "SharedDirtyPayloadCache",
+        "payload_cache",
+        "self.state.wait_dirty_batch_after(last_sent",
+        "payload=bytes(payload)",
+        "DIRTY_EVENT_HISTORY_LIMIT, STREAM_COALESCE_SECONDS",
+    ]
     if any(token in relay_source + producer_source for token in retired):
         print("retired per-client dirty payload path is still present")
         return 43
@@ -397,7 +426,14 @@ def check_skewed_stream_clients_share_prepared_history() -> int:
         if first is None or second is None or first.frame is None or first.frame is not second.frame:
             print("skewed clients did not share one immutable prepared frame", first, second)
             return 44
-        if state.build_count != 1 or not isinstance(first.frame.meta_bytes, bytes) or not isinstance(first.frame.payload, bytes):
+        parts = getattr(first.frame.payload, "parts", ())
+        if (
+            state.build_count != 1
+            or not isinstance(first.frame.meta_bytes, bytes)
+            or first.frame.payload is not state.last_payload
+            or not isinstance(parts, tuple)
+            or any(not part.readonly for part in parts)
+        ):
             print("global producer rebuilt or exposed mutable payload", state.build_count, first)
             return 45
     finally:
@@ -474,12 +510,76 @@ def check_missing_history_requests_full_repair() -> int:
     return 0
 
 
+def check_frame_and_byte_budgets_request_repairs() -> int:
+    import v5_remote_ui_shared_payload as shared
+    from v5_remote_ui_contract import STREAM_COALESCE_SECONDS, STREAM_TARGET_FPS
+
+    if abs(STREAM_COALESCE_SECONDS - (1.0 / STREAM_TARGET_FPS)) > 1e-12 or STREAM_TARGET_FPS != 30:
+        print("shared payload history changed the 30 Hz stream cadence")
+        return 54
+
+    def advance(producer, state, start: int, count: int) -> None:
+        for frame_id in range(start + 1, start + count + 1):
+            state.publish_dirty(
+                {"frame_id": frame_id, "base_frame_id": frame_id - 1, "x": 0, "y": 0, "w": 1, "h": 1}
+            )
+            delivery = producer.wait_after(frame_id - 1, 1.0)
+            if delivery is None or delivery.frame is None:
+                raise RuntimeError(f"producer did not advance to frame {frame_id}")
+
+    frame_state = ProducerTestState()
+    frame_producer = shared.SharedDirtyPayloadProducer(
+        frame_state,
+        history_limit=2,
+        history_byte_budget=1024,
+        coalesce_seconds=0.001,
+        poll_seconds=0.01,
+    )
+    frame_producer.start()
+    frame_producer.subscribe(1)
+    try:
+        advance(frame_producer, frame_state, 1, 3)
+        if len(frame_producer.history) != 2 or frame_producer.wait_after(1, 0.05).needs_full is not True:
+            print("frame-bounded history did not force slow-client full repair")
+            return 55
+    finally:
+        frame_producer.unsubscribe()
+        frame_producer.stop()
+
+    byte_state = ProducerTestState()
+    byte_producer = shared.SharedDirtyPayloadProducer(
+        byte_state,
+        history_limit=8,
+        history_byte_budget=8,
+        coalesce_seconds=0.001,
+        poll_seconds=0.01,
+    )
+    byte_producer.start()
+    byte_producer.subscribe(1)
+    try:
+        advance(byte_producer, byte_state, 1, 3)
+        repaired = byte_producer.wait_after(1, 0.05)
+        if (
+            len(byte_producer.history) != 2
+            or byte_producer.history_payload_bytes != 8
+            or repaired is None
+            or not repaired.needs_full
+        ):
+            print("byte-bounded history did not force slow-client full repair")
+            return 56
+    finally:
+        byte_producer.unsubscribe()
+        byte_producer.stop()
+    return 0
+
+
 def check_shared_payload_producer() -> int:
     for check in (
         check_global_producer_source_contract,
         check_skewed_stream_clients_share_prepared_history,
         check_slow_client_does_not_block_global_producer,
         check_missing_history_requests_full_repair,
+        check_frame_and_byte_budgets_request_repairs,
     ):
         rc = check()
         if rc != 0:

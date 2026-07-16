@@ -60,6 +60,7 @@ void v5_settings_page_set_boot_closure(const V5BootClosure *closure);
 int v5_settings_page_create(V5SettingsPage *page, lv_obj_t *parent);
 int v5_settings_page_set_native_readback(V5SettingsPage *page, const V5NativeReadback *readback);
 int v5_settings_page_apply_status(V5SettingsPage *page, const V5UiStatusView *status);
+void v5_settings_page_set_page_visible(V5SettingsPage *page, int visible);
 void v5_settings_page_set_navigation_callback(V5SettingsPage *page, V5UiNavigationCallback cb, void *user_data);
 int v5_settings_page_trigger_action(V5SettingsPage *page, V5MainPageActionKind action, V5MainPageActionReport *report);
 

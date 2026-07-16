@@ -114,12 +114,6 @@ char v5_main_page_internal_main_page_axis_display_char(const V5MainPage *page, u
 
 int v5_main_page_internal_main_page_axis_values_finite(const double axis[V5_STATUS_AXIS_COUNT]);
 
-int v5_main_page_internal_main_page_dynamic_toolpath_outside_fit_window(
-    const V5MainPage *page,
-    const V5UiStatusView *status);
-
-int v5_main_page_internal_main_page_expand_fit_on_overflow(V5MainPage *page, const V5UiStatusView *status);
-
 void v5_main_page_internal_main_page_expand_visible_toolpath_fit(
     V5MainPage *page,
     const V5UiStatusView *status,
@@ -136,8 +130,6 @@ int v5_main_page_internal_main_page_handle_program_preview_touch(
 V5ToolpathScreenPoint v5_main_page_internal_apply_toolpath_view_transform(const V5MainPage *page, V5ToolpathScreenPoint point);
 
 int v5_main_page_internal_main_page_program_model_projection_changed(const V5MainPage *page);
-
-int v5_main_page_internal_main_page_program_outside_fit_window(const V5MainPage *page);
 
 int v5_main_page_internal_main_page_project_cmd_tip(const V5MainPage *page, const V5UiStatusView *status, V5ToolpathScreenPoint *point);
 
@@ -157,10 +149,6 @@ int v5_main_page_internal_main_page_resolve_active_model_scene(
 int v5_main_page_internal_main_page_rtcp_wcs_follow_model_scene_available(
     const V5MainPage *page,
     const V5MainPageModelScene **scene);
-
-int v5_main_page_internal_main_page_static_geometry_outside_fit_window(
-    V5MainPage *page,
-    const V5UiStatusView *status);
 
 int v5_main_page_internal_main_page_static_pose_changed(const V5MainPage *page);
 

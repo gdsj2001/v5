@@ -75,6 +75,30 @@ int main(void)
     if (v5_ui_page_cache_affected_mask(2U, 0U, 1U, 1, 0, 0) != 0U) {
         return 18;
     }
+    if (!v5_ui_page_cache_invalidate_now(1U, 1U, 1)) {
+        return 23;
+    }
+    if (v5_ui_page_cache_invalidate_now(1U, 0U, 1)) {
+        return 24;
+    }
+    if (v5_ui_page_cache_invalidate_now(1U, 1U, 0)) {
+        return 25;
+    }
+    if (!v5_ui_structure_event_pending(0, 0U, 0U, 0, 0, 0U, 0U, 1)) {
+        return 26;
+    }
+    if (v5_ui_structure_event_pending(1, 4U, 4U, 1, 1, 12U, 12U, 1)) {
+        return 27;
+    }
+    if (!v5_ui_structure_event_pending(1, 4U, 5U, 1, 1, 12U, 12U, 1)) {
+        return 28;
+    }
+    if (!v5_ui_structure_event_pending(1, 4U, 4U, 1, 1, 12U, 13U, 1)) {
+        return 29;
+    }
+    if (v5_ui_structure_event_pending(0, 0U, 0U, 0, 1, 0U, 1U, 0)) {
+        return 30;
+    }
     if (v5_ui_page_cache_projection_required(1, 1, 1)) {
         return 19;
     }

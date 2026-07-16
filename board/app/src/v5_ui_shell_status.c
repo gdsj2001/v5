@@ -118,14 +118,14 @@ void shell_update_top_status_label(void)
     if (v5_native_readback_safety_estop_known(&g_v5_shell_main_page.native_readback) &&
         g_v5_shell_main_page.native_readback.safety_estop_active) {
         changed = shell_set_label_text_if_changed(g_v5_shell_top_status_label, "急停中");
-        if (changed) shell_mark_all_page_caches_dirty();
+        if (changed) shell_mark_page_cache_dirty(g_v5_shell_current_page);
         return;
     }
     /* P1: current Home/positioning transaction; P2: fresh operator error. */
     if (v5_main_page_home_transaction_status(&home_status) &&
         v5_main_page_home_transaction_format_status_cn(&home_status, home_text, sizeof(home_text))) {
         changed = shell_set_label_text_if_changed(g_v5_shell_top_status_label, home_text);
-        if (changed) shell_mark_all_page_caches_dirty();
+        if (changed) shell_mark_page_cache_dirty(g_v5_shell_current_page);
         return;
     }
     now = shell_monotonic_ns();
@@ -135,21 +135,21 @@ void shell_update_top_status_label(void)
         now < g_v5_shell_operator_error_show_until_ns &&
         g_v5_shell_operator_error_status.reason_cn[0]) {
         changed = shell_set_label_text_if_changed(g_v5_shell_top_status_label, g_v5_shell_operator_error_status.reason_cn);
-        if (changed) shell_mark_all_page_caches_dirty();
+        if (changed) shell_mark_page_cache_dirty(g_v5_shell_current_page);
         return;
     }
     if (!v5_native_readback_all_homed_known(&g_v5_shell_main_page.native_readback)) {
         changed = shell_set_label_text_if_changed(g_v5_shell_top_status_label, "回零状态未知");
-        if (changed) shell_mark_all_page_caches_dirty();
+        if (changed) shell_mark_page_cache_dirty(g_v5_shell_current_page);
         return;
     }
     if (g_v5_shell_main_page.native_readback.all_homed) {
         changed = shell_set_label_text_if_changed(g_v5_shell_top_status_label, "");
-        if (changed) shell_mark_all_page_caches_dirty();
+        if (changed) shell_mark_page_cache_dirty(g_v5_shell_current_page);
         return;
     }
     changed = shell_set_label_text_if_changed(g_v5_shell_top_status_label, "未回零: 开机后需回零一次");
-    if (changed) shell_mark_all_page_caches_dirty();
+    if (changed) shell_mark_page_cache_dirty(g_v5_shell_current_page);
 }
 
 void shell_return_button_cb(lv_event_t *event)

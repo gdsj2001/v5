@@ -118,8 +118,9 @@ int shell_run_boot_page_cache_queue(
     struct V5UiPageCacheQueueEvidence *evidence,
     unsigned long long *peak_cpu_pct_x100);
 void shell_mark_page_cache_dirty(V5ShellPageKind page);
-void shell_mark_all_page_caches_dirty(void);
 int shell_sync_current_page_cache_if_dirty(void);
+int shell_main_page_structure_refresh_pending(void);
+void shell_main_page_structure_refresh_consume(void);
 
 void shell_clear_style(lv_obj_t *obj);
 

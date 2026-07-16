@@ -207,39 +207,35 @@ static void shell_apply_modal_tool_readback(V5NativeReadback *readback, const V5
     }
 }
 
-static V5NativeReadback g_v5_shell_projected_native_readback;
 static lv_obj_t *g_v5_shell_projected_native_root;
 static int g_v5_shell_projected_native_valid;
-
-static int shell_settings_motion_model_equal(
-    const V5NativeReadback *left,
-    const V5NativeReadback *right)
-{
-    int left_known;
-    int right_known;
-    if (!left || !right) {
-        return 0;
-    }
-    left_known = v5_native_readback_motion_model_known(left);
-    right_known = v5_native_readback_motion_model_known(right);
-    if (left_known != right_known) {
-        return 0;
-    }
-    return !left_known || strcmp(left->motion_model, right->motion_model) == 0;
-}
 
 static int shell_store_or_project_native_readback(const V5NativeReadback *readback)
 {
     int storage_changed;
     int projection_changed;
     int settings_changed;
+    int main_visible;
+    int settings_visible;
+    unsigned int native_change_flags;
+    unsigned int projection_flags = 0U;
     if (!readback) {
         return 0;
     }
-    storage_changed = memcmp(
+    main_visible =
+        g_v5_shell_current_page == V5_SHELL_PAGE_MAIN &&
+        g_v5_shell_main_page.root &&
+        !lv_obj_has_flag(g_v5_shell_main_page.root, LV_OBJ_FLAG_HIDDEN);
+    settings_visible =
+        g_v5_shell_current_page == V5_SHELL_PAGE_SETTINGS &&
+        g_v5_shell_settings_page.root &&
+        !lv_obj_has_flag(g_v5_shell_settings_page.root, LV_OBJ_FLAG_HIDDEN);
+    native_change_flags = v5_main_page_native_readback_change_flags(
         &g_v5_shell_main_page.native_readback,
-        readback,
-        sizeof(*readback)) != 0;
+        readback);
+    settings_changed =
+        (native_change_flags & V5_MAIN_PAGE_NATIVE_READBACK_MODEL) != 0U;
+    storage_changed = native_change_flags != 0U;
     if (v5_ui_first_frame_guard_overlay_active()) {
         if (storage_changed) {
             v5_main_page_store_native_readback_during_modal(&g_v5_shell_main_page, readback);
@@ -247,23 +243,62 @@ static int shell_store_or_project_native_readback(const V5NativeReadback *readba
         return storage_changed;
     }
 
-    projection_changed = v5_ui_page_cache_projection_required(
-        g_v5_shell_projected_native_valid,
-        g_v5_shell_projected_native_root == g_v5_shell_main_page.root,
-        memcmp(&g_v5_shell_projected_native_readback, readback, sizeof(*readback)) == 0);
-    if (!projection_changed) {
-        return 0;
+    if (!main_visible && storage_changed) {
+        /* Hidden Main stores the resident snapshot only.  Its projector and
+         * Fit are run once by navigation when Main becomes visible again. */
+        v5_main_page_set_native_readback_flags(
+            &g_v5_shell_main_page,
+            readback,
+            native_change_flags);
     }
-    settings_changed = !g_v5_shell_projected_native_valid ||
-        !shell_settings_motion_model_equal(&g_v5_shell_projected_native_readback, readback);
-    v5_main_page_set_native_readback(&g_v5_shell_main_page, readback);
-    if (settings_changed) {
+    if (!main_visible && !settings_visible) {
+        if (settings_changed) {
+            shell_mark_page_cache_dirty(V5_SHELL_PAGE_SETTINGS);
+        }
+        return storage_changed;
+    }
+
+    if (settings_visible) {
+        projection_changed =
+            !g_v5_shell_projected_native_valid ||
+            g_v5_shell_projected_native_root != g_v5_shell_settings_page.root ||
+            settings_changed;
+    } else {
+        projection_changed =
+            !g_v5_shell_projected_native_valid ||
+            g_v5_shell_projected_native_root != g_v5_shell_main_page.root ||
+            storage_changed;
+    }
+    if (!projection_changed) {
+        if (main_visible && storage_changed) {
+            v5_main_page_set_native_readback_flags(
+                &g_v5_shell_main_page,
+                readback,
+                native_change_flags);
+        }
+        return storage_changed;
+    }
+    if (main_visible) {
+        projection_flags =
+            !g_v5_shell_projected_native_valid ||
+            g_v5_shell_projected_native_root != g_v5_shell_main_page.root
+                ? V5_MAIN_PAGE_NATIVE_READBACK_ALL
+                : native_change_flags;
+        v5_main_page_set_native_readback_flags(
+            &g_v5_shell_main_page,
+            readback,
+            projection_flags);
+    } else {
         (void)v5_settings_page_set_native_readback(&g_v5_shell_settings_page, readback);
+    }
+    if (main_visible && settings_changed) {
         shell_mark_page_cache_dirty(V5_SHELL_PAGE_SETTINGS);
     }
-    shell_update_top_status_label();
-    g_v5_shell_projected_native_readback = *readback;
-    g_v5_shell_projected_native_root = g_v5_shell_main_page.root;
+    if (main_visible) {
+        shell_update_top_status_label();
+    }
+    g_v5_shell_projected_native_root =
+        main_visible ? g_v5_shell_main_page.root : g_v5_shell_settings_page.root;
     g_v5_shell_projected_native_valid = 1;
     return 1;
 }

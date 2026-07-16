@@ -9,11 +9,16 @@ from v5_machine_status_projection import NativeRotaryDisplayProjection
 class FakeHal:
     def __init__(self, values):
         self.values = dict(values)
+        self.read_counts = {}
 
     def get_value(self, name):
+        self.read_counts[name] = self.read_counts.get(name, 0) + 1
         if name not in self.values:
             raise AssertionError(f'unexpected HAL read: {name}')
         return self.values[name]
+
+    def read_count(self, name):
+        return self.read_counts.get(name, 0)
 
 
 class SequencedHal(FakeHal):
@@ -22,10 +27,13 @@ class SequencedHal(FakeHal):
         self.sequences = {name: list(items) for name, items in sequences.items()}
 
     def get_value(self, name):
+        self.read_counts[name] = self.read_counts.get(name, 0) + 1
         sequence = self.sequences.get(name)
         if sequence:
             return sequence.pop(0)
-        return super().get_value(name)
+        if name not in self.values:
+            raise AssertionError(f'unexpected HAL read: {name}')
+        return self.values[name]
 
 
 def projection_values():
@@ -150,6 +158,116 @@ def check_wcheckpoint_valid_drop_fails_closed() -> None:
         raise AssertionError('native wcheckpoint valid drop did not fail closed')
 
 
+def check_stable_generation_uses_fast_metadata_path() -> None:
+    hal = FakeHal(projection_values())
+    projection = NativeRotaryDisplayProjection(hal)
+    for _sample in range(31):
+        projection.project(
+            [0.0, 0.0, 0.0, 0.0, -18000.0],
+            [0.0, 0.0, 0.0, 0.0, -18000.0])
+
+    # Static mapping and wcheckpoint metadata are loaded once.  Every 33 ms
+    # sample still reads fresh validity, generation and logical counts.
+    assert hal.read_count('v5-native-hal-owner.home-table-active-mask') == 2
+    assert hal.read_count('v5-native-hal-owner.home-table-commit-seq') == 32
+    assert hal.read_count('v5-native-hal-owner.home-counts-per-unit-03') == 1
+    assert hal.read_count('v5-native-hal-owner.home-counts-per-unit-04') == 1
+    for axis in ('a', 'c'):
+        assert hal.read_count(f'v5-native-hal-owner.wcp-{axis}-base-counts') == 1
+        assert hal.read_count(f'v5-native-hal-owner.wcp-{axis}-runtime-counts') == 1
+        assert hal.read_count(f'v5-native-hal-owner.wcp-{axis}-logical-counts') == 31
+        assert hal.read_count(f'v5-native-hal-owner.wcp-{axis}-valid') == 62
+        assert hal.read_count(f'v5-native-hal-owner.wcp-{axis}-generation') == 62
+
+
+def check_generation_change_reloads_all_metadata_immediately() -> None:
+    values = projection_values()
+    hal = FakeHal(values)
+    projection = NativeRotaryDisplayProjection(hal)
+    projection.project([0.0] * 5, [0.0] * 5)
+
+    new_generation = values['v5-native-hal-owner.home-table-map-gen'] + 1
+    hal.values['v5-native-hal-owner.home-table-map-gen'] = new_generation
+    for joint in range(5):
+        hal.values[
+            f'v5-native-hal-owner.home-mapping-generation-{joint:02d}'
+        ] = new_generation
+    projection.project([0.0] * 5, [0.0] * 5)
+
+    assert hal.read_count('v5-native-hal-owner.home-counts-per-unit-03') == 2
+    assert hal.read_count('v5-native-hal-owner.home-counts-per-unit-04') == 2
+    assert hal.read_count('v5-native-hal-owner.wcp-a-base-counts') == 2
+    assert hal.read_count('v5-native-hal-owner.wcp-c-base-counts') == 2
+
+    # A parameter-only controlled reload advances commit_seq even when the
+    # axis/slave generation hash is unchanged.  It must still invalidate all
+    # cached mapping and wcheckpoint metadata on the very next sample.
+    hal.values['v5-native-hal-owner.home-table-commit-seq'] += 1
+    projection.project([0.0] * 5, [0.0] * 5)
+    assert hal.read_count('v5-native-hal-owner.home-counts-per-unit-03') == 3
+    assert hal.read_count('v5-native-hal-owner.home-counts-per-unit-04') == 3
+    assert hal.read_count('v5-native-hal-owner.wcp-a-base-counts') == 3
+    assert hal.read_count('v5-native-hal-owner.wcp-c-base-counts') == 3
+
+    hal.values['v5-native-hal-owner.wcp-a-generation'] += 1
+    hal.values['v5-native-hal-owner.wcp-a-logical-counts'] = 10.0
+    hal.values['v5-native-hal-owner.wcp-a-base-counts'] = 4.0
+    hal.values['v5-native-hal-owner.wcp-a-runtime-counts'] = 6.0
+    _, cmd = projection.project(
+        [0.0] * 5, [0.0, 0.0, 0.0, 0.006, 0.0])
+    assert hal.read_count('v5-native-hal-owner.wcp-a-base-counts') == 4
+    assert math.isclose(cmd[3], 0.01, abs_tol=1.0e-12)
+
+
+def check_new_projection_instance_rebuilds_resident_cache() -> None:
+    hal = FakeHal(projection_values())
+    first = NativeRotaryDisplayProjection(hal)
+    first.project([0.0] * 5, [0.0] * 5)
+    first.project([0.0] * 5, [0.0] * 5)
+    assert hal.read_count('v5-native-hal-owner.home-counts-per-unit-03') == 1
+    assert hal.read_count('v5-native-hal-owner.wcp-a-base-counts') == 1
+
+    restarted = NativeRotaryDisplayProjection(hal)
+    restarted.project([0.0] * 5, [0.0] * 5)
+    assert hal.read_count('v5-native-hal-owner.home-counts-per-unit-03') == 2
+    assert hal.read_count('v5-native-hal-owner.wcp-a-base-counts') == 2
+
+
+def check_invalid_sample_drops_cache_before_same_generation_recovers() -> None:
+    values = projection_values()
+    hal = FakeHal(values)
+    projection = NativeRotaryDisplayProjection(hal)
+    projection.project([0.0] * 5, [0.0] * 5)
+
+    hal.values['v5-native-hal-owner.wcp-a-valid'] = False
+    try:
+        projection.project([0.0] * 5, [0.0] * 5)
+    except RuntimeError as exc:
+        assert str(exc) == 'native_rotary_projection_readback_invalid'
+    else:
+        raise AssertionError('invalid wcheckpoint sample reused cached metadata')
+
+    hal.values['v5-native-hal-owner.wcp-a-valid'] = True
+    hal.values['v5-native-hal-owner.wcp-a-logical-counts'] = 12.0
+    hal.values['v5-native-hal-owner.wcp-a-base-counts'] = 5.0
+    hal.values['v5-native-hal-owner.wcp-a-runtime-counts'] = 7.0
+    _, cmd = projection.project(
+        [0.0] * 5, [0.0, 0.0, 0.0, 0.003, 0.0])
+    assert hal.read_count('v5-native-hal-owner.wcp-a-base-counts') == 2
+    assert math.isclose(cmd[3], 0.008, abs_tol=1.0e-12)
+
+    hal.values['v5-native-hal-owner.home-table-mapping-valid'] = False
+    try:
+        projection.project([0.0] * 5, [0.0] * 5)
+    except RuntimeError as exc:
+        assert str(exc) == 'native_rotary_projection_mapping_invalid'
+    else:
+        raise AssertionError('invalid mapping reused cached records')
+    hal.values['v5-native-hal-owner.home-table-mapping-valid'] = True
+    projection.project([0.0] * 5, [0.0] * 5)
+    assert hal.read_count('v5-native-hal-owner.home-counts-per-unit-03') == 2
+
+
 def main() -> int:
     check_router_zero_relative_counts_are_not_offset_twice()
     check_one_count_displays_one_count_not_clamped()
@@ -159,6 +277,10 @@ def main() -> int:
     check_invalid_native_mapping_fails_closed()
     check_inconsistent_wcheckpoint_window_fails_closed()
     check_wcheckpoint_valid_drop_fails_closed()
+    check_stable_generation_uses_fast_metadata_path()
+    check_generation_change_reloads_all_metadata_immediately()
+    check_new_projection_instance_rebuilds_resident_cache()
+    check_invalid_sample_drops_cache_before_same_generation_recovers()
     print('V5_MACHINE_STATUS_PROJECTION_TEST_OK')
     return 0
 

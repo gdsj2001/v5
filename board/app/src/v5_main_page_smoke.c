@@ -156,6 +156,7 @@ static int build_status(V5UiStatusView *status)
     unsigned int i;
 
     v5_status_shm_frame_init(&frame);
+    frame.status_epoch = 1U;
     frame.typed_valid_mask =
         V5_STATUS_VALID_MCS |
         V5_STATUS_VALID_CMD_MCS |
@@ -326,10 +327,45 @@ int main(void)
     v5_native_readback_set_rtcp_actual(&readback, 0);
     v5_native_readback_set_modal_actual(&readback, "G0 G17 G21 G40 G49 G54 G64 G80 G90 G94 G97");
     v5_native_readback_set_tool_actual(&readback, 7, 1, 123.456);
+    {
+        V5MainPage axis_identity_page;
+        memset(&axis_identity_page, 0, sizeof(axis_identity_page));
+        axis_identity_page.native_readback = readback;
+        v5_main_page_internal_update_coordinate_target_axes(&axis_identity_page);
+        if (axis_identity_page.toolpath_model_scene_valid ||
+            axis_identity_page.toolpath_model_scene_fresh ||
+            v5_main_page_internal_main_page_axis_display_char(&axis_identity_page, 3U) != 'A' ||
+            v5_main_page_internal_main_page_axis_display_char(&axis_identity_page, 4U) != 'C' ||
+            axis_identity_page.mcs_targets[3].axis != 'A' ||
+            axis_identity_page.wcs_targets[3].axis != 'A' ||
+            axis_identity_page.mcs_targets[4].axis != 'C' ||
+            axis_identity_page.wcs_targets[4].axis != 'C') {
+            return 84;
+        }
+        v5_native_readback_set_motion_model(
+            &axis_identity_page.native_readback, "XYZBC_TRT");
+        v5_main_page_internal_update_coordinate_target_axes(&axis_identity_page);
+        if (v5_main_page_internal_main_page_axis_display_char(&axis_identity_page, 3U) != 'B' ||
+            v5_main_page_internal_main_page_axis_display_char(&axis_identity_page, 4U) != 'C' ||
+            axis_identity_page.mcs_targets[3].axis != 'B' ||
+            axis_identity_page.wcs_targets[3].axis != 'B' ||
+            axis_identity_page.mcs_targets[4].axis != 'C' ||
+            axis_identity_page.wcs_targets[4].axis != 'C') {
+            return 85;
+        }
+    }
     v5_main_page_set_native_readback(&page, &readback);
     v5_main_page_bind_program_controller(&page, &controller);
     if (!build_status(&status)) {
         return 3;
+    }
+    if (page.toolpath_fit.valid ||
+        !v5_main_page_apply_status_flags(
+            &page,
+            &status,
+            V5_MAIN_PAGE_REFRESH_DYNAMIC | V5_MAIN_PAGE_REFRESH_POSE) ||
+        page.toolpath_fit.valid) {
+        return 86;
     }
     if (!v5_settings_page_create(&settings_page, screen)) {
         return 60;
@@ -482,6 +518,17 @@ int main(void)
             line_cross_abs(page.toolpath_model_axis_points[0], page.toolpath_mcs_axis_points[0]) > 250L ||
             line_cross_vector_abs(page.toolpath_model_axis_points[1], c_dx, c_dy) > 250L ||
             line_cross_abs(page.toolpath_model_axis_points[1], page.toolpath_mcs_axis_points[2]) <= 2L) {
+            fprintf(stderr,
+                    "main_page_smoke active-model axes mismatch wcs=%ld,%ld,%ld primary=%ld child=%ld child_vs_z=%ld scene=%u/%u model=%s\n",
+                    line_cross_abs(page.toolpath_wcs_axis_points[0], page.toolpath_mcs_axis_points[0]),
+                    line_cross_abs(page.toolpath_wcs_axis_points[1], page.toolpath_mcs_axis_points[1]),
+                    line_cross_abs(page.toolpath_wcs_axis_points[2], page.toolpath_mcs_axis_points[2]),
+                    line_cross_abs(page.toolpath_model_axis_points[0], page.toolpath_mcs_axis_points[0]),
+                    line_cross_vector_abs(page.toolpath_model_axis_points[1], c_dx, c_dy),
+                    line_cross_abs(page.toolpath_model_axis_points[1], page.toolpath_mcs_axis_points[2]),
+                    page.toolpath_model_scene_valid,
+                    page.toolpath_model_scene_fresh,
+                    page.native_readback.motion_model);
             return 22;
         }
         if (!project_expected(&page, a_start_world, &a_start_expected) ||
@@ -653,25 +700,186 @@ int main(void)
     fit_generation_after_program = page.toolpath_fit.generation;
     if (!v5_main_page_apply_status(&page, &status) ||
         page.toolpath_line_rewrite_count != rewrite_count_after_program ||
-        page.toolpath_static_cache_hits == 0U) {
+        page.toolpath_fit.generation != fit_generation_after_program) {
         v5_program_controller_destroy(&controller);
         return 12;
     }
     {
+        const unsigned int dynamic_before = page.toolpath_dynamic_refresh_count;
+        const unsigned int pose_before = page.toolpath_pose_refresh_count;
+        const unsigned int structure_before = page.toolpath_structure_refresh_count;
         const unsigned int rewrite_before = page.toolpath_line_rewrite_count;
         const unsigned int set_points_before = page.toolpath_line_set_points_count;
-        const double expected_primary = page.toolpath_program_model_scene.primary_deg + 0.001;
-        const double expected_child = page.toolpath_program_model_scene.child_deg - 0.001;
+        const unsigned int fit_before = page.toolpath_fit.generation;
+        const V5MainPageModelScene program_pose_before = page.toolpath_program_model_scene;
+        const lv_coord_t marker_x_before = lv_obj_get_x(page.toolpath_holder_marker_line);
+        const lv_coord_t marker_y_before = lv_obj_get_y(page.toolpath_holder_marker_line);
+        char coordinate_before[32];
+        unsigned int frame;
+
+        snprintf(
+            coordinate_before,
+            sizeof(coordinate_before),
+            "%s",
+            page.coordinate_digits.value_text[0][0]);
+        for (frame = 0U; frame < 30U; ++frame) {
+            status.mcs[0] += 0.05;
+            status.cmd_mcs[0] += 0.05;
+            status.mcs[3] += 1.0;
+            status.mcs[4] -= 1.0;
+            if (!v5_main_page_apply_status_flags(
+                    &page,
+                    &status,
+                    V5_MAIN_PAGE_REFRESH_DYNAMIC | V5_MAIN_PAGE_REFRESH_POSE)) {
+                v5_program_controller_destroy(&controller);
+                return 81;
+            }
+        }
+        lv_obj_update_layout(page.toolpath_holder_marker_line);
+        if (page.toolpath_dynamic_refresh_count != dynamic_before + 30U ||
+            page.toolpath_pose_refresh_count != pose_before + 30U ||
+            page.toolpath_structure_refresh_count != structure_before ||
+            page.toolpath_fit.generation != fit_before ||
+            page.toolpath_line_set_points_count != set_points_before ||
+            v5_main_page_model_scene_pose_equal(
+                &page.toolpath_program_model_scene,
+                &program_pose_before,
+                0.0) ||
+            fabs(page.toolpath_program_model_scene.primary_deg - status.mcs[3]) > 0.0000001 ||
+            fabs(page.toolpath_program_model_scene.child_deg - status.mcs[4]) > 0.0000001 ||
+            strcmp(page.coordinate_digits.value_text[0][0], coordinate_before) == 0 ||
+            (lv_obj_get_x(page.toolpath_holder_marker_line) == marker_x_before &&
+             lv_obj_get_y(page.toolpath_holder_marker_line) == marker_y_before)) {
+            fprintf(stderr,
+                    "main_page_smoke dynamic tier mismatch dynamic=%u/%u pose=%u/%u structure=%u/%u rewrite=%u/%u set_points=%u/%u pose_equal=%d coordinate_changed=%d marker=%d,%d/%d,%d\n",
+                    page.toolpath_dynamic_refresh_count, dynamic_before + 30U,
+                    page.toolpath_pose_refresh_count, pose_before + 30U,
+                    page.toolpath_structure_refresh_count, structure_before,
+                    page.toolpath_line_rewrite_count, rewrite_before,
+                    page.toolpath_line_set_points_count, set_points_before,
+                    v5_main_page_model_scene_pose_equal(
+                        &page.toolpath_program_model_scene, &program_pose_before, 0.0),
+                    strcmp(page.coordinate_digits.value_text[0][0], coordinate_before) != 0,
+                    (int)lv_obj_get_x(page.toolpath_holder_marker_line),
+                    (int)lv_obj_get_y(page.toolpath_holder_marker_line),
+                    (int)marker_x_before,
+                    (int)marker_y_before);
+            v5_program_controller_destroy(&controller);
+            return 82;
+        }
+    }
+    {
+        const unsigned int dynamic_before = page.toolpath_dynamic_refresh_count;
+        const unsigned int pose_before = page.toolpath_pose_refresh_count;
+        const unsigned int structure_before = page.toolpath_structure_refresh_count;
+        const unsigned int rewrite_before = page.toolpath_line_rewrite_count;
+        const unsigned int set_points_before = page.toolpath_line_set_points_count;
+        const unsigned int fit_before = page.toolpath_fit.generation;
+        char coordinate_before[32];
+
+        snprintf(
+            coordinate_before,
+            sizeof(coordinate_before),
+            "%s",
+            page.coordinate_digits.value_text[0][0]);
+        lv_obj_add_flag(page.root, LV_OBJ_FLAG_HIDDEN);
+        status.mcs[0] += 12.0;
+        status.mcs[3] += 15.0;
+        status.mcs[4] -= 15.0;
+        if (!v5_main_page_apply_status_flags(
+                &page,
+                &status,
+                V5_MAIN_PAGE_REFRESH_ALL) ||
+            fabs(page.last_status.mcs[0] - status.mcs[0]) > 0.000001 ||
+            page.toolpath_dynamic_refresh_count != dynamic_before ||
+            page.toolpath_pose_refresh_count != pose_before ||
+            page.toolpath_structure_refresh_count != structure_before ||
+            page.toolpath_fit.generation != fit_before ||
+            page.toolpath_line_rewrite_count != rewrite_before ||
+            page.toolpath_line_set_points_count != set_points_before ||
+            strcmp(page.coordinate_digits.value_text[0][0], coordinate_before) != 0) {
+            lv_obj_clear_flag(page.root, LV_OBJ_FLAG_HIDDEN);
+            v5_program_controller_destroy(&controller);
+            return 88;
+        }
+        lv_obj_clear_flag(page.root, LV_OBJ_FLAG_HIDDEN);
+    }
+    {
+        V5NativeReadback line_readback = page.native_readback;
+        V5NativeReadback wcs_readback = page.native_readback;
+        const V5MainPageModelScene scene_before = page.toolpath_model_scene;
+        const unsigned int fit_before = page.toolpath_fit.generation;
+        unsigned int change_flags;
+
+        v5_native_readback_set_current_line(
+            &line_readback,
+            line_readback.current_line + 1);
+        change_flags = v5_main_page_native_readback_change_flags(
+            &page.native_readback,
+            &line_readback);
+        if (change_flags != V5_MAIN_PAGE_NATIVE_READBACK_PROGRAM) {
+            v5_program_controller_destroy(&controller);
+            return 89;
+        }
+        v5_main_page_set_native_readback_flags(&page, &line_readback, change_flags);
+        if (page.toolpath_fit.generation != fit_before ||
+            !v5_main_page_model_scene_pose_equal(
+                &page.toolpath_model_scene,
+                &scene_before,
+                0.0)) {
+            v5_program_controller_destroy(&controller);
+            return 90;
+        }
+        wcs_readback = page.native_readback;
+        wcs_readback.wcs_offsets_epoch += 1U;
+        wcs_readback.wcs_offsets[0][0] += 1.0;
+        change_flags = v5_main_page_native_readback_change_flags(
+            &page.native_readback,
+            &wcs_readback);
+        if (change_flags != V5_MAIN_PAGE_NATIVE_READBACK_WCS) {
+            v5_program_controller_destroy(&controller);
+            return 91;
+        }
+        v5_main_page_set_native_readback_flags(&page, &wcs_readback, change_flags);
+        if (!v5_main_page_apply_status_flags(
+                &page,
+                &status,
+                V5_MAIN_PAGE_REFRESH_POSE) ||
+            page.toolpath_fit.generation != fit_before ||
+            page.toolpath_program_wcs_epoch != wcs_readback.wcs_offsets_epoch) {
+            v5_program_controller_destroy(&controller);
+            return 92;
+        }
+    }
+    {
+        const unsigned int rewrite_before = page.toolpath_line_rewrite_count;
+        const unsigned int set_points_before = page.toolpath_line_set_points_count;
+        const unsigned int fit_before = page.toolpath_fit.generation;
+        const unsigned int dirty_rect_before = page.toolpath_line_last_dirty_rect_count;
+        const uint64_t dirty_pixels_before = page.toolpath_line_last_dirty_pixels;
+        const uint64_t dirty_max_before = page.toolpath_line_last_dirty_max_pixels;
+        const double expected_primary = page.toolpath_program_model_scene.primary_deg + 0.000001;
+        const double expected_child = page.toolpath_program_model_scene.child_deg - 0.000001;
         status.mcs[3] = expected_primary;
         status.mcs[4] = expected_child;
         if (!v5_main_page_apply_status(&page, &status) ||
-            fabs(page.toolpath_program_model_scene.primary_deg - expected_primary) > 0.0000001 ||
-            fabs(page.toolpath_program_model_scene.child_deg - expected_child) > 0.0000001 ||
             page.toolpath_line_rewrite_count != rewrite_before ||
             page.toolpath_line_set_points_count != set_points_before ||
-            page.toolpath_line_last_dirty_rect_count != 0U ||
-            page.toolpath_line_last_dirty_pixels != 0U ||
-            page.toolpath_line_last_dirty_max_pixels != 0U) {
+            page.toolpath_fit.generation != fit_before ||
+            page.toolpath_line_last_dirty_rect_count != dirty_rect_before ||
+            page.toolpath_line_last_dirty_pixels != dirty_pixels_before ||
+            page.toolpath_line_last_dirty_max_pixels != dirty_max_before) {
+            fprintf(stderr,
+                    "main_page_smoke subpixel redraw mismatch rewrite=%u/%u set_points=%u/%u fit=%u/%u dirty=%u/%u/%u\n",
+                    page.toolpath_line_rewrite_count,
+                    rewrite_before,
+                    page.toolpath_line_set_points_count,
+                    set_points_before,
+                    page.toolpath_fit.generation,
+                    fit_before,
+                    page.toolpath_line_last_dirty_rect_count,
+                    (unsigned int)page.toolpath_line_last_dirty_pixels,
+                    (unsigned int)page.toolpath_line_last_dirty_max_pixels);
             v5_program_controller_destroy(&controller);
             return 68;
         }
@@ -748,7 +956,7 @@ int main(void)
         status.mcs[4] += 35.0;
         if (!v5_main_page_apply_status(&page, &status) ||
             page.toolpath_line_rewrite_count <= rewrite_before ||
-            page.toolpath_fit.generation > fit_before + 1U ||
+            page.toolpath_fit.generation != fit_before ||
             !wcs_axes_match_world(&page, base_wcs_world) ||
             (fabs(page.toolpath_program_project_points[0].axis[0] - projected_before[0]) < 0.0005 &&
              fabs(page.toolpath_program_project_points[0].axis[1] - projected_before[1]) < 0.0005 &&
@@ -776,8 +984,8 @@ int main(void)
         projected_before[2] = page.toolpath_program_project_points[0].axis[2];
         v5_native_readback_set_rtcp_actual(&readback, 1);
         v5_main_page_set_native_readback(&page, &readback);
-        status.mcs[3] += 15.0;
-        status.mcs[4] -= 20.0;
+        status.mcs[3] = 10.0;
+        status.mcs[4] = -10.0;
         for (wi = 0U; wi < 4U; ++wi) {
             const double first_center[3] = {10.0, 20.0, -50.0};
             const double second_center[3] = {50.0, 20.0, 8.0};
@@ -789,15 +997,46 @@ int main(void)
                 status.mcs[4],
                 posed_wcs_world[wi]);
         }
-        if (!v5_main_page_apply_status(&page, &status) ||
-            page.toolpath_line_rewrite_count <= rewrite_before ||
-            page.toolpath_fit.generation > fit_before + 1U ||
-            !wcs_axes_match_world(&page, posed_wcs_world) ||
-            (fabs(page.toolpath_program_project_points[0].axis[0] - projected_before[0]) < 0.0005 &&
-             fabs(page.toolpath_program_project_points[0].axis[1] - projected_before[1]) < 0.0005 &&
-             fabs(page.toolpath_program_project_points[0].axis[2] - projected_before[2]) < 0.0005)) {
-            v5_program_controller_destroy(&controller);
-            return 38;
+        {
+            const int applied = v5_main_page_apply_status(&page, &status);
+            const int program_changed =
+                fabs(page.toolpath_program_project_points[0].axis[0] - projected_before[0]) >= 0.0005 ||
+                fabs(page.toolpath_program_project_points[0].axis[1] - projected_before[1]) >= 0.0005 ||
+                fabs(page.toolpath_program_project_points[0].axis[2] - projected_before[2]) >= 0.0005;
+            const int wcs_match = wcs_axes_match_world(&page, posed_wcs_world);
+            if (!applied ||
+                page.toolpath_line_rewrite_count <= rewrite_before ||
+                page.toolpath_fit.generation != fit_before ||
+                !wcs_match ||
+                !program_changed) {
+                fprintf(
+                    stderr,
+                    "main_page_smoke rtcp pose mismatch applied=%d rewrite=%u/%u fit=%u/%u wcs=%d program=%d\n",
+                    applied,
+                    page.toolpath_line_rewrite_count,
+                    rewrite_before,
+                    page.toolpath_fit.generation,
+                    fit_before,
+                    wcs_match,
+                    program_changed);
+                for (wi = 0U; wi < 4U; ++wi) {
+                    V5ToolpathScreenPoint expected_point;
+                    if (project_expected(&page, posed_wcs_world[wi], &expected_point)) {
+                        fprintf(
+                            stderr,
+                            "  wcs[%u] actual=%d,%d expected=%.3f,%.3f\n",
+                            wi,
+                            (int)(wi == 0U ? page.toolpath_wcs_axis_points[0][0].x :
+                                page.toolpath_wcs_axis_points[wi - 1U][1].x),
+                            (int)(wi == 0U ? page.toolpath_wcs_axis_points[0][0].y :
+                                page.toolpath_wcs_axis_points[wi - 1U][1].y),
+                            expected_point.x,
+                            expected_point.y);
+                    }
+                }
+                v5_program_controller_destroy(&controller);
+                return 38;
+            }
         }
         {
             unsigned int stable_fit_generation = page.toolpath_fit.generation;
@@ -968,8 +1207,18 @@ int main(void)
                     LV_OBJ_FLAG_HIDDEN) ||
                 lv_label_get_text(page.toolpath_summary_label)[0] != '\0' ||
                 lv_label_get_text(page.toolpath_detail_label)[0] != '\0') {
+                fprintf(
+                    stderr,
+                    "main_page_smoke invalid model mismatch valid=%d fresh=%d program=%d primary_hidden=%d child_hidden=%d summary=%s detail=%s\n",
+                    page.toolpath_model_scene_valid,
+                    page.toolpath_model_scene_fresh,
+                    page.toolpath_program_visible,
+                    lv_obj_has_flag(page.toolpath_model_primary_axis_line, LV_OBJ_FLAG_HIDDEN),
+                    lv_obj_has_flag(page.toolpath_model_child_axis_line, LV_OBJ_FLAG_HIDDEN),
+                    lv_label_get_text(page.toolpath_summary_label),
+                    lv_label_get_text(page.toolpath_detail_label));
                 v5_program_controller_destroy(&controller);
-                return 77;
+                return 87;
             }
 
             v5_main_page_set_native_readback(&page, &readback);
@@ -1000,6 +1249,19 @@ int main(void)
                     LV_OBJ_FLAG_HIDDEN) ||
                 lv_label_get_text(page.toolpath_summary_label)[0] != '\0' ||
                 lv_label_get_text(page.toolpath_detail_label)[0] != '\0') {
+                fprintf(
+                    stderr,
+                    "main_page_smoke unavailable model mismatch stale=%d valid=%d fresh=%d program=%d axes=%s/%s hidden=%d/%d summary=%s detail=%s\n",
+                    transient_readback.g53_geometry_stale,
+                    page.toolpath_model_scene_valid,
+                    page.toolpath_model_scene_fresh,
+                    page.toolpath_program_visible,
+                    lv_label_get_text(page.axis_labels[3]),
+                    lv_label_get_text(page.axis_labels[4]),
+                    lv_obj_has_flag(page.toolpath_model_primary_axis_line, LV_OBJ_FLAG_HIDDEN),
+                    lv_obj_has_flag(page.toolpath_model_child_axis_line, LV_OBJ_FLAG_HIDDEN),
+                    lv_label_get_text(page.toolpath_summary_label),
+                    lv_label_get_text(page.toolpath_detail_label));
                 v5_program_controller_destroy(&controller);
                 return 79;
             }
@@ -1046,40 +1308,49 @@ int main(void)
     page.toolpath_manual_rotate_deg = 31.0;
     page.toolpath_gesture_active_count = 2;
     memset(&view_report, 0, sizeof(view_report));
-    if (!v5_main_page_trigger_action(&page, V5_MAIN_PAGE_ACTION_VIEW_XY, &view_report) ||
-        page.view_plane != V5_TOOLPATH_DISPLAY_XY ||
-        fabs(page.toolpath_manual_rotate_deg) > 1.0e-9 ||
-        page.toolpath_gesture_active_count != 0) {
-        v5_program_controller_destroy(&controller);
-        return 34;
-    }
-    if (v5_main_page_handle_touch_points(&page, 0, 0, 0, &gesture_changed)) {
-        v5_program_controller_destroy(&controller);
-        return 18;
-    }
-    status.valid_mask &= ~V5_STATUS_VALID_CMD_MCS;
-    if (!v5_main_page_apply_status(&page, &status) ||
-        !lv_obj_has_flag(page.toolpath_microkernel_marker_dot, LV_OBJ_FLAG_HIDDEN) ||
-        lv_obj_has_flag(page.toolpath_holder_marker_line, LV_OBJ_FLAG_HIDDEN)) {
-        v5_program_controller_destroy(&controller);
-        return 11;
+    {
+        unsigned int view_fit_generation_before = page.toolpath_fit.generation;
+        if (!v5_main_page_trigger_action(&page, V5_MAIN_PAGE_ACTION_VIEW_XY, &view_report) ||
+            page.view_plane != V5_TOOLPATH_DISPLAY_XY ||
+            fabs(page.toolpath_manual_rotate_deg) > 1.0e-9 ||
+            page.toolpath_gesture_active_count != 0) {
+            v5_program_controller_destroy(&controller);
+            return 34;
+        }
+        if (v5_main_page_handle_touch_points(&page, 0, 0, 0, &gesture_changed)) {
+            v5_program_controller_destroy(&controller);
+            return 18;
+        }
+        status.valid_mask &= ~V5_STATUS_VALID_CMD_MCS;
+        if (!v5_main_page_apply_status(&page, &status) ||
+            page.toolpath_fit.generation != view_fit_generation_before + 1U ||
+            !lv_obj_has_flag(page.toolpath_microkernel_marker_dot, LV_OBJ_FLAG_HIDDEN) ||
+            lv_obj_has_flag(page.toolpath_holder_marker_line, LV_OBJ_FLAG_HIDDEN)) {
+            fprintf(
+                stderr,
+                "main_page_smoke view boundary mismatch fit=%u/%u cmd_hidden=%d holder_hidden=%d plane=%d program_plane=%d\n",
+                page.toolpath_fit.generation,
+                view_fit_generation_before + 1U,
+                lv_obj_has_flag(page.toolpath_microkernel_marker_dot, LV_OBJ_FLAG_HIDDEN),
+                lv_obj_has_flag(page.toolpath_holder_marker_line, LV_OBJ_FLAG_HIDDEN),
+                (int)page.view_plane,
+                (int)page.toolpath_program_plane);
+            v5_program_controller_destroy(&controller);
+            return 11;
+        }
     }
     {
         V5ToolpathDisplayFit fit_before = page.toolpath_fit;
-        unsigned int expanded_generation;
         status.mcs[0] += 10000.0;
         if (!v5_main_page_apply_status(&page, &status) ||
-            page.toolpath_fit.generation != fit_before.generation + 1U ||
-            page.toolpath_fit.bounds.min_u > fit_before.bounds.min_u ||
-            page.toolpath_fit.bounds.min_v > fit_before.bounds.min_v ||
-            page.toolpath_fit.bounds.max_v < fit_before.bounds.max_v ||
-            page.toolpath_fit.bounds.max_u <= fit_before.bounds.max_u) {
+            page.toolpath_fit.generation != fit_before.generation ||
+            memcmp(&page.toolpath_fit.bounds, &fit_before.bounds, sizeof(fit_before.bounds)) != 0) {
             v5_program_controller_destroy(&controller);
             return 68;
         }
-        expanded_generation = page.toolpath_fit.generation;
         if (!v5_main_page_apply_status(&page, &status) ||
-            page.toolpath_fit.generation != expanded_generation) {
+            page.toolpath_fit.generation != fit_before.generation ||
+            memcmp(&page.toolpath_fit.bounds, &fit_before.bounds, sizeof(fit_before.bounds)) != 0) {
             v5_program_controller_destroy(&controller);
             return 69;
         }

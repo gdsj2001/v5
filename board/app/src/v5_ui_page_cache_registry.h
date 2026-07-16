@@ -104,6 +104,33 @@ static inline unsigned int v5_ui_page_cache_affected_mask(
     return mask;
 }
 
+static inline int v5_ui_page_cache_invalidate_now(
+    unsigned int current_page,
+    unsigned int changed_page,
+    int changed_page_visible)
+{
+    return current_page == changed_page && changed_page_visible;
+}
+
+static inline int v5_ui_structure_event_pending(
+    int signature_valid,
+    unsigned int consumed_view_generation,
+    unsigned int current_view_generation,
+    int consumed_program_present,
+    int current_program_present,
+    unsigned int consumed_program_epoch,
+    unsigned int current_program_epoch,
+    int current_model_ready)
+{
+    if (current_program_present && !current_model_ready) {
+        return 0;
+    }
+    return !signature_valid ||
+        consumed_view_generation != current_view_generation ||
+        consumed_program_present != current_program_present ||
+        consumed_program_epoch != current_program_epoch;
+}
+
 static inline int v5_ui_page_cache_queue_evidence_validate(
     const V5UiPageCacheQueueEvidence *entries,
     size_t entry_count,

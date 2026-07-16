@@ -41,7 +41,8 @@ static void program_delete_refresh_background(void)
         lv_label_set_text(g_v5_shell_program_source_label, status);
         lv_obj_invalidate(g_v5_shell_program_source_label);
     }
-    (void)v5_main_page_apply_status(&g_v5_shell_main_page, &g_v5_shell_model.status_view);
+    /* Main is hidden on the program page. Defer its one-shot structure projection
+     * to shell_apply_page_resident_model() when Main becomes visible. */
     shell_mark_page_cache_dirty(V5_SHELL_PAGE_MAIN);
     shell_mark_page_cache_dirty(V5_SHELL_PAGE_PROGRAM);
     g_program_delete_refresh_pending = 0;

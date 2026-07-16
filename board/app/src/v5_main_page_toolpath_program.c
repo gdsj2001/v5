@@ -136,6 +136,10 @@ void v5_main_page_internal_reset_toolpath_view_rotation(V5MainPage *page)
     page->toolpath_gesture_last_distance = 0.0;
     page->toolpath_gesture_last_angle_deg = 0.0;
     page->toolpath_manual_rotate_deg = 0.0;
+    page->toolpath_view_generation += 1U;
+    if (page->toolpath_view_generation == 0U) {
+        page->toolpath_view_generation = 1U;
+    }
 }
 
 static uint64_t invalidate_toolpath_program_segment_bounds(

@@ -383,6 +383,18 @@ void v5_settings_page_popup_create(V5SettingsPage *page)
     page->popup_close = popup.close;
 }
 
+void v5_settings_page_set_page_visible(V5SettingsPage *page, int visible)
+{
+    if (!page || !page->status_timer) {
+        return;
+    }
+    lv_timer_pause(page->status_timer);
+    if (visible) {
+        lv_timer_reset(page->status_timer);
+        lv_timer_resume(page->status_timer);
+    }
+}
+
 void v5_settings_page_status_timer_cb(lv_timer_t *timer)
 {
     V5SettingsPage *page = timer ? (V5SettingsPage *)timer->user_data : 0;
@@ -395,6 +407,7 @@ void v5_settings_page_status_timer_cb(lv_timer_t *timer)
         return;
     }
     if (lv_obj_has_flag(page->root, LV_OBJ_FLAG_HIDDEN)) {
+        lv_timer_pause(timer);
         return;
     }
     modal_active = v5_ui_first_frame_guard_overlay_active();

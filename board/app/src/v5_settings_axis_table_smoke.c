@@ -27,13 +27,20 @@ static int active_model_registry_smoke(void)
     const V5MotionModelDescriptor *ac = v5_motion_model_find("XYZAC_TRT");
     const V5MotionModelDescriptor *bc = v5_motion_model_find("XYZBC_TRT");
     V5MotionModelDescriptor invalid;
+    V5MotionModelDescriptor entries[2];
+    V5MotionModelDescriptor future;
+    V5MotionModelAxisTransition transitions[V5_MOTION_MODEL_MAX_TRANSITION_AXES];
+    size_t transition_count = 0U;
+    size_t transition_i;
+    int saw_z_retired = 0;
+    int saw_a_move = 0;
+    int saw_c_move = 0;
     unsigned int slot = 0U;
     char axis = '\0';
 
     if (!v5_motion_model_registry_valid() ||
         !v5_motion_model_descriptor_valid(ac) ||
         !v5_motion_model_descriptor_valid(bc) ||
-        !v5_motion_model_same_status_slots(ac, bc) ||
         !v5_motion_model_status_slot_for_axis(ac, 'A', &slot) || slot != 3U ||
         v5_motion_model_status_slot_for_axis(ac, 'B', &slot) ||
         !v5_motion_model_status_slot_for_axis(bc, 'B', &slot) || slot != 3U ||
@@ -59,6 +66,69 @@ static int active_model_registry_smoke(void)
     invalid = *ac;
     invalid.second_g53_center = invalid.first_g53_center;
     if (v5_motion_model_descriptor_valid(&invalid)) {
+        return 0;
+    }
+    entries[0] = *ac;
+    entries[1] = *bc;
+    entries[1].display = " xyzac_trt ";
+    if (v5_motion_model_registry_entries_valid(entries, 2U)) {
+        return 0;
+    }
+    entries[1] = *bc;
+    entries[1].canonical = " AC摇篮 ";
+    if (v5_motion_model_registry_entries_valid(entries, 2U)) {
+        return 0;
+    }
+    entries[1] = *bc;
+    entries[1].aliases[0] = " ac ";
+    if (v5_motion_model_registry_entries_valid(entries, 2U)) {
+        return 0;
+    }
+    future = *ac;
+    future.registry_id = 99U;
+    future.canonical = "XYAC_FUTURE";
+    future.display = "XYAC future";
+    future.aliases[0] = "XYAC4";
+    future.aliases[1] = 0;
+    future.aliases[2] = 0;
+    future.aliases[3] = 0;
+    future.kins_module = "xyac-future-kins";
+    future.kins_coordinates = "XYAC";
+    future.traj_coordinates = "X Y A C";
+    future.first_status_slot = 2U;
+    future.second_status_slot = 3U;
+    future.active_axis_count = 4U;
+    future.active_axes[0] = 'X';
+    future.active_axes[1] = 'Y';
+    future.active_axes[2] = 'A';
+    future.active_axes[3] = 'C';
+    future.active_status_slots[0] = 0U;
+    future.active_status_slots[1] = 1U;
+    future.active_status_slots[2] = 2U;
+    future.active_status_slots[3] = 3U;
+    if (!v5_motion_model_descriptor_valid(&future) ||
+        !v5_motion_model_build_axis_transition(
+            ac, &future, transitions,
+            sizeof(transitions) / sizeof(transitions[0]), &transition_count) ||
+        transition_count != 5U) {
+        return 0;
+    }
+    for (transition_i = 0U; transition_i < transition_count; ++transition_i) {
+        const V5MotionModelAxisTransition *transition = &transitions[transition_i];
+        if (transition->axis == 'Z' && transition->current_active &&
+            !transition->target_active && transition->current_status_slot == 2U) {
+            saw_z_retired = 1;
+        } else if (transition->axis == 'A' && transition->current_active &&
+                   transition->target_active && transition->current_status_slot == 3U &&
+                   transition->target_status_slot == 2U) {
+            saw_a_move = 1;
+        } else if (transition->axis == 'C' && transition->current_active &&
+                   transition->target_active && transition->current_status_slot == 4U &&
+                   transition->target_status_slot == 3U) {
+            saw_c_move = 1;
+        }
+    }
+    if (!saw_z_retired || !saw_a_move || !saw_c_move) {
         return 0;
     }
     return 1;

@@ -62,21 +62,45 @@ class NativeRotaryDisplayProjection:
 
     def __init__(self, hal_module):
         self._hal = hal_module
+        self._mapping_generation = None
         self._mapping_key = None
         self._records = {}
+        self._wcheckpoint_metadata = {}
 
     def _get(self, name):
         return self._hal.get_value(name)
 
+    def _invalidate_mapping_cache(self):
+        self._mapping_generation = None
+        self._mapping_key = None
+        self._records = {}
+        self._wcheckpoint_metadata = {}
+
+    def _invalidate_wcheckpoint_cache(self, axis):
+        self._wcheckpoint_metadata.pop(axis, None)
+
     def _load_mapping(self):
         valid = bool(self._get('v5-native-hal-owner.home-table-mapping-valid'))
         generation = int(self._get('v5-native-hal-owner.home-table-map-gen'))
-        active_mask = int(self._get('v5-native-hal-owner.home-table-active-mask'))
+        if not valid or not generation:
+            self._invalidate_mapping_cache()
+            raise RuntimeError('native_rotary_projection_mapping_invalid')
         commit_seq = int(self._get('v5-native-hal-owner.home-table-commit-seq'))
-        mapping_key = (generation, active_mask, commit_seq)
-        if valid and generation and active_mask and commit_seq and mapping_key == self._mapping_key:
+        if not commit_seq:
+            self._invalidate_mapping_cache()
+            raise RuntimeError('native_rotary_projection_mapping_invalid')
+        if (self._mapping_key is not None and
+                generation == self._mapping_key[0] and
+                commit_seq == self._mapping_key[2]):
             return
-        if not valid or not generation or not active_mask or not commit_seq:
+
+        # A new generation is an atomic cache boundary.  Drop the old records
+        # before reading any of the new metadata so an incomplete native commit
+        # can never fall back to the previous mapping.
+        self._invalidate_mapping_cache()
+        active_mask = int(self._get('v5-native-hal-owner.home-table-active-mask'))
+        mapping_key = (generation, active_mask, commit_seq)
+        if not active_mask:
             raise RuntimeError('native_rotary_projection_mapping_invalid')
 
         records = {}
@@ -116,26 +140,49 @@ class NativeRotaryDisplayProjection:
                 mapping_key_after != mapping_key):
             raise RuntimeError('native_rotary_projection_mapping_changed')
         self._records = records
+        self._mapping_generation = generation
         self._mapping_key = mapping_key
 
     def _read_wcheckpoint(self, axis):
         for _attempt in range(3):
             valid_before = bool(self._get(f'v5-native-hal-owner.wcp-{axis}-valid'))
             generation_before = int(self._get(f'v5-native-hal-owner.wcp-{axis}-generation'))
+            if not valid_before or not generation_before:
+                self._invalidate_wcheckpoint_cache(axis)
+                continue
             logical_counts = exact_native_count(
                 self._get(f'v5-native-hal-owner.wcp-{axis}-logical-counts'))
-            base_counts = exact_native_count(
-                self._get(f'v5-native-hal-owner.wcp-{axis}-base-counts'))
-            runtime_counts = exact_native_count(
-                self._get(f'v5-native-hal-owner.wcp-{axis}-runtime-counts'))
+            metadata = self._wcheckpoint_metadata.get(axis)
+            needs_metadata_reload = (
+                metadata is None or
+                metadata['generation'] != generation_before)
+            base_counts = None
+            runtime_counts = None
+            if needs_metadata_reload:
+                # Invalidate first: if the generation is mid-commit, none of the
+                # previous base/window metadata may be reused on this sample.
+                self._invalidate_wcheckpoint_cache(axis)
+                base_counts = exact_native_count(
+                    self._get(f'v5-native-hal-owner.wcp-{axis}-base-counts'))
+                runtime_counts = exact_native_count(
+                    self._get(f'v5-native-hal-owner.wcp-{axis}-runtime-counts'))
             generation_after = int(self._get(f'v5-native-hal-owner.wcp-{axis}-generation'))
             valid_after = bool(self._get(f'v5-native-hal-owner.wcp-{axis}-valid'))
-            if (valid_before and valid_after and generation_before and
-                    generation_after == generation_before and
-                    logical_counts is not None and base_counts is not None and
-                    runtime_counts is not None and
-                    runtime_counts == logical_counts - base_counts):
-                return logical_counts, base_counts
+            if (not valid_after or generation_after != generation_before or
+                    logical_counts is None):
+                self._invalidate_wcheckpoint_cache(axis)
+                continue
+            if needs_metadata_reload:
+                if (base_counts is None or runtime_counts is None or
+                        runtime_counts != logical_counts - base_counts):
+                    continue
+                metadata = {
+                    'generation': generation_before,
+                    'base_counts': base_counts,
+                }
+                self._wcheckpoint_metadata[axis] = metadata
+            return logical_counts, metadata['base_counts']
+        self._invalidate_wcheckpoint_cache(axis)
         raise RuntimeError('native_rotary_projection_readback_invalid')
 
     def project(self, raw_mcs=None, raw_cmd=None):

@@ -10,7 +10,8 @@ from v5_drive_parameter_table import (
     resident_axis_by_slave_position,
     write_drive_parameter_display_rows,
 )
-from v5_drive_runtime_store import active_model_axes_from_runtime_ini, load_settings_runtime
+from v5_active_model_descriptor import active_model_descriptor_from_runtime_ini
+from v5_drive_runtime_store import load_settings_runtime
 from v5_drive_sdo import (
     parse_slave_identity,
     parse_slave_position_token,
@@ -120,7 +121,9 @@ def configured_drive_targets(timeout_s: float) -> Tuple[List[Dict[str, Any]], Di
     if not scan.get("ok"):
         raise DriveActionError(str(scan.get("code") or "DRIVE_SCAN_FAILED"), str(scan.get("message_cn") or "扫描从站失败，未写驱动。"), scan)
     runtime = load_settings_runtime()
-    active_axes = active_model_axes_from_runtime_ini()
+    active_model = active_model_descriptor_from_runtime_ini()
+    active_axes = active_model["active_axes"]
+    active_status_slots = dict(zip(active_axes, active_model["active_status_slots"]))
     active_axis_set = set(active_axes)
     self_bindings = load_self_slave_bindings()
     failures: List[Dict[str, Any]] = []
@@ -233,6 +236,7 @@ def configured_drive_targets(timeout_s: float) -> Tuple[List[Dict[str, Any]], Di
             targets.append({
                 "axis": axis,
                 "axis_index": axis_index,
+                "status_slot": active_status_slots[axis],
                 "axis_cfg": axis_cfg,
                 "position": position,
                 "axis_slave_binding_source": binding_source,
@@ -246,7 +250,10 @@ def configured_drive_targets(timeout_s: float) -> Tuple[List[Dict[str, Any]], Di
     if failures:
         raise DriveActionError("DRIVE_TARGET_PRECHECK_FAILED", "驱动目标轴预检失败，未写驱动。", {"failures": failures})
     frozen_scan = dict(scan)
+    frozen_scan["active_model"] = active_model["canonical"]
     frozen_scan["active_model_axes"] = list(active_axes)
+    frozen_scan["active_model_status_slots"] = [
+        {"axis": axis, "status_slot": active_status_slots[axis]} for axis in active_axes]
     frozen_scan["profile_snapshot"] = {
         "generated_at": snapshot.get("generated_at"),
         "profile_count": snapshot.get("profile_count"),

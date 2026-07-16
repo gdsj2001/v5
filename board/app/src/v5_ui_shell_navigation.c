@@ -1,6 +1,7 @@
 #include "v5_ui_shell_internal.h"
 
 #include "v5_lvgl_remote_display.h"
+#include "v5_ui_page_cache_registry.h"
 
 #include <stdio.h>
 
@@ -49,16 +50,13 @@ void shell_mark_page_cache_dirty(V5ShellPageKind page)
         return;
     }
     g_v5_shell_page_cache_dirty[page] = 1;
-    if (g_v5_shell_remote_display_active) {
+    if (g_v5_shell_remote_display_active &&
+        v5_ui_page_cache_invalidate_now(
+            (unsigned int)g_v5_shell_current_page,
+            (unsigned int)page,
+            g_v5_shell_shell_pages[page] &&
+                !lv_obj_has_flag(g_v5_shell_shell_pages[page], LV_OBJ_FLAG_HIDDEN))) {
         v5_lvgl_remote_display_cache_invalidate(shell_page_cache_slot(page));
-    }
-}
-
-void shell_mark_all_page_caches_dirty(void)
-{
-    unsigned int page;
-    for (page = 0U; page < (unsigned int)V5_SHELL_PAGE_COUNT; ++page) {
-        shell_mark_page_cache_dirty((V5ShellPageKind)page);
     }
 }
 
@@ -70,6 +68,12 @@ void shell_show_page_objects(V5ShellPageKind page)
     if ((unsigned int)page < (unsigned int)V5_SHELL_PAGE_COUNT && g_v5_shell_shell_pages[page]) {
         lv_obj_clear_flag(g_v5_shell_shell_pages[page], LV_OBJ_FLAG_HIDDEN);
     }
+    v5_main_page_set_page_visible(
+        &g_v5_shell_main_page,
+        page == V5_SHELL_PAGE_MAIN);
+    v5_settings_page_set_page_visible(
+        &g_v5_shell_settings_page,
+        page == V5_SHELL_PAGE_SETTINGS);
     if (!g_v5_shell_top_status_layer) {
         return;
     }
@@ -113,11 +117,17 @@ int shell_apply_page_resident_model(V5ShellPageKind page)
     V5NativeReadback readback = g_v5_shell_main_page.native_readback;
     shell_update_top_status_label();
     switch (page) {
-    case V5_SHELL_PAGE_MAIN:
+    case V5_SHELL_PAGE_MAIN: {
+        int applied;
         v5_main_page_set_native_readback(&g_v5_shell_main_page, &readback);
-        return v5_main_page_apply_status(
+        applied = v5_main_page_apply_status(
             &g_v5_shell_main_page,
             &g_v5_shell_model.status_view);
+        if (shell_main_page_structure_refresh_pending()) {
+            shell_main_page_structure_refresh_consume();
+        }
+        return applied;
+    }
     case V5_SHELL_PAGE_SETTINGS:
         (void)v5_settings_page_set_native_readback(&g_v5_shell_settings_page, &readback);
         return v5_settings_page_apply_status(

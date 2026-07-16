@@ -226,9 +226,9 @@ static void shell_open_program_row_for_run(int idx)
     shell_clear_program_selection_confirm();
     if (v5_main_page_open_program(&g_v5_shell_main_page, g_v5_shell_program_rows[idx].path, &result)) {
         shell_log_program_event("program_file_double_click", g_v5_shell_program_rows[idx].path, 1, &result);
-        (void)v5_main_page_apply_status(&g_v5_shell_main_page, &g_v5_shell_model.status_view);
-        shell_log_program_event("program_file_double_click_applied", g_v5_shell_program_rows[idx].path, 1, &result);
-        (void)v5_settings_page_apply_status(&g_v5_shell_settings_page, &g_v5_shell_model.status_view);
+        /* Main is hidden here.  Navigation prepares exactly one resident
+         * structure frame (including Program Open Fit) immediately before
+         * the cached Main frame becomes visible. */
         shell_mark_page_cache_dirty(V5_SHELL_PAGE_MAIN);
         shell_navigate(0, V5_MAIN_PAGE_ACTION_NAV_MAIN);
     } else {

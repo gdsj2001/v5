@@ -120,6 +120,7 @@ add_executable(v5_lvgl_shell
     src/v5_settings_page_actions.c
     src/v5_settings_page_widgets.c
     src/v5_runtime_registry.c
+    src/v5_settings_parameter_store.c
     src/v5_settings_axis_table.c
     src/v5_settings_axis_table_resident.c
     src/v5_settings_axis_table_runtime.c

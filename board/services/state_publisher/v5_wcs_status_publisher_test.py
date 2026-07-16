@@ -2,10 +2,23 @@
 from __future__ import annotations
 
 import tempfile
+import sys
+import types
 from pathlib import Path
 
 import v5_wcs_status_codec as codec
 import v5_machine_status_projection as projection
+
+if 'resource' not in sys.modules:
+    try:
+        import resource  # noqa: F401
+    except ModuleNotFoundError:
+        sys.modules['resource'] = types.SimpleNamespace(
+            RLIMIT_MEMLOCK=0,
+            RLIM_INFINITY=-1,
+            getrlimit=lambda _resource: (0, 0),
+            setrlimit=lambda _resource, _limits: None)
+
 import v5_wcs_status_publisher as publisher
 
 
@@ -182,6 +195,34 @@ def check_position_change_or_heartbeat_publish() -> None:
         projection.atomic_write = original_atomic_write
 
 
+def check_rotary_projection_is_sampled_at_30hz_cadence() -> None:
+    stat = FakeStat()
+    cadence = publisher.StatusPublishCadence(0.2)
+
+    class CountingProjection:
+        def __init__(self):
+            self.samples = 0
+
+        def project(self, raw_mcs, raw_cmd):
+            self.samples += 1
+            return raw_mcs, raw_cmd
+
+    rotary = CountingProjection()
+    original_atomic_write = projection.atomic_write
+    projection.atomic_write = lambda _path, _payload: None
+    try:
+        for index in range(31):
+            projection.write_position_status(
+                '/dev/null/position',
+                stat,
+                rotary_projection=rotary,
+                publish_cadence=cadence,
+                now_monotonic=index * 0.033)
+    finally:
+        projection.atomic_write = original_atomic_write
+    assert rotary.samples == 31
+
+
 def check_position_uses_continuous_joint_position() -> None:
     stat = FakeStat()
     stat.joint_position[4] = -19079.946
@@ -221,6 +262,7 @@ def main() -> int:
     check_resident_epoch_changes_only_with_table()
     check_poll_cadence()
     check_position_change_or_heartbeat_publish()
+    check_rotary_projection_is_sampled_at_30hz_cadence()
     check_position_uses_continuous_joint_position()
     check_atomic_shm_write_needs_no_fsync()
     print("V5_WCS_STATUS_PUBLISHER_TEST_OK")

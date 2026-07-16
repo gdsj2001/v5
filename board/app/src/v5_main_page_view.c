@@ -236,10 +236,10 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
     int program_model_changed = 0;
     int static_pose_changed = 0;
     int program_refresh_due = 0;
-    int fit_overflow_checked = 0;
-    int fit_overflow_changed = 0;
     int model_projection_fresh = 0;
     int model_scene_stale = 0;
+    int pose_refresh_due = 0;
+    int structure_refresh_due = 0;
     int runtime_has_program = runtime && v5_program_runtime_has_open_program(runtime);
     unsigned int i;
 
@@ -250,16 +250,32 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
     if (status) {
         page->last_status = *status;
     }
-    v5_main_page_internal_main_page_resolve_active_model_scene(page, status);
+    /* A hidden page only owns a resident snapshot.  Projection, Fit and LVGL
+     * invalidation happen once when navigation makes Main the target page. */
+    if (lv_obj_has_flag(page->root, LV_OBJ_FLAG_HIDDEN)) {
+        return 1;
+    }
+    if (refresh_flags == 0U) {
+        return 1;
+    }
+    pose_refresh_due =
+        (refresh_flags & (V5_MAIN_PAGE_REFRESH_POSE | V5_MAIN_PAGE_REFRESH_STRUCTURE)) != 0U;
+    structure_refresh_due =
+        (refresh_flags & V5_MAIN_PAGE_REFRESH_STRUCTURE) != 0U;
+    if (pose_refresh_due) {
+        v5_main_page_internal_main_page_resolve_active_model_scene(page, status);
+        page->toolpath_pose_refresh_count += 1U;
+    }
+    if (structure_refresh_due) {
+        page->toolpath_structure_refresh_count += 1U;
+    }
     model_projection_fresh =
         page->toolpath_model_scene_valid && page->toolpath_model_scene_fresh;
     model_scene_stale =
         page->toolpath_model_scene_valid && !page->toolpath_model_scene_fresh;
-    if (refresh_flags == 0U) {
-        return 1;
-    }
 
     if ((refresh_flags & V5_MAIN_PAGE_REFRESH_DYNAMIC) != 0U) {
+        page->toolpath_dynamic_refresh_count += 1U;
         v5_coordinate_panel_from_status(status, &panel);
         for (i = 0; i < V5_MAIN_PAGE_AXIS_COUNT; ++i) {
             const char display_axis = v5_main_page_internal_main_page_axis_display_char(page, i);
@@ -309,18 +325,35 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
         }
     }
 
-    if ((refresh_flags & V5_MAIN_PAGE_REFRESH_DYNAMIC) != 0U) {
+    if ((refresh_flags & (V5_MAIN_PAGE_REFRESH_DYNAMIC |
+                          V5_MAIN_PAGE_REFRESH_POSE |
+                          V5_MAIN_PAGE_REFRESH_STRUCTURE)) != 0U) {
         static_toolpath_due =
-            ((refresh_flags & V5_MAIN_PAGE_REFRESH_SLOW) != 0U) ||
-            (runtime_has_program && !page->toolpath_program_visible) ||
-            !page->toolpath_fit.valid ||
-            page->toolpath_program_view_generation != page->toolpath_view_generation;
-        program_model_changed = v5_main_page_internal_main_page_program_model_projection_changed(page);
-        static_pose_changed = v5_main_page_internal_main_page_static_pose_changed(page);
+            structure_refresh_due &&
+            ((runtime_has_program && !page->toolpath_program_visible) ||
+             !page->toolpath_fit.valid ||
+             page->toolpath_program_view_generation != page->toolpath_view_generation ||
+             (runtime_has_program &&
+              v5_program_runtime_loaded_epoch(runtime) != page->toolpath_program_generation) ||
+             (!runtime_has_program &&
+              (page->toolpath_program_visible || page->toolpath_program_point_count != 0U)));
+        if (pose_refresh_due) {
+            program_model_changed = v5_main_page_internal_main_page_program_model_projection_changed(page);
+            static_pose_changed = v5_main_page_internal_main_page_static_pose_changed(page);
+        }
+        if (runtime_has_program && page->toolpath_program_visible &&
+            page->toolpath_program_wcs_valid &&
+            v5_native_readback_wcs_table_known(&page->native_readback) &&
+            page->toolpath_program_wcs_epoch != page->native_readback.wcs_offsets_epoch) {
+            program_wcs_changed = 1;
+        }
         program_refresh_due =
-            (static_toolpath_due || program_model_changed) && model_projection_fresh;
+            (static_toolpath_due || program_model_changed || program_wcs_changed) &&
+            model_projection_fresh;
 
-        if (!page->toolpath_fit.valid && status && !model_scene_stale) {
+        if (structure_refresh_due && !runtime_has_program && status && !model_scene_stale &&
+            (!page->toolpath_fit.valid ||
+             (!runtime_has_program && page->toolpath_fit.plane != page->view_plane))) {
             if (v5_toolpath_display_fit_from_status(status, page->view_plane, &page->toolpath_fit)) {
                 v5_main_page_internal_main_page_expand_visible_toolpath_fit(page, status, &page->toolpath_fit);
                 page->toolpath_static_cache_misses += 1U;
@@ -328,7 +361,7 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
         }
 
         if (program_refresh_due && runtime_has_program) {
-            if (static_toolpath_due) {
+            if (static_toolpath_due || program_wcs_changed) {
                 runtime_generation = v5_program_runtime_loaded_epoch(runtime);
                 preview_count = v5_program_runtime_preview_trajectory(
                     runtime,
@@ -372,20 +405,10 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
                  page->toolpath_program_generation != runtime_generation ||
                  page->toolpath_program_plane != page->view_plane ||
                  !page->toolpath_fit.valid);
-            if (preview_count > 0U && !program_fit_dirty &&
-                (program_model_changed || program_wcs_changed || static_pose_changed)) {
-                fit_overflow_checked = 1;
-                if (v5_main_page_internal_main_page_program_outside_fit_window(page) ||
-                    v5_main_page_internal_main_page_dynamic_toolpath_outside_fit_window(page, status) ||
-                    v5_main_page_internal_main_page_static_geometry_outside_fit_window(page, status)) {
-                    fit_overflow_changed = v5_main_page_internal_main_page_expand_fit_on_overflow(page, status);
-                }
-            }
             program_projection_dirty =
                 program_fit_dirty ||
                 program_model_changed ||
                 program_wcs_changed ||
-                fit_overflow_changed ||
                 page->toolpath_program_view_generation != page->toolpath_view_generation;
             if (preview_count > 0U && program_projection_dirty) {
                 if (!program_fit_dirty ||
@@ -425,7 +448,8 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
                 v5_program_runtime_loaded_epoch(runtime) != page->toolpath_program_generation)) {
         v5_main_page_internal_hide_toolpath_program_line(page);
         page->toolpath_program_generation = 0U;
-        page->toolpath_program_view_generation = 0U;
+        page->toolpath_program_view_generation = page->toolpath_view_generation;
+        page->toolpath_program_plane = page->view_plane;
         page->toolpath_program_wcs_valid = 0;
         page->toolpath_program_wcs_index = -1;
         page->toolpath_program_wcs_epoch = 0U;
@@ -438,39 +462,31 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
             sizeof(page->toolpath_program_model_scene));
     }
 
-    if (!model_scene_stale && !fit_overflow_checked &&
-        (v5_main_page_internal_main_page_dynamic_toolpath_outside_fit_window(page, status) ||
-         ((static_toolpath_due || static_pose_changed) &&
-          v5_main_page_internal_main_page_static_geometry_outside_fit_window(page, status)))) {
-        fit_overflow_changed = v5_main_page_internal_main_page_expand_fit_on_overflow(page, status);
-        if (fit_overflow_changed && runtime_has_program && page->toolpath_program_visible) {
-            v5_main_page_internal_main_page_project_program_with_current_fit(page);
-        }
-    }
-
-    if (static_toolpath_due || program_model_changed || static_pose_changed || fit_overflow_changed ||
+    if (static_toolpath_due || program_model_changed || static_pose_changed ||
         (refresh_flags & V5_MAIN_PAGE_REFRESH_SLOW) != 0U) {
         v5_main_page_internal_update_toolpath_state_lines(page, status);
         v5_main_page_internal_main_page_store_static_pose(page);
     }
 
-    v5_toolpath_display_from_status_with_fit(
-        status,
-        &page->toolpath_fit,
-        (double)V5_TOOLPATH_W,
-        (double)V5_TOOLPATH_H,
-        &dynamic_display);
-    v5_main_page_internal_apply_toolpath_view_transform_to_snapshot(page, &dynamic_display);
-    {
-        V5ToolpathScreenPoint cmd_tip_point;
-        int cmd_tip_valid = v5_main_page_internal_main_page_project_cmd_tip(page, status, &cmd_tip_point);
-        v5_main_page_internal_set_toolpath_v3_dot_center(page->toolpath_microkernel_marker_dot, &cmd_tip_point, cmd_tip_valid);
-    }
-    v5_main_page_internal_set_toolpath_v3_dot_center(page->toolpath_holder_marker_line, &dynamic_display.mcs_point, dynamic_display.mcs_valid);
-    v5_main_page_internal_update_toolpath_holder_line(page, status, dynamic_display.mcs_valid ? &dynamic_display.mcs_point : 0);
-    if (!dynamic_display.mcs_valid) {
-        v5_main_page_internal_hide_toolpath_unproven_geometry(page);
-    }
+        if ((refresh_flags & V5_MAIN_PAGE_REFRESH_DYNAMIC) != 0U) {
+            v5_toolpath_display_from_status_with_fit(
+                status,
+                &page->toolpath_fit,
+                (double)V5_TOOLPATH_W,
+                (double)V5_TOOLPATH_H,
+                &dynamic_display);
+            v5_main_page_internal_apply_toolpath_view_transform_to_snapshot(page, &dynamic_display);
+            {
+                V5ToolpathScreenPoint cmd_tip_point;
+                int cmd_tip_valid = v5_main_page_internal_main_page_project_cmd_tip(page, status, &cmd_tip_point);
+                v5_main_page_internal_set_toolpath_v3_dot_center(page->toolpath_microkernel_marker_dot, &cmd_tip_point, cmd_tip_valid);
+            }
+            v5_main_page_internal_set_toolpath_v3_dot_center(page->toolpath_holder_marker_line, &dynamic_display.mcs_point, dynamic_display.mcs_valid);
+            v5_main_page_internal_update_toolpath_holder_line(page, status, dynamic_display.mcs_valid ? &dynamic_display.mcs_point : 0);
+            if (!dynamic_display.mcs_valid) {
+                v5_main_page_internal_hide_toolpath_unproven_geometry(page);
+            }
+        }
     }
 
     if ((refresh_flags & V5_MAIN_PAGE_REFRESH_BUTTONS) != 0U) {

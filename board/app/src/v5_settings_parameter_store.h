@@ -13,6 +13,11 @@ typedef enum V5SettingsParameterDiskTable {
     V5_SETTINGS_PARAMETER_DISK_DRIVE,
 } V5SettingsParameterDiskTable;
 
+typedef struct V5SettingsParameterAxisValue {
+    const char *axis;
+    const char *value;
+} V5SettingsParameterAxisValue;
+
 int v5_settings_parameter_store_read_axis(
     const char *project_root,
     V5SettingsParameterDiskTable table,
@@ -36,6 +41,13 @@ int v5_settings_parameter_store_write_axis_pair(
     const char *field_key,
     const char *first_value,
     const char *second_value);
+
+int v5_settings_parameter_store_write_axis_values(
+    const char *project_root,
+    V5SettingsParameterDiskTable table,
+    const char *field_key,
+    const V5SettingsParameterAxisValue *values,
+    size_t value_count);
 
 #ifdef __cplusplus
 }

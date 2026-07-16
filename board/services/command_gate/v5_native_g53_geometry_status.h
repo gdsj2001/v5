@@ -15,6 +15,18 @@ extern "C" {
 #define V5_NATIVE_G53_GEOMETRY_STATUS_AXIS_COUNT V5_NATIVE_READBACK_G53_AXIS_COUNT
 #define V5_NATIVE_G53_GEOMETRY_STATUS_MOTION_MODEL_CAP V5_NATIVE_READBACK_MOTION_MODEL_CAP
 
+/* Version-2 wire field bits.  The mask occupies the former reserved0 slot. */
+#define V5_NATIVE_G53_GEOMETRY_FIELD_A_Y (1U << 0)
+#define V5_NATIVE_G53_GEOMETRY_FIELD_A_Z (1U << 1)
+#define V5_NATIVE_G53_GEOMETRY_FIELD_B_X (1U << 2)
+#define V5_NATIVE_G53_GEOMETRY_FIELD_B_Z (1U << 3)
+#define V5_NATIVE_G53_GEOMETRY_FIELD_C_X (1U << 4)
+#define V5_NATIVE_G53_GEOMETRY_FIELD_C_Y (1U << 5)
+#define V5_NATIVE_G53_GEOMETRY_FIELD_MASK_ALL \
+    (V5_NATIVE_G53_GEOMETRY_FIELD_A_Y | V5_NATIVE_G53_GEOMETRY_FIELD_A_Z | \
+     V5_NATIVE_G53_GEOMETRY_FIELD_B_X | V5_NATIVE_G53_GEOMETRY_FIELD_B_Z | \
+     V5_NATIVE_G53_GEOMETRY_FIELD_C_X | V5_NATIVE_G53_GEOMETRY_FIELD_C_Y)
+
 int v5_native_g53_geometry_status_read(const char *path, unsigned int max_age_ms, V5NativeReadback *readback);
 int v5_native_g53_geometry_status_write(
     const char *path,

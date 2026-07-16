@@ -267,22 +267,18 @@ static void apply_local_action_state(V5MainPage *page, const V5MainPageActionRep
     case V5_MAIN_PAGE_ACTION_VIEW_XY:
         page->view_plane = V5_TOOLPATH_DISPLAY_XY;
         v5_main_page_internal_reset_toolpath_view_rotation(page);
-        v5_main_page_internal_mark_toolpath_static_dirty(page);
         break;
     case V5_MAIN_PAGE_ACTION_VIEW_XZ:
         page->view_plane = V5_TOOLPATH_DISPLAY_XZ;
         v5_main_page_internal_reset_toolpath_view_rotation(page);
-        v5_main_page_internal_mark_toolpath_static_dirty(page);
         break;
     case V5_MAIN_PAGE_ACTION_VIEW_YZ:
         page->view_plane = V5_TOOLPATH_DISPLAY_YZ;
         v5_main_page_internal_reset_toolpath_view_rotation(page);
-        v5_main_page_internal_mark_toolpath_static_dirty(page);
         break;
     case V5_MAIN_PAGE_ACTION_VIEW_3D:
         page->view_plane = V5_TOOLPATH_DISPLAY_3D;
         v5_main_page_internal_reset_toolpath_view_rotation(page);
-        v5_main_page_internal_mark_toolpath_static_dirty(page);
         break;
     default:
         break;

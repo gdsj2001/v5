@@ -31,11 +31,29 @@ enum {
     V5_MAIN_PAGE_REFRESH_BUTTONS = 1u << 1,
     V5_MAIN_PAGE_REFRESH_ESTOP = 1u << 2,
     V5_MAIN_PAGE_REFRESH_SLOW = 1u << 3,
+    V5_MAIN_PAGE_REFRESH_POSE = 1u << 4,
+    V5_MAIN_PAGE_REFRESH_STRUCTURE = 1u << 5,
     V5_MAIN_PAGE_REFRESH_ALL =
         V5_MAIN_PAGE_REFRESH_DYNAMIC |
         V5_MAIN_PAGE_REFRESH_BUTTONS |
         V5_MAIN_PAGE_REFRESH_ESTOP |
-        V5_MAIN_PAGE_REFRESH_SLOW
+        V5_MAIN_PAGE_REFRESH_SLOW |
+        V5_MAIN_PAGE_REFRESH_POSE |
+        V5_MAIN_PAGE_REFRESH_STRUCTURE
+};
+
+enum {
+    V5_MAIN_PAGE_NATIVE_READBACK_MODEL = 1u << 0,
+    V5_MAIN_PAGE_NATIVE_READBACK_WCS = 1u << 1,
+    V5_MAIN_PAGE_NATIVE_READBACK_PROGRAM = 1u << 2,
+    V5_MAIN_PAGE_NATIVE_READBACK_SAFETY = 1u << 3,
+    V5_MAIN_PAGE_NATIVE_READBACK_MODAL = 1u << 4,
+    V5_MAIN_PAGE_NATIVE_READBACK_ALL =
+        V5_MAIN_PAGE_NATIVE_READBACK_MODEL |
+        V5_MAIN_PAGE_NATIVE_READBACK_WCS |
+        V5_MAIN_PAGE_NATIVE_READBACK_PROGRAM |
+        V5_MAIN_PAGE_NATIVE_READBACK_SAFETY |
+        V5_MAIN_PAGE_NATIVE_READBACK_MODAL
 };
 
 typedef void (*V5UiNavigationCallback)(void *user_data, V5MainPageActionKind action);
@@ -190,6 +208,9 @@ typedef struct V5MainPage {
     V5ToolpathScreenPoint toolpath_program_screen_points[V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT];
     unsigned int toolpath_static_cache_hits;
     unsigned int toolpath_static_cache_misses;
+    unsigned int toolpath_dynamic_refresh_count;
+    unsigned int toolpath_pose_refresh_count;
+    unsigned int toolpath_structure_refresh_count;
     unsigned int toolpath_line_rewrite_count;
     unsigned int toolpath_line_set_points_count;
     unsigned int toolpath_line_last_dirty_rect_count;
@@ -204,6 +225,13 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
 int v5_main_page_handle_touch_points(V5MainPage *page, const lv_point_t *points, int count, int pressed, int *changed);
 void v5_main_page_bind_program_controller(V5MainPage *page, V5ProgramController *controller);
 void v5_main_page_set_command_execution_enabled(V5MainPage *page, int enabled);
+unsigned int v5_main_page_native_readback_change_flags(
+    const V5NativeReadback *before,
+    const V5NativeReadback *after);
+void v5_main_page_set_native_readback_flags(
+    V5MainPage *page,
+    const V5NativeReadback *readback,
+    unsigned int change_flags);
 void v5_main_page_set_native_readback(V5MainPage *page, const V5NativeReadback *readback);
 void v5_main_page_store_native_readback_during_modal(
     V5MainPage *page,
@@ -217,6 +245,7 @@ int v5_main_page_open_program(V5MainPage *page, const char *path, V5ProgramOpenR
 int v5_main_page_set_mdi_text(V5MainPage *page, const char *line);
 void v5_main_page_select_all_axes(V5MainPage *page);
 int v5_main_page_select_axis(V5MainPage *page, V5MainPageSelectionSpace space, char axis);
+void v5_main_page_set_page_visible(V5MainPage *page, int visible);
 void v5_main_page_refresh_program_status(V5MainPage *page);
 int v5_main_page_trigger_action(V5MainPage *page, V5MainPageActionKind action, V5MainPageActionReport *report);
 int v5_main_page_trigger_override(

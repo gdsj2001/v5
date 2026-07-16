@@ -26,6 +26,7 @@ static unsigned int g_delete_count;
 static unsigned int g_refresh_count;
 static unsigned int g_main_dirty_count;
 static unsigned int g_program_dirty_count;
+static unsigned int g_main_apply_count;
 
 int shell_program_path_allowed(const char *path)
 {
@@ -62,6 +63,7 @@ int v5_main_page_apply_status(V5MainPage *page, const V5UiStatusView *status)
 {
     (void)page;
     (void)status;
+    ++g_main_apply_count;
     return 1;
 }
 
@@ -199,6 +201,7 @@ int main(void)
     if (shell_program_delete_popup_visible() || g_delete_count != 1U ||
         g_refresh_count != 1U || g_v5_shell_program_selected_index != -1 ||
         g_main_dirty_count != 1U || g_program_dirty_count != 1U ||
+        g_main_apply_count != 0U ||
         strcmp(lv_label_get_text(g_v5_shell_program_source_label), "已删除: delete-me.ngc") != 0) {
         return 4;
     }

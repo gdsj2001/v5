@@ -323,9 +323,15 @@ int rtapi_app_main(void)
 
     if (!coordinates) {coordinates = kp.required_coordinates;}
 
-    ksetup0(comp_id,coordinates,&kp);
-    ksetup1(comp_id,coordinates,&kp);
-    ksetup2(comp_id,coordinates,&kp);
+    if (ksetup0(comp_id,coordinates,&kp)) {
+        emsg = "kinematics setup type 0 failed"; goto error;
+    }
+    if (ksetup1(comp_id,coordinates,&kp)) {
+        emsg = "kinematics setup type 1 failed"; goto error;
+    }
+    if (ksetup2(comp_id,coordinates,&kp)) {
+        emsg = "kinematics setup type 2 failed"; goto error;
+    }
 
     hal_ready(comp_id);
     return 0;

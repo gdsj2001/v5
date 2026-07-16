@@ -26,22 +26,11 @@
 #include "rtapi_string.h"
 #include "rtapi_ctype.h"
 
-static TrtKinematicsContext trt_context = {
-    .max_joints = 0,
-    .joint_x = -1,
-    .joint_y = -1,
-    .joint_z = -1,
-    .joint_a = -1,
-    .joint_b = -1,
-    .joint_c = -1,
-    .joint_u = -1,
-    .joint_v = -1,
-    .joint_w = -1,
-};
+static TrtKinematicsContext *trt_context;
 
 const TrtKinematicsContext *trtKinematicsGetContext(void)
 {
-    return &trt_context;
+    return trt_context;
 }
 
 
@@ -70,16 +59,20 @@ int trtKinematicsSetup(const int   comp_id,
              rqdjoints);
         goto error;
     }
-    trt_context.max_joints = kp->max_joints;
-    trt_context.joint_x = -1;
-    trt_context.joint_y = -1;
-    trt_context.joint_z = -1;
-    trt_context.joint_a = -1;
-    trt_context.joint_b = -1;
-    trt_context.joint_c = -1;
-    trt_context.joint_u = -1;
-    trt_context.joint_v = -1;
-    trt_context.joint_w = -1;
+    trt_context = hal_malloc(sizeof(*trt_context));
+    if (!trt_context) {
+        goto error;
+    }
+    trt_context->max_joints = kp->max_joints;
+    trt_context->joint_x = -1;
+    trt_context->joint_y = -1;
+    trt_context->joint_z = -1;
+    trt_context->joint_a = -1;
+    trt_context->joint_b = -1;
+    trt_context->joint_c = -1;
+    trt_context->joint_u = -1;
+    trt_context->joint_v = -1;
+    trt_context->joint_w = -1;
 
     if (map_coordinates_to_jnumbers(coordinates,
                                     kp->max_joints,
@@ -104,15 +97,15 @@ int trtKinematicsSetup(const int   comp_id,
     // assign principal joint numbers (first found in coordinates map)
     // duplicates are handled by position_to_mapped_joints()
     for (jno=0; jno < EMCMOT_MAX_JOINTS; jno++) {
-       if (axis_idx_for_jno[jno] == 0 && trt_context.joint_x == -1) {trt_context.joint_x = jno;}
-       if (axis_idx_for_jno[jno] == 1 && trt_context.joint_y == -1) {trt_context.joint_y = jno;}
-       if (axis_idx_for_jno[jno] == 2 && trt_context.joint_z == -1) {trt_context.joint_z = jno;}
-       if (axis_idx_for_jno[jno] == 3 && trt_context.joint_a == -1) {trt_context.joint_a = jno;}
-       if (axis_idx_for_jno[jno] == 4 && trt_context.joint_b == -1) {trt_context.joint_b = jno;}
-       if (axis_idx_for_jno[jno] == 5 && trt_context.joint_c == -1) {trt_context.joint_c = jno;}
-       if (axis_idx_for_jno[jno] == 6 && trt_context.joint_u == -1) {trt_context.joint_u = jno;}
-       if (axis_idx_for_jno[jno] == 7 && trt_context.joint_v == -1) {trt_context.joint_v = jno;}
-       if (axis_idx_for_jno[jno] == 8 && trt_context.joint_w == -1) {trt_context.joint_w = jno;}
+       if (axis_idx_for_jno[jno] == 0 && trt_context->joint_x == -1) {trt_context->joint_x = jno;}
+       if (axis_idx_for_jno[jno] == 1 && trt_context->joint_y == -1) {trt_context->joint_y = jno;}
+       if (axis_idx_for_jno[jno] == 2 && trt_context->joint_z == -1) {trt_context->joint_z = jno;}
+       if (axis_idx_for_jno[jno] == 3 && trt_context->joint_a == -1) {trt_context->joint_a = jno;}
+       if (axis_idx_for_jno[jno] == 4 && trt_context->joint_b == -1) {trt_context->joint_b = jno;}
+       if (axis_idx_for_jno[jno] == 5 && trt_context->joint_c == -1) {trt_context->joint_c = jno;}
+       if (axis_idx_for_jno[jno] == 6 && trt_context->joint_u == -1) {trt_context->joint_u = jno;}
+       if (axis_idx_for_jno[jno] == 7 && trt_context->joint_v == -1) {trt_context->joint_v = jno;}
+       if (axis_idx_for_jno[jno] == 8 && trt_context->joint_w == -1) {trt_context->joint_w = jno;}
     }
 
     rtapi_print("%s coordinates=%s assigns:\n", kp->kinsname,coordinates);
@@ -122,19 +115,19 @@ int trtKinematicsSetup(const int   comp_id,
                    jno,"XYZABCUVW"[axis_idx_for_jno[jno]]);
     }
 
-    res += hal_pin_float_newf(HAL_IN, &(trt_context.x_rot_point), comp_id,
+    res += hal_pin_float_newf(HAL_IN, &(trt_context->x_rot_point), comp_id,
                  "%s.x-rot-point",kp->halprefix);
-    res += hal_pin_float_newf(HAL_IN, &(trt_context.y_rot_point), comp_id,
+    res += hal_pin_float_newf(HAL_IN, &(trt_context->y_rot_point), comp_id,
                  "%s.y-rot-point",kp->halprefix);
-    res += hal_pin_float_newf(HAL_IN, &(trt_context.z_rot_point), comp_id,
+    res += hal_pin_float_newf(HAL_IN, &(trt_context->z_rot_point), comp_id,
                  "%s.z-rot-point",kp->halprefix);
-    res += hal_pin_float_newf(HAL_IN, &(trt_context.x_offset), comp_id,
+    res += hal_pin_float_newf(HAL_IN, &(trt_context->x_offset), comp_id,
                  "%s.x-offset",kp->halprefix);
-    res += hal_pin_float_newf(HAL_IN, &(trt_context.y_offset), comp_id,
+    res += hal_pin_float_newf(HAL_IN, &(trt_context->y_offset), comp_id,
                  "%s.y-offset",kp->halprefix);
-    res += hal_pin_float_newf(HAL_IN, &(trt_context.z_offset), comp_id,
+    res += hal_pin_float_newf(HAL_IN, &(trt_context->z_offset), comp_id,
                  "%s.z-offset",kp->halprefix);
-    res += hal_pin_float_newf(HAL_IN, &(trt_context.tool_offset), comp_id,
+    res += hal_pin_float_newf(HAL_IN, &(trt_context->tool_offset), comp_id,
                  "%s.tool-offset",kp->halprefix);
     if (res) {goto error;}
     return 0;

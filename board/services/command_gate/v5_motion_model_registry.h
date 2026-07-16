@@ -12,6 +12,8 @@
 #define V5_MOTION_MODEL_MAX_STATUS_SLOTS 8U
 #define V5_MOTION_MODEL_G53_CENTER_COUNT 3U
 #define V5_MOTION_MODEL_WCS_COMPONENT_COUNT 3U
+#define V5_MOTION_MODEL_KEY_CAP 64U
+#define V5_MOTION_MODEL_MAX_TRANSITION_AXES (V5_MOTION_MODEL_MAX_ACTIVE_AXES * 2U)
 
 typedef struct V5MotionModelDescriptor {
     unsigned int registry_id;
@@ -34,6 +36,14 @@ typedef struct V5MotionModelDescriptor {
     char active_axes[V5_MOTION_MODEL_MAX_ACTIVE_AXES];
     unsigned int active_status_slots[V5_MOTION_MODEL_MAX_ACTIVE_AXES];
 } V5MotionModelDescriptor;
+
+typedef struct V5MotionModelAxisTransition {
+    char axis;
+    unsigned int current_active;
+    unsigned int current_status_slot;
+    unsigned int target_active;
+    unsigned int target_status_slot;
+} V5MotionModelAxisTransition;
 
 static const V5MotionModelDescriptor v5_motion_model_registry[] = {
     {
@@ -80,6 +90,64 @@ static const V5MotionModelDescriptor v5_motion_model_registry[] = {
     },
 };
 
+static inline int v5_motion_model_normalize_checked(
+    const char *text,
+    char *out,
+    size_t out_cap)
+{
+    const unsigned char *begin;
+    const unsigned char *end;
+    size_t used = 0U;
+
+    if (!out || out_cap == 0U) {
+        return 0;
+    }
+    out[0] = '\0';
+    if (!text) {
+        return 0;
+    }
+    begin = (const unsigned char *)text;
+    while (*begin && isspace(*begin)) {
+        ++begin;
+    }
+    end = begin + strlen((const char *)begin);
+    while (end > begin && isspace(end[-1])) {
+        --end;
+    }
+    if (end == begin || (size_t)(end - begin) >= out_cap) {
+        return 0;
+    }
+    while (begin < end) {
+        unsigned char ch = *begin++;
+        out[used++] = ch < 0x80U ? (char)toupper(ch) : (char)ch;
+    }
+    out[used] = '\0';
+    return 1;
+}
+
+static inline void v5_motion_model_normalize(const char *text, char *out, size_t out_cap)
+{
+    (void)v5_motion_model_normalize_checked(text, out, out_cap);
+}
+
+static inline const char *v5_motion_model_identity_key_at(
+    const V5MotionModelDescriptor *model,
+    size_t index)
+{
+    if (!model) {
+        return 0;
+    }
+    if (index == 0U) {
+        return model->canonical;
+    }
+    if (index == 1U) {
+        return model->display;
+    }
+    index -= 2U;
+    return index < sizeof(model->aliases) / sizeof(model->aliases[0])
+        ? model->aliases[index] : 0;
+}
+
 static inline int v5_motion_model_descriptor_valid(const V5MotionModelDescriptor *model)
 {
     unsigned int i;
@@ -91,6 +159,7 @@ static inline int v5_motion_model_descriptor_valid(const V5MotionModelDescriptor
     unsigned int first_rotary_seen = 0U;
     unsigned int second_rotary_seen = 0U;
     unsigned int expected_wrapped_mask = 0U;
+    char normalized[V5_MOTION_MODEL_KEY_CAP];
 
     if (!model || model->registry_id == 0U ||
         !model->canonical || !model->canonical[0] ||
@@ -111,12 +180,26 @@ static inline int v5_motion_model_descriptor_valid(const V5MotionModelDescriptor
         model->first_center_wcs_component == model->second_center_wcs_component) {
         return 0;
     }
+    if (!v5_motion_model_normalize_checked(
+            model->canonical, normalized, sizeof(normalized)) ||
+        !v5_motion_model_normalize_checked(
+            model->display, normalized, sizeof(normalized))) {
+        return 0;
+    }
+    for (i = 0U; i < sizeof(model->aliases) / sizeof(model->aliases[0]); ++i) {
+        if (model->aliases[i] &&
+            !v5_motion_model_normalize_checked(
+                model->aliases[i], normalized, sizeof(normalized))) {
+            return 0;
+        }
+    }
     for (i = 0U; i < model->active_axis_count; ++i) {
         unsigned char axis = (unsigned char)model->active_axes[i];
         if (!isalpha(axis) || (char)toupper(axis) != model->active_axes[i]) {
             return 0;
         }
-        if (model->active_status_slots[i] >= V5_MOTION_MODEL_MAX_STATUS_SLOTS) {
+        if (model->active_status_slots[i] >= V5_MOTION_MODEL_MAX_STATUS_SLOTS ||
+            model->active_status_slots[i] != i) {
             return 0;
         }
         if (model->active_axes[i] == model->first_rotary_axis &&
@@ -215,23 +298,51 @@ static inline int v5_motion_model_status_slot_for_axis(
     return 0;
 }
 
-static inline int v5_motion_model_same_status_slots(
-    const V5MotionModelDescriptor *left,
-    const V5MotionModelDescriptor *right)
+static inline int v5_motion_model_build_axis_transition(
+    const V5MotionModelDescriptor *current,
+    const V5MotionModelDescriptor *target,
+    V5MotionModelAxisTransition *transitions,
+    size_t transition_cap,
+    size_t *transition_count_out)
 {
+    size_t transition_count = 0U;
     unsigned int i;
-    char axis;
-    if (!v5_motion_model_descriptor_valid(left) ||
-        !v5_motion_model_descriptor_valid(right) ||
-        left->active_axis_count != right->active_axis_count) {
+    if (transition_count_out) {
+        *transition_count_out = 0U;
+    }
+    if (!v5_motion_model_descriptor_valid(current) ||
+        !v5_motion_model_descriptor_valid(target) ||
+        !transitions || !transition_count_out ||
+        transition_cap < current->active_axis_count) {
         return 0;
     }
-    for (i = 0U; i < left->active_axis_count; ++i) {
-        if (!v5_motion_model_axis_for_status_slot(
-                right, left->active_status_slots[i], &axis)) {
-            return 0;
-        }
+    memset(transitions, 0, sizeof(*transitions) * transition_cap);
+    for (i = 0U; i < current->active_axis_count; ++i) {
+        V5MotionModelAxisTransition *transition = &transitions[transition_count++];
+        transition->axis = current->active_axes[i];
+        transition->current_active = 1U;
+        transition->current_status_slot = current->active_status_slots[i];
     }
+    for (i = 0U; i < target->active_axis_count; ++i) {
+        size_t transition_i;
+        V5MotionModelAxisTransition *transition = 0;
+        for (transition_i = 0U; transition_i < transition_count; ++transition_i) {
+            if (transitions[transition_i].axis == target->active_axes[i]) {
+                transition = &transitions[transition_i];
+                break;
+            }
+        }
+        if (!transition) {
+            if (transition_count >= transition_cap) {
+                return 0;
+            }
+            transition = &transitions[transition_count++];
+            transition->axis = target->active_axes[i];
+        }
+        transition->target_active = 1U;
+        transition->target_status_slot = target->active_status_slots[i];
+    }
+    *transition_count_out = transition_count;
     return 1;
 }
 
@@ -240,25 +351,64 @@ static inline size_t v5_motion_model_registry_count(void)
     return sizeof(v5_motion_model_registry) / sizeof(v5_motion_model_registry[0]);
 }
 
-static inline int v5_motion_model_registry_valid(void)
+static inline int v5_motion_model_registry_entries_valid(
+    const V5MotionModelDescriptor *entries,
+    size_t count)
 {
     size_t i;
     size_t j;
-    for (i = 0U; i < v5_motion_model_registry_count(); ++i) {
-        const V5MotionModelDescriptor *model = &v5_motion_model_registry[i];
+    if (!entries || count == 0U) {
+        return 0;
+    }
+    for (i = 0U; i < count; ++i) {
+        const V5MotionModelDescriptor *model = &entries[i];
         if (!v5_motion_model_descriptor_valid(model)) {
             return 0;
         }
         for (j = 0U; j < i; ++j) {
-            const V5MotionModelDescriptor *other = &v5_motion_model_registry[j];
+            const V5MotionModelDescriptor *other = &entries[j];
+            size_t model_key_i;
             if (model->registry_id == other->registry_id ||
-                strcmp(model->canonical, other->canonical) == 0 ||
                 strcmp(model->kins_module, other->kins_module) == 0) {
                 return 0;
+            }
+            for (model_key_i = 0U;
+                 model_key_i < 2U + sizeof(model->aliases) / sizeof(model->aliases[0]);
+                 ++model_key_i) {
+                const char *model_key = v5_motion_model_identity_key_at(model, model_key_i);
+                size_t other_key_i;
+                char normalized_model[V5_MOTION_MODEL_KEY_CAP];
+                if (!model_key) {
+                    continue;
+                }
+                if (!v5_motion_model_normalize_checked(
+                        model_key, normalized_model, sizeof(normalized_model))) {
+                    return 0;
+                }
+                for (other_key_i = 0U;
+                     other_key_i < 2U + sizeof(other->aliases) / sizeof(other->aliases[0]);
+                     ++other_key_i) {
+                    const char *other_key = v5_motion_model_identity_key_at(other, other_key_i);
+                    char normalized_other[V5_MOTION_MODEL_KEY_CAP];
+                    if (!other_key) {
+                        continue;
+                    }
+                    if (!v5_motion_model_normalize_checked(
+                            other_key, normalized_other, sizeof(normalized_other)) ||
+                        strcmp(normalized_model, normalized_other) == 0) {
+                        return 0;
+                    }
+                }
             }
         }
     }
     return 1;
+}
+
+static inline int v5_motion_model_registry_valid(void)
+{
+    return v5_motion_model_registry_entries_valid(
+        v5_motion_model_registry, v5_motion_model_registry_count());
 }
 
 static inline const V5MotionModelDescriptor *v5_motion_model_registry_at(size_t index)
@@ -267,41 +417,13 @@ static inline const V5MotionModelDescriptor *v5_motion_model_registry_at(size_t 
         ? &v5_motion_model_registry[index] : 0;
 }
 
-static inline void v5_motion_model_normalize(const char *text, char *out, size_t out_cap)
-{
-    const unsigned char *begin;
-    const unsigned char *end;
-    size_t used = 0U;
-
-    if (!out || out_cap == 0U) {
-        return;
-    }
-    out[0] = '\0';
-    if (!text) {
-        return;
-    }
-    begin = (const unsigned char *)text;
-    while (*begin && isspace(*begin)) {
-        ++begin;
-    }
-    end = begin + strlen((const char *)begin);
-    while (end > begin && isspace(end[-1])) {
-        --end;
-    }
-    while (begin < end && used + 1U < out_cap) {
-        unsigned char ch = *begin++;
-        out[used++] = ch < 0x80U ? (char)toupper(ch) : (char)ch;
-    }
-    out[used] = '\0';
-}
-
 static inline const V5MotionModelDescriptor *v5_motion_model_find(const char *text)
 {
     char normalized[64];
     size_t model_i;
 
-    v5_motion_model_normalize(text, normalized, sizeof(normalized));
-    if (!normalized[0] || !v5_motion_model_registry_valid()) {
+    if (!v5_motion_model_normalize_checked(text, normalized, sizeof(normalized)) ||
+        !v5_motion_model_registry_valid()) {
         return 0;
     }
     for (model_i = 0U; model_i < v5_motion_model_registry_count(); ++model_i) {
@@ -312,11 +434,17 @@ static inline const V5MotionModelDescriptor *v5_motion_model_find(const char *te
         if (!v5_motion_model_descriptor_valid(model)) {
             continue;
         }
-        v5_motion_model_normalize(model->canonical, candidate, sizeof(candidate));
+        if (!v5_motion_model_normalize_checked(
+                model->canonical, candidate, sizeof(candidate))) {
+            return 0;
+        }
         if (strcmp(normalized, candidate) == 0) {
             return model;
         }
-        v5_motion_model_normalize(model->display, candidate, sizeof(candidate));
+        if (!v5_motion_model_normalize_checked(
+                model->display, candidate, sizeof(candidate))) {
+            return 0;
+        }
         if (strcmp(normalized, candidate) == 0) {
             return model;
         }
@@ -324,7 +452,10 @@ static inline const V5MotionModelDescriptor *v5_motion_model_find(const char *te
             if (!model->aliases[alias_i]) {
                 continue;
             }
-            v5_motion_model_normalize(model->aliases[alias_i], candidate, sizeof(candidate));
+            if (!v5_motion_model_normalize_checked(
+                    model->aliases[alias_i], candidate, sizeof(candidate))) {
+                return 0;
+            }
             if (strcmp(normalized, candidate) == 0) {
                 return model;
             }

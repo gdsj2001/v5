@@ -8,7 +8,12 @@ from collections import deque
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from v5_remote_ui_contract import DIRTY_EVENT_HISTORY_LIMIT, STREAM_COALESCE_SECONDS
+from v5_remote_ui_contract import (
+    SHARED_DIRTY_FRAME_HISTORY_LIMIT,
+    SHARED_DIRTY_PAYLOAD_HISTORY_BYTES,
+    STREAM_COALESCE_SECONDS,
+    FramePayload,
+)
 from v5_remote_ui_protocol import frame_metadata
 
 if TYPE_CHECKING:
@@ -23,7 +28,7 @@ class PreparedDirtyFrame:
     frame_id: int
     base_frame_id: int
     meta_bytes: bytes
-    payload: bytes
+    payload: FramePayload
 
 
 @dataclass(frozen=True)
@@ -39,13 +44,17 @@ class SharedDirtyPayloadProducer:
         self,
         state: FrameState,
         *,
-        history_limit: int = DIRTY_EVENT_HISTORY_LIMIT,
+        history_limit: int = SHARED_DIRTY_FRAME_HISTORY_LIMIT,
+        history_byte_budget: int = SHARED_DIRTY_PAYLOAD_HISTORY_BYTES,
         coalesce_seconds: float = STREAM_COALESCE_SECONDS,
         poll_seconds: float = 0.25,
     ):
         self.state = state
         self.condition = threading.Condition()
-        self.history: deque[PreparedDirtyFrame] = deque(maxlen=max(1, int(history_limit)))
+        self.history: deque[PreparedDirtyFrame] = deque()
+        self.history_limit = max(1, int(history_limit))
+        self.history_byte_budget = max(1, int(history_byte_budget))
+        self.history_payload_bytes = 0
         self.coalesce_seconds = max(0.0, float(coalesce_seconds))
         self.poll_seconds = max(0.01, float(poll_seconds))
         self.stop_requested = threading.Event()
@@ -55,6 +64,19 @@ class SharedDirtyPayloadProducer:
         self.cursor_frame_id = int(state.frame_id)
         self.latest_frame_id = self.cursor_frame_id
         self.last_large_dirty_sent_at = 0.0
+
+    def _clear_history_locked(self) -> None:
+        self.history.clear()
+        self.history_payload_bytes = 0
+
+    def _append_history_locked(self, prepared: PreparedDirtyFrame) -> None:
+        self.history.append(prepared)
+        self.history_payload_bytes += len(prepared.payload)
+        while len(self.history) > self.history_limit or (
+            self.history_payload_bytes > self.history_byte_budget and len(self.history) > 1
+        ):
+            evicted = self.history.popleft()
+            self.history_payload_bytes -= len(evicted.payload)
 
     def start(self) -> None:
         self.thread.start()
@@ -73,7 +95,7 @@ class SharedDirtyPayloadProducer:
         with self.condition:
             if self.subscribers == 0:
                 self.generation += 1
-                self.history.clear()
+                self._clear_history_locked()
                 self.cursor_frame_id = initial
                 self.latest_frame_id = initial
                 self.last_large_dirty_sent_at = 0.0
@@ -89,7 +111,7 @@ class SharedDirtyPayloadProducer:
                 self.subscribers -= 1
             if self.subscribers == 0:
                 self.generation += 1
-                self.history.clear()
+                self._clear_history_locked()
             self.condition.notify_all()
         with self.state.condition:
             self.state.condition.notify_all()
@@ -132,7 +154,7 @@ class SharedDirtyPayloadProducer:
             frame_id=frame_id,
             base_frame_id=base_frame_id,
             meta_bytes=json.dumps(meta, separators=(",", ":")).encode("utf-8"),
-            payload=bytes(payload),
+            payload=payload,
         )
 
     def _wait_for_active_generation(self) -> tuple[int, int] | None:
@@ -157,7 +179,7 @@ class SharedDirtyPayloadProducer:
         with self.condition:
             if self.subscribers == 0 or self.generation != generation:
                 return
-            self.history.clear()
+            self._clear_history_locked()
             self.cursor_frame_id = max(self.cursor_frame_id, current_frame_id)
             self.latest_frame_id = self.cursor_frame_id
             self.condition.notify_all()
@@ -201,7 +223,7 @@ class SharedDirtyPayloadProducer:
                 with self.condition:
                     if not self._generation_is_current(generation, cursor_frame_id):
                         continue
-                    self.history.append(prepared)
+                    self._append_history_locked(prepared)
                     self.cursor_frame_id = prepared.frame_id
                     self.latest_frame_id = prepared.frame_id
                     self.condition.notify_all()

@@ -75,6 +75,13 @@ do_configure() {
     if [ -f Makefile ]; then
         make distclean || true
     fi
+    # These upstream files are intentionally patched in the writable view.
+    # Always start from the canonical S copy so an old overlay copy-up can
+    # never shadow a changed model object list or component build rule.
+    install -m 0644 ${S}/src/Makefile ${B}/Makefile
+    install -m 0644 \
+        ${S}/src/hal/components/Submakefile \
+        ${B}/hal/components/Submakefile
     ./autogen.sh
 
     export PATH="$PATH:/usr/bin:/bin:/usr/sbin:/sbin"
@@ -111,6 +118,10 @@ do_configure() {
     sed -i "s@\$(Q)ld -d -r -o objects/\$\*.tmp \$\^@\$(Q)${TARGET_PREFIX}ld -d -r -o objects/\$\*.tmp \$\^@" Makefile
     sed -i "s@\$(Q)objdump -w -j .rtapi_export@\$(Q)${TARGET_PREFIX}objdump -w -j .rtapi_export@" Makefile
     sed -i 's#preconv -r < $@.new > $@#cat $@.new > $@#' hal/components/Submakefile
+    grep -Fqx 'xyzac-trt-kins-objs += emc/kinematics/xyzac-trt-funcs.o' Makefile || \
+        bbfatal "configured LinuxCNC Makefile lost the XYZAC model implementation object"
+    grep -Fqx 'xyzbc-trt-kins-objs += emc/kinematics/xyzbc-trt-funcs.o' Makefile || \
+        bbfatal "configured LinuxCNC Makefile lost the XYZBC model implementation object"
 }
 
 do_compile() {
@@ -151,6 +162,26 @@ do_install() {
     if grep -aEq 'z20_wrap_public_|WRAPPED_ROTARY' ${D}${bindir}/milltask; then
         bbfatal "built milltask contains retired rotary coordinate wrapping"
     fi
+
+    v5_require_defined_kinematics_symbol() {
+        module_path="$1"
+        symbol_name="$2"
+        [ -f "$module_path" ] || \
+            bbfatal "required kinematics module is missing: $module_path"
+        ${TARGET_PREFIX}readelf -Ws "$module_path" | \
+            awk -v symbol="$symbol_name" \
+                '$NF == symbol { if ($7 == "UND") und = 1; else def = 1 } \
+                 END { exit(def && !und ? 0 : 1) }' || \
+            bbfatal "kinematics module must define $symbol_name without an undefined reference: $module_path"
+    }
+    v5_require_defined_kinematics_symbol \
+        "${D}${libdir}/linuxcnc/modules/xyzac-trt-kins.so" xyzacKinematicsForward
+    v5_require_defined_kinematics_symbol \
+        "${D}${libdir}/linuxcnc/modules/xyzac-trt-kins.so" xyzacKinematicsInverse
+    v5_require_defined_kinematics_symbol \
+        "${D}${libdir}/linuxcnc/modules/xyzbc-trt-kins.so" xyzbcKinematicsForward
+    v5_require_defined_kinematics_symbol \
+        "${D}${libdir}/linuxcnc/modules/xyzbc-trt-kins.so" xyzbcKinematicsInverse
 
     mv ${D} "$full_install"
     install -d ${D}
