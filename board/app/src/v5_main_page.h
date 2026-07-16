@@ -6,6 +6,7 @@
 #include "v5_coordinate_panel.h"
 #include "v5_command_program.h"
 #include "v5_main_page_actions.h"
+#include "v5_main_page_model_projector.h"
 #include "v5_native_readback.h"
 #include "v5_toolpath_display.h"
 #include "v5_ui_first_frame_guard.h"
@@ -74,18 +75,18 @@ typedef struct V5MainPage {
     lv_obj_t *toolpath_wcs_origin_line;
     lv_obj_t *toolpath_mcs_axis_lines[3];
     lv_obj_t *toolpath_wcs_axis_lines[3];
-    lv_obj_t *toolpath_a_axis_line;
-    lv_obj_t *toolpath_c_axis_line;
+    lv_obj_t *toolpath_model_primary_axis_line;
+    lv_obj_t *toolpath_model_child_axis_line;
     lv_obj_t *toolpath_program_wcs_origin_lines[V5_MAIN_PAGE_TOOLPATH_WCS_COUNT];
     lv_obj_t *toolpath_program_wcs_axis_lines[V5_MAIN_PAGE_TOOLPATH_WCS_COUNT][3];
     lv_obj_t *toolpath_holder_line;
-    lv_obj_t *toolpath_a_center_line;
-    lv_obj_t *toolpath_c_center_line;
+    lv_obj_t *toolpath_model_primary_center_line;
+    lv_obj_t *toolpath_model_child_center_line;
     lv_obj_t *toolpath_summary_label;
     lv_obj_t *toolpath_detail_label;
     lv_obj_t *toolpath_view_label;
-    lv_obj_t *toolpath_a_label;
-    lv_obj_t *toolpath_c_label;
+    lv_obj_t *toolpath_model_primary_label;
+    lv_obj_t *toolpath_model_child_label;
     lv_obj_t *toolpath_wcs_label;
     lv_obj_t *toolpath_mcs_label;
     lv_obj_t *toolpath_program_wcs_labels[V5_MAIN_PAGE_TOOLPATH_WCS_COUNT];
@@ -151,7 +152,7 @@ typedef struct V5MainPage {
     lv_point_t toolpath_wcs_origin_points[5];
     lv_point_t toolpath_mcs_axis_points[3][2];
     lv_point_t toolpath_wcs_axis_points[3][2];
-    lv_point_t toolpath_ac_axis_points[2][2];
+    lv_point_t toolpath_model_axis_points[2][2];
     lv_point_t toolpath_holder_points[2];
     lv_point_t toolpath_program_wcs_origin_points[V5_MAIN_PAGE_TOOLPATH_WCS_COUNT][5];
     lv_point_t toolpath_program_wcs_axis_points[V5_MAIN_PAGE_TOOLPATH_WCS_COUNT][3][2];
@@ -176,14 +177,13 @@ typedef struct V5MainPage {
     double toolpath_program_wcs_offset[3];
     int toolpath_program_visible;
     unsigned int toolpath_program_point_count;
-    int toolpath_program_ac_valid;
-    int toolpath_program_model_kind;
-    double toolpath_program_ac_a_deg;
-    double toolpath_program_ac_c_deg;
-    int toolpath_static_pose_valid;
-    int toolpath_static_model_kind;
-    double toolpath_static_pose_a_deg;
-    double toolpath_static_pose_c_deg;
+    int toolpath_model_scene_valid;
+    int toolpath_model_scene_fresh;
+    V5MainPageModelScene toolpath_model_scene;
+    int toolpath_program_model_scene_valid;
+    V5MainPageModelScene toolpath_program_model_scene;
+    int toolpath_static_model_scene_valid;
+    V5MainPageModelScene toolpath_static_model_scene;
     V5StatusPoint toolpath_program_points[V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT];
     V5StatusPoint toolpath_program_project_points[V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT];
     unsigned char toolpath_program_break_before[V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT];

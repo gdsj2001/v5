@@ -41,41 +41,64 @@ static int project_expected(const V5MainPage *page, const double world[V5_STATUS
     return v5_toolpath_display_project_world_point(world, &page->toolpath_fit, 388.0, 378.0, point);
 }
 
-static void nested_pose_expected(
+static void ac_pose_expected(
     const double source[V5_STATUS_AXIS_COUNT],
-    const double first_center[3],
-    const double second_center[3],
-    unsigned int first_axis_component,
-    double first_deg,
-    double second_deg,
+    const double a_center[3],
+    const double c_center[3],
+    double a_deg,
+    double c_deg,
     double expected[V5_STATUS_AXIS_COUNT])
 {
-    const double first_rad = first_deg * 3.14159265358979323846 / 180.0;
-    const double second_rad = second_deg * 3.14159265358979323846 / 180.0;
-    const double first_c = cos(first_rad);
-    const double first_s = sin(first_rad);
-    const double second_c = cos(second_rad);
-    const double second_s = sin(second_rad);
+    const double a_rad = a_deg * 3.14159265358979323846 / 180.0;
+    const double c_rad = c_deg * 3.14159265358979323846 / 180.0;
+    const double a_c = cos(a_rad);
+    const double a_s = sin(a_rad);
+    const double c_c = cos(c_rad);
+    const double c_s = sin(c_rad);
     double dx;
     double dy;
     double dz;
 
     memcpy(expected, source, sizeof(double) * V5_STATUS_AXIS_COUNT);
-    dx = expected[0] - second_center[0];
-    dy = expected[1] - second_center[1];
-    expected[0] = second_center[0] + (second_c * dx) - (second_s * dy);
-    expected[1] = second_center[1] + (second_s * dx) + (second_c * dy);
+    dx = expected[0] - c_center[0];
+    dy = expected[1] - c_center[1];
+    expected[0] = c_center[0] + (c_c * dx) - (c_s * dy);
+    expected[1] = c_center[1] + (c_s * dx) + (c_c * dy);
 
-    dx = expected[0] - first_center[0];
-    dy = expected[1] - first_center[1];
-    dz = expected[2] - first_center[2];
-    if (first_axis_component == 0U) {
-        expected[1] = first_center[1] + (first_c * dy) - (first_s * dz);
-        expected[2] = first_center[2] + (first_s * dy) + (first_c * dz);
-    } else {
-        expected[0] = first_center[0] + (first_c * dx) + (first_s * dz);
-        expected[2] = first_center[2] - (first_s * dx) + (first_c * dz);
-    }
+    dy = expected[1] - a_center[1];
+    dz = expected[2] - a_center[2];
+    expected[1] = a_center[1] + (a_c * dy) - (a_s * dz);
+    expected[2] = a_center[2] + (a_s * dy) + (a_c * dz);
+}
+
+static void bc_pose_expected(
+    const double source[V5_STATUS_AXIS_COUNT],
+    const double b_center[3],
+    const double c_center[3],
+    double b_deg,
+    double c_deg,
+    double expected[V5_STATUS_AXIS_COUNT])
+{
+    const double b_rad = b_deg * 3.14159265358979323846 / 180.0;
+    const double c_rad = c_deg * 3.14159265358979323846 / 180.0;
+    const double b_c = cos(b_rad);
+    const double b_s = sin(b_rad);
+    const double c_c = cos(c_rad);
+    const double c_s = sin(c_rad);
+    double dx;
+    double dy;
+    double dz;
+
+    memcpy(expected, source, sizeof(double) * V5_STATUS_AXIS_COUNT);
+    dx = expected[0] - c_center[0];
+    dy = expected[1] - c_center[1];
+    expected[0] = c_center[0] + (c_c * dx) - (c_s * dy);
+    expected[1] = c_center[1] + (c_s * dx) + (c_c * dy);
+
+    dx = expected[0] - b_center[0];
+    dz = expected[2] - b_center[2];
+    expected[0] = b_center[0] + (b_c * dx) + (b_s * dz);
+    expected[2] = b_center[2] - (b_s * dx) + (b_c * dz);
 }
 
 static int wcs_axes_match_world(
@@ -257,12 +280,12 @@ int main(void)
         !lv_obj_has_flag(page.toolpath_program_wcs_origin_lines[0], LV_OBJ_FLAG_HIDDEN) ||
         !lv_obj_has_flag(page.toolpath_program_wcs_axis_lines[8][2], LV_OBJ_FLAG_HIDDEN) ||
         !lv_obj_has_flag(page.toolpath_program_wcs_labels[8], LV_OBJ_FLAG_HIDDEN) ||
-        !lv_obj_has_flag(page.toolpath_a_axis_line, LV_OBJ_FLAG_HIDDEN) ||
-        !lv_obj_has_flag(page.toolpath_c_axis_line, LV_OBJ_FLAG_HIDDEN) ||
-        !lv_obj_has_flag(page.toolpath_a_center_line, LV_OBJ_FLAG_HIDDEN) ||
-        !lv_obj_has_flag(page.toolpath_c_center_line, LV_OBJ_FLAG_HIDDEN) ||
-        !lv_obj_has_flag(page.toolpath_a_label, LV_OBJ_FLAG_HIDDEN) ||
-        !lv_obj_has_flag(page.toolpath_c_label, LV_OBJ_FLAG_HIDDEN)) {
+        !lv_obj_has_flag(page.toolpath_model_primary_axis_line, LV_OBJ_FLAG_HIDDEN) ||
+        !lv_obj_has_flag(page.toolpath_model_child_axis_line, LV_OBJ_FLAG_HIDDEN) ||
+        !lv_obj_has_flag(page.toolpath_model_primary_center_line, LV_OBJ_FLAG_HIDDEN) ||
+        !lv_obj_has_flag(page.toolpath_model_child_center_line, LV_OBJ_FLAG_HIDDEN) ||
+        !lv_obj_has_flag(page.toolpath_model_primary_label, LV_OBJ_FLAG_HIDDEN) ||
+        !lv_obj_has_flag(page.toolpath_model_child_label, LV_OBJ_FLAG_HIDDEN)) {
         return 19;
     }
     if (!lv_label_get_text(page.toolpath_summary_label) ||
@@ -282,8 +305,8 @@ int main(void)
         !lv_obj_has_flag(page.toolpath_wcs_axis_lines[0], LV_OBJ_FLAG_HIDDEN) ||
         !lv_obj_has_flag(page.toolpath_program_wcs_origin_lines[0], LV_OBJ_FLAG_HIDDEN) ||
         !lv_obj_has_flag(page.toolpath_program_wcs_axis_lines[8][2], LV_OBJ_FLAG_HIDDEN) ||
-        !lv_obj_has_flag(page.toolpath_a_axis_line, LV_OBJ_FLAG_HIDDEN) ||
-        !lv_obj_has_flag(page.toolpath_c_axis_line, LV_OBJ_FLAG_HIDDEN)) {
+        !lv_obj_has_flag(page.toolpath_model_primary_axis_line, LV_OBJ_FLAG_HIDDEN) ||
+        !lv_obj_has_flag(page.toolpath_model_child_axis_line, LV_OBJ_FLAG_HIDDEN)) {
         return 20;
     }
     if (!lv_obj_has_state(page.spindle_override_slider, LV_STATE_DISABLED) ||
@@ -456,9 +479,9 @@ int main(void)
         if (line_cross_abs(page.toolpath_wcs_axis_points[0], page.toolpath_mcs_axis_points[0]) > 250L ||
             line_cross_abs(page.toolpath_wcs_axis_points[1], page.toolpath_mcs_axis_points[1]) > 250L ||
             line_cross_abs(page.toolpath_wcs_axis_points[2], page.toolpath_mcs_axis_points[2]) > 250L ||
-            line_cross_abs(page.toolpath_ac_axis_points[0], page.toolpath_mcs_axis_points[0]) > 250L ||
-            line_cross_vector_abs(page.toolpath_ac_axis_points[1], c_dx, c_dy) > 250L ||
-            line_cross_abs(page.toolpath_ac_axis_points[1], page.toolpath_mcs_axis_points[2]) <= 2L) {
+            line_cross_abs(page.toolpath_model_axis_points[0], page.toolpath_mcs_axis_points[0]) > 250L ||
+            line_cross_vector_abs(page.toolpath_model_axis_points[1], c_dx, c_dy) > 250L ||
+            line_cross_abs(page.toolpath_model_axis_points[1], page.toolpath_mcs_axis_points[2]) <= 2L) {
             return 22;
         }
         if (!project_expected(&page, a_start_world, &a_start_expected) ||
@@ -467,10 +490,10 @@ int main(void)
             !project_expected(&page, c_end_world, &c_end_expected)) {
             return 30;
         }
-        if (point_delta_abs(&page.toolpath_ac_axis_points[0][0], &a_start_expected) > 4L ||
-            point_delta_abs(&page.toolpath_ac_axis_points[0][1], &a_end_expected) > 4L ||
-            point_delta_abs(&page.toolpath_ac_axis_points[1][0], &c_start_expected) > 4L ||
-            point_delta_abs(&page.toolpath_ac_axis_points[1][1], &c_end_expected) > 4L) {
+        if (point_delta_abs(&page.toolpath_model_axis_points[0][0], &a_start_expected) > 4L ||
+            point_delta_abs(&page.toolpath_model_axis_points[0][1], &a_end_expected) > 4L ||
+            point_delta_abs(&page.toolpath_model_axis_points[1][0], &c_start_expected) > 4L ||
+            point_delta_abs(&page.toolpath_model_axis_points[1][1], &c_end_expected) > 4L) {
             return 31;
         }
         status.mcs[0] += 25.0;
@@ -562,10 +585,10 @@ int main(void)
         lv_obj_has_flag(page.toolpath_wcs_axis_lines[2], LV_OBJ_FLAG_HIDDEN) ||
         !lv_obj_has_flag(page.toolpath_program_wcs_origin_lines[0], LV_OBJ_FLAG_HIDDEN) ||
         !lv_obj_has_flag(page.toolpath_program_wcs_axis_lines[8][2], LV_OBJ_FLAG_HIDDEN) ||
-        lv_obj_has_flag(page.toolpath_a_axis_line, LV_OBJ_FLAG_HIDDEN) ||
-        lv_obj_has_flag(page.toolpath_c_axis_line, LV_OBJ_FLAG_HIDDEN) ||
-        lv_obj_has_flag(page.toolpath_a_label, LV_OBJ_FLAG_HIDDEN) ||
-        lv_obj_has_flag(page.toolpath_c_label, LV_OBJ_FLAG_HIDDEN)) {
+        lv_obj_has_flag(page.toolpath_model_primary_axis_line, LV_OBJ_FLAG_HIDDEN) ||
+        lv_obj_has_flag(page.toolpath_model_child_axis_line, LV_OBJ_FLAG_HIDDEN) ||
+        lv_obj_has_flag(page.toolpath_model_primary_label, LV_OBJ_FLAG_HIDDEN) ||
+        lv_obj_has_flag(page.toolpath_model_child_label, LV_OBJ_FLAG_HIDDEN)) {
         v5_program_controller_destroy(&controller);
         return 7;
     }
@@ -600,11 +623,10 @@ int main(void)
             if (page.trajectory_points[pi].y < min_y) min_y = page.trajectory_points[pi].y;
             if (page.trajectory_points[pi].y > max_y) max_y = page.trajectory_points[pi].y;
         }
-        nested_pose_expected(
+        ac_pose_expected(
             page.toolpath_program_points[0].axis,
             ac_first_center,
             c_center,
-            0U,
             status.mcs[3],
             status.mcs[4],
             nested_expected);
@@ -638,13 +660,13 @@ int main(void)
     {
         const unsigned int rewrite_before = page.toolpath_line_rewrite_count;
         const unsigned int set_points_before = page.toolpath_line_set_points_count;
-        const double expected_a = page.toolpath_program_ac_a_deg + 0.001;
-        const double expected_c = page.toolpath_program_ac_c_deg - 0.001;
-        status.mcs[3] = expected_a;
-        status.mcs[4] = expected_c;
+        const double expected_primary = page.toolpath_program_model_scene.primary_deg + 0.001;
+        const double expected_child = page.toolpath_program_model_scene.child_deg - 0.001;
+        status.mcs[3] = expected_primary;
+        status.mcs[4] = expected_child;
         if (!v5_main_page_apply_status(&page, &status) ||
-            fabs(page.toolpath_program_ac_a_deg - expected_a) > 0.0000001 ||
-            fabs(page.toolpath_program_ac_c_deg - expected_c) > 0.0000001 ||
+            fabs(page.toolpath_program_model_scene.primary_deg - expected_primary) > 0.0000001 ||
+            fabs(page.toolpath_program_model_scene.child_deg - expected_child) > 0.0000001 ||
             page.toolpath_line_rewrite_count != rewrite_before ||
             page.toolpath_line_set_points_count != set_points_before ||
             page.toolpath_line_last_dirty_rect_count != 0U ||
@@ -759,11 +781,10 @@ int main(void)
         for (wi = 0U; wi < 4U; ++wi) {
             const double first_center[3] = {10.0, 20.0, -50.0};
             const double second_center[3] = {50.0, 20.0, 8.0};
-            nested_pose_expected(
+            ac_pose_expected(
                 base_wcs_world[wi],
                 first_center,
                 second_center,
-                0U,
                 status.mcs[3],
                 status.mcs[4],
                 posed_wcs_world[wi]);
@@ -791,20 +812,53 @@ int main(void)
 
         v5_native_readback_set_motion_model(&readback, "XYZBC_TRT");
         v5_main_page_set_native_readback(&page, &readback);
-        if (!v5_main_page_apply_status(&page, &status) || !page.toolpath_program_ac_valid ||
-            strcmp(lv_label_get_text(page.axis_labels[3]), "B") != 0) {
+        if (!v5_main_page_apply_status(&page, &status) || !page.toolpath_program_model_scene_valid ||
+            !page.toolpath_model_scene_valid ||
+            !page.toolpath_model_scene_fresh ||
+            page.toolpath_model_scene.registry_id != V5_MOTION_MODEL_ID_XYZBC_TRT ||
+            strcmp(lv_label_get_text(page.axis_labels[3]), "B") != 0 ||
+            strcmp(lv_label_get_text(page.toolpath_model_primary_label), "B") != 0 ||
+            strcmp(lv_label_get_text(page.toolpath_model_child_label), "C") != 0 ||
+            lv_obj_has_flag(page.toolpath_model_primary_axis_line, LV_OBJ_FLAG_HIDDEN) ||
+            lv_obj_has_flag(page.toolpath_model_child_axis_line, LV_OBJ_FLAG_HIDDEN)) {
             v5_program_controller_destroy(&controller);
             return 39;
+        }
+        {
+            const double b_rad = status.mcs[3] * 3.14159265358979323846 / 180.0;
+            const double x_dx =
+                (double)page.toolpath_mcs_axis_points[0][1].x -
+                (double)page.toolpath_mcs_axis_points[0][0].x;
+            const double x_dy =
+                (double)page.toolpath_mcs_axis_points[0][1].y -
+                (double)page.toolpath_mcs_axis_points[0][0].y;
+            const double z_dx =
+                (double)page.toolpath_mcs_axis_points[2][1].x -
+                (double)page.toolpath_mcs_axis_points[2][0].x;
+            const double z_dy =
+                (double)page.toolpath_mcs_axis_points[2][1].y -
+                (double)page.toolpath_mcs_axis_points[2][0].y;
+            const double c_dx = (sin(b_rad) * x_dx) + (cos(b_rad) * z_dx);
+            const double c_dy = (sin(b_rad) * x_dy) + (cos(b_rad) * z_dy);
+            if (line_cross_abs(
+                    page.toolpath_model_axis_points[0],
+                    page.toolpath_mcs_axis_points[1]) > 250L ||
+                line_cross_vector_abs(
+                    page.toolpath_model_axis_points[1],
+                    c_dx,
+                    c_dy) > 250L) {
+                v5_program_controller_destroy(&controller);
+                return 75;
+            }
         }
         {
             const double bc_first_center[3] = {0.0, 12.0, -25.0};
             const double c_center[3] = {50.0, 20.0, 8.0};
             double nested_expected[V5_STATUS_AXIS_COUNT];
-            nested_pose_expected(
+            bc_pose_expected(
                 page.toolpath_program_points[0].axis,
                 bc_first_center,
                 c_center,
-                1U,
                 status.mcs[3],
                 status.mcs[4],
                 nested_expected);
@@ -823,7 +877,7 @@ int main(void)
         status.mcs[3] += 10.0;
         status.mcs[4] += 10.0;
         if (!v5_main_page_apply_status(&page, &status) ||
-            !page.toolpath_program_ac_valid ||
+            !page.toolpath_program_model_scene_valid ||
             (memcmp(wcs_origin_before, page.toolpath_wcs_origin_points, sizeof(wcs_origin_before)) == 0 &&
              memcmp(wcs_axes_before, page.toolpath_wcs_axis_points, sizeof(wcs_axes_before)) == 0) ||
             (fabs(page.toolpath_program_project_points[0].axis[0] - projected_before[0]) < 0.0005 &&
@@ -834,10 +888,53 @@ int main(void)
         }
         v5_native_readback_set_motion_model(&readback, "XYZAC_TRT");
         v5_main_page_set_native_readback(&page, &readback);
-        if (!v5_main_page_apply_status(&page, &status) || !page.toolpath_program_ac_valid ||
+        if (!v5_main_page_apply_status(&page, &status) || !page.toolpath_program_model_scene_valid ||
             strcmp(lv_label_get_text(page.axis_labels[3]), "A") != 0) {
             v5_program_controller_destroy(&controller);
             return 41;
+        }
+        {
+            const V5MainPageModelScene last_good_ac_scene = page.toolpath_model_scene;
+            V5NativeReadback transient_readback = readback;
+
+            v5_native_readback_set_g53_geometry(&transient_readback, 0, 0U, 0U, 0U);
+            v5_main_page_set_native_readback(&page, &transient_readback);
+            if (!page.toolpath_model_scene_valid ||
+                page.toolpath_model_scene_fresh ||
+                !v5_main_page_model_scene_pose_equal(
+                    &page.toolpath_model_scene,
+                    &last_good_ac_scene,
+                    0.0) ||
+                !page.toolpath_program_visible) {
+                v5_program_controller_destroy(&controller);
+                return 76;
+            }
+
+            v5_native_readback_set_motion_model(&transient_readback, "XYZ_UNKNOWN");
+            v5_main_page_set_native_readback(&page, &transient_readback);
+            if (page.toolpath_model_scene_valid ||
+                page.toolpath_model_scene_fresh ||
+                page.toolpath_program_visible ||
+                !lv_obj_has_flag(
+                    page.toolpath_model_primary_axis_line,
+                    LV_OBJ_FLAG_HIDDEN) ||
+                !lv_obj_has_flag(
+                    page.toolpath_model_child_axis_line,
+                    LV_OBJ_FLAG_HIDDEN) ||
+                lv_label_get_text(page.toolpath_summary_label)[0] != '\0' ||
+                lv_label_get_text(page.toolpath_detail_label)[0] != '\0') {
+                v5_program_controller_destroy(&controller);
+                return 77;
+            }
+
+            v5_main_page_set_native_readback(&page, &readback);
+            if (!v5_main_page_apply_status(&page, &status) ||
+                !page.toolpath_model_scene_valid ||
+                !page.toolpath_model_scene_fresh ||
+                !page.toolpath_program_visible) {
+                v5_program_controller_destroy(&controller);
+                return 78;
+            }
         }
         fit_generation_after_program = page.toolpath_fit.generation;
     }

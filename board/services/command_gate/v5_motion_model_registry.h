@@ -6,6 +6,9 @@
 #include <stdio.h>
 #include <string.h>
 
+#define V5_MOTION_MODEL_ID_XYZAC_TRT 1U
+#define V5_MOTION_MODEL_ID_XYZBC_TRT 2U
+
 typedef struct V5MotionModelDescriptor {
     unsigned int registry_id;
     const char *canonical;
@@ -23,12 +26,11 @@ typedef struct V5MotionModelDescriptor {
     unsigned int second_g53_center;
     unsigned int first_center_wcs_component;
     unsigned int second_center_wcs_component;
-    unsigned int first_world_axis_component;
 } V5MotionModelDescriptor;
 
 static const V5MotionModelDescriptor v5_motion_model_registry[] = {
     {
-        1U,
+        V5_MOTION_MODEL_ID_XYZAC_TRT,
         "XYZAC_TRT",
         "AC摇篮",
         {"AC", "AC摇篮", "XYZAC", "XYZAC_TRT"},
@@ -44,10 +46,9 @@ static const V5MotionModelDescriptor v5_motion_model_registry[] = {
         2U,
         0U,
         2U,
-        0U,
     },
     {
-        2U,
+        V5_MOTION_MODEL_ID_XYZBC_TRT,
         "XYZBC_TRT",
         "BC摇篮",
         {"BC", "BC摇篮", "XYZBC", "XYZBC_TRT"},
@@ -63,7 +64,6 @@ static const V5MotionModelDescriptor v5_motion_model_registry[] = {
         2U,
         1U,
         2U,
-        1U,
     },
 };
 

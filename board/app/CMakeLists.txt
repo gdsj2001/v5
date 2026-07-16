@@ -11,6 +11,12 @@ set(LV_LVGL_H_INCLUDE_SIMPLE ON CACHE BOOL "Use simple LVGL include" FORCE)
 
 add_subdirectory("${V5_LVGL_DIR}" "${CMAKE_BINARY_DIR}/third_party/lvgl" EXCLUDE_FROM_ALL)
 
+set(V5_MAIN_PAGE_MODEL_SOURCES
+    src/v5_main_page_model_projector.c
+    src/v5_main_page_model_projector_ac.c
+    src/v5_main_page_model_projector_bc.c
+)
+
 add_library(v5_button_visuals STATIC
     src/v5_button_visuals.c
 )
@@ -59,6 +65,22 @@ target_compile_definitions(v5_coordinate_digits_smoke PRIVATE
 
 target_link_libraries(v5_coordinate_digits_smoke PRIVATE lvgl)
 
+add_executable(v5_main_page_model_projector_smoke
+    src/v5_main_page_model_projector_smoke.c
+    ${V5_MAIN_PAGE_MODEL_SOURCES}
+    ../services/command_gate/v5_native_readback.c
+)
+
+target_include_directories(v5_main_page_model_projector_smoke PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${V5_ROOT_DIR}/services/command_gate"
+)
+
+if(NOT WIN32)
+    target_link_libraries(v5_main_page_model_projector_smoke PRIVATE m)
+endif()
+
 add_executable(v5_lvgl_shell
     src/lv_font_zh_16.c
     src/v5_layout_icon_masks.c
@@ -77,6 +99,7 @@ add_executable(v5_lvgl_shell
     src/v5_lvgl_touch_input.c
     src/v5_main_page.c
     src/v5_main_page_model_projection.c
+    ${V5_MAIN_PAGE_MODEL_SOURCES}
     src/v5_main_page_fit.c
     src/v5_main_page_status_text.c
     src/v5_main_page_toolpath_primitives.c
@@ -148,6 +171,7 @@ add_executable(v5_program_page_double_click_smoke
     src/v5_lvgl_touch_input.c
     src/v5_main_page.c
     src/v5_main_page_model_projection.c
+    ${V5_MAIN_PAGE_MODEL_SOURCES}
     src/v5_main_page_fit.c
     src/v5_main_page_status_text.c
     src/v5_main_page_toolpath_primitives.c
@@ -461,6 +485,7 @@ add_executable(v5_main_page_actions_smoke
     src/v5_ui_first_frame_guard_test_remote.c
     src/v5_main_page.c
     src/v5_main_page_model_projection.c
+    ${V5_MAIN_PAGE_MODEL_SOURCES}
     src/v5_main_page_fit.c
     src/v5_main_page_status_text.c
     src/v5_main_page_toolpath_primitives.c
@@ -532,6 +557,7 @@ add_executable(v5_main_page_smoke
     src/v5_ui_first_frame_guard_test_remote.c
     src/v5_main_page.c
     src/v5_main_page_model_projection.c
+    ${V5_MAIN_PAGE_MODEL_SOURCES}
     src/v5_main_page_fit.c
     src/v5_main_page_status_text.c
     src/v5_main_page_toolpath_primitives.c

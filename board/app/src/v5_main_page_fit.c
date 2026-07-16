@@ -28,19 +28,13 @@ static void main_page_expand_static_geometry_fit(
     double point[V5_STATUS_AXIS_COUNT];
     double wcs_origin[V5_STATUS_AXIS_COUNT];
     double wcs_axis[3][V5_STATUS_AXIS_COUNT];
-    const V5MotionModelDescriptor *model;
-    double first_center[V5_STATUS_AXIS_COUNT];
-    double second_center[V5_STATUS_AXIS_COUNT];
-    double first_deg = 0.0;
-    double second_deg = 0.0;
-    double pose_first_deg;
-    double angle;
-    double c_vec_x;
-    double c_vec_y;
-    double c_vec_z;
-    int first_center_valid;
+    const V5MainPageModelScene *wcs_follow_scene = 0;
+    V5MainPageModelGeometry geometry;
     int wcs_follow_model;
     unsigned int i;
+    unsigned int axis_i;
+    unsigned int component_i;
+
     if (!page || !fit || !fit->valid) {
         return;
     }
@@ -57,56 +51,50 @@ static void main_page_expand_static_geometry_fit(
             memcpy(wcs_axis[i], wcs_origin, sizeof(wcs_axis[i]));
             wcs_axis[i][i] += 40.0;
         }
-        wcs_follow_model = v5_main_page_internal_main_page_rtcp_wcs_follow_active_model_available(
-            page, status, &model, &first_deg, &second_deg, first_center, second_center);
+        wcs_follow_model =
+            v5_main_page_internal_main_page_rtcp_wcs_follow_model_scene_available(
+                page,
+                &wcs_follow_scene);
         if (wcs_follow_model) {
-            v5_main_page_internal_main_page_apply_active_model_pose_to_world_point(
-                model, wcs_origin, first_center, second_center, first_deg, second_deg);
+            v5_main_page_model_scene_transform_world_point(wcs_follow_scene, wcs_origin);
         }
         v5_main_page_internal_main_page_fit_expand_world_point(fit, wcs_origin);
         for (i = 0U; i < 3U; ++i) {
             if (wcs_follow_model) {
-                v5_main_page_internal_main_page_apply_active_model_pose_to_world_point(
-                    model, wcs_axis[i], first_center, second_center, first_deg, second_deg);
+                v5_main_page_model_scene_transform_world_point(
+                    wcs_follow_scene,
+                    wcs_axis[i]);
             }
             v5_main_page_internal_main_page_fit_expand_world_point(fit, wcs_axis[i]);
         }
     }
-    model = v5_main_page_internal_main_page_active_motion_model(page);
-    first_center_valid = v5_main_page_internal_main_page_g53_active_center_world(page, 0U, first_center);
-    if (first_center_valid) {
-        point[0] = first_center[0];
-        point[1] = first_center[1];
-        point[2] = first_center[2];
-        point[3] = 0.0;
-        point[4] = 0.0;
-        point[model->first_world_axis_component] -= 40.0;
-        v5_main_page_internal_main_page_fit_expand_world_point(fit, point);
-        point[0] = first_center[0];
-        point[1] = first_center[1];
-        point[2] = first_center[2];
-        point[model->first_world_axis_component] += 40.0;
-        v5_main_page_internal_main_page_fit_expand_world_point(fit, point);
-    }
-    if (v5_main_page_internal_main_page_g53_active_center_world(page, 1U, second_center)) {
-        pose_first_deg = (status && (status->valid_mask & V5_STATUS_VALID_MCS) && isfinite(status->mcs[3])) ? status->mcs[3] : 0.0;
-        angle = pose_first_deg * M_PI / 180.0;
-        if (first_center_valid) {
-            v5_main_page_internal_main_page_rotate_about_active_model_first_axis(
-                model,
-                second_center,
-                first_center,
-                pose_first_deg);
+    if (page->toolpath_model_scene_valid &&
+        v5_main_page_model_scene_build_geometry(
+            &page->toolpath_model_scene,
+            &geometry)) {
+        const double *centers[2] = {
+            geometry.primary_center,
+            geometry.child_center,
+        };
+        const double *directions[2] = {
+            geometry.primary_direction,
+            geometry.child_direction,
+        };
+        for (axis_i = 0U; axis_i < 2U; ++axis_i) {
+            memset(point, 0, sizeof(point));
+            for (component_i = 0U; component_i < 3U; ++component_i) {
+                point[component_i] =
+                    centers[axis_i][component_i] -
+                    (directions[axis_i][component_i] * 40.0);
+            }
+            v5_main_page_internal_main_page_fit_expand_world_point(fit, point);
+            for (component_i = 0U; component_i < 3U; ++component_i) {
+                point[component_i] =
+                    centers[axis_i][component_i] +
+                    (directions[axis_i][component_i] * 40.0);
+            }
+            v5_main_page_internal_main_page_fit_expand_world_point(fit, point);
         }
-        c_vec_x = model->first_world_axis_component == 1U ? sin(angle) * 40.0 : 0.0;
-        c_vec_y = model->first_world_axis_component == 0U ? -sin(angle) * 40.0 : 0.0;
-        c_vec_z = cos(angle) * 40.0;
-        point[0] = second_center[0] - c_vec_x; point[1] = second_center[1] - c_vec_y; point[2] = second_center[2] - c_vec_z; point[3] = 0.0; point[4] = 0.0;
-        v5_main_page_internal_main_page_fit_expand_world_point(fit, point);
-        point[0] = second_center[0] + c_vec_x;
-        point[1] = second_center[1] + c_vec_y;
-        point[2] = second_center[2] + c_vec_z;
-        v5_main_page_internal_main_page_fit_expand_world_point(fit, point);
     }
 }
 

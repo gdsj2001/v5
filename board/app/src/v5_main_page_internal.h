@@ -76,7 +76,7 @@ void v5_main_page_internal_feed_override_reset_event_cb(lv_event_t *event);
 void v5_main_page_internal_format_main_page_wcs_coordinate(char *out, size_t out_size, const V5UiStatusView *status,
                                             const V5NativeReadback *readback, unsigned int axis);
 
-void v5_main_page_internal_hide_toolpath_ac_geometry(V5MainPage *page);
+void v5_main_page_internal_hide_toolpath_model_geometry(V5MainPage *page);
 
 void v5_main_page_internal_hide_toolpath_line(lv_obj_t *line);
 
@@ -101,14 +101,6 @@ void v5_main_page_internal_log_button_event(V5MainPageActionKind action, int ok,
 lv_color_t v5_main_page_internal_main_coordinate_digit_color(const V5MainPage *page, unsigned int axis, int is_wcs);
 
 const V5MotionModelDescriptor *v5_main_page_internal_main_page_active_motion_model(const V5MainPage *page);
-
-void v5_main_page_internal_main_page_apply_active_model_pose_to_world_point(
-    const V5MotionModelDescriptor *model,
-    double point[V5_STATUS_AXIS_COUNT],
-    const double first_center[V5_STATUS_AXIS_COUNT],
-    const double second_center[V5_STATUS_AXIS_COUNT],
-    double first_deg,
-    double second_deg);
 
 int v5_main_page_internal_main_page_apply_program_preview_wcs_offset(
     const V5MainPage *page,
@@ -135,11 +127,6 @@ void v5_main_page_internal_main_page_expand_visible_toolpath_fit(
 
 void v5_main_page_internal_main_page_fit_expand_world_point(V5ToolpathDisplayFit *fit, const double axis[V5_STATUS_AXIS_COUNT]);
 
-int v5_main_page_internal_main_page_g53_active_center_world(
-    const V5MainPage *page,
-    unsigned int index,
-    double center[V5_STATUS_AXIS_COUNT]);
-
 int v5_main_page_internal_main_page_handle_program_preview_touch(
     V5MainPage *page,
     const lv_point_t *point,
@@ -148,7 +135,7 @@ int v5_main_page_internal_main_page_handle_program_preview_touch(
 
 V5ToolpathScreenPoint v5_main_page_internal_apply_toolpath_view_transform(const V5MainPage *page, V5ToolpathScreenPoint point);
 
-int v5_main_page_internal_main_page_program_ac_projection_changed(const V5MainPage *page, const V5UiStatusView *status);
+int v5_main_page_internal_main_page_program_model_projection_changed(const V5MainPage *page);
 
 int v5_main_page_internal_main_page_program_outside_fit_window(const V5MainPage *page);
 
@@ -163,34 +150,26 @@ int v5_main_page_internal_main_page_project_world_point_transformed(
 
 void v5_main_page_internal_main_page_root_delete_event_cb(lv_event_t *event);
 
-void v5_main_page_internal_main_page_rotate_about_active_model_first_axis(
-    const V5MotionModelDescriptor *model,
-    double point[V5_STATUS_AXIS_COUNT],
-    const double center[V5_STATUS_AXIS_COUNT],
-    double first_deg);
+int v5_main_page_internal_main_page_resolve_active_model_scene(
+    V5MainPage *page,
+    const V5UiStatusView *status);
 
-int v5_main_page_internal_main_page_rtcp_wcs_follow_active_model_available(
+int v5_main_page_internal_main_page_rtcp_wcs_follow_model_scene_available(
     const V5MainPage *page,
-    const V5UiStatusView *status,
-    const V5MotionModelDescriptor **model,
-    double *first_deg,
-    double *second_deg,
-    double first_center[V5_STATUS_AXIS_COUNT],
-    double second_center[V5_STATUS_AXIS_COUNT]);
+    const V5MainPageModelScene **scene);
 
 int v5_main_page_internal_main_page_static_geometry_outside_fit_window(
     V5MainPage *page,
     const V5UiStatusView *status);
 
-int v5_main_page_internal_main_page_static_pose_changed(const V5MainPage *page, const V5UiStatusView *status);
+int v5_main_page_internal_main_page_static_pose_changed(const V5MainPage *page);
 
-void v5_main_page_internal_main_page_store_static_pose(V5MainPage *page, const V5UiStatusView *status);
+void v5_main_page_internal_main_page_store_static_pose(V5MainPage *page);
 
 int v5_main_page_internal_main_page_tool_length_mm(const V5MainPage *page, double *out);
 
 int v5_main_page_internal_main_page_update_program_project_points(
     V5MainPage *page,
-    const V5UiStatusView *status,
     unsigned int count);
 
 const char *v5_main_page_internal_main_page_wcs_code(const V5NativeReadback *readback);

@@ -20,91 +20,113 @@
 
 #include "v5_main_page_internal.h"
 
-static void set_toolpath_active_model_geometry_from_basis(
+static int set_toolpath_active_model_geometry(
     V5MainPage *page,
-    const V5MotionModelDescriptor *model,
-    const V5ToolpathScreenPoint *origin,
-    const V5ToolpathScreenPoint *x_axis,
-    const V5ToolpathScreenPoint *y_axis,
-    const V5ToolpathScreenPoint *z_axis,
-    const V5ToolpathScreenPoint *first_center_override,
-    const V5ToolpathScreenPoint *second_center_override,
-    double first_deg,
-    int first_valid)
+    const V5MainPageModelGeometry *geometry)
 {
-    V5ToolpathScreenPoint ac_center[2];
-    V5ToolpathScreenPoint ac_axis_start[2];
-    V5ToolpathScreenPoint ac_axis_end[2];
-    double angle = 0.0;
-    double x_dx;
-    double x_dy;
-    double y_dx;
-    double y_dy;
-    double z_dx;
-    double z_dy;
-    double c_dx;
-    double c_dy;
-    char first_label[2] = {model ? model->first_rotary_axis : '-', '\0'};
+    V5ToolpathScreenPoint center[2];
+    V5ToolpathScreenPoint axis_start[2];
+    V5ToolpathScreenPoint axis_end[2];
+    double start_world[2][V5_STATUS_AXIS_COUNT];
+    double end_world[2][V5_STATUS_AXIS_COUNT];
+    const double *centers[2];
+    const double *directions[2];
+    char primary_label[2];
+    char child_label[2];
+    unsigned int axis_i;
+    unsigned int component_i;
 
-    if (!page || !origin || !x_axis || !y_axis || !z_axis ||
-        !first_center_override || !second_center_override || !model) {
-        v5_main_page_internal_hide_toolpath_ac_geometry(page);
-        return;
+    if (!page || !geometry) {
+        v5_main_page_internal_hide_toolpath_model_geometry(page);
+        return 0;
     }
-
-    if (first_valid && isfinite(first_deg)) {
-        angle = first_deg * M_PI / 180.0;
+    centers[0] = geometry->primary_center;
+    centers[1] = geometry->child_center;
+    directions[0] = geometry->primary_direction;
+    directions[1] = geometry->child_direction;
+    for (axis_i = 0U; axis_i < 2U; ++axis_i) {
+        memset(start_world[axis_i], 0, sizeof(start_world[axis_i]));
+        memset(end_world[axis_i], 0, sizeof(end_world[axis_i]));
+        for (component_i = 0U; component_i < 3U; ++component_i) {
+            start_world[axis_i][component_i] =
+                centers[axis_i][component_i] - (directions[axis_i][component_i] * 40.0);
+            end_world[axis_i][component_i] =
+                centers[axis_i][component_i] + (directions[axis_i][component_i] * 40.0);
+        }
+        if (!v5_main_page_internal_main_page_project_world_point_transformed(
+                page,
+                centers[axis_i],
+                &center[axis_i]) ||
+            !v5_main_page_internal_main_page_project_world_point_transformed(
+                page,
+                start_world[axis_i],
+                &axis_start[axis_i]) ||
+            !v5_main_page_internal_main_page_project_world_point_transformed(
+                page,
+                end_world[axis_i],
+                &axis_end[axis_i])) {
+            v5_main_page_internal_hide_toolpath_model_geometry(page);
+            return 0;
+        }
     }
-    x_dx = x_axis->x - origin->x;
-    x_dy = x_axis->y - origin->y;
-    y_dx = y_axis->x - origin->x;
-    y_dy = y_axis->y - origin->y;
-    z_dx = z_axis->x - origin->x;
-    z_dy = z_axis->y - origin->y;
-    if (model->first_world_axis_component == 1U) {
-        c_dx = (sin(angle) * x_dx) + (cos(angle) * z_dx);
-        c_dy = (sin(angle) * x_dy) + (cos(angle) * z_dy);
-    } else {
-        c_dx = (-sin(angle) * y_dx) + (cos(angle) * z_dx);
-        c_dy = (-sin(angle) * y_dy) + (cos(angle) * z_dy);
-    }
-
-    ac_center[0] = *first_center_override;
-    if (model->first_world_axis_component == 1U) {
-        ac_axis_start[0] = v5_main_page_internal_toolpath_scaffold_point(ac_center[0].x - y_dx, ac_center[0].y - y_dy);
-        ac_axis_end[0] = v5_main_page_internal_toolpath_scaffold_point(ac_center[0].x + y_dx, ac_center[0].y + y_dy);
-    } else {
-        ac_axis_start[0] = v5_main_page_internal_toolpath_scaffold_point(ac_center[0].x - x_dx, ac_center[0].y - x_dy);
-        ac_axis_end[0] = v5_main_page_internal_toolpath_scaffold_point(ac_center[0].x + x_dx, ac_center[0].y + x_dy);
-    }
-    ac_center[1] = *second_center_override;
-    ac_axis_start[1] = v5_main_page_internal_toolpath_scaffold_point(ac_center[1].x - c_dx, ac_center[1].y - c_dy);
-    ac_axis_end[1] = v5_main_page_internal_toolpath_scaffold_point(ac_center[1].x + c_dx, ac_center[1].y + c_dy);
 
     v5_main_page_internal_set_toolpath_axis_line(
-        page->toolpath_a_axis_line,
-        page->toolpath_ac_axis_points[0],
-        &ac_axis_start[0],
-        &ac_axis_end[0],
-        v5_main_page_internal_clip_toolpath_segment(&ac_axis_start[0], &ac_axis_end[0]));
+        page->toolpath_model_primary_axis_line,
+        page->toolpath_model_axis_points[0],
+        &axis_start[0],
+        &axis_end[0],
+        v5_main_page_internal_clip_toolpath_segment(&axis_start[0], &axis_end[0]));
     v5_main_page_internal_set_toolpath_axis_line(
-        page->toolpath_c_axis_line,
-        page->toolpath_ac_axis_points[1],
-        &ac_axis_start[1],
-        &ac_axis_end[1],
-        v5_main_page_internal_clip_toolpath_segment(&ac_axis_start[1], &ac_axis_end[1]));
-    v5_main_page_internal_set_toolpath_v3_center_dot(page->toolpath_a_center_line, &ac_center[0], 1);
-    v5_main_page_internal_set_toolpath_v3_center_dot(page->toolpath_c_center_line, &ac_center[1], 1);
-    if (page->toolpath_a_label) {
-        v5_main_page_internal_set_label_text_if_changed(page->toolpath_a_label, first_label);
-        v5_main_page_internal_set_obj_pos_if_changed(page->toolpath_a_label, V5_TOOLPATH_X + v5_main_page_internal_clamp_coord(ac_axis_end[0].x + 4.0, 0, V5_TOOLPATH_W - 24), V5_TOOLPATH_Y + v5_main_page_internal_clamp_coord(ac_axis_end[0].y - 12.0, 0, V5_TOOLPATH_H - 22));
-        v5_main_page_internal_clear_hidden_flag_if_hidden(page->toolpath_a_label);
+        page->toolpath_model_child_axis_line,
+        page->toolpath_model_axis_points[1],
+        &axis_start[1],
+        &axis_end[1],
+        v5_main_page_internal_clip_toolpath_segment(&axis_start[1], &axis_end[1]));
+    v5_main_page_internal_set_toolpath_v3_center_dot(
+        page->toolpath_model_primary_center_line,
+        &center[0],
+        1);
+    v5_main_page_internal_set_toolpath_v3_center_dot(
+        page->toolpath_model_child_center_line,
+        &center[1],
+        1);
+    primary_label[0] = geometry->primary_axis;
+    primary_label[1] = '\0';
+    child_label[0] = geometry->child_axis;
+    child_label[1] = '\0';
+    if (page->toolpath_model_primary_label) {
+        v5_main_page_internal_set_label_text_if_changed(
+            page->toolpath_model_primary_label,
+            primary_label);
+        v5_main_page_internal_set_obj_pos_if_changed(
+            page->toolpath_model_primary_label,
+            V5_TOOLPATH_X + v5_main_page_internal_clamp_coord(
+                axis_end[0].x + 4.0,
+                0,
+                V5_TOOLPATH_W - 24),
+            V5_TOOLPATH_Y + v5_main_page_internal_clamp_coord(
+                axis_end[0].y - 12.0,
+                0,
+                V5_TOOLPATH_H - 22));
+        v5_main_page_internal_clear_hidden_flag_if_hidden(page->toolpath_model_primary_label);
     }
-    if (page->toolpath_c_label) {
-        v5_main_page_internal_set_label_text_if_changed(page->toolpath_c_label, "C");
-        v5_main_page_internal_set_obj_pos_if_changed(page->toolpath_c_label, V5_TOOLPATH_X + v5_main_page_internal_clamp_coord(ac_axis_end[1].x + 8.0, 0, V5_TOOLPATH_W - 20), V5_TOOLPATH_Y + v5_main_page_internal_clamp_coord(ac_axis_end[1].y - 10.0, 0, V5_TOOLPATH_H - 22));
-        v5_main_page_internal_clear_hidden_flag_if_hidden(page->toolpath_c_label);
+    if (page->toolpath_model_child_label) {
+        v5_main_page_internal_set_label_text_if_changed(
+            page->toolpath_model_child_label,
+            child_label);
+        v5_main_page_internal_set_obj_pos_if_changed(
+            page->toolpath_model_child_label,
+            V5_TOOLPATH_X + v5_main_page_internal_clamp_coord(
+                axis_end[1].x + 8.0,
+                0,
+                V5_TOOLPATH_W - 20),
+            V5_TOOLPATH_Y + v5_main_page_internal_clamp_coord(
+                axis_end[1].y - 10.0,
+                0,
+                V5_TOOLPATH_H - 22));
+        v5_main_page_internal_clear_hidden_flag_if_hidden(page->toolpath_model_child_label);
     }
+    return 1;
 }
 
 void v5_main_page_internal_hide_toolpath_unproven_geometry(V5MainPage *page)
@@ -121,7 +143,7 @@ void v5_main_page_internal_hide_toolpath_unproven_geometry(V5MainPage *page)
         v5_main_page_internal_hide_toolpath_line(page->toolpath_mcs_axis_lines[i]);
     }
     v5_main_page_internal_hide_toolpath_program_wcs_objects(page);
-    v5_main_page_internal_hide_toolpath_ac_geometry(page);
+    v5_main_page_internal_hide_toolpath_model_geometry(page);
     v5_main_page_internal_hide_toolpath_line(page->toolpath_holder_line);
     v5_main_page_internal_add_hidden_flag_if_visible(page->toolpath_microkernel_marker_dot);
     v5_main_page_internal_add_hidden_flag_if_visible(page->toolpath_holder_marker_line);
@@ -143,16 +165,11 @@ void v5_main_page_internal_update_toolpath_state_lines(V5MainPage *page, const V
     };
     double wcs_origin[V5_STATUS_AXIS_COUNT];
     double wcs_axis[3][V5_STATUS_AXIS_COUNT];
-    const V5MotionModelDescriptor *active_model;
-    const V5MotionModelDescriptor *wcs_follow_model = 0;
-    double wcs_follow_first_center[V5_STATUS_AXIS_COUNT];
-    double wcs_follow_second_center[V5_STATUS_AXIS_COUNT];
-    double wcs_follow_first_deg = 0.0;
-    double wcs_follow_second_deg = 0.0;
+    const V5MainPageModelScene *wcs_follow_scene = 0;
+    V5MainPageModelGeometry model_geometry;
     int mcs_valid;
     int wcs_valid;
     int wcs_follow_active_model;
-    int axis_ok[3] = {0, 0, 0};
     unsigned int i;
 
     if (!page) {
@@ -170,46 +187,16 @@ void v5_main_page_internal_update_toolpath_state_lines(V5MainPage *page, const V
             int ok = v5_toolpath_display_project_world_point(axis_world[i], &page->toolpath_fit, (double)V5_TOOLPATH_W, (double)V5_TOOLPATH_H, &axis_point[i]);
             if (ok) {
                 axis_point[i] = v5_main_page_internal_apply_toolpath_view_transform(page, axis_point[i]);
-                axis_ok[i] = 1;
             }
             v5_main_page_internal_set_toolpath_axis_line(page->toolpath_mcs_axis_lines[i], page->toolpath_mcs_axis_points[i], &origin_point, &axis_point[i], ok);
         }
-        if (axis_ok[0] && axis_ok[1] && axis_ok[2]) {
-            V5ToolpathScreenPoint first_center_point;
-            V5ToolpathScreenPoint second_center_point;
-            double first_center_world[V5_STATUS_AXIS_COUNT];
-            double second_center_world[V5_STATUS_AXIS_COUNT];
-            int active_geometry_valid;
-            active_model = v5_main_page_internal_main_page_active_motion_model(page);
-            active_geometry_valid = active_model &&
-                v5_main_page_internal_main_page_g53_active_center_world(page, 0U, first_center_world) &&
-                v5_main_page_internal_main_page_g53_active_center_world(page, 1U, second_center_world);
-            if (active_geometry_valid) {
-                v5_main_page_internal_main_page_rotate_about_active_model_first_axis(
-                    active_model,
-                    second_center_world,
-                    first_center_world,
-                    status->mcs[3]);
-            }
-            if (active_geometry_valid &&
-                v5_main_page_internal_main_page_project_world_point_transformed(page, first_center_world, &first_center_point) &&
-                v5_main_page_internal_main_page_project_world_point_transformed(page, second_center_world, &second_center_point)) {
-                set_toolpath_active_model_geometry_from_basis(
-                    page,
-                    active_model,
-                    &origin_point,
-                    &axis_point[0],
-                    &axis_point[1],
-                    &axis_point[2],
-                    &first_center_point,
-                    &second_center_point,
-                    status->mcs[3],
-                    1);
-            } else {
-                v5_main_page_internal_hide_toolpath_ac_geometry(page);
-            }
+        if (page->toolpath_model_scene_valid &&
+            v5_main_page_model_scene_build_geometry(
+                &page->toolpath_model_scene,
+                &model_geometry)) {
+            set_toolpath_active_model_geometry(page, &model_geometry);
         } else {
-            v5_main_page_internal_hide_toolpath_ac_geometry(page);
+            v5_main_page_internal_hide_toolpath_model_geometry(page);
         }
     }
 
@@ -233,30 +220,13 @@ void v5_main_page_internal_update_toolpath_state_lines(V5MainPage *page, const V
             memcpy(wcs_axis[i], wcs_origin, sizeof(wcs_axis[i]));
             wcs_axis[i][i] += 40.0;
         }
-        wcs_follow_active_model = v5_main_page_internal_main_page_rtcp_wcs_follow_active_model_available(
+        wcs_follow_active_model = v5_main_page_internal_main_page_rtcp_wcs_follow_model_scene_available(
             page,
-            status,
-            &wcs_follow_model,
-            &wcs_follow_first_deg,
-            &wcs_follow_second_deg,
-            wcs_follow_first_center,
-            wcs_follow_second_center);
+            &wcs_follow_scene);
         if (wcs_follow_active_model) {
-            v5_main_page_internal_main_page_apply_active_model_pose_to_world_point(
-                wcs_follow_model,
-                wcs_origin,
-                wcs_follow_first_center,
-                wcs_follow_second_center,
-                wcs_follow_first_deg,
-                wcs_follow_second_deg);
+            v5_main_page_model_scene_transform_world_point(wcs_follow_scene, wcs_origin);
             for (i = 0U; i < 3U; ++i) {
-                v5_main_page_internal_main_page_apply_active_model_pose_to_world_point(
-                    wcs_follow_model,
-                    wcs_axis[i],
-                    wcs_follow_first_center,
-                    wcs_follow_second_center,
-                    wcs_follow_first_deg,
-                    wcs_follow_second_deg);
+                v5_main_page_model_scene_transform_world_point(wcs_follow_scene, wcs_axis[i]);
             }
         }
         if (v5_toolpath_display_project_world_point(wcs_origin, &page->toolpath_fit, (double)V5_TOOLPATH_W, (double)V5_TOOLPATH_H, &wcs_origin_point)) {

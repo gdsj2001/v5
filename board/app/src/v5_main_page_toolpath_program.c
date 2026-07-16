@@ -88,10 +88,11 @@ void v5_main_page_internal_hide_toolpath_program_line(V5MainPage *page)
     page->toolpath_program_wcs_epoch = 0U;
     memset(page->toolpath_program_wcs_offset, 0, sizeof(page->toolpath_program_wcs_offset));
     page->toolpath_program_point_count = 0U;
-    page->toolpath_program_ac_valid = 0;
-    page->toolpath_program_model_kind = 0;
-    page->toolpath_program_ac_a_deg = 0.0;
-    page->toolpath_program_ac_c_deg = 0.0;
+    page->toolpath_program_model_scene_valid = 0;
+    memset(
+        &page->toolpath_program_model_scene,
+        0,
+        sizeof(page->toolpath_program_model_scene));
     page->toolpath_line_last_dirty_rect_count = 0U;
     page->toolpath_line_last_dirty_pixels = 0U;
     page->toolpath_line_last_dirty_max_pixels = 0U;
@@ -118,10 +119,11 @@ void v5_main_page_internal_mark_toolpath_static_dirty(V5MainPage *page)
     memset(page->toolpath_program_wcs_offset, 0, sizeof(page->toolpath_program_wcs_offset));
     page->toolpath_program_visible = 0;
     page->toolpath_program_point_count = 0U;
-    page->toolpath_program_ac_valid = 0;
-    page->toolpath_program_model_kind = 0;
-    page->toolpath_program_ac_a_deg = 0.0;
-    page->toolpath_program_ac_c_deg = 0.0;
+    page->toolpath_program_model_scene_valid = 0;
+    memset(
+        &page->toolpath_program_model_scene,
+        0,
+        sizeof(page->toolpath_program_model_scene));
     v5_toolpath_display_fit_init(&page->toolpath_fit);
 }
 

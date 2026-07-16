@@ -161,81 +161,63 @@ void v5_main_page_internal_format_main_page_wcs_coordinate(char *out, size_t out
     snprintf(out, out_size, "%+010.3f", value);
 }
 
-static int format_toolpath_g53_active_model_text(char *out, size_t out_size, const V5NativeReadback *readback)
+static int format_toolpath_g53_active_model_text(
+    char *out,
+    size_t out_size,
+    const V5MainPage *page)
 {
-    const V5MotionModelDescriptor *model;
-    const double *first_center;
-    const double *second_center;
-    const double *active_offsets;
-    double first_display[3];
-    double second_display[3];
-    if (!out || out_size == 0U || !readback) {
+    const V5MainPageModelScene *scene;
+
+    if (!out || out_size == 0U || !page || !page->toolpath_model_scene_valid) {
         return 0;
     }
-    model = v5_motion_model_find(readback->motion_model);
-    if (!model) {
-        return 0;
-    }
-    first_center = v5_native_readback_g53_center(readback, model->first_g53_center);
-    second_center = v5_native_readback_g53_center(readback, model->second_g53_center);
-    active_offsets = v5_native_readback_active_wcs_offsets(readback);
-    if (!first_center || !second_center ||
-        !isfinite(first_center[0]) || !isfinite(first_center[1]) || !isfinite(first_center[2]) ||
-        !isfinite(second_center[0]) || !isfinite(second_center[1]) || !isfinite(second_center[2]) ||
-        !active_offsets ||
-        !isfinite(active_offsets[0]) ||
-        !isfinite(active_offsets[1]) ||
-        !isfinite(active_offsets[2])) {
-        return 0;
-    }
-    memcpy(first_display, first_center, sizeof(first_display));
-    memcpy(second_display, second_center, sizeof(second_display));
-    first_display[model->first_center_wcs_component] = active_offsets[model->first_center_wcs_component];
-    second_display[model->second_center_wcs_component] = active_offsets[model->second_center_wcs_component];
+    scene = &page->toolpath_model_scene;
     snprintf(
         out,
         out_size,
         "G53 %c %.2f,%.2f,%.2f  %c %.2f,%.2f,%.2f",
-        model->first_rotary_axis,
-        first_display[0],
-        first_display[1],
-        first_display[2],
-        model->second_rotary_axis,
-        second_display[0],
-        second_display[1],
-        second_display[2]);
+        scene->primary_axis,
+        scene->primary_center[0],
+        scene->primary_center[1],
+        scene->primary_center[2],
+        scene->child_axis,
+        scene->child_center[0],
+        scene->child_center[1],
+        scene->child_center[2]);
     return 1;
 }
 
-static int format_toolpath_wcs_offset_text(char *out, size_t out_size, const V5NativeReadback *readback)
+static int format_toolpath_wcs_offset_text(
+    char *out,
+    size_t out_size,
+    const V5MainPage *page)
 {
     const double *offsets;
-    const V5MotionModelDescriptor *model;
-    if (!out || out_size == 0U || !readback) {
+
+    if (!out || out_size == 0U || !page || !page->toolpath_model_scene_valid) {
         return 0;
     }
-    offsets = v5_native_readback_active_wcs_offsets(readback);
+    offsets = v5_native_readback_active_wcs_offsets(&page->native_readback);
     if (!offsets ||
+        page->toolpath_model_scene.primary_status_slot >= V5_NATIVE_READBACK_WCS_OFFSET_COUNT ||
+        page->toolpath_model_scene.child_status_slot >= V5_NATIVE_READBACK_WCS_OFFSET_COUNT ||
         !isfinite(offsets[0]) || !isfinite(offsets[1]) || !isfinite(offsets[2]) ||
-        !isfinite(offsets[3]) || !isfinite(offsets[4])) {
-        return 0;
-    }
-    model = v5_motion_model_find(readback->motion_model);
-    if (!model) {
+        !isfinite(offsets[page->toolpath_model_scene.primary_status_slot]) ||
+        !isfinite(offsets[page->toolpath_model_scene.child_status_slot])) {
         return 0;
     }
     snprintf(
         out,
         out_size,
         "%s偏置 X%.2f Y%.2f Z%.2f %c%.2f %c%.2f",
-        v5_main_page_internal_main_page_wcs_code(readback),
+        v5_main_page_internal_main_page_wcs_code(&page->native_readback),
         offsets[0],
         offsets[1],
         offsets[2],
-        model->first_rotary_axis,
-        offsets[3],
-        model->second_rotary_axis,
-        offsets[4]);
+        page->toolpath_model_scene.primary_axis,
+        offsets[page->toolpath_model_scene.primary_status_slot],
+        page->toolpath_model_scene.child_axis,
+        offsets[page->toolpath_model_scene.child_status_slot]);
     return 1;
 }
 
@@ -246,12 +228,16 @@ void v5_main_page_internal_update_toolpath_status_text(V5MainPage *page)
         return;
     }
     if (page->toolpath_summary_label &&
-        format_toolpath_g53_active_model_text(text, sizeof(text), &page->native_readback)) {
+        format_toolpath_g53_active_model_text(text, sizeof(text), page)) {
         v5_main_page_internal_set_label_text_if_changed(page->toolpath_summary_label, text);
+    } else if (page->toolpath_summary_label && !page->toolpath_model_scene_valid) {
+        v5_main_page_internal_set_label_text_if_changed(page->toolpath_summary_label, "");
     }
     if (page->toolpath_detail_label &&
-        format_toolpath_wcs_offset_text(text, sizeof(text), &page->native_readback)) {
+        format_toolpath_wcs_offset_text(text, sizeof(text), page)) {
         v5_main_page_internal_set_label_text_if_changed(page->toolpath_detail_label, text);
+    } else if (page->toolpath_detail_label && !page->toolpath_model_scene_valid) {
+        v5_main_page_internal_set_label_text_if_changed(page->toolpath_detail_label, "");
     }
 }
 

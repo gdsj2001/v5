@@ -286,17 +286,17 @@ void v5_main_page_internal_set_toolpath_origin_cross(lv_obj_t *line, lv_point_t 
     v5_main_page_internal_clear_hidden_flag_if_hidden(line);
 }
 
-void v5_main_page_internal_hide_toolpath_ac_geometry(V5MainPage *page)
+void v5_main_page_internal_hide_toolpath_model_geometry(V5MainPage *page)
 {
     if (!page) {
         return;
     }
-    v5_main_page_internal_hide_toolpath_line(page->toolpath_a_axis_line);
-    v5_main_page_internal_hide_toolpath_line(page->toolpath_c_axis_line);
-    v5_main_page_internal_add_hidden_flag_if_visible(page->toolpath_a_center_line);
-    v5_main_page_internal_add_hidden_flag_if_visible(page->toolpath_c_center_line);
-    v5_main_page_internal_add_hidden_flag_if_visible(page->toolpath_a_label);
-    v5_main_page_internal_add_hidden_flag_if_visible(page->toolpath_c_label);
+    v5_main_page_internal_hide_toolpath_line(page->toolpath_model_primary_axis_line);
+    v5_main_page_internal_hide_toolpath_line(page->toolpath_model_child_axis_line);
+    v5_main_page_internal_add_hidden_flag_if_visible(page->toolpath_model_primary_center_line);
+    v5_main_page_internal_add_hidden_flag_if_visible(page->toolpath_model_child_center_line);
+    v5_main_page_internal_add_hidden_flag_if_visible(page->toolpath_model_primary_label);
+    v5_main_page_internal_add_hidden_flag_if_visible(page->toolpath_model_child_label);
 }
 
 
