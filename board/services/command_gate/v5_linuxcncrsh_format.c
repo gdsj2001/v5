@@ -1,6 +1,5 @@
 #include "v5_linuxcncrsh_client.h"
 
-#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -9,80 +8,24 @@ static int v5_linuxcncrsh_format_ok(int rc, size_t out_size)
     return rc > 0 && (size_t)rc < out_size;
 }
 
-static int v5_linuxcncrsh_program_from_response(
-    const char *response,
-    char *program,
-    size_t program_size)
-{
-    const char *cursor;
-    if (!response || !program || program_size == 0U) {
-        return 0;
-    }
-    program[0] = '\0';
-    cursor = response;
-    while (*cursor) {
-        const char *start;
-        const char *end;
-        const char *value;
-        size_t value_len;
-        while (*cursor == '\r' || *cursor == '\n') {
-            ++cursor;
-        }
-        start = cursor;
-        while (*cursor && *cursor != '\r' && *cursor != '\n') {
-            ++cursor;
-        }
-        end = cursor;
-        while (start < end && isspace((unsigned char)*start)) {
-            ++start;
-        }
-        while (end > start && isspace((unsigned char)end[-1])) {
-            --end;
-        }
-        if ((size_t)(end - start) <= 8U || memcmp(start, "PROGRAM ", 8U) != 0) {
-            continue;
-        }
-        value = start + 8U;
-        while (value < end && isspace((unsigned char)*value)) {
-            ++value;
-        }
-        value_len = (size_t)(end - value);
-        if (value_len == 0U || value_len >= program_size) {
-            return 0;
-        }
-        memcpy(program, value, value_len);
-        program[value_len] = '\0';
-        return 1;
-    }
-    return 0;
-}
-
 int v5_linuxcncrsh_format_start_transaction(
     const V5CommandPrepared *prepared,
     const V5CommandRequest *request,
-    const char *program_response,
     char *out,
     size_t out_size)
 {
-    char current_program[384];
     int rc;
     if (!prepared || !request || !out || out_size == 0U ||
         !prepared->accepted || prepared->kind != V5_COMMAND_START ||
         request->kind != V5_COMMAND_START ||
-        !request->text_value || !request->text_value[0] ||
-        !v5_linuxcncrsh_program_from_response(
-            program_response, current_program, sizeof(current_program))) {
+        !request->text_value || !request->text_value[0]) {
         return 0;
     }
-    if (strcmp(current_program, request->text_value) == 0) {
-        rc = snprintf(out, out_size, "Set Mode Auto\nSet Run 0");
-    } else {
-        rc = snprintf(
-            out,
-            out_size,
-            "Set Open %s\nSet Mode Auto\nSet Run 0",
-            request->text_value);
-    }
+    rc = snprintf(
+        out,
+        out_size,
+        "Set Task_Plan_Init\nSet Mode Auto\nSet Open %s\nSet Run 0",
+        request->text_value);
     return v5_linuxcncrsh_format_ok(rc, out_size);
 }
 

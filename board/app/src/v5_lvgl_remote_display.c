@@ -28,6 +28,7 @@
 #define V5_REMOTE_FRAMEBUFFER_PATH V5_REMOTE_RUN_DIR "/remote_framebuffer.bgra"
 #define V5_REMOTE_DIRTY_FIFO_PATH V5_REMOTE_RUN_DIR "/remote_dirty"
 #define V5_REMOTE_DIRTY_RECT_CAPACITY 16U
+#define V5_UI_DRAW_BUFFER_ROWS 160U
 
 typedef struct {
     int x1;
@@ -36,7 +37,7 @@ typedef struct {
     int y2;
 } V5RemoteDirtyRect;
 
-static lv_color_t g_draw_buffer[V5_UI_MAX_WIDTH * 20U];
+static lv_color_t g_draw_buffer[V5_UI_MAX_WIDTH * V5_UI_DRAW_BUFFER_ROWS];
 static unsigned char g_frame[V5_UI_MAX_WIDTH * V5_UI_MAX_HEIGHT * 4U];
 static unsigned char g_cached_frame[V5_REMOTE_DISPLAY_CACHE_COUNT][V5_UI_MAX_WIDTH * V5_UI_MAX_HEIGHT * 4U];
 static int g_cached_valid[V5_REMOTE_DISPLAY_CACHE_COUNT];
@@ -509,7 +510,7 @@ int v5_lvgl_remote_display_setup(unsigned int width, unsigned int height)
     if (!ensure_remote_framebuffer()) {
         return 0;
     }
-    lv_disp_draw_buf_init(&g_draw, g_draw_buffer, 0, width * 20U);
+    lv_disp_draw_buf_init(&g_draw, g_draw_buffer, 0, width * V5_UI_DRAW_BUFFER_ROWS);
     lv_disp_drv_init(&g_driver);
     g_driver.hor_res = (lv_coord_t)width;
     g_driver.ver_res = (lv_coord_t)height;

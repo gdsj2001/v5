@@ -19,10 +19,8 @@ from v5_native_operator_error_map import (
 
 from v5_wcs_status_codec import (
     BLOCK_STRUCT,
-    DEFAULT_INTERVAL_MS,
     DEFAULT_MODAL_TOOL_PATH,
     DEFAULT_PATH,
-    DEFAULT_POSITION_PATH,
     DEFAULT_T0_TOOL_HOLDER_LENGTH_MM,
     MAGIC,
     OFFSET_COUNT,
@@ -37,29 +35,22 @@ from v5_wcs_status_codec import (
     wcs_from_g5x,
 )
 from v5_machine_status_projection import (
-    NativeRotaryDisplayProjection,
     all_homed_from_stat,
     current_tool_length,
     current_tool_number,
-    display_position_projection,
     finite_float,
-    first_spindle,
-    gcode_to_text,
     interpreter_idle_from_stat,
     interpreter_paused_from_stat,
     line_from_stat,
     mdi_run_from_stat,
     modal_text_from_gcodes,
-    normalized_axis,
-    normalized_axis_with_presence,
     tool_entry_value,
-    write_mock_position_status,
     write_modal_tool_status,
-    write_position_status,
 )
+from v5_polling_cadence import StartToStartPollingCadence
 
 SLOW_STATUS_HEARTBEAT_SECONDS = 0.2
-HAL_DISPLAY_PROJECTION_COMPONENT = 'v5-wcs-display'
+DEFAULT_WCS_INTERVAL_MS = 200
 
 
 class StatusPublishCadence:
@@ -80,61 +71,6 @@ class StatusPublishCadence:
     def mark_published(self, name: str, signature, now=None) -> None:
         now = time.monotonic() if now is None else float(now)
         self._last[name] = (signature, now)
-
-
-class HalReadAccess:
-    def __init__(self, hal_module):
-        self._hal = hal_module
-        self._component = hal_module.component(HAL_DISPLAY_PROJECTION_COMPONENT)
-        self._pin_names = {}
-        specs = [
-            ('home-table-mapping-valid', 'home-table-valid', 'v5-home-table-valid', hal_module.HAL_BIT),
-            ('home-table-map-gen', 'home-table-generation', 'v5-home-table-generation', hal_module.HAL_U32),
-            ('home-table-active-mask', 'home-table-active-mask', 'v5-home-table-active-mask', hal_module.HAL_U32),
-            ('home-table-commit-seq', 'home-table-commit', 'v5-home-table-commit', hal_module.HAL_U32),
-        ]
-        joint_fields = (
-            ('home-config-valid', 'config-valid', hal_module.HAL_BIT),
-            ('home-status-slot', 'status-slot', hal_module.HAL_U32),
-            ('home-axis-code', 'axis-code', hal_module.HAL_U32),
-            ('home-mapping-generation', 'generation', hal_module.HAL_U32),
-            ('home-zero-counts', 'zero', hal_module.HAL_FLOAT),
-            ('home-counts-per-unit', 'scale', hal_module.HAL_FLOAT),
-        )
-        for joint in range(5):
-            suffix = f'{joint:02d}'
-            for owner_field, signal_field, pin_type in joint_fields:
-                specs.append((
-                    f'{owner_field}-{suffix}',
-                    f'home-j{joint}-{signal_field}',
-                    f'v5-home-j{joint}-{signal_field}',
-                    pin_type))
-        wcheckpoint_fields = (
-            ('valid', hal_module.HAL_BIT),
-            ('generation', hal_module.HAL_U32),
-            ('logical-counts', hal_module.HAL_FLOAT),
-            ('base-counts', hal_module.HAL_FLOAT),
-            ('runtime-counts', hal_module.HAL_FLOAT),
-        )
-        for axis in ('a', 'b', 'c'):
-            for owner_field, pin_type in wcheckpoint_fields:
-                signal_field = owner_field[:-7] if owner_field.endswith('-counts') else owner_field
-                specs.append((
-                    f'wcp-{axis}-{owner_field}',
-                    f'wcp-{axis}-{signal_field}',
-                    f'v5-wcheckpoint-{axis}-{signal_field}',
-                    pin_type))
-        for owner_name, local_name, signal_name, pin_type in specs:
-            self._component.newpin(local_name, pin_type, hal_module.HAL_IN)
-            hal_module.connect(
-                f'{HAL_DISPLAY_PROJECTION_COMPONENT}.{local_name}', signal_name)
-            self._pin_names[f'v5-native-hal-owner.{owner_name}'] = local_name
-        self._component.ready()
-
-    def get_value(self, name):
-        return self._component[self._pin_names[name]]
-
-
 
 
 def lock_process_memory(process_name: str) -> None:
@@ -348,37 +284,20 @@ def load_linuxcnc():
     return linuxcnc
 
 
-def load_hal():
-    dist = '/usr/lib/python3/dist-packages'
-    if os.path.isdir(dist) and dist not in sys.path:
-        sys.path.insert(0, dist)
-    import hal  # type: ignore
-    return HalReadAccess(hal)
-
-
-
 def poll_once(
     stat,
     resident_wcs: ResidentWcsParameterOwner,
     path: str,
-    position_path: str,
     modal_tool_path: str,
     t0_tool_holder_length_mm=DEFAULT_T0_TOOL_HOLDER_LENGTH_MM,
     interpreter_idle_value=None,
     interpreter_paused_value=None,
     publish_cadence=None,
-    now_monotonic=None,
-    rotary_projection=None) -> Tuple[int, int]:
+    now_monotonic=None) -> Tuple[int, int]:
     stat.poll()
     valid, wcs_index = wcs_from_g5x(int(getattr(stat, 'g5x_index', 0)))
     if not resident_wcs.loaded():
         raise RuntimeError('wcs_resident_owner_unloaded')
-    write_position_status(
-        position_path,
-        stat,
-        rotary_projection,
-        publish_cadence,
-        now_monotonic)
     slow_signature = ('slow-status-sample', valid, wcs_index)
     if publish_cadence is not None and not publish_cadence.should_publish(
             'slow-status', slow_signature, now_monotonic):
@@ -428,19 +347,16 @@ def main() -> int:
     lock_process_memory("v5_wcs_status_publisher")
     parser = argparse.ArgumentParser(description='Publish v5 WCS actual status from boot-resident native WCS memory.')
     parser.add_argument('--path', default=DEFAULT_PATH)
-    parser.add_argument('--position-path', default=DEFAULT_POSITION_PATH)
     parser.add_argument('--modal-tool-path', default=DEFAULT_MODAL_TOOL_PATH)
     parser.add_argument('--operator-error-path', default=DEFAULT_OPERATOR_ERROR_PATH)
     parser.add_argument('--operator-error-map', default=DEFAULT_OPERATOR_ERROR_MAP)
     parser.add_argument('--ini', default=os.environ.get('V5_LINUXCNC_INI', os.environ.get('INI_FILE_NAME', '')))
     parser.add_argument('--parameter-file', default=os.environ.get('V5_LINUXCNC_PARAMETER_FILE', ''))
-    parser.add_argument('--interval-ms', type=int, default=DEFAULT_INTERVAL_MS)
+    parser.add_argument('--interval-ms', type=int, default=DEFAULT_WCS_INTERVAL_MS)
     parser.add_argument('--t0-tool-holder-length-mm', type=float, default=float(os.environ.get('V5_T0_TOOL_HOLDER_LENGTH_MM', DEFAULT_T0_TOOL_HOLDER_LENGTH_MM)))
     parser.add_argument('--once', action='store_true')
     parser.add_argument('--mock-g5x-index', type=int, default=0)
     parser.add_argument('--mock-offsets', default='')
-    parser.add_argument('--mock-mcs', default='')
-    parser.add_argument('--mock-cmd-mcs', default='')
     parser.add_argument('--mock-native-error', default='')
     parser.add_argument('--mock-native-error-kind', type=int, default=1)
     args = parser.parse_args()
@@ -460,11 +376,9 @@ def main() -> int:
             flush=True)
         return 0
 
-    if args.mock_g5x_index or args.mock_mcs:
+    if args.mock_g5x_index:
         valid, wcs_index = wcs_from_g5x(args.mock_g5x_index or 1)
         write_status(args.path, valid, wcs_index, mock_wcs_table(wcs_index, parse_offsets(args.mock_offsets)), 1 if valid else 0, 1)
-        if args.mock_mcs:
-            write_mock_position_status(args.position_path, parse_offsets(args.mock_mcs), parse_offsets(args.mock_cmd_mcs))
         write_modal_tool_status(
             args.modal_tool_path,
             'G0 G17 G21 G40 G49 G54 G64 G80 G90 G94 G97',
@@ -482,7 +396,7 @@ def main() -> int:
             mdi_run_valid=1,
             mdi_run_active=0,
             mdi_run_line=0)
-        print(f'v5_wcs_status_publisher mock valid={valid} wcs_index={wcs_index} path={args.path} position_path={args.position_path} modal_tool_path={args.modal_tool_path}')
+        print(f'v5_wcs_status_publisher mock valid={valid} wcs_index={wcs_index} path={args.path} modal_tool_path={args.modal_tool_path}')
         return 0
 
     resident_wcs = ResidentWcsParameterOwner()
@@ -493,7 +407,6 @@ def main() -> int:
         flush=True)
 
     linuxcnc = load_linuxcnc()
-    rotary_projection = NativeRotaryDisplayProjection(load_hal())
     interpreter_idle_value = getattr(linuxcnc, 'INTERP_IDLE', 1)
     interpreter_paused_value = getattr(linuxcnc, 'INTERP_PAUSED', None)
     operator_error_types = {
@@ -501,7 +414,8 @@ def main() -> int:
         int(getattr(linuxcnc, 'OPERATOR_ERROR', 3)),
     }
     consecutive_failures = 0
-    interval = max(args.interval_ms, 20) / 1000.0
+    interval = max(args.interval_ms, 100) / 1000.0
+    polling_cadence = StartToStartPollingCadence(interval)
     invalid_after_failures = max(1, int(math.ceil(1.0 / interval)))
     next_status_log = 0.0
     last_status_log = None
@@ -512,6 +426,7 @@ def main() -> int:
     publish_cadence = StatusPublishCadence()
     write_operator_error_status(args.operator_error_path, 0, 0, 0)
     while True:
+        sample_now = time.monotonic()
         try:
             if stat is None:
                 stat = linuxcnc.stat()
@@ -519,13 +434,12 @@ def main() -> int:
                 stat,
                 resident_wcs,
                 args.path,
-                args.position_path,
                 args.modal_tool_path,
                 args.t0_tool_holder_length_mm,
                 interpreter_idle_value,
                 interpreter_paused_value,
                 publish_cadence,
-                rotary_projection=rotary_projection)
+                sample_now)
             try:
                 if operator_error_channel is None:
                     operator_error_channel = linuxcnc.error_channel()
@@ -569,7 +483,7 @@ def main() -> int:
                 print(f'v5_wcs_status_publisher reconnecting after unavailable poll: {exc}', file=sys.stderr, flush=True)
             if args.once and consecutive_failures >= invalid_after_failures:
                 return 1
-        time.sleep(interval)
+        polling_cadence.wait_next()
 
 
 if __name__ == '__main__':

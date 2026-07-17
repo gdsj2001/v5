@@ -116,7 +116,7 @@ check_remote_target() {
     fi
   done
 
-  remote_check 'ps w 2>/dev/null | grep -E "v5_state_publisher|v5_native_hal_owner|v5_wcs_status_publisher|v5_lvgl_shell|v5_remote_ui_relay|linuxcncrsh|linuxcncsvr|milltask" | grep -v grep || true' |
+  remote_check 'ps w 2>/dev/null | grep -E "v5_state_publisher|v5_position_status_publisher|v5_native_hal_owner|v5_wcs_status_publisher|v5_lvgl_shell|v5_remote_ui_relay|linuxcncrsh|linuxcncsvr|milltask" | grep -v grep || true' |
     sed 's/^/INFO board process: /'
 
   if remote_check 'test -x /etc/init.d/v5-state-publisher'; then

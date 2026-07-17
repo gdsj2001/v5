@@ -259,16 +259,13 @@ class RemoteRelayHandler(BaseHTTPRequestHandler):
                     send_ws_frame(sock, 0x9, b"")
                     self.state.mark_metric("stream_idle_pings")
                     continue
-                if delivery.needs_full:
-                    frame = self.state.full_frame()
-                    if frame is None:
-                        continue
-                    frame_id, payload = frame
-                    self.state.mark_metric("stream_repair_missing_dirty_events")
-                    self.state.mark_metric("stream_repair_full_frames")
-                    self.send_frame(sock, frame_metadata("full_frame", frame_id, 0, self.state.width, self.state.height, self.state.stride, []), payload)
-                    last_sent = frame_id
-                    continue
+                if delivery.restart_stream:
+                    self.state.mark_metric("stream_runtime_resets")
+                    if delivery.reason == "invalid_dirty_event":
+                        self.state.mark_metric("stream_runtime_invalid_dirty_disconnects")
+                    else:
+                        self.state.mark_metric("stream_runtime_history_gap_disconnects")
+                    return
                 prepared = delivery.frame
                 if prepared is None:
                     continue

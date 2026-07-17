@@ -27,12 +27,17 @@ typedef struct V5CoordinateDigits {
     char value_text[V5_COORD_DIGITS_COL_COUNT][V5_COORD_DIGITS_AXIS_COUNT][24];
     lv_color_t value_color[V5_COORD_DIGITS_COL_COUNT][V5_COORD_DIGITS_AXIS_COUNT];
     unsigned char value_valid[V5_COORD_DIGITS_COL_COUNT][V5_COORD_DIGITS_AXIS_COUNT];
+    unsigned int update_batch_depth;
+    unsigned char update_dirty_valid;
+    lv_area_t update_dirty;
 } V5CoordinateDigits;
 
 void v5_coordinate_digits_init(V5CoordinateDigits *digits);
 int v5_coordinate_digits_create_main(V5CoordinateDigits *digits, lv_obj_t *parent, lv_color_t *buffer);
 int v5_coordinate_digits_create_settings(V5CoordinateDigits *digits, lv_obj_t *parent, lv_color_t *buffer);
+void v5_coordinate_digits_begin_update(V5CoordinateDigits *digits);
 int v5_coordinate_digits_set_value(V5CoordinateDigits *digits, unsigned int col, unsigned int axis, const char *text, lv_color_t color);
+void v5_coordinate_digits_end_update(V5CoordinateDigits *digits);
 void v5_coordinate_digits_invalidate(V5CoordinateDigits *digits);
 
 #ifdef __cplusplus

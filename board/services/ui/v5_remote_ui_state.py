@@ -21,8 +21,8 @@ from v5_remote_ui_contract import (
     LARGE_DIRTY_PIXEL_RATIO,
     MAX_DIRTY_RECTS_PER_FRAME,
     FramePayload,
-    PayloadViews,
 )
+from v5_remote_ui_dirty_geometry import DirtyGeometryNormalizer
 
 LOCK_SH = 1
 LOCK_EX = 2
@@ -57,6 +57,9 @@ class FrameState:
             "stream_initial_full_frames": 0,
             "stream_repair_full_frames": 0,
             "stream_repair_missing_dirty_events": 0,
+            "stream_runtime_resets": 0,
+            "stream_runtime_history_gap_disconnects": 0,
+            "stream_runtime_invalid_dirty_disconnects": 0,
             "stream_idle_pings": 0,
             "stream_disconnects": 0,
             "stream_send_failures": 0,
@@ -69,6 +72,10 @@ class FrameState:
             "dirty_payload_contiguous_frames": 0,
             "dirty_payload_union_frames": 0,
             "dirty_payload_union_source_rects": 0,
+            "dirty_payload_bounded_merge_frames": 0,
+            "dirty_payload_bounded_merge_source_rects": 0,
+            "dirty_payload_bounded_merge_output_rects": 0,
+            "dirty_payload_bounded_merge_added_pixels": 0,
             "dirty_large_frames": 0,
             "dirty_large_pixels": 0,
             "dirty_large_throttle_sleeps": 0,
@@ -88,6 +95,7 @@ class FrameState:
         self._ready_path = ready_path or (run_dir / "ui_ready.json")
         self._ready_lock = threading.Lock()
         self._ready_metadata: dict | None = None
+        self._dirty_geometry = DirtyGeometryNormalizer(width, height, self.mark_metric)
 
     @property
     def framebuffer_path(self) -> Path:
@@ -225,64 +233,13 @@ class FrameState:
         with self.metrics_lock:
             return dict(self.metrics)
 
-    def _single_union_rect(self, rects: list[dict]) -> dict | None:
-        if not rects:
-            return None
-        x1 = self.width
-        y1 = self.height
-        x2 = 0
-        y2 = 0
-        for rect in rects:
-            x = int(rect["x"])
-            y = int(rect["y"])
-            w = int(rect["w"])
-            h = int(rect["h"])
-            x1 = min(x1, x)
-            y1 = min(y1, y)
-            x2 = max(x2, x + w)
-            y2 = max(y2, y + h)
-        if x1 >= x2 or y1 >= y2:
-            return None
-        return {"x": x1, "y": y1, "w": x2 - x1, "h": y2 - y1, "codec": "raw"}
-
     def normalized_dirty_rects(self, event: dict) -> list[dict] | None:
-        source_rects = event.get("rects")
-        if source_rects is None:
-            source_rects = [event]
-        rects = []
-        for source in source_rects:
-            x = int(source["x"])
-            y = int(source["y"])
-            w = int(source["w"])
-            h = int(source["h"])
-            if x < 0 or y < 0 or w <= 0 or h <= 0 or x + w > self.width or y + h > self.height:
-                return None
-            rects.append({"x": x, "y": y, "w": w, "h": h, "codec": "raw"})
-        if len(rects) > MAX_DIRTY_RECTS_PER_FRAME:
-            union = self._single_union_rect(rects)
-            self.mark_metric("dirty_payload_union_frames")
-            self.mark_metric("dirty_payload_union_source_rects", len(rects))
-            return [union] if union else None
-        return rects
+        prepared = self._dirty_geometry.prepare(event)
+        return prepared[0] if prepared is not None else None
 
     def dirty_area_pixels(self, event: dict) -> int:
-        source_rects = event.get("rects")
-        if source_rects is None:
-            source_rects = [event]
-        rects = []
-        for source in source_rects:
-            rects.append({
-                "x": int(source["x"]),
-                "y": int(source["y"]),
-                "w": int(source["w"]),
-                "h": int(source["h"]),
-            })
-        if len(rects) > MAX_DIRTY_RECTS_PER_FRAME:
-            union = self._single_union_rect(rects)
-            if union is None:
-                return 0
-            return max(0, int(union["w"])) * max(0, int(union["h"]))
-        return sum(max(0, int(rect["w"])) * max(0, int(rect["h"])) for rect in rects)
+        prepared = self._dirty_geometry.prepare(event)
+        return prepared[1] if prepared is not None else 0
 
     def is_large_dirty(self, event: dict) -> bool:
         frame_pixels = max(1, self.width * self.height)
@@ -290,9 +247,11 @@ class FrameState:
         return self.dirty_area_pixels(event) >= threshold
 
     def throttle_large_dirty(self, event: dict, last_sent_at: float) -> float:
-        if not self.is_large_dirty(event):
-            return last_sent_at
         pixels = self.dirty_area_pixels(event)
+        frame_pixels = max(1, self.width * self.height)
+        threshold = max(1, int(frame_pixels * LARGE_DIRTY_PIXEL_RATIO))
+        if pixels < threshold:
+            return last_sent_at
         self.mark_metric("dirty_large_frames")
         self.mark_metric("dirty_large_pixels", pixels)
         if last_sent_at > 0.0:
@@ -313,7 +272,9 @@ class FrameState:
             return None
         total_bytes = sum(int(rect["w"]) * int(rect["h"]) * 4 for rect in rects)
         total_rows = sum(int(rect["h"]) for rect in rects)
-        payload_parts: list[memoryview] = []
+        payload = bytearray(total_bytes)
+        payload_view = memoryview(payload)
+        mapped_view = memoryview(mapped)
         captured_bytes = 0
         locked = False
         try:
@@ -330,9 +291,9 @@ class FrameState:
                     end = start + (row_bytes * h)
                     if end > self.frame_size:
                         return None
-                    part = memoryview(mapped[start:end])
-                    payload_parts.append(part)
-                    captured_bytes += len(part)
+                    length = end - start
+                    payload_view[captured_bytes:captured_bytes + length] = mapped_view[start:end]
+                    captured_bytes += length
                     self.mark_metric("dirty_payload_contiguous_frames")
                     continue
                 for row in range(h):
@@ -340,9 +301,8 @@ class FrameState:
                     src_end = src_start + row_bytes
                     if src_end > self.frame_size:
                         return None
-                    part = memoryview(mapped[src_start:src_end])
-                    payload_parts.append(part)
-                    captured_bytes += len(part)
+                    payload_view[captured_bytes:captured_bytes + row_bytes] = mapped_view[src_start:src_end]
+                    captured_bytes += row_bytes
         except OSError:
             return None
         finally:
@@ -351,12 +311,14 @@ class FrameState:
                     flock(fd, LOCK_UN)
                 except OSError:
                     pass
+            mapped_view.release()
+            payload_view.release()
         if captured_bytes != total_bytes:
             return None
         self.mark_metric("dirty_payload_bytes", total_bytes)
         self.mark_metric("dirty_payload_rows", total_rows)
         self.mark_metric("dirty_payload_rects", len(rects))
-        return PayloadViews(payload_parts, total_bytes), rects
+        return bytes(payload), rects
 
     def publish_dirty(self, event: dict) -> None:
         with self.condition:
@@ -369,7 +331,13 @@ class FrameState:
             self.dirty_events.append(stored)
             self.condition.notify_all()
 
-    def wait_dirty_batch_after(self, frame_id: int, timeout: float, coalesce_seconds: float) -> dict | None:
+    def wait_dirty_batch_after(
+        self,
+        frame_id: int,
+        timeout: float,
+        coalesce_seconds: float,
+        coalesce_deadline: float | None = None,
+    ) -> dict | None:
         deadline = time.monotonic() + timeout
         with self.condition:
             while True:
@@ -379,7 +347,10 @@ class FrameState:
                 if remaining <= 0:
                     return None
                 self.condition.wait(min(remaining, 1.0))
-            settle_deadline = time.monotonic() + max(0.0, coalesce_seconds)
+            first_event_at = time.monotonic()
+            settle_deadline = first_event_at + max(0.0, coalesce_seconds)
+            if coalesce_deadline is not None:
+                settle_deadline = min(settle_deadline, max(first_event_at, float(coalesce_deadline)))
             while True:
                 remaining = settle_deadline - time.monotonic()
                 if remaining <= 0:
@@ -409,15 +380,15 @@ class FrameState:
                 event_base = int(event["base_frame_id"])
                 if event_base != expected_base:
                     return {
-                        "needs_full": True,
+                        "stream_reset": True,
                         "frame_id": max(latest_frame, event_frame),
                         "base_frame_id": base_frame_id,
                         "reason": "missing_dirty_event",
                     }
-                event_rects = self.normalized_dirty_rects(event)
+                event_rects = self._dirty_geometry.source_rects(event)
                 if not event_rects:
                     return {
-                        "needs_full": True,
+                        "stream_reset": True,
                         "frame_id": max(latest_frame, event_frame),
                         "base_frame_id": base_frame_id,
                         "reason": "invalid_dirty_event",
@@ -429,12 +400,20 @@ class FrameState:
             index = group_end
         if merged == 0:
             return None
-        return {
+        batch = {
             "frame_id": latest_frame,
             "base_frame_id": int(base_frame_id),
             "rects": rects,
             "merged_events": merged,
         }
+        if self._dirty_geometry.prepare(batch) is None:
+            return {
+                "stream_reset": True,
+                "frame_id": latest_frame,
+                "base_frame_id": base_frame_id,
+                "reason": "invalid_dirty_event",
+            }
+        return batch
 
 
 class DirtyReader(threading.Thread):

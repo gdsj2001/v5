@@ -434,7 +434,6 @@ V5LinuxcncrshSendStatus v5_linuxcncrsh_send_start_transaction(
     return V5_LINUXCNCRSH_SEND_UNAVAILABLE;
 #else
     int fd;
-    char program_response[768];
     if (!prepared || !request || !command_line || command_line_size == 0U ||
         !prepared->accepted || prepared->kind != V5_COMMAND_START ||
         request->kind != V5_COMMAND_START ||
@@ -447,10 +446,8 @@ V5LinuxcncrshSendStatus v5_linuxcncrsh_send_start_transaction(
         return V5_LINUXCNCRSH_SEND_UNAVAILABLE;
     }
     if (!v5_linuxcncrsh_send_request_text(fd, "Set Enable EMCTOO", 0, 0U) ||
-        !v5_linuxcncrsh_send_request_text(
-            fd, "Get Program", program_response, sizeof(program_response)) ||
         !v5_linuxcncrsh_format_start_transaction(
-            prepared, request, program_response, command_line, command_line_size) ||
+            prepared, request, command_line, command_line_size) ||
         !v5_linuxcncrsh_send_fifo_commands(fd, command_line)) {
         v5_linuxcncrsh_gate_close();
         return V5_LINUXCNCRSH_SEND_IO_ERROR;

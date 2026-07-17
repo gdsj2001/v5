@@ -348,6 +348,15 @@ add_executable(v5_state_publisher_smoke
 
 target_link_libraries(v5_state_publisher_smoke PRIVATE v5_status_shm_projection)
 
+add_executable(v5_state_publisher_cadence_smoke
+    ../services/state_publisher/v5_state_publisher_cadence_smoke.c
+)
+
+target_include_directories(v5_state_publisher_cadence_smoke PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${V5_ROOT_DIR}/services/state_publisher"
+)
+
 add_executable(v5_state_publisher
     ../services/state_publisher/v5_state_publisher_main.c
     src/v5_process_residency.c

@@ -597,6 +597,7 @@ static int init_hal_io(void)
     CALL_CHECK(hal_pin_float_newf(HAL_OUT, &(emcmot_hal_data->current_vel), mot_comp_id, "motion.current-vel"));
     CALL_CHECK(hal_pin_float_newf(HAL_OUT, &(emcmot_hal_data->requested_vel), mot_comp_id, "motion.requested-vel"));
     CALL_CHECK(hal_pin_float_newf(HAL_OUT, &(emcmot_hal_data->distance_to_go), mot_comp_id, "motion.distance-to-go"));
+    CALL_CHECK(hal_pin_float_newf(HAL_OUT, &(emcmot_hal_data->feed_override), mot_comp_id, "motion.feed-override"));
     CALL_CHECK(hal_pin_s32_newf(HAL_OUT, &(emcmot_hal_data->program_line), mot_comp_id, "motion.program-line"));
     CALL_CHECK(hal_pin_bit_newf(HAL_OUT, &(emcmot_hal_data->jog_is_active), mot_comp_id, "motion.jog-is-active"));
 
@@ -685,6 +686,7 @@ static int init_hal_io(void)
     *(emcmot_hal_data->teleop_mode) = 0;
     *(emcmot_hal_data->coord_error) = 0;
     *(emcmot_hal_data->on_soft_limit) = 0;
+    *(emcmot_hal_data->feed_override) = 1.0;
 
     /* init debug parameters */
     emcmot_hal_data->debug_bit_0 = 0;
@@ -756,9 +758,11 @@ static int export_spindle(int num, spindle_hal_t * addr){
     if ((retval = hal_pin_float_newf(HAL_OUT, &(addr->spindle_speed_out_rps), mot_comp_id, "spindle.%d.speed-out-rps", num)) != 0) return retval;
     if ((retval = hal_pin_float_newf(HAL_OUT, &(addr->spindle_speed_out_rps_abs), mot_comp_id, "spindle.%d.speed-out-rps-abs", num)) != 0) return retval;
     if ((retval = hal_pin_float_newf(HAL_OUT, &(addr->spindle_speed_cmd_rps), mot_comp_id, "spindle.%d.speed-cmd-rps", num)) != 0) return retval;
+    if ((retval = hal_pin_float_newf(HAL_OUT, &(addr->spindle_override), mot_comp_id, "spindle.%d.override", num)) != 0) return retval;
     if ((retval = hal_pin_bit_newf(HAL_IN, &(addr->spindle_inhibit), mot_comp_id, "spindle.%d.inhibit", num)) != 0) return retval;
     if ((retval = hal_pin_bit_newf(HAL_IN, &(addr->spindle_amp_fault), mot_comp_id, "spindle.%d.amp-fault-in", num)) != 0) return retval;
     *(addr->spindle_inhibit) = 0;
+    *(addr->spindle_override) = 1.0;
 
     // spindle orient pins
     if ((retval = hal_pin_float_newf(HAL_OUT, &(addr->spindle_orient_angle), mot_comp_id, "spindle.%d.orient-angle", num)) < 0) return retval;

@@ -209,14 +209,8 @@ static void execute_prepared_command_if_enabled(V5MainPage *page, V5MainPageActi
         (report->request.kind == V5_COMMAND_WCS_SELECT || report->request.kind == V5_COMMAND_WORK_ZERO)) {
         report->executed = main_page_confirm_wcs_readback_after_send(page, report);
     }
-    if (report->executed &&
-        (report->request.kind == V5_COMMAND_START || report->request.kind == V5_COMMAND_MDI_RUN) &&
-        page->program_controller) {
-        const V5ProgramRuntime *runtime = v5_program_controller_runtime(page->program_controller);
-        unsigned int epoch = v5_main_page_internal_program_preview_highlight_epoch(runtime);
-        if (epoch != 0U) {
-            page->program_preview_started_loaded_epoch = epoch;
-        }
+    if (report->executed) {
+        v5_main_page_internal_sync_program_preview_after_execution(page, report->request.kind);
     }
     if (report->executed && strcmp(report->command.owner ? report->command.owner : "", "native_safety") == 0) {
         V5NativeReadback readback = page->native_readback;

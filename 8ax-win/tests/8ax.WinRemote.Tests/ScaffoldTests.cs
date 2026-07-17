@@ -33,6 +33,9 @@ VerifyRemoteInfoSystemMetricsSerialization();
 VerifyProgramProtocolCompatibility();
 VerifyPointerEventDtoSerialization();
 VerifyFullFrameAndDirtyRectApply();
+VerifyDirtyBaseChainIsStrictAndLossless();
+VerifyZeroDirtyAdvancesWithoutBitmapCommit();
+VerifyDirtyBatchUsesSingleBitmapCommit();
 VerifyCoalescedDirtyFrameIsAccepted();
 VerifyBaseFrameMismatchNeedsFullFrame();
 VerifyStaleDirtyFrameIsIgnored();
@@ -40,6 +43,7 @@ VerifyInvalidPayloadIsRejected();
 VerifyOutOfBoundsRectIsRejectedAtomically();
 VerifyRgb565Conversion();
 VerifyRuntimeEvidenceRecorder();
+VerifyFrameStatsThirtyHertz();
 VerifyAppSettingsDefaults();
 VerifyAppSettingsConfigFile();
 VerifyUpdateDefaults();
@@ -171,6 +175,79 @@ static void VerifyFullFrameAndDirtyRectApply()
     Require((byte)80, pixels[offset], "dirty blue");
     Require((byte)90, pixels[offset + 1], "dirty green");
     Require((byte)100, pixels[offset + 2], "dirty red");
+}
+
+static void VerifyDirtyBaseChainIsStrictAndLossless()
+{
+    RemoteFramebuffer framebuffer = new();
+    RemoteFrameAssembler assembler = new(framebuffer);
+    assembler.Apply(new RemoteFramePacket(
+        FrameMetadata.FullFrame(100, PointerMapper.RemoteWidth, PointerMapper.RemoteHeight, PointerMapper.RemoteWidth * 4, RemotePixelFormats.Bgra32),
+        FullBgraFrame(1, 2, 3)));
+
+    RemoteFrameApplyResult first = assembler.Apply(new RemoteFramePacket(
+        FrameMetadata.DirtyRects(101, 100, PointerMapper.RemoteWidth, PointerMapper.RemoteHeight, PointerMapper.RemoteWidth * 4, RemotePixelFormats.Bgra32,
+            new[] { new DirtyRectMetadata(1, 1, 1, 1, "raw") }),
+        SolidBgraRect(1, 1, 10, 20, 30)));
+    RemoteFrameApplyResult coalesced = assembler.Apply(new RemoteFramePacket(
+        FrameMetadata.DirtyRects(103, 101, PointerMapper.RemoteWidth, PointerMapper.RemoteHeight, PointerMapper.RemoteWidth * 4, RemotePixelFormats.Bgra32,
+            new[] { new DirtyRectMetadata(2, 2, 1, 1, "raw") }),
+        SolidBgraRect(1, 1, 40, 50, 60)));
+    RemoteFrameApplyResult reordered = assembler.Apply(new RemoteFramePacket(
+        FrameMetadata.DirtyRects(102, 101, PointerMapper.RemoteWidth, PointerMapper.RemoteHeight, PointerMapper.RemoteWidth * 4, RemotePixelFormats.Bgra32,
+            new[] { new DirtyRectMetadata(3, 3, 1, 1, "raw") }),
+        SolidBgraRect(1, 1, 70, 80, 90)));
+
+    Require(RemoteFrameApplyStatus.AppliedDirtyRects, first.Status, "first chained dirty status");
+    Require(RemoteFrameApplyStatus.AppliedDirtyRects, coalesced.Status, "coalesced chained dirty status");
+    Require(RemoteFrameApplyStatus.StaleFrame, reordered.Status, "reordered dirty rejected as stale");
+    Require(103L, framebuffer.FrameId, "reordered dirty does not roll frame id back");
+    byte[] pixels = framebuffer.CopyBgra32Pixels();
+    Require((byte)10, pixels[PixelOffset(1, 1)], "first chained dirty retained");
+    Require((byte)40, pixels[PixelOffset(2, 2)], "coalesced chained dirty retained");
+    Require((byte)1, pixels[PixelOffset(3, 3)], "reordered dirty not applied");
+}
+
+static void VerifyZeroDirtyAdvancesWithoutBitmapCommit()
+{
+    RemoteFramebuffer framebuffer = new();
+    RemoteFrameAssembler assembler = new(framebuffer);
+    assembler.Apply(new RemoteFramePacket(
+        FrameMetadata.FullFrame(20, PointerMapper.RemoteWidth, PointerMapper.RemoteHeight, PointerMapper.RemoteWidth * 4, RemotePixelFormats.Bgra32),
+        FullBgraFrame(4, 5, 6)));
+    int commitsBefore = framebuffer.BitmapCommitCount;
+
+    RemoteFrameApplyResult result = assembler.Apply(new RemoteFramePacket(
+        FrameMetadata.DirtyRects(21, 20, PointerMapper.RemoteWidth, PointerMapper.RemoteHeight, PointerMapper.RemoteWidth * 4, RemotePixelFormats.Bgra32,
+            Array.Empty<DirtyRectMetadata>()),
+        Array.Empty<byte>()));
+
+    Require(RemoteFrameApplyStatus.AppliedDirtyRects, result.Status, "zero dirty status");
+    Require(21L, framebuffer.FrameId, "zero dirty advances frame id");
+    Require(commitsBefore, framebuffer.BitmapCommitCount, "zero dirty does not commit bitmap");
+}
+
+static void VerifyDirtyBatchUsesSingleBitmapCommit()
+{
+    RemoteFramebuffer framebuffer = new();
+    RemoteFrameAssembler assembler = new(framebuffer);
+    assembler.Apply(new RemoteFramePacket(
+        FrameMetadata.FullFrame(30, PointerMapper.RemoteWidth, PointerMapper.RemoteHeight, PointerMapper.RemoteWidth * 4, RemotePixelFormats.Bgra32),
+        FullBgraFrame(7, 8, 9)));
+    int commitsBefore = framebuffer.BitmapCommitCount;
+    byte[] payload = SolidBgraRect(1, 1, 11, 12, 13).Concat(SolidBgraRect(1, 1, 21, 22, 23)).ToArray();
+
+    RemoteFrameApplyResult result = assembler.Apply(new RemoteFramePacket(
+        FrameMetadata.DirtyRects(31, 30, PointerMapper.RemoteWidth, PointerMapper.RemoteHeight, PointerMapper.RemoteWidth * 4, RemotePixelFormats.Bgra32,
+            new[]
+            {
+                new DirtyRectMetadata(4, 4, 1, 1, "raw"),
+                new DirtyRectMetadata(8, 8, 1, 1, "raw"),
+            }),
+        payload));
+
+    Require(RemoteFrameApplyStatus.AppliedDirtyRects, result.Status, "dirty batch status");
+    Require(commitsBefore + 1, framebuffer.BitmapCommitCount, "dirty batch uses one bitmap commit");
 }
 
 static void VerifyBaseFrameMismatchNeedsFullFrame()
@@ -323,6 +400,20 @@ static void VerifyRuntimeEvidenceRecorder()
     Require(false, events.Contains("should-not-appear", StringComparison.Ordinal), "events no raw token");
     Require(true, metrics.Contains("\"full_frame_requests\":1", StringComparison.Ordinal), "metrics full-frame count");
     Require(true, metrics.Contains("\"dirty_rect_frames\":1", StringComparison.Ordinal), "metrics dirty count");
+    Require(true, metrics.Contains("\"frames_observed\":1", StringComparison.Ordinal), "metrics observed frame count");
+}
+
+static void VerifyFrameStatsThirtyHertz()
+{
+    long ticks = -1000;
+    FrameStats stats = new(() => ticks += 1000, 30000);
+    for (int frame = 1; frame <= 31; frame++)
+    {
+        stats.MarkFrame(frame, 0);
+    }
+
+    Require(31L, stats.FramesObserved, "30Hz observed frame count");
+    Require(true, Math.Abs(stats.Fps - 30.0) < 0.001, "30Hz measured frame rate");
 }
 
 static void VerifyAppSettingsDefaults()
@@ -472,7 +563,12 @@ static void VerifyRelayDisplayRefreshRateContract()
     string readme = ReadWinRemoteFile(winRoot, "README.md");
     Require(true, mainWindow.Contains("RelayStreamTargetFps = 30", StringComparison.Ordinal), "relay target fps is 30");
     Require(true, mainWindow.Contains("RelayFrameMetricsMinIntervalMs = 1000.0 / RelayStreamTargetFps", StringComparison.Ordinal), "relay frame metrics cadence derives from target fps");
-    Require(true, mainWindow.Contains("ShouldRecordRelayFrameMetrics", StringComparison.Ordinal), "relay status and metrics are throttled to target cadence");
+    Require(true, mainWindow.Contains("RelayEvidenceIntervalMs = 1000.0", StringComparison.Ordinal), "relay frame evidence is throttled to 1Hz");
+    Require(true, mainWindow.Contains("RelayStatusIntervalMs = 100.0", StringComparison.Ordinal), "relay status text is throttled to 10Hz");
+    Require(true, mainWindow.Contains("ShouldRecordRelayFrameEvidence", StringComparison.Ordinal), "relay evidence cadence is independent of frame apply");
+    Require(true, mainWindow.Contains("ShouldRefreshRelayFrameStatus", StringComparison.Ordinal), "relay status cadence is independent of frame apply");
+    Require(true, mainWindow.Contains("await foreach (RemoteFramePacket packet", StringComparison.Ordinal), "every streamed frame is consumed in order");
+    Require(true, mainWindow.Contains("Dispatcher.InvokeAsync(() => ApplyRelayPacket(packet", StringComparison.Ordinal), "every streamed frame is applied in order");
     Require(true, mainWindow.Contains("[\"target_fps\"] = RelayStreamTargetFps", StringComparison.Ordinal), "relay target fps is recorded in session evidence");
     Require(true, mockRelay.Contains("StreamTargetFps = 30", StringComparison.Ordinal), "mock relay target fps is 30");
     Require(true, mockRelay.Contains("StreamFrameIntervalTicks = (long)Math.Round(Stopwatch.Frequency / (double)StreamTargetFps)", StringComparison.Ordinal), "mock relay frame interval derives from target fps");

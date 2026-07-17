@@ -92,7 +92,6 @@ int v5_linuxcncrsh_format_line(
 int v5_linuxcncrsh_format_start_transaction(
     const V5CommandPrepared *prepared,
     const V5CommandRequest *request,
-    const char *program_response,
     char *out,
     size_t out_size);
 int v5_linuxcncrsh_format_all_home(char *out, size_t out_size);

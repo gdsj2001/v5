@@ -124,52 +124,6 @@ int v5_main_page_model_scene_pose_equal(
     return 1;
 }
 
-void v5_main_page_model_rotate_point_about_axis(
-    double point[V5_STATUS_AXIS_COUNT],
-    const double center[V5_STATUS_AXIS_COUNT],
-    const double axis[3],
-    double angle_deg)
-{
-    double vx;
-    double vy;
-    double vz;
-    double kx;
-    double ky;
-    double kz;
-    double norm;
-    double angle_rad;
-    double c;
-    double s;
-    double dot;
-    double cross_x;
-    double cross_y;
-    double cross_z;
-
-    if (!point || !center || !axis || !isfinite(angle_deg)) {
-        return;
-    }
-    norm = sqrt((axis[0] * axis[0]) + (axis[1] * axis[1]) + (axis[2] * axis[2]));
-    if (norm <= 1.0e-12 || !isfinite(norm)) {
-        return;
-    }
-    kx = axis[0] / norm;
-    ky = axis[1] / norm;
-    kz = axis[2] / norm;
-    vx = point[0] - center[0];
-    vy = point[1] - center[1];
-    vz = point[2] - center[2];
-    angle_rad = angle_deg * 3.14159265358979323846 / 180.0;
-    c = cos(angle_rad);
-    s = sin(angle_rad);
-    dot = (kx * vx) + (ky * vy) + (kz * vz);
-    cross_x = (ky * vz) - (kz * vy);
-    cross_y = (kz * vx) - (kx * vz);
-    cross_z = (kx * vy) - (ky * vx);
-    point[0] = center[0] + (vx * c) + (cross_x * s) + (kx * dot * (1.0 - c));
-    point[1] = center[1] + (vy * c) + (cross_y * s) + (ky * dot * (1.0 - c));
-    point[2] = center[2] + (vz * c) + (cross_z * s) + (kz * dot * (1.0 - c));
-}
-
 int v5_main_page_model_copy_center(
     const V5NativeReadback *readback,
     unsigned int center_index,

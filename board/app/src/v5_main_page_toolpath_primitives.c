@@ -20,6 +20,110 @@
 
 #include "v5_main_page_internal.h"
 
+#define V5_TOOLPATH_DIRTY_RECT_BUDGET 12U
+#define V5_TOOLPATH_DIRTY_RESERVED_SLOTS 4U
+
+static uint64_t toolpath_dirty_pixels(const lv_area_t *area)
+{
+    if (!area || area->x1 > area->x2 || area->y1 > area->y2) {
+        return 0U;
+    }
+    return (uint64_t)((int32_t)area->x2 - (int32_t)area->x1 + 1) *
+           (uint64_t)((int32_t)area->y2 - (int32_t)area->y1 + 1);
+}
+
+static void coalesce_toolpath_display_invalidations(lv_disp_t *display)
+{
+    const lv_area_t scope = {V5_TOOLPATH_X, V5_TOOLPATH_Y,
+        V5_TOOLPATH_X + V5_TOOLPATH_W - 1, V5_TOOLPATH_Y + V5_TOOLPATH_H - 1};
+    lv_area_t outside[LV_INV_BUF_SIZE];
+    lv_area_t toolpath[LV_INV_BUF_SIZE];
+    uint16_t outside_count = 0U;
+    uint16_t toolpath_count = 0U;
+    uint16_t toolpath_budget;
+    uint16_t read_index;
+    uint16_t write_index = 0U;
+
+    if (!display || display->rendering_in_progress ||
+        display->inv_p == 0U || display->inv_p > LV_INV_BUF_SIZE) {
+        return;
+    }
+    for (read_index = 0U; read_index < display->inv_p; ++read_index) {
+        if (display->inv_area_joined[read_index] != 0U) return;
+        if (display->inv_areas[read_index].x1 >= scope.x1 &&
+            display->inv_areas[read_index].x2 <= scope.x2 &&
+            display->inv_areas[read_index].y1 >= scope.y1 &&
+            display->inv_areas[read_index].y2 <= scope.y2) {
+            toolpath[toolpath_count++] = display->inv_areas[read_index];
+        } else {
+            outside[outside_count++] = display->inv_areas[read_index];
+        }
+    }
+    if (toolpath_count == 0U) return;
+
+    /* Preserve genuinely separate moving primitives.  Only when the bounded
+     * queue is exceeded do we choose the pair with the smallest additional
+     * pixel cost (overlapping/contained areas naturally win that choice). */
+    toolpath_budget = V5_TOOLPATH_DIRTY_RECT_BUDGET;
+    read_index = (uint16_t)(LV_INV_BUF_SIZE - outside_count);
+    if (read_index > V5_TOOLPATH_DIRTY_RESERVED_SLOTS)
+        read_index = (uint16_t)(read_index - V5_TOOLPATH_DIRTY_RESERVED_SLOTS);
+    if (toolpath_budget > read_index) toolpath_budget = read_index;
+    if (toolpath_budget == 0U) toolpath_budget = 1U;
+    while (toolpath_count > toolpath_budget) {
+        uint16_t first;
+        uint16_t second;
+        uint16_t best_first = 0U;
+        uint16_t best_second = 1U;
+        int64_t best_extra = 0;
+        int found = 0;
+        lv_area_t best_joined = toolpath[0];
+        for (first = 0U; first + 1U < toolpath_count; ++first) {
+            for (second = first + 1U; second < toolpath_count; ++second) {
+                lv_area_t joined = toolpath[first];
+                int64_t extra;
+                if (toolpath[second].x1 < joined.x1) joined.x1 = toolpath[second].x1;
+                if (toolpath[second].y1 < joined.y1) joined.y1 = toolpath[second].y1;
+                if (toolpath[second].x2 > joined.x2) joined.x2 = toolpath[second].x2;
+                if (toolpath[second].y2 > joined.y2) joined.y2 = toolpath[second].y2;
+                extra = (int64_t)toolpath_dirty_pixels(&joined) -
+                    (int64_t)toolpath_dirty_pixels(&toolpath[first]) -
+                    (int64_t)toolpath_dirty_pixels(&toolpath[second]);
+                if (!found || extra < best_extra) {
+                    found = 1;
+                    best_extra = extra;
+                    best_first = first;
+                    best_second = second;
+                    best_joined = joined;
+                }
+            }
+        }
+        toolpath[best_first] = best_joined;
+        memmove(&toolpath[best_second], &toolpath[best_second + 1U],
+            ((size_t)toolpath_count - best_second - 1U) * sizeof(toolpath[0]));
+        --toolpath_count;
+    }
+
+    for (read_index = 0U; read_index < outside_count; ++read_index) {
+        display->inv_areas[write_index++] = outside[read_index];
+    }
+    for (read_index = 0U; read_index < toolpath_count; ++read_index) {
+        display->inv_areas[write_index++] = toolpath[read_index];
+    }
+    if (write_index < LV_INV_BUF_SIZE) {
+        memset(&display->inv_areas[write_index], 0,
+            (LV_INV_BUF_SIZE - write_index) * sizeof(display->inv_areas[0]));
+    }
+    memset(display->inv_area_joined, 0, sizeof(display->inv_area_joined));
+    display->inv_p = write_index;
+}
+
+void v5_main_page_internal_coalesce_toolpath_invalidations(V5MainPage *page)
+{
+    if (!page || !page->toolpath_clip_layer) return;
+    coalesce_toolpath_display_invalidations(lv_obj_get_disp(page->toolpath_clip_layer));
+}
+
 void v5_main_page_internal_clear_obj_style(lv_obj_t *obj)
 {
     lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
@@ -80,6 +184,7 @@ void v5_main_page_internal_set_toolpath_v3_dot_center(lv_obj_t *dot, const V5Too
     if (!dot) {
         return;
     }
+    coalesce_toolpath_display_invalidations(lv_obj_get_disp(dot));
     if (!valid || !point) {
         v5_main_page_internal_add_hidden_flag_if_visible(dot);
         return;
@@ -99,6 +204,7 @@ void v5_main_page_internal_set_toolpath_v3_center_dot(lv_obj_t *dot, const V5Too
     if (!dot) {
         return;
     }
+    coalesce_toolpath_display_invalidations(lv_obj_get_disp(dot));
     if (!valid || !point) {
         v5_main_page_internal_add_hidden_flag_if_visible(dot);
         return;
@@ -131,6 +237,9 @@ lv_obj_t *v5_main_page_internal_make_toolpath_v3_line(lv_obj_t *parent, uint8_t 
 
 void v5_main_page_internal_hide_toolpath_line(lv_obj_t *line)
 {
+    if (line) {
+        coalesce_toolpath_display_invalidations(lv_obj_get_disp(line));
+    }
     if (line && !lv_obj_has_flag(line, LV_OBJ_FLAG_HIDDEN)) {
         lv_obj_add_flag(line, LV_OBJ_FLAG_HIDDEN);
         lv_line_set_points(line, 0, 0);
@@ -145,7 +254,7 @@ static lv_point_t toolpath_local_point(const V5ToolpathScreenPoint *point)
     return out;
 }
 
-static void invalidate_toolpath_line_segment(lv_obj_t *line, const lv_point_t points[2])
+static void invalidate_toolpath_line_points(lv_obj_t *line, const lv_point_t *points, unsigned int point_count)
 {
     lv_area_t coords;
     lv_area_t dirty;
@@ -154,15 +263,20 @@ static void invalidate_toolpath_line_segment(lv_obj_t *line, const lv_point_t po
     lv_coord_t max_x;
     lv_coord_t min_y;
     lv_coord_t max_y;
-    if (!line || !points) {
+    unsigned int i;
+    if (!line || !points || point_count == 0U) {
         return;
     }
     lv_obj_get_coords(line, &coords);
     padding = (lv_obj_get_style_line_width(line, 0) + 1) / 2 + 2;
-    min_x = points[0].x < points[1].x ? points[0].x : points[1].x;
-    max_x = points[0].x > points[1].x ? points[0].x : points[1].x;
-    min_y = points[0].y < points[1].y ? points[0].y : points[1].y;
-    max_y = points[0].y > points[1].y ? points[0].y : points[1].y;
+    min_x = max_x = points[0].x;
+    min_y = max_y = points[0].y;
+    for (i = 1U; i < point_count; ++i) {
+        if (points[i].x < min_x) min_x = points[i].x;
+        if (points[i].x > max_x) max_x = points[i].x;
+        if (points[i].y < min_y) min_y = points[i].y;
+        if (points[i].y > max_y) max_y = points[i].y;
+    }
     dirty.x1 = coords.x1 + min_x - padding;
     dirty.y1 = coords.y1 + min_y - padding;
     dirty.x2 = coords.x1 + max_x + padding;
@@ -179,6 +293,7 @@ void v5_main_page_internal_set_toolpath_axis_line(lv_obj_t *line, lv_point_t poi
     if (!line || !points) {
         return;
     }
+    coalesce_toolpath_display_invalidations(lv_obj_get_disp(line));
     if (!valid || !start || !end) {
         v5_main_page_internal_hide_toolpath_line(line);
         return;
@@ -198,10 +313,10 @@ void v5_main_page_internal_set_toolpath_axis_line(lv_obj_t *line, lv_point_t poi
             points[1] = next[1];
             lv_line_set_points(line, points, 2);
         } else if (!v5_main_page_internal_points_equal(points, next, 2U)) {
-            invalidate_toolpath_line_segment(line, points);
+            invalidate_toolpath_line_points(line, points, 2U);
             points[0] = next[0];
             points[1] = next[1];
-            invalidate_toolpath_line_segment(line, points);
+            invalidate_toolpath_line_points(line, points, 2U);
         }
     }
     v5_main_page_internal_clear_hidden_flag_if_hidden(line);
@@ -260,6 +375,7 @@ void v5_main_page_internal_set_toolpath_origin_cross(lv_obj_t *line, lv_point_t 
     if (!line || !points) {
         return;
     }
+    coalesce_toolpath_display_invalidations(lv_obj_get_disp(line));
     if (!valid || !origin) {
         v5_main_page_internal_hide_toolpath_line(line);
         return;
@@ -278,9 +394,13 @@ void v5_main_page_internal_set_toolpath_origin_cross(lv_obj_t *line, lv_point_t 
         next[3].y = y;
         next[4].x = x;
         next[4].y = y - half;
-        if (lv_obj_has_flag(line, LV_OBJ_FLAG_HIDDEN) || !v5_main_page_internal_points_equal(points, next, 5U)) {
+        if (lv_obj_has_flag(line, LV_OBJ_FLAG_HIDDEN)) {
             memcpy(points, next, sizeof(next));
             lv_line_set_points(line, points, 5);
+        } else if (!v5_main_page_internal_points_equal(points, next, 5U)) {
+            invalidate_toolpath_line_points(line, points, 5U);
+            memcpy(points, next, sizeof(next));
+            invalidate_toolpath_line_points(line, points, 5U);
         }
     }
     v5_main_page_internal_clear_hidden_flag_if_hidden(line);

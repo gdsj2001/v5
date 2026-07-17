@@ -25,6 +25,8 @@ static int v5_main_page_model_ac_snapshot(
     V5MainPageModelScene *scene)
 {
     const double *active_offsets;
+    double primary_rad;
+    double child_rad;
 
     if (!v5_main_page_model_ac_descriptor_supported(model) ||
         !readback || !status || !scene ||
@@ -59,6 +61,12 @@ static int v5_main_page_model_ac_snapshot(
     scene->child_status_slot = 4U;
     scene->primary_deg = status->mcs[3];
     scene->child_deg = status->mcs[4];
+    primary_rad = scene->primary_deg * 3.14159265358979323846 / 180.0;
+    child_rad = scene->child_deg * 3.14159265358979323846 / 180.0;
+    scene->primary_sin = sin(primary_rad);
+    scene->primary_cos = cos(primary_rad);
+    scene->child_sin = sin(child_rad);
+    scene->child_cos = cos(child_rad);
     scene->primary_center[0] = active_offsets[0];
     scene->child_center[2] = active_offsets[2];
     return 1;
@@ -68,28 +76,28 @@ static void v5_main_page_model_ac_transform_world_point(
     const V5MainPageModelScene *scene,
     double point[V5_STATUS_AXIS_COUNT])
 {
-    static const double c_axis[3] = {0.0, 0.0, 1.0};
-    static const double a_axis[3] = {1.0, 0.0, 0.0};
+    const double x = point[0] - scene->child_center[0];
+    const double y = point[1] - scene->child_center[1];
+    const double c_x = scene->child_center[0] +
+        (x * scene->child_cos) - (y * scene->child_sin);
+    const double c_y = scene->child_center[1] +
+        (x * scene->child_sin) + (y * scene->child_cos);
+    const double a_y = c_y - scene->primary_center[1];
+    const double a_z = point[2] - scene->primary_center[2];
 
-    v5_main_page_model_rotate_point_about_axis(
-        point,
-        scene->child_center,
-        c_axis,
-        scene->child_deg);
-    v5_main_page_model_rotate_point_about_axis(
-        point,
-        scene->primary_center,
-        a_axis,
-        scene->primary_deg);
+    point[0] = c_x;
+    point[1] = scene->primary_center[1] +
+        (a_y * scene->primary_cos) - (a_z * scene->primary_sin);
+    point[2] = scene->primary_center[2] +
+        (a_y * scene->primary_sin) + (a_z * scene->primary_cos);
 }
 
 static int v5_main_page_model_ac_build_geometry(
     const V5MainPageModelScene *scene,
     V5MainPageModelGeometry *geometry)
 {
-    static const double a_axis[3] = {1.0, 0.0, 0.0};
-    double child_tip[V5_STATUS_AXIS_COUNT];
-    unsigned int i;
+    const double child_y = scene ? scene->child_center[1] - scene->primary_center[1] : 0.0;
+    const double child_z = scene ? scene->child_center[2] - scene->primary_center[2] : 0.0;
 
     if (!scene || !geometry || scene->registry_id != V5_MOTION_MODEL_ID_XYZAC_TRT) {
         return 0;
@@ -99,24 +107,12 @@ static int v5_main_page_model_ac_build_geometry(
     memcpy(geometry->primary_center, scene->primary_center, sizeof(geometry->primary_center));
     memcpy(geometry->child_center, scene->child_center, sizeof(geometry->child_center));
     geometry->primary_direction[0] = 1.0;
-    child_tip[0] = scene->child_center[0];
-    child_tip[1] = scene->child_center[1];
-    child_tip[2] = scene->child_center[2] + 1.0;
-    child_tip[3] = 0.0;
-    child_tip[4] = 0.0;
-    v5_main_page_model_rotate_point_about_axis(
-        geometry->child_center,
-        scene->primary_center,
-        a_axis,
-        scene->primary_deg);
-    v5_main_page_model_rotate_point_about_axis(
-        child_tip,
-        scene->primary_center,
-        a_axis,
-        scene->primary_deg);
-    for (i = 0U; i < 3U; ++i) {
-        geometry->child_direction[i] = child_tip[i] - geometry->child_center[i];
-    }
+    geometry->child_center[1] = scene->primary_center[1] +
+        (child_y * scene->primary_cos) - (child_z * scene->primary_sin);
+    geometry->child_center[2] = scene->primary_center[2] +
+        (child_y * scene->primary_sin) + (child_z * scene->primary_cos);
+    geometry->child_direction[1] = -scene->primary_sin;
+    geometry->child_direction[2] = scene->primary_cos;
     return 1;
 }
 

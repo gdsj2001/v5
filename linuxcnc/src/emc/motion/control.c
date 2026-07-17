@@ -1871,6 +1871,7 @@ static void output_to_hal(void)
     *(emcmot_hal_data->teleop_mode) = GET_MOTION_TELEOP_FLAG();
     *(emcmot_hal_data->coord_error) = GET_MOTION_ERROR_FLAG();
     *(emcmot_hal_data->on_soft_limit) = emcmotStatus->on_soft_limit;
+    *(emcmot_hal_data->feed_override) = emcmotStatus->feed_scale;
 
     switch (emcmotStatus->motionType) {
         case EMC_MOTION_TYPE_FEED: //fall thru
@@ -1942,8 +1943,10 @@ static void output_to_hal(void)
 	*(emcmot_hal_data->spindle[spindle_num].spindle_brake) =
 		    (emcmotStatus->spindle_status[spindle_num].brake != 0) ? 1 : 0;
         // What is this for? Docs don't say
-        *(emcmot_hal_data->spindle[spindle_num].spindle_speed_cmd_rps) =
+	*(emcmot_hal_data->spindle[spindle_num].spindle_speed_cmd_rps) =
 				emcmotStatus->spindle_status[spindle_num].speed / 60.;
+        *(emcmot_hal_data->spindle[spindle_num].spindle_override) =
+                emcmotStatus->spindle_status[spindle_num].scale;
     }
 
     *(emcmot_hal_data->program_line) = emcmotStatus->id;

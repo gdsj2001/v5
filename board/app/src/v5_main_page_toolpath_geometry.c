@@ -194,6 +194,7 @@ void v5_main_page_internal_update_toolpath_state_lines(V5MainPage *page, const V
     if (!mcs_valid ||
         !v5_toolpath_display_project_world_point(origin, &page->toolpath_fit, (double)V5_TOOLPATH_W, (double)V5_TOOLPATH_H, &origin_point)) {
         v5_main_page_internal_hide_toolpath_unproven_geometry(page);
+        v5_main_page_internal_coalesce_toolpath_invalidations(page);
         return;
     } else {
         origin_point = v5_main_page_internal_apply_toolpath_view_transform(page, origin_point);
@@ -216,6 +217,8 @@ void v5_main_page_internal_update_toolpath_state_lines(V5MainPage *page, const V
         }
     }
 
+    v5_main_page_internal_coalesce_toolpath_invalidations(page);
+
     v5_main_page_internal_hide_toolpath_program_wcs_objects(page);
     rtcp_requires_model_scene =
         v5_native_readback_rtcp_known(&page->native_readback) &&
@@ -224,6 +227,7 @@ void v5_main_page_internal_update_toolpath_state_lines(V5MainPage *page, const V
         if (!page->toolpath_model_scene_valid) {
             hide_current_wcs_geometry(page);
         }
+        v5_main_page_internal_coalesce_toolpath_invalidations(page);
         return;
     }
     wcs_valid = mcs_valid && v5_native_readback_wcs_offset_known(&page->native_readback);
@@ -235,6 +239,7 @@ void v5_main_page_internal_update_toolpath_state_lines(V5MainPage *page, const V
     } else {
         const double *active_offsets = v5_native_readback_active_wcs_offsets(&page->native_readback);
         if (!active_offsets) {
+            v5_main_page_internal_coalesce_toolpath_invalidations(page);
             return;
         }
         memset(wcs_origin, 0, sizeof(wcs_origin));
@@ -274,4 +279,5 @@ void v5_main_page_internal_update_toolpath_state_lines(V5MainPage *page, const V
             }
         }
     }
+    v5_main_page_internal_coalesce_toolpath_invalidations(page);
 }

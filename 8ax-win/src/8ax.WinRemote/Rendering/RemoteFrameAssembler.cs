@@ -74,7 +74,7 @@ public sealed class RemoteFrameAssembler
             return RemoteFrameApplyResult.Rejected(_framebuffer.FrameId, "dirty_count does not match rect count.");
         }
 
-        List<PreparedDirtyRect> prepared = new(metadata.Rects.Count);
+        List<RemoteDirtyRectUpdate> prepared = new(metadata.Rects.Count);
         int payloadOffset = 0;
         foreach (DirtyRectMetadata rect in metadata.Rects)
         {
@@ -96,7 +96,7 @@ public sealed class RemoteFrameAssembler
                 rect.Height,
                 packet.PixelPayload.AsSpan(payloadOffset, rectBytes));
 
-            prepared.Add(new PreparedDirtyRect(rect.X, rect.Y, rect.Width, rect.Height, rectBgra32));
+            prepared.Add(new RemoteDirtyRectUpdate(rect.X, rect.Y, rect.Width, rect.Height, rectBgra32));
             payloadOffset += rectBytes;
         }
 
@@ -105,19 +105,7 @@ public sealed class RemoteFrameAssembler
             return RemoteFrameApplyResult.Rejected(_framebuffer.FrameId, "Dirty rect payload contains trailing bytes.");
         }
 
-        foreach (PreparedDirtyRect rect in prepared)
-        {
-            _framebuffer.ApplyDirtyRect(rect.X, rect.Y, rect.Width, rect.Height, rect.Bgra32Pixels);
-        }
-
-        if (prepared.Count == 0)
-        {
-            _framebuffer.ApplyFullFrame(_framebuffer.CopyBgra32Pixels(), metadata.FrameId);
-        }
-        else
-        {
-            _framebuffer.SetFrameId(metadata.FrameId);
-        }
+        _framebuffer.ApplyDirtyRects(prepared, metadata.FrameId);
 
         return RemoteFrameApplyResult.AppliedDirtyRects(metadata.FrameId, prepared.Count);
     }
@@ -129,8 +117,6 @@ public sealed class RemoteFrameAssembler
             throw new InvalidOperationException($"Frame dimensions {metadata.Width}x{metadata.Height} do not match framebuffer {_framebuffer.Width}x{_framebuffer.Height}.");
         }
     }
-
-    private sealed record PreparedDirtyRect(int X, int Y, int Width, int Height, byte[] Bgra32Pixels);
 }
 
 public enum RemoteFrameApplyStatus

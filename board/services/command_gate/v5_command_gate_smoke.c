@@ -79,38 +79,19 @@ int main(void)
     config.timeout_ms = 50U;
     send_status = v5_linuxcncrsh_send_prepared(&config, &prepared, &request);
 
-    if (strcmp(line, "Set Open /opt/8ax/v5/gcode/golden/cc-ac.ngc\nSet Mode Auto\nSet Run 0") != 0) {
+    if (strcmp(line, "Set Task_Plan_Init\nSet Mode Auto\nSet Open /opt/8ax/v5/gcode/golden/cc-ac.ngc\nSet Run 0") != 0) {
         return 4;
     }
     if (!v5_linuxcncrsh_format_start_transaction(
             &prepared,
             &request,
-            "Get Program\nPROGRAM /opt/8ax/v5/gcode/golden/cc-ac.ngc\n",
             line,
             sizeof(line)) ||
-        strcmp(line, "Set Mode Auto\nSet Run 0") != 0) {
+        strcmp(line, "Set Task_Plan_Init\nSet Mode Auto\nSet Open /opt/8ax/v5/gcode/golden/cc-ac.ngc\nSet Run 0") != 0) {
         return 5;
     }
-    if (!v5_linuxcncrsh_format_start_transaction(
-            &prepared,
-            &request,
-            "Get Program\nPROGRAM NONE\n",
-            line,
-            sizeof(line)) ||
-        strcmp(line, "Set Open /opt/8ax/v5/gcode/golden/cc-ac.ngc\nSet Mode Auto\nSet Run 0") != 0) {
-        return 6;
-    }
-    if (!v5_linuxcncrsh_format_start_transaction(
-            &prepared,
-            &request,
-            "Get Program\nPROGRAM /opt/8ax/v5/gcode/golden/cc-bc.ngc\n",
-            line,
-            sizeof(line)) ||
-        strcmp(line, "Set Open /opt/8ax/v5/gcode/golden/cc-ac.ngc\nSet Mode Auto\nSet Run 0") != 0) {
-        return 7;
-    }
     if (v5_linuxcncrsh_format_start_transaction(
-            &prepared, &request, "Get Program\n", line, sizeof(line))) {
+            &prepared, &request, 0, 0U)) {
         return 8;
     }
     if (!v5_linuxcncrsh_estop_reset_ready(1, 0) ||

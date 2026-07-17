@@ -55,6 +55,7 @@ typedef struct {
     hal_float_t *spindle_speed_out_abs; /* spindle speed output absolute*/
     hal_float_t *spindle_speed_out_rps_abs; /* spindle speed output absolute*/
     hal_float_t *spindle_speed_cmd_rps; /* spindle speed command without SO applied */
+    hal_float_t *spindle_override; /* current user spindle override ratio */
     hal_float_t *spindle_speed_in;  /* spindle speed measured */
     hal_bit_t *spindle_index_enable; /* spindle inde I/O pin */
     hal_bit_t *spindle_inhibit;
@@ -157,6 +158,7 @@ typedef struct {
     hal_float_t *current_vel;   /* RPI: velocity magnitude in machine units */
     hal_float_t *requested_vel;   /* RPI: requested velocity magnitude in machine units */
     hal_float_t *distance_to_go;/* RPI: distance to go in current move*/
+    hal_float_t *feed_override; /* current user feed override ratio */
 
     hal_bit_t debug_bit_0;	/* RPA: generic param, for debugging */
     hal_bit_t debug_bit_1;	/* RPA: generic param, for debugging */

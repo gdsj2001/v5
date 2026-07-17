@@ -119,6 +119,7 @@ public partial class MainWindow
         }
 
         _lastRelayFrameMetricsUtc = DateTime.MinValue;
+        _lastRelayFrameStatusUtc = DateTime.MinValue;
         RemoteInfoMessage info = await relayClient.GetInfoAsync(_shutdown.Token);
         UpdateSystemMetrics(info.SystemMetrics);
         _evidence.RecordEvent("relay_info", new Dictionary<string, object?>
@@ -144,7 +145,7 @@ public partial class MainWindow
             ["relay"] = relayBaseUri,
         });
         RemoteFramePacket fullFrame = await relayClient.GetFullFrameAsync(_shutdown.Token);
-        ApplyRelayPacket(fullFrame, relayBaseUri, "full");
+        await Dispatcher.InvokeAsync(() => ApplyRelayPacket(fullFrame, relayBaseUri, "full"));
         _relaySessionConnected = true;
 
         try

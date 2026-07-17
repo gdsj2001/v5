@@ -521,7 +521,8 @@ verify_rootfs_package_selection() {
 
 if [ "$package_only" -eq 1 ]; then
     if [ ! -x "$petalinux_root/components/yocto/layers/core/bitbake/bin/bitbake" ] || \
-       [ ! -f "$petalinux_root/build/conf/local.conf" ]; then
+       [ ! -f "$petalinux_root/build/conf/local.conf" ] || \
+       [ ! -f "$petalinux_root/build/conf/plnxtool.conf" ]; then
         run_petalinux_build "-c linuxcnc-prebuilt -x listtasks"
     fi
     configure_download_cache

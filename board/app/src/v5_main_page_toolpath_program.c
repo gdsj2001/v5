@@ -142,13 +142,13 @@ void v5_main_page_internal_reset_toolpath_view_rotation(V5MainPage *page)
     }
 }
 
-static uint64_t invalidate_toolpath_program_segment_bounds(
+static int toolpath_program_segment_bounds(
     lv_obj_t *line,
     const lv_point_t *points,
-    unsigned int point_count)
+    unsigned int point_count,
+    lv_area_t *dirty)
 {
     lv_area_t coords;
-    lv_area_t dirty;
     int32_t min_x;
     int32_t max_x;
     int32_t min_y;
@@ -160,8 +160,8 @@ static uint64_t invalidate_toolpath_program_segment_bounds(
     int32_t dirty_y2;
     unsigned int i;
 
-    if (!line || !points || point_count == 0U) {
-        return 0U;
+    if (!line || !points || point_count == 0U || !dirty) {
+        return 0;
     }
     min_x = max_x = points[0].x;
     min_y = max_y = points[0].y;
@@ -182,15 +182,85 @@ static uint64_t invalidate_toolpath_program_segment_bounds(
     if (dirty_x2 > coords.x2) dirty_x2 = coords.x2;
     if (dirty_y2 > coords.y2) dirty_y2 = coords.y2;
     if (dirty_x1 > dirty_x2 || dirty_y1 > dirty_y2) {
+        return 0;
+    }
+    dirty->x1 = (lv_coord_t)dirty_x1;
+    dirty->y1 = (lv_coord_t)dirty_y1;
+    dirty->x2 = (lv_coord_t)dirty_x2;
+    dirty->y2 = (lv_coord_t)dirty_y2;
+    return 1;
+}
+
+static uint64_t toolpath_program_area_pixels(const lv_area_t *area)
+{
+    if (!area || area->x1 > area->x2 || area->y1 > area->y2) {
         return 0U;
     }
-    dirty.x1 = (lv_coord_t)dirty_x1;
-    dirty.y1 = (lv_coord_t)dirty_y1;
-    dirty.x2 = (lv_coord_t)dirty_x2;
-    dirty.y2 = (lv_coord_t)dirty_y2;
-    lv_obj_invalidate_area(line, &dirty);
-    return (uint64_t)((int32_t)dirty.x2 - (int32_t)dirty.x1 + 1) *
-           (uint64_t)((int32_t)dirty.y2 - (int32_t)dirty.y1 + 1);
+    return (uint64_t)((int32_t)area->x2 - (int32_t)area->x1 + 1) *
+           (uint64_t)((int32_t)area->y2 - (int32_t)area->y1 + 1);
+}
+
+#define V5_TOOLPATH_PROGRAM_DIRTY_RECT_BUDGET 12U
+
+typedef struct {
+    lv_area_t areas[V5_TOOLPATH_PROGRAM_DIRTY_RECT_BUDGET + 1U];
+    unsigned int count;
+} V5ToolpathProgramDirtySet;
+
+static lv_area_t toolpath_program_area_union(const lv_area_t *first, const lv_area_t *second)
+{
+    lv_area_t joined = *first;
+    if (second->x1 < joined.x1) joined.x1 = second->x1;
+    if (second->y1 < joined.y1) joined.y1 = second->y1;
+    if (second->x2 > joined.x2) joined.x2 = second->x2;
+    if (second->y2 > joined.y2) joined.y2 = second->y2;
+    return joined;
+}
+
+static void toolpath_program_dirty_add(
+    V5ToolpathProgramDirtySet *dirty,
+    const lv_area_t *area)
+{
+    unsigned int first;
+    unsigned int second;
+    unsigned int best_first = 0U;
+    unsigned int best_second = 1U;
+    int64_t best_extra = 0;
+    int found = 0;
+    lv_area_t best_joined;
+
+    if (!dirty || !area || toolpath_program_area_pixels(area) == 0U) {
+        return;
+    }
+    dirty->areas[dirty->count++] = *area;
+    if (dirty->count <= V5_TOOLPATH_PROGRAM_DIRTY_RECT_BUDGET) {
+        return;
+    }
+
+    best_joined = toolpath_program_area_union(&dirty->areas[0], &dirty->areas[1]);
+    for (first = 0U; first + 1U < dirty->count; ++first) {
+        for (second = first + 1U; second < dirty->count; ++second) {
+            const lv_area_t joined =
+                toolpath_program_area_union(&dirty->areas[first], &dirty->areas[second]);
+            const int64_t extra =
+                (int64_t)toolpath_program_area_pixels(&joined) -
+                (int64_t)toolpath_program_area_pixels(&dirty->areas[first]) -
+                (int64_t)toolpath_program_area_pixels(&dirty->areas[second]);
+            if (!found || extra < best_extra) {
+                found = 1;
+                best_extra = extra;
+                best_first = first;
+                best_second = second;
+                best_joined = joined;
+            }
+        }
+    }
+    dirty->areas[best_first] = best_joined;
+    memmove(
+        &dirty->areas[best_second],
+        &dirty->areas[best_second + 1U],
+        (dirty->count - best_second - 1U) * sizeof(dirty->areas[0]));
+    --dirty->count;
 }
 
 static uint64_t toolpath_program_line_object_pixels(lv_obj_t *line)
@@ -229,7 +299,10 @@ int v5_main_page_internal_update_toolpath_program_segment(
     unsigned int point_count)
 {
     lv_obj_t *line;
+    lv_area_t part;
+    V5ToolpathProgramDirtySet dirty = {0};
     unsigned int old_count;
+    unsigned int dirty_index;
     int hidden;
 
     if (!page || segment >= V5_MAIN_PAGE_TOOLPATH_DRAW_SEGMENTS ||
@@ -271,15 +344,60 @@ int v5_main_page_internal_update_toolpath_program_segment(
             page->toolpath_segment_points[segment], points, point_count)) {
         return 0;
     }
-    record_toolpath_program_dirty(
-        page,
-        invalidate_toolpath_program_segment_bounds(
-            line, page->toolpath_segment_points[segment], old_count));
+    if (toolpath_program_segment_bounds(
+            line, page->toolpath_segment_points[segment], old_count, &part)) {
+        toolpath_program_dirty_add(&dirty, &part);
+    }
+    if (toolpath_program_segment_bounds(line, points, point_count, &part)) {
+        toolpath_program_dirty_add(&dirty, &part);
+    }
     memcpy(page->toolpath_segment_points[segment], points, point_count * sizeof(points[0]));
-    record_toolpath_program_dirty(
-        page,
-        invalidate_toolpath_program_segment_bounds(
-            line, page->toolpath_segment_points[segment], point_count));
+    for (dirty_index = 0U; dirty_index < dirty.count; ++dirty_index) {
+        lv_obj_invalidate_area(line, &dirty.areas[dirty_index]);
+        record_toolpath_program_dirty(
+            page, toolpath_program_area_pixels(&dirty.areas[dirty_index]));
+    }
+    return 1;
+}
+
+static int update_toolpath_program_segment_batched(
+    V5MainPage *page,
+    unsigned int segment,
+    const lv_point_t *points,
+    unsigned int point_count,
+    V5ToolpathProgramDirtySet *dirty)
+{
+    lv_obj_t *line;
+    lv_area_t part;
+    unsigned int old_count;
+
+    if (!page || segment >= V5_MAIN_PAGE_TOOLPATH_DRAW_SEGMENTS ||
+        point_count > V5_MAIN_PAGE_TOOLPATH_SEGMENT_POINT_COUNT ||
+        (point_count > 0U && !points) || !dirty) {
+        return 0;
+    }
+    line = page->toolpath_line_segments[segment];
+    if (!line) {
+        return 0;
+    }
+    old_count = page->toolpath_segment_point_counts[segment];
+    if (point_count < 2U || lv_obj_has_flag(line, LV_OBJ_FLAG_HIDDEN) ||
+        old_count != point_count) {
+        return v5_main_page_internal_update_toolpath_program_segment(
+            page, segment, points, point_count);
+    }
+    if (v5_main_page_internal_points_equal(
+            page->toolpath_segment_points[segment], points, point_count)) {
+        return 0;
+    }
+    if (toolpath_program_segment_bounds(
+            line, page->toolpath_segment_points[segment], old_count, &part)) {
+        toolpath_program_dirty_add(dirty, &part);
+    }
+    if (toolpath_program_segment_bounds(line, points, point_count, &part)) {
+        toolpath_program_dirty_add(dirty, &part);
+    }
+    memcpy(page->toolpath_segment_points[segment], points, point_count * sizeof(points[0]));
     return 1;
 }
 
@@ -288,7 +406,9 @@ static void set_toolpath_program_line(
     const V5ToolpathScreenPoint *screen_points,
     unsigned int point_count)
 {
+    V5ToolpathProgramDirtySet dirty = {0};
     unsigned int i;
+    unsigned int dirty_index;
     unsigned int segment = 0U;
     unsigned int start = 0U;
     int changed = 0;
@@ -316,8 +436,8 @@ static void set_toolpath_program_line(
             next_points[local_count] = page->trajectory_points[start + local_count];
             ++local_count;
         }
-        changed |= v5_main_page_internal_update_toolpath_program_segment(
-            page, segment, next_points, local_count);
+        changed |= update_toolpath_program_segment_batched(
+            page, segment, next_points, local_count, &dirty);
         if (start + local_count >= page->trajectory_point_count) {
             ++segment;
             break;
@@ -331,8 +451,15 @@ static void set_toolpath_program_line(
         ++segment;
     }
     for (; segment < V5_MAIN_PAGE_TOOLPATH_DRAW_SEGMENTS; ++segment) {
-        changed |= v5_main_page_internal_update_toolpath_program_segment(page, segment, 0, 0U);
+        changed |= update_toolpath_program_segment_batched(
+            page, segment, 0, 0U, &dirty);
     }
+    for (dirty_index = 0U; dirty_index < dirty.count; ++dirty_index) {
+        lv_obj_invalidate_area(page->toolpath_clip_layer, &dirty.areas[dirty_index]);
+        record_toolpath_program_dirty(
+            page, toolpath_program_area_pixels(&dirty.areas[dirty_index]));
+    }
+    v5_main_page_internal_coalesce_toolpath_invalidations(page);
     page->toolpath_program_visible = 1;
     if (changed) {
         page->toolpath_line_rewrite_count += 1U;
@@ -341,7 +468,6 @@ static void set_toolpath_program_line(
 
 int v5_main_page_internal_main_page_project_program_with_current_fit(V5MainPage *page)
 {
-    unsigned int i;
     unsigned int projected_count;
 
     if (!page || !page->toolpath_fit.valid || page->toolpath_program_point_count == 0U) {
@@ -358,10 +484,8 @@ int v5_main_page_internal_main_page_project_program_with_current_fit(V5MainPage 
     if (projected_count == 0U) {
         return 0;
     }
-    for (i = 0U; i < projected_count; ++i) {
-        page->toolpath_program_screen_points[i] =
-            v5_main_page_internal_apply_toolpath_view_transform(page, page->toolpath_program_screen_points[i]);
-    }
+    v5_main_page_internal_apply_toolpath_view_transform_points(
+        page, page->toolpath_program_screen_points, projected_count);
     set_toolpath_program_line(page, page->toolpath_program_screen_points, projected_count);
     return 1;
 }

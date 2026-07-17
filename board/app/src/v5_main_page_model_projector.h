@@ -26,6 +26,10 @@ typedef struct V5MainPageModelScene {
     unsigned int child_status_slot;
     double primary_deg;
     double child_deg;
+    double primary_sin;
+    double primary_cos;
+    double child_sin;
+    double child_cos;
     double primary_center[V5_STATUS_AXIS_COUNT];
     double child_center[V5_STATUS_AXIS_COUNT];
 } V5MainPageModelScene;

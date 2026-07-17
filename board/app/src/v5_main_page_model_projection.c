@@ -220,12 +220,10 @@ int v5_main_page_internal_main_page_update_program_project_points(
     if (count > V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT) {
         count = V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT;
     }
-    for (i = 0U; i < count; ++i) {
-        page->toolpath_program_project_points[i] = page->toolpath_program_points[i];
-    }
     page->toolpath_program_model_scene_valid = 1;
     page->toolpath_program_model_scene = page->toolpath_model_scene;
     for (i = 0U; i < count; ++i) {
+        page->toolpath_program_project_points[i] = page->toolpath_program_points[i];
         if (!v5_main_page_model_scene_transform_world_point(
                 &page->toolpath_model_scene,
                 page->toolpath_program_project_points[i].axis)) {

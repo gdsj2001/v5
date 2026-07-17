@@ -1,4 +1,5 @@
 #include "v5_ui_model.h"
+#include "v5_ui_refresh_schedule.h"
 #include "v5_status_shm_mmap.h"
 
 #include <stdio.h>
@@ -99,6 +100,19 @@ int main(void)
     const char *path = "/dev/shm/v5_ui_shm_refresh_smoke";
     V5UiModel model;
     V5StatusShmFrame frame;
+    uint64_t refresh_anchor_ns = 0ULL;
+
+    if (!v5_ui_refresh_deadline_due(1000000000ULL, &refresh_anchor_ns, 33333333ULL) ||
+        refresh_anchor_ns != 1000000000ULL ||
+        v5_ui_refresh_deadline_due(1030000000ULL, &refresh_anchor_ns, 33333333ULL) ||
+        !v5_ui_refresh_deadline_due(1040000000ULL, &refresh_anchor_ns, 33333333ULL) ||
+        refresh_anchor_ns != 1033333333ULL ||
+        !v5_ui_refresh_deadline_due(1070000000ULL, &refresh_anchor_ns, 33333333ULL) ||
+        refresh_anchor_ns != 1066666666ULL ||
+        v5_ui_refresh_wait_ns(1070000000ULL, refresh_anchor_ns, 33333333ULL, 10000000ULL) != 10000000ULL ||
+        v5_ui_refresh_wait_ns(1099500000ULL, refresh_anchor_ns, 33333333ULL, 10000000ULL) != 499999ULL) {
+        return 13;
+    }
 
     unlink(path);
     v5_ui_model_init(&model);

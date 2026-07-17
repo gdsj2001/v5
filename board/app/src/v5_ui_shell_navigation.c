@@ -157,17 +157,16 @@ static int shell_capture_current_page(void)
         slot >= V5_REMOTE_DISPLAY_CACHE_PAGE_COUNT) {
         return 1;
     }
-    if (g_v5_shell_page_cache_dirty[page]) {
-        return shell_sync_current_page_cache_if_dirty() > 0;
-    }
     disp = lv_obj_get_disp(g_v5_shell_shell_pages[page]);
     if (!disp || disp->rendering_in_progress) {
         return 0;
     }
     /* g_frame is the last frame already published to both local and remote
-     * outputs. A pointer release may have queued a later LVGL invalidation,
-     * but that pending work is not part of the currently visible frame and
-     * must not block the cache-first page switch. */
+     * outputs. This remains the canonical visible frame even while the current
+     * page is marked dirty by the 30 Hz coordinate/toolpath layer. Re-entering
+     * lv_timer_handler here can never drain that continuously changing layer
+     * reliably and must not block a cache-first page switch. Capture exactly
+     * what the operator can see; pending invalidations belong to a later frame. */
     if (!v5_lvgl_remote_display_cache_capture(slot)) {
         return 0;
     }

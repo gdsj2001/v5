@@ -10,7 +10,7 @@
     "tree": "cbadbb8d029aefe7a8d0e3218885aaa59798337b"
   },
   "v5_source_tree": "c1f4c53315c8e614fafbe48992afa91e8aef8014",
-  "content_sha256": "87cb31ae9820ec10f49a6a45d2589ad061a5cab6ed0230e3c804b1b17fb7f84c",
+  "content_sha256": "c6fc45879185217751c7ab4a12aaf808ff02682120574ccd2889132953c356e3",
   "implementation": "in_tree",
   "changed_files": [
     "scripts/linuxcnc.in",
@@ -133,7 +133,17 @@
       "v5_wcheckpoint_command_raw_bits",
       "v5_wcheckpoint_feedback_raw_bits",
       "v5_wcheckpoint_counts_per_rev",
-      "v5_wcheckpoint_read_snapshot"
+      "v5_wcheckpoint_read_snapshot",
+      "motion.feed-override",
+      "spindle.%d.override"
+    ],
+    "src/emc/motion/mot_priv.h": [
+      "hal_float_t *feed_override",
+      "hal_float_t *spindle_override"
+    ],
+    "src/emc/motion/control.c": [
+      "*(emcmot_hal_data->feed_override) = emcmotStatus->feed_scale;",
+      "emcmotStatus->spindle_status[spindle_num].scale;"
     ],
     "src/emc/motion/homing.c": [
       "ReadWcheckpointSnapshot = *pReadWcheckpointSnapshot;"
@@ -295,6 +305,8 @@
         "v5_wrapped_rotary_mask",
         "v5_wcheckpoint_command_raw_bits",
         "motion.v5-wcheckpoint-%c-valid",
+        "motion.feed-override",
+        "spindle.%d.override",
         "invalid V5 wrapped rotary target state"
       ],
       "forbidden_ascii": [

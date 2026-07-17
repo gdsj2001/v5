@@ -121,6 +121,7 @@ void shell_mark_page_cache_dirty(V5ShellPageKind page);
 int shell_sync_current_page_cache_if_dirty(void);
 int shell_main_page_structure_refresh_pending(void);
 void shell_main_page_structure_refresh_consume(void);
+unsigned int shell_next_loop_sleep_us(void);
 
 void shell_clear_style(lv_obj_t *obj);
 

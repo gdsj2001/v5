@@ -6,13 +6,33 @@ namespace EightAxis.WinRemote.Diagnostics;
 
 public sealed class FrameStats
 {
-    private readonly Stopwatch _clock = Stopwatch.StartNew();
-    private long _lastTicks;
+    private readonly Func<long> _timestampProvider;
+    private readonly long _timestampFrequency;
+    private readonly Queue<long> _frameTicks = new();
+    private long? _lastTimestamp;
     private double _fps;
+
+    public FrameStats()
+        : this(Stopwatch.GetTimestamp, Stopwatch.Frequency)
+    {
+    }
+
+    public FrameStats(Func<long> timestampProvider, long timestampFrequency)
+    {
+        _timestampProvider = timestampProvider ?? throw new ArgumentNullException(nameof(timestampProvider));
+        if (timestampFrequency <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(timestampFrequency));
+        }
+
+        _timestampFrequency = timestampFrequency;
+    }
 
     public int FrameId { get; private set; }
 
     public double Fps => _fps;
+
+    public long FramesObserved { get; private set; }
 
     public int LatencyMs { get; private set; }
 
@@ -29,18 +49,30 @@ public sealed class FrameStats
     public void MarkFrame(int frameId, int captureElapsedMs)
     {
         FrameId = frameId;
-        long nowTicks = _clock.ElapsedTicks;
-        if (_lastTicks > 0)
+        FramesObserved++;
+        long nowTicks = _timestampProvider();
+        if (_lastTimestamp.HasValue && nowTicks < _lastTimestamp.Value)
         {
-            double seconds = (nowTicks - _lastTicks) / (double)Stopwatch.Frequency;
+            _frameTicks.Clear();
+        }
+
+        _lastTimestamp = nowTicks;
+        _frameTicks.Enqueue(nowTicks);
+        long cutoffTicks = nowTicks - _timestampFrequency;
+        while (_frameTicks.Count > 2 && _frameTicks.Peek() < cutoffTicks)
+        {
+            _frameTicks.Dequeue();
+        }
+
+        if (_frameTicks.Count >= 2)
+        {
+            double seconds = (nowTicks - _frameTicks.Peek()) / (double)_timestampFrequency;
             if (seconds > 0)
             {
-                double instantFps = 1.0 / seconds;
-                _fps = _fps <= 0 ? instantFps : (_fps * 0.85) + (instantFps * 0.15);
+                _fps = (_frameTicks.Count - 1) / seconds;
             }
         }
 
-        _lastTicks = nowTicks;
         LatencyMs = Math.Max(0, captureElapsedMs);
     }
 
@@ -87,6 +119,7 @@ public sealed class RuntimeEvidenceRecorder
         Dictionary<string, object?> row = CreateBaseRow();
         row["source"] = SanitizeValue("source", source);
         row["frame_id"] = stats.FrameId;
+        row["frames_observed"] = stats.FramesObserved;
         row["fps"] = Math.Round(stats.Fps, 3);
         row["latency_ms"] = stats.LatencyMs;
         row["full_frame_requests"] = stats.FullFrameRequests;

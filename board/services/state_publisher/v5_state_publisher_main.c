@@ -44,7 +44,7 @@ int main(int argc, char **argv)
         } else if (strcmp(argv[i], "--interval-ms") == 0 && i + 1 < argc) {
             interval_ms = parse_u32(argv[++i], interval_ms);
         } else if (strcmp(argv[i], "--help") == 0) {
-            printf("usage: v5_state_publisher [--path PATH] [--once|--frames N] [--interval-ms 30]\n");
+            printf("usage: v5_state_publisher [--path PATH] [--once|--frames N] [--interval-ms 33]\n");
             return 0;
         } else {
             fprintf(stderr, "unknown argument: %s\n", argv[i]);

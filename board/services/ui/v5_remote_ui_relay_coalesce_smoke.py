@@ -103,14 +103,15 @@ def check_refresh_commit_boundary() -> int:
     axis_line_end = toolpath_source.index("int v5_main_page_internal_main_page_tool_length_mm")
     axis_line_body = toolpath_source[axis_line_start:axis_line_end]
     precise_line_tokens = [
-        "static void invalidate_toolpath_line_segment",
-        "invalidate_toolpath_line_segment(line, points);",
+        "static void invalidate_toolpath_line_points",
+        "invalidate_toolpath_line_points(line, points, 2U);",
         "lv_obj_invalidate_area(line, &dirty);",
+        "coalesce_toolpath_display_invalidations",
     ]
     if any(token not in toolpath_source for token in precise_line_tokens):
         print("dynamic toolpath line precise invalidation is missing")
         return 28
-    if axis_line_body.count("invalidate_toolpath_line_segment(line, points);") != 2:
+    if axis_line_body.count("invalidate_toolpath_line_points(line, points, 2U);") != 2:
         print("dynamic toolpath line does not invalidate both old and new segment bounds")
         return 29
     if axis_line_body.count("lv_line_set_points(line, points, 2);") != 1:
@@ -135,13 +136,19 @@ def check_refresh_commit_boundary() -> int:
     dirty_end = state_source.index("    def publish_dirty(", dirty_start)
     dirty_body = state_source[dirty_start:dirty_end]
     required_dirty_snapshot = [
-        "payload_parts: list[memoryview] = []",
+        "payload = bytearray(total_bytes)",
+        "payload_view = memoryview(payload)",
+        "mapped_view = memoryview(mapped)",
         "flock(fd, LOCK_SH)",
-        "memoryview(mapped[start:end])",
-        "memoryview(mapped[src_start:src_end])",
-        "return PayloadViews(payload_parts, total_bytes), rects",
+        "payload_view[captured_bytes:captured_bytes + length] = mapped_view[start:end]",
+        "payload_view[captured_bytes:captured_bytes + row_bytes] = mapped_view[src_start:src_end]",
+        "return bytes(payload), rects",
     ]
-    retired_dirty_copy = ["payload = bytearray(total_bytes)", "return bytes(payload), rects", "memoryview(mapped)"]
+    retired_dirty_copy = [
+        "payload_parts: list[memoryview] = []",
+        "return PayloadViews(payload_parts, total_bytes), rects",
+        ".toreadonly()",
+    ]
     if any(token not in dirty_body for token in required_dirty_snapshot) or any(
         token in dirty_body for token in retired_dirty_copy
     ):
@@ -276,17 +283,12 @@ def check_dirty_payload_is_owned_snapshot(root: Path) -> int:
         print("dirty payload snapshot missing")
         return 35
     payload, _ = prepared
-    parts = getattr(payload, "parts", ())
-    if not parts or not isinstance(parts, tuple) or any(not part.readonly for part in parts):
-        print("dirty payload is not an immutable owned scatter snapshot")
+    if (
+        not isinstance(payload, bytes)
+        or len(payload) != state.frame_size
+    ):
+        print("dirty payload is not one immutable owned snapshot")
         return 53
-    try:
-        payload.parts = ()
-    except AttributeError:
-        pass
-    else:
-        print("dirty payload scatter container is still mutable")
-        return 57
     captured = payload_bytes(payload)
     replacement = bytes((31, 37, 41, 255)) * (state.width * state.height)
     writer_fd = os.open(state.framebuffer_path, os.O_RDWR)
@@ -302,7 +304,7 @@ def check_dirty_payload_is_owned_snapshot(root: Path) -> int:
 
 
 class ProducerTestState:
-    def __init__(self):
+    def __init__(self, build_delay_seconds: float = 0.0):
         self.width = 4
         self.height = 4
         self.stride = self.width * 4
@@ -311,6 +313,8 @@ class ProducerTestState:
         self.events: list[dict] = []
         self.metrics: dict[str, int] = {}
         self.build_count = 0
+        self.build_times: list[float] = []
+        self.build_delay_seconds = max(0.0, float(build_delay_seconds))
         self.last_payload = None
 
     def mark_metric(self, name: str, delta: int = 1) -> None:
@@ -325,7 +329,13 @@ class ProducerTestState:
             self.frame_id = max(self.frame_id, int(event["frame_id"]))
             self.condition.notify_all()
 
-    def wait_dirty_batch_after(self, frame_id: int, timeout: float, coalesce_seconds: float) -> dict | None:
+    def wait_dirty_batch_after(
+        self,
+        frame_id: int,
+        timeout: float,
+        coalesce_seconds: float,
+        coalesce_deadline: float | None = None,
+    ) -> dict | None:
         deadline = time.monotonic() + timeout
         with self.condition:
             while not any(int(event["frame_id"]) > frame_id for event in self.events):
@@ -333,15 +343,24 @@ class ProducerTestState:
                 if remaining <= 0.0:
                     return None
                 self.condition.wait(remaining)
-            if coalesce_seconds > 0.0:
-                self.condition.wait(coalesce_seconds)
+            first_event_at = time.monotonic()
+            settle_deadline = first_event_at + max(0.0, coalesce_seconds)
+            if coalesce_deadline is not None:
+                settle_deadline = min(settle_deadline, max(first_event_at, float(coalesce_deadline)))
+            remaining = settle_deadline - time.monotonic()
+            if remaining > 0.0:
+                self.condition.wait(remaining)
             events = [dict(event) for event in self.events if int(event["frame_id"]) > frame_id]
         events.sort(key=lambda event: int(event["frame_id"]))
         expected_base = int(frame_id)
         rects = []
         for event in events:
             if int(event["base_frame_id"]) != expected_base:
-                return {"needs_full": True, "frame_id": int(event["frame_id"])}
+                return {
+                    "stream_reset": True,
+                    "frame_id": int(event["frame_id"]),
+                    "reason": "missing_dirty_event",
+                }
             rects.extend(event.get("rects") or [event])
             expected_base = int(event["frame_id"])
         return {
@@ -357,7 +376,10 @@ class ProducerTestState:
     def dirty_payload(self, batch: dict):
         from v5_remote_ui_contract import PayloadViews
 
+        if self.build_delay_seconds > 0.0:
+            time.sleep(self.build_delay_seconds)
         self.build_count += 1
+        self.build_times.append(time.monotonic())
         rects = [
             {
                 "x": int(rect["x"]),
@@ -380,7 +402,9 @@ def check_global_producer_source_contract() -> int:
     required = [
         "SharedDirtyPayloadProducer",
         "FRAME_PRODUCER_NICE = 10",
-        "os.nice(FRAME_PRODUCER_NICE)",
+        "apply_frame_producer_priority(self.state)",
+        "os.getpriority",
+        "os.setpriority",
         "dirty_payload_shared_producer_priority_errors",
         "self.server.payload_producer.subscribe(frame_id)",
         "self.server.payload_producer.wait_after(last_sent",
@@ -389,6 +413,12 @@ def check_global_producer_source_contract() -> int:
         "SHARED_DIRTY_PAYLOAD_HISTORY_BYTES",
         "self.history_limit = max(1, int(history_limit))",
         "self.history_payload_bytes > self.history_byte_budget",
+        "coalesce_deadline=next_emit_at",
+        "next_emit_at += self.coalesce_seconds",
+        "next_emit_at = now",
+        "restart_stream=True",
+        "if delivery.restart_stream:",
+        "stream_runtime_resets",
     ]
     if any(token not in relay_source + producer_source for token in required):
         print("global dirty payload producer contract is incomplete")
@@ -403,10 +433,89 @@ def check_global_producer_source_contract() -> int:
         "self.state.wait_dirty_batch_after(last_sent",
         "payload=bytes(payload)",
         "DIRTY_EVENT_HISTORY_LIMIT, STREAM_COALESCE_SECONDS",
+        "next_emit_at = now + self.coalesce_seconds",
+        "PreparedFrameDelivery(" + "needs_" + "full=True)",
+        "if delivery." + "needs_" + "full:",
     ]
     if any(token in relay_source + producer_source for token in retired):
         print("retired per-client dirty payload path is still present")
         return 43
+    handle_stream = relay_source[
+        relay_source.index("    def handle_stream(self) -> None:"):
+        relay_source.index("    def handle_input(self) -> None:")
+    ]
+    if handle_stream.count("self.state.full_frame()") != 1 or "if delivery.restart_stream:\n" not in handle_stream:
+        print("runtime stream discontinuity can still fall back to a full frame")
+        return 62
+    return 0
+
+
+def check_shared_payload_producer_priority_is_absolute() -> int:
+    import v5_remote_ui_shared_payload as shared
+
+    for initial in (0, shared.FRAME_PRODUCER_NICE, 15):
+        current = [initial]
+        set_calls: list[tuple[int, int, int]] = []
+
+        def fake_getpriority(which: int, who: int) -> int:
+            if which != shared.PRIO_PROCESS or who != 0:
+                raise AssertionError((which, who))
+            return current[0]
+
+        def fake_setpriority(which: int, who: int, value: int) -> None:
+            set_calls.append((which, who, value))
+            current[0] = value
+
+        result = shared.ensure_frame_producer_priority(fake_getpriority, fake_setpriority)
+        expected_calls = [] if initial == shared.FRAME_PRODUCER_NICE else [
+            (shared.PRIO_PROCESS, 0, shared.FRAME_PRODUCER_NICE)
+        ]
+        if result != shared.FRAME_PRODUCER_NICE or set_calls != expected_calls:
+            print("producer priority was not applied absolutely", initial, result, set_calls)
+            return 53
+
+    def ignored_setpriority(which: int, who: int, value: int) -> None:
+        return None
+
+    try:
+        shared.ensure_frame_producer_priority(
+            lambda which, who: 0,
+            ignored_setpriority,
+        )
+    except OSError:
+        pass
+    else:
+        print("producer priority mismatch did not fail closed")
+        return 54
+
+    state = ProducerTestState()
+
+    def failed_priority() -> None:
+        raise OSError("simulated priority failure")
+
+    if shared.apply_frame_producer_priority(state, failed_priority):
+        print("producer priority failure was not reported")
+        return 55
+    if state.metrics.get("dirty_payload_shared_producer_priority_errors") != 1:
+        print("producer priority failure metric missing", state.metrics)
+        return 56
+    producer = shared.SharedDirtyPayloadProducer(
+        state,
+        history_limit=2,
+        coalesce_seconds=0.001,
+        poll_seconds=0.01,
+    )
+    producer.start()
+    producer.subscribe(1)
+    try:
+        state.publish_dirty({"frame_id": 2, "base_frame_id": 1, "x": 0, "y": 0, "w": 1, "h": 1})
+        delivery = producer.wait_after(1, 1.0)
+        if delivery is None or delivery.frame is None:
+            print("producer stopped after a non-safety priority failure")
+            return 57
+    finally:
+        producer.unsubscribe()
+        producer.stop()
     return 0
 
 
@@ -485,7 +594,93 @@ def check_slow_client_does_not_block_global_producer() -> int:
     return 0
 
 
-def check_missing_history_requests_full_repair() -> int:
+def check_continuous_30hz_input_keeps_30hz_cadence() -> int:
+    import v5_remote_ui_shared_payload as shared
+    from v5_remote_ui_contract import STREAM_COALESCE_SECONDS
+
+    state = ProducerTestState()
+    producer = shared.SharedDirtyPayloadProducer(
+        state,
+        history_limit=64,
+        history_byte_budget=1024 * 1024,
+        coalesce_seconds=STREAM_COALESCE_SECONDS,
+        poll_seconds=0.05,
+    )
+    producer.start()
+    producer.subscribe(1)
+    started = time.monotonic()
+    expected_frames = 40
+    try:
+        for frame_id in range(2, 2 + expected_frames):
+            target = started + 0.005 + ((frame_id - 2) * STREAM_COALESCE_SECONDS)
+            remaining = target - time.monotonic()
+            if remaining > 0.0:
+                time.sleep(remaining)
+            state.publish_dirty(
+                {"frame_id": frame_id, "base_frame_id": frame_id - 1, "x": 0, "y": 0, "w": 1, "h": 1}
+            )
+        deadline = time.monotonic() + 0.25
+        while state.build_count < expected_frames and time.monotonic() < deadline:
+            time.sleep(0.005)
+        steady_build_times = state.build_times[1:]
+        if len(steady_build_times) < 29:
+            print("continuous 30 Hz dirty input produced too few steady samples", state.build_count)
+            return 58
+        elapsed = max(0.001, steady_build_times[-1] - steady_build_times[0])
+        cadence_hz = (len(steady_build_times) - 1) / elapsed
+        if cadence_hz < 29.0:
+            print("continuous 30 Hz dirty input was merged down below cadence", state.build_count, cadence_hz)
+            return 58
+    finally:
+        producer.unsubscribe()
+        producer.stop()
+    return 0
+
+
+def check_late_build_does_not_add_another_cadence_wait() -> int:
+    import v5_remote_ui_shared_payload as shared
+
+    cadence = 0.02
+    build_delay = 0.03
+    state = ProducerTestState(build_delay_seconds=build_delay)
+    producer = shared.SharedDirtyPayloadProducer(
+        state,
+        history_limit=64,
+        history_byte_budget=1024 * 1024,
+        coalesce_seconds=cadence,
+        poll_seconds=0.05,
+    )
+    producer.start()
+    producer.subscribe(1)
+    started = time.monotonic()
+    try:
+        for frame_id in range(2, 26):
+            target = started + 0.002 + ((frame_id - 2) * cadence)
+            remaining = target - time.monotonic()
+            if remaining > 0.0:
+                time.sleep(remaining)
+            state.publish_dirty(
+                {"frame_id": frame_id, "base_frame_id": frame_id - 1, "x": 0, "y": 0, "w": 1, "h": 1}
+            )
+        deadline = time.monotonic() + 0.35
+        while state.build_count < 12 and time.monotonic() < deadline:
+            time.sleep(0.005)
+        if state.build_count < 10:
+            print("late producer build still paid a second full cadence wait", state.build_count)
+            return 59
+        if len(state.build_times) >= 4:
+            elapsed = state.build_times[-1] - state.build_times[1]
+            average_interval = elapsed / max(1, len(state.build_times) - 2)
+            if average_interval >= build_delay + (cadence * 0.75):
+                print("late producer cadence includes an artificial post-build wait", average_interval)
+                return 60
+    finally:
+        producer.unsubscribe()
+        producer.stop()
+    return 0
+
+
+def check_missing_history_restarts_stream() -> int:
     import v5_remote_ui_shared_payload as shared
 
     state = ProducerTestState()
@@ -501,8 +696,13 @@ def check_missing_history_requests_full_repair() -> int:
         if first is None or first.frame is None or second is None or second.frame is None:
             print("bounded producer history did not advance", first, second)
             return 49
-        if missing is None or not missing.needs_full or missing.frame is not None:
-            print("missing producer history did not request full repair", missing)
+        if (
+            missing is None
+            or not missing.restart_stream
+            or missing.reason != "history_gap"
+            or missing.frame is not None
+        ):
+            print("missing producer history did not restart the stream", missing)
             return 50
     finally:
         producer.unsubscribe()
@@ -510,7 +710,7 @@ def check_missing_history_requests_full_repair() -> int:
     return 0
 
 
-def check_frame_and_byte_budgets_request_repairs() -> int:
+def check_frame_and_byte_budgets_restart_streams() -> int:
     import v5_remote_ui_shared_payload as shared
     from v5_remote_ui_contract import STREAM_COALESCE_SECONDS, STREAM_TARGET_FPS
 
@@ -539,8 +739,9 @@ def check_frame_and_byte_budgets_request_repairs() -> int:
     frame_producer.subscribe(1)
     try:
         advance(frame_producer, frame_state, 1, 3)
-        if len(frame_producer.history) != 2 or frame_producer.wait_after(1, 0.05).needs_full is not True:
-            print("frame-bounded history did not force slow-client full repair")
+        frame_gap = frame_producer.wait_after(1, 0.05)
+        if len(frame_producer.history) != 2 or frame_gap is None or not frame_gap.restart_stream:
+            print("frame-bounded history did not restart the slow client stream")
             return 55
     finally:
         frame_producer.unsubscribe()
@@ -563,9 +764,9 @@ def check_frame_and_byte_budgets_request_repairs() -> int:
             len(byte_producer.history) != 2
             or byte_producer.history_payload_bytes != 8
             or repaired is None
-            or not repaired.needs_full
+            or not repaired.restart_stream
         ):
-            print("byte-bounded history did not force slow-client full repair")
+            print("byte-bounded history did not restart the slow client stream")
             return 56
     finally:
         byte_producer.unsubscribe()
@@ -576,10 +777,13 @@ def check_frame_and_byte_budgets_request_repairs() -> int:
 def check_shared_payload_producer() -> int:
     for check in (
         check_global_producer_source_contract,
+        check_shared_payload_producer_priority_is_absolute,
         check_skewed_stream_clients_share_prepared_history,
         check_slow_client_does_not_block_global_producer,
-        check_missing_history_requests_full_repair,
-        check_frame_and_byte_budgets_request_repairs,
+        check_continuous_30hz_input_keeps_30hz_cadence,
+        check_late_build_does_not_add_another_cadence_wait,
+        check_missing_history_restarts_stream,
+        check_frame_and_byte_budgets_restart_streams,
     ):
         rc = check()
         if rc != 0:
@@ -620,10 +824,18 @@ def main() -> int:
             return rc
         state = relay.FrameState(Path(tmp), 4, 4)
         write_framebuffer(state.framebuffer_path, state.width, state.height)
+        normalization_calls = [0]
+        original_normalize = state._dirty_geometry._non_overlapping_union_rects
+
+        def counted_normalize(rects):
+            normalization_calls[0] += 1
+            return original_normalize(rects)
+
+        state._dirty_geometry._non_overlapping_union_rects = counted_normalize
         reader = relay.DirtyReader(state)
         reader.handle_line("2 1 2 0 0 1 1 2 2 1 1")
         batch = state.wait_dirty_batch_after(1, timeout=0.01, coalesce_seconds=0.0)
-        if not batch or batch.get("needs_full"):
+        if not batch or batch.get("stream_reset"):
             print("missing coalesced dirty batch", batch)
             return 1
         expected = {"frame_id": 2, "base_frame_id": 1, "merged_events": 2}
@@ -649,6 +861,45 @@ def main() -> int:
         if state.dirty_area_pixels(batch) != 2:
             print("disjoint dirty rects regressed to their 3x3 bounding rectangle", batch)
             return 25
+        if normalization_calls[0] != 1:
+            print("dirty batch geometry was normalized more than once", normalization_calls[0])
+            return 61
+        overlap_state = relay.FrameState(Path(tmp) / "overlap", 8, 8)
+        overlap = {
+            "frame_id": 3,
+            "base_frame_id": 2,
+            "rects": [
+                {"x": 1, "y": 1, "w": 6, "h": 6},
+                {"x": 1, "y": 1, "w": 6, "h": 6},
+                {"x": 1, "y": 1, "w": 6, "h": 6},
+            ],
+        }
+        overlap_rects = overlap_state.normalized_dirty_rects(overlap)
+        if (
+            overlap_state.dirty_area_pixels(overlap) != 36
+            or overlap_state.is_large_dirty(overlap)
+            or overlap_rects != [{"x": 1, "y": 1, "w": 6, "h": 6, "codec": "raw"}]
+        ):
+            print("overlapping dirty rects were double-counted or recopied", overlap_rects)
+            return 59
+        multi_band_state = relay.FrameState(Path(tmp) / "multi_band", 4, 6)
+        multi_band = {
+            "frame_id": 4,
+            "base_frame_id": 3,
+            "rects": [
+                {"x": 0, "y": 0, "w": 2, "h": 2},
+                {"x": 2, "y": 0, "w": 2, "h": 2},
+                {"x": 0, "y": 4, "w": 2, "h": 2},
+                {"x": 2, "y": 4, "w": 2, "h": 2},
+            ],
+        }
+        multi_band_rects = multi_band_state.normalized_dirty_rects(multi_band)
+        if multi_band_rects != [
+            {"x": 0, "y": 0, "w": 4, "h": 2, "codec": "raw"},
+            {"x": 0, "y": 4, "w": 4, "h": 2, "codec": "raw"},
+        ]:
+            print("multiple y bands were not merged horizontally", multi_band_rects)
+            return 63
         single_state = relay.FrameState(Path(tmp) / "single", 4, 4)
         single_reader = relay.DirtyReader(single_state)
         single_reader.handle_line("2 1 1 0 0 4 4")
@@ -688,19 +939,31 @@ def main() -> int:
         many_rects = {
             "frame_id": 5,
             "base_frame_id": 4,
-            "rects": [{"x": index, "y": 0, "w": 1, "h": 1} for index in range(relay.MAX_DIRTY_RECTS_PER_FRAME + 1)],
+            "rects": [
+                {"x": x, "y": y, "w": 1, "h": 1}
+                for y in (0, 4, 8)
+                for x in range(0, 44, 2)
+            ],
         }
-        wide_state = relay.FrameState(Path(tmp) / "wide", relay.MAX_DIRTY_RECTS_PER_FRAME + 1, 1)
-        write_framebuffer(wide_state.framebuffer_path, wide_state.width, wide_state.height)
-        prepared_union = wide_state.dirty_payload(many_rects)
-        if prepared_union is None:
-            print("union dirty payload missing")
+        bounded_state = relay.FrameState(Path(tmp) / "bounded", 43, 9)
+        write_framebuffer(bounded_state.framebuffer_path, bounded_state.width, bounded_state.height)
+        prepared_bounded = bounded_state.dirty_payload(many_rects)
+        if prepared_bounded is None:
+            print("bounded dirty payload missing")
             return 11
-        union_payload, union_rects = prepared_union
-        union_metrics = wide_state.metrics_snapshot()
-        expected_union = [{"x": 0, "y": 0, "w": relay.MAX_DIRTY_RECTS_PER_FRAME + 1, "h": 1, "codec": "raw"}]
-        if union_rects != expected_union or union_metrics.get("dirty_payload_union_frames") != 1:
-            print("bad union dirty payload", union_rects, union_metrics)
+        bounded_payload, bounded_rects = prepared_bounded
+        bounded_metrics = bounded_state.metrics_snapshot()
+        if (
+            len(bounded_rects) != relay.MAX_DIRTY_RECTS_PER_FRAME
+            or len(bounded_rects) <= 1
+            or any(int(rect["h"]) != 1 for rect in bounded_rects)
+            or len(bounded_payload) != 68 * 4
+            or bounded_metrics.get("dirty_payload_bounded_merge_frames") != 1
+            or bounded_metrics.get("dirty_payload_bounded_merge_source_rects") != 66
+            or bounded_metrics.get("dirty_payload_bounded_merge_output_rects") != relay.MAX_DIRTY_RECTS_PER_FRAME
+            or bounded_metrics.get("dirty_payload_bounded_merge_added_pixels") != 2
+        ):
+            print("over-limit multi-band dirty geometry collapsed or exceeded its bound", bounded_rects, bounded_metrics)
             return 12
         cpu_samples = relay.cpu_samples_snapshot()
         process = relay.process_diagnostics()
@@ -710,9 +973,15 @@ def main() -> int:
         gap_state = relay.FrameState(Path(tmp) / "gap", 4, 4)
         gap_state.publish_dirty({"frame_id": 4, "base_frame_id": 3, "x": 0, "y": 0, "w": 1, "h": 1})
         gap = gap_state.wait_dirty_batch_after(1, timeout=0.01, coalesce_seconds=0.0)
-        if not gap or not gap.get("needs_full"):
-            print("missing full repair signal", gap)
+        if not gap or not gap.get("stream_reset") or gap.get("reason") != "missing_dirty_event":
+            print("missing dirty history did not request a stream restart", gap)
             return 4
+        invalid_state = relay.FrameState(Path(tmp) / "invalid", 4, 4)
+        invalid_state.publish_dirty({"frame_id": 2, "base_frame_id": 1, "x": 3, "y": 3, "w": 2, "h": 2})
+        invalid = invalid_state.wait_dirty_batch_after(1, timeout=0.01, coalesce_seconds=0.0)
+        if not invalid or not invalid.get("stream_reset") or invalid.get("reason") != "invalid_dirty_event":
+            print("invalid dirty geometry did not request a stream restart", invalid)
+            return 64
         ready_state = relay.FrameState(Path(tmp) / "ready", 4, 4)
         if ready_state.ui_ready():
             print("ready gate opened without metadata")
@@ -733,11 +1002,11 @@ def main() -> int:
         }:
             print("ready gate did not bind to the formal first frame")
             return 15
-        del union_payload
-        del prepared_union
+        del bounded_payload
+        del prepared_bounded
         del payload
         del prepared
-        wide_state.close_framebuffer_map()
+        bounded_state.close_framebuffer_map()
         state.close_framebuffer_map()
     print("v5 remote ui relay coalesce smoke: dirty coalescing ok")
     return 0

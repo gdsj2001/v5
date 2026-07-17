@@ -44,6 +44,9 @@ check_remote_test "native HAL owner installed executable" 'test -x /usr/bin/v5_n
 check_remote_test "realtime safety latch installed module" 'test -r /usr/lib/linuxcnc/modules/v5_safety_latch.so'
 check_remote_test "retired Python HAL owners absent" 'test ! -e /usr/libexec/8ax/v5_rtcp_status_publisher.py && test ! -e /usr/libexec/8ax/v5_g53_geometry_memory_owner.py && test ! -e /usr/libexec/8ax/v5_native_safety_latch_owner.py'
 check_remote_test "v5_wcs_status_publisher installed executable" 'test -x /usr/libexec/8ax/v5_wcs_status_publisher.py'
+check_remote_test "v5_position_status_publisher installed executable" 'test -x /usr/libexec/8ax/v5_position_status_publisher.py'
+check_remote_test "position polling cadence installed module" 'test -r /usr/libexec/8ax/v5_polling_cadence.py'
+check_remote_test "remote dirty geometry installed module" 'test -r /usr/libexec/8ax/v5_remote_ui_dirty_geometry.py'
 check_remote_test "native operator error mapper installed" 'test -r /usr/libexec/8ax/v5_native_operator_error_map.py'
 check_remote_test "native operator error complete map installed" 'test -r /opt/8ax/v5/config/ui/v5_native_operator_error_map.tsv && test "$(grep -vc "^#" /opt/8ax/v5/config/ui/v5_native_operator_error_map.tsv)" -eq 556'
 check_remote_test "v5_touch_diagnostics installed executable" 'test -x /usr/libexec/8ax/v5_touch_diagnostics'
@@ -56,6 +59,7 @@ check_remote_test "v5 UI cache queue contract installed module" 'test -r /usr/li
 check_remote_test "state publisher init installed" 'test -x /etc/init.d/v5-state-publisher'
 check_remote_test "retired Python HAL owner init scripts absent" 'test ! -e /etc/init.d/v5-rtcp-status-publisher && test ! -e /etc/init.d/v5-g53-geometry-memory-owner'
 check_remote_test "wcs status publisher init installed" 'test -x /etc/init.d/v5-wcs-status-publisher'
+check_remote_test "position status publisher init installed" 'test -x /etc/init.d/v5-position-status-publisher'
 check_remote_test "linuxcnc command gate init installed" 'test -x /etc/init.d/v5-linuxcnc-command-gate'
 check_remote_test "v5 ui relay init installed" 'test -x /etc/init.d/v5-ui-relay'
 check_remote_test "v5 touch diagnostics init installed" 'test -x /etc/init.d/v5-touch-diagnostics'
@@ -108,6 +112,22 @@ else
   sed 's/^/INFO wcs status publisher init: /' /tmp/v5_wcs_status_publisher_status.out
 fi
 rm -f /tmp/v5_wcs_status_publisher_status.out
+
+if remote '/etc/init.d/v5-position-status-publisher status' >/tmp/v5_position_status_publisher_status.out 2>&1; then
+  ok "v5-position-status-publisher init status running"
+  sed 's/^/INFO position status publisher init: /' /tmp/v5_position_status_publisher_status.out
+else
+  fail_msg "v5-position-status-publisher init status running"
+  sed 's/^/INFO position status publisher init: /' /tmp/v5_position_status_publisher_status.out
+fi
+rm -f /tmp/v5_position_status_publisher_status.out
+
+position_fresh_check='import struct,time,sys; p="/dev/shm/v5_native_position_status.bin"; f=struct.Struct("<IIIIIIQ"+("d"*14)+"II"); a=f.unpack(open(p,"rb").read(f.size)); time.sleep(0.2); b=f.unpack(open(p,"rb").read(f.size)); sys.exit(0 if a[1]==2 and a[2]==f.size and (a[3]&3)==3 and b[6]>a[6] else 1)'
+if remote "/usr/bin/python3 -c '$position_fresh_check'" >/dev/null 2>&1; then
+  ok "position status publisher advances fresh native position block"
+else
+  fail_msg "position status publisher advances fresh native position block"
+fi
 
 wcs_block_check='import struct,sys; p="/dev/shm/v5_native_wcs_status.bin"; fmt=struct.Struct("<IIIIiIIIIIQ"+("d"*45)+"II"); data=open(p,"rb").read(fmt.size); v=fmt.unpack(data); sys.exit(0 if v[1]==2 and v[3]==1 and v[5]==9 and v[6]==5 and v[7]==1 and v[8] else 1)'
 wcs_block_info='import struct; p="/dev/shm/v5_native_wcs_status.bin"; fmt=struct.Struct("<IIIIiIIIIIQ"+("d"*45)+"II"); v=fmt.unpack(open(p,"rb").read(fmt.size)); print("wcs_block version=%d valid=%d active=%d wcs_count=%d axis_count=%d epoch=%d" % (v[1], v[3], v[4], v[5], v[6], v[8]))'
@@ -239,7 +259,7 @@ else
   warn_msg "input event devices not visible; touch evidence still missing"
 fi
 
-remote 'ps w 2>/dev/null | grep -E "v5_state_publisher|v5_native_hal_owner|v5_wcs_status_publisher|v5_lvgl_shell|v5_remote_ui_relay|linuxcncrsh|linuxcncsvr|milltask" | grep -v grep || true' |
+remote 'ps w 2>/dev/null | grep -E "v5_state_publisher|v5_position_status_publisher|v5_native_hal_owner|v5_wcs_status_publisher|v5_lvgl_shell|v5_remote_ui_relay|linuxcncrsh|linuxcncsvr|milltask" | grep -v grep || true' |
   sed 's/^/INFO process: /'
 
 if [ "$fail" -ne 0 ]; then

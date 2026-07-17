@@ -17,12 +17,18 @@ namespace EightAxis.WinRemote;
 
 public partial class MainWindow
 {
+    private const double RelayEvidenceIntervalMs = 1000.0;
+    private const double RelayStatusIntervalMs = 100.0;
+    private DateTime _lastRelayFrameStatusUtc = DateTime.MinValue;
+
     private RemoteFrameApplyResult ApplyRelayPacket(RemoteFramePacket packet, Uri relayBaseUri, string source)
     {
         RemoteFrameApplyResult result = _relayAssembler.Apply(packet);
         if (result.Status is RemoteFrameApplyStatus.AppliedFullFrame or RemoteFrameApplyStatus.AppliedDirtyRects)
         {
-            bool recordFrameMetrics = ShouldRecordRelayFrameMetrics();
+            DateTime now = DateTime.UtcNow;
+            bool recordFrameEvidence = ShouldRecordRelayFrameEvidence(now);
+            bool refreshFrameStatus = ShouldRefreshRelayFrameStatus(now);
             if (result.Status == RemoteFrameApplyStatus.AppliedDirtyRects)
             {
                 _stats.MarkDirtyRectFrame();
@@ -31,7 +37,7 @@ public partial class MainWindow
             EmptyStateText.Visibility = Visibility.Collapsed;
             _stats.MarkFrame(ToStatsFrameId(result.FrameId), 0);
             SetConnectionState("live", "#263D30", "#A8E8B2");
-            if (recordFrameMetrics)
+            if (recordFrameEvidence)
             {
                 _evidence.RecordEvent("frame_applied", new Dictionary<string, object?>
                 {
@@ -53,9 +59,12 @@ public partial class MainWindow
                 });
                 PointerText.Text = $"relay feedback: {feedbackMs:0} ms";
             }
-            if (recordFrameMetrics)
+            if (recordFrameEvidence)
             {
                 _evidence.RecordMetrics(_stats, "relay");
+            }
+            if (refreshFrameStatus)
+            {
                 UpdateRelayFrameStatus(relayBaseUri, source, result.DirtyRectCount);
             }
         }
@@ -91,15 +100,25 @@ public partial class MainWindow
     private static int ToStatsFrameId(long frameId) =>
         frameId > Int32.MaxValue ? Int32.MaxValue : Math.Max(0, (int)frameId);
 
-    private bool ShouldRecordRelayFrameMetrics()
+    private bool ShouldRecordRelayFrameEvidence(DateTime now)
     {
-        DateTime now = DateTime.UtcNow;
-        if ((now - _lastRelayFrameMetricsUtc).TotalMilliseconds < RelayFrameMetricsMinIntervalMs)
+        if ((now - _lastRelayFrameMetricsUtc).TotalMilliseconds < RelayEvidenceIntervalMs)
         {
             return false;
         }
 
         _lastRelayFrameMetricsUtc = now;
+        return true;
+    }
+
+    private bool ShouldRefreshRelayFrameStatus(DateTime now)
+    {
+        if ((now - _lastRelayFrameStatusUtc).TotalMilliseconds < RelayStatusIntervalMs)
+        {
+            return false;
+        }
+
+        _lastRelayFrameStatusUtc = now;
         return true;
     }
 

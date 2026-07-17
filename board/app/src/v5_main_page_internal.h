@@ -41,6 +41,10 @@ int v5_main_page_internal_active_preview_line_from_readback(
 void v5_main_page_internal_add_hidden_flag_if_visible(lv_obj_t *obj);
 
 V5ToolpathScreenPoint v5_main_page_internal_apply_toolpath_view_transform(const V5MainPage *page, V5ToolpathScreenPoint point);
+void v5_main_page_internal_apply_toolpath_view_transform_points(
+    const V5MainPage *page,
+    V5ToolpathScreenPoint *points,
+    unsigned int count);
 
 void v5_main_page_internal_apply_toolpath_view_transform_to_snapshot(const V5MainPage *page, V5ToolpathDisplaySnapshot *display);
 
@@ -77,6 +81,8 @@ void v5_main_page_internal_format_main_page_wcs_coordinate(char *out, size_t out
                                             const V5NativeReadback *readback, unsigned int axis);
 
 void v5_main_page_internal_hide_toolpath_model_geometry(V5MainPage *page);
+
+void v5_main_page_internal_coalesce_toolpath_invalidations(V5MainPage *page);
 
 void v5_main_page_internal_hide_toolpath_line(lv_obj_t *line);
 
@@ -212,6 +218,10 @@ unsigned int v5_main_page_internal_program_preview_highlight_epoch(const V5Progr
 void v5_main_page_internal_refresh_coordinate_selection_now(V5MainPage *page);
 
 void v5_main_page_internal_refresh_program_preview_rows(V5MainPage *page, const V5ProgramRuntime *runtime);
+
+void v5_main_page_internal_sync_program_preview_after_execution(
+    V5MainPage *page,
+    V5CommandKind request_kind);
 
 int v5_main_page_internal_remembered_program_preview_highlight_line(
     const V5MainPage *page,

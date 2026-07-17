@@ -20,6 +20,7 @@
 #include "v5_status_shm.h"
 #include "v5_ui_first_frame_guard.h"
 #include "v5_ui_page_cache_registry.h"
+#include "v5_ui_refresh_schedule.h"
 #include "v5_ui_model.h"
 #include "v5_v3_local_pages.h"
 
@@ -37,14 +38,19 @@
 
 static int shell_refresh_due(unsigned long long now, unsigned long long *last, unsigned long long period_ns)
 {
-    if (!last || period_ns == 0ULL) {
-        return 0;
-    }
-    if (*last == 0ULL || now < *last || now - *last >= period_ns) {
-        *last = now;
-        return 1;
-    }
-    return 0;
+    return v5_ui_refresh_deadline_due(now, last, period_ns);
+}
+
+unsigned int shell_next_loop_sleep_us(void)
+{
+    const unsigned long long max_wait_ns = 10000000ULL;
+    unsigned long long wait_ns = v5_ui_refresh_wait_ns(
+        shell_monotonic_ns(),
+        g_v5_shell_ui_dynamic_last_refresh_ns,
+        V5_UI_DYNAMIC_REFRESH_NS,
+        max_wait_ns);
+
+    return (unsigned int)((wait_ns + 999ULL) / 1000ULL);
 }
 
 static long long shell_quantized_display_value(double value, double scale)
@@ -284,10 +290,11 @@ int v5_ui_shell_refresh_once(void)
         /* The emergency button lives above the modal mask and remains live at 10 Hz. */
         lv_timer_handler();
     }
-    if (!overlay_active && shell_sync_current_page_cache_if_dirty() < 0) {
-        fprintf(stderr, "V5_UI_CACHE_SYNC_FAIL page=%u\n", (unsigned int)g_v5_shell_current_page);
-        return 0;
-    }
+    /* The visible page has already been rendered into the canonical frame by
+     * the handler above.  Keep its cache marked dirty and capture that last
+     * published frame once at the navigation boundary.  Rebuilding and
+     * capturing the current-page cache here would run a second model apply,
+     * LVGL handler and full-frame copy on every 30 Hz dynamic refresh. */
     return 1;
 }
 

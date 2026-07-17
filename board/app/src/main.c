@@ -13,7 +13,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#define V5_UI_SHELL_LOOP_MS 10U
+#define V5_UI_SHELL_OVERDUE_YIELD_US 1000U
 
 static volatile sig_atomic_t g_stop_requested;
 
@@ -94,6 +94,7 @@ int main(int argc, char **argv)
     fflush(stdout);
     v5_lvgl_clock_init();
     while (!g_stop_requested) {
+        unsigned int sleep_us;
         v5_lvgl_clock_advance();
         (void)v5_ui_shell_refresh_once();
         if (!v5_remote_frame_ipc_pump()) {
@@ -107,7 +108,8 @@ int main(int argc, char **argv)
         if (!shell_process_pending_navigation()) {
             fprintf(stderr, "v5 UI pending navigation failed\n");
         }
-        usleep(V5_UI_SHELL_LOOP_MS * 1000U);
+        sleep_us = shell_next_loop_sleep_us();
+        usleep(sleep_us > 0U ? sleep_us : V5_UI_SHELL_OVERDUE_YIELD_US);
     }
     return 0;
 }

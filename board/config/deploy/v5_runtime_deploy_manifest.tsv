@@ -1,7 +1,9 @@
 # kind	source	destination	mode
 binary	build/board/app/v5_lvgl_shell	/usr/libexec/8ax/v5_lvgl_shell	0755
 binary	build/board/app/v5_state_publisher	/usr/libexec/8ax/v5_state_publisher	0755
+script	services/state_publisher/v5_position_status_publisher.py	/usr/libexec/8ax/v5_position_status_publisher.py	0755
 script	services/state_publisher/v5_wcs_status_publisher.py	/usr/libexec/8ax/v5_wcs_status_publisher.py	0755
+module	services/state_publisher/v5_polling_cadence.py	/usr/libexec/8ax/v5_polling_cadence.py	0644
 module	services/state_publisher/v5_machine_status_projection.py	/usr/libexec/8ax/v5_machine_status_projection.py	0644
 module	services/state_publisher/v5_wcs_status_codec.py	/usr/libexec/8ax/v5_wcs_status_codec.py	0644
 module	services/state_publisher/v5_native_operator_error_map.py	/usr/libexec/8ax/v5_native_operator_error_map.py	0644
@@ -17,11 +19,13 @@ module	services/ui/v5_ui_cache_queue_contract.py	/usr/libexec/8ax/v5_ui_cache_qu
 module	services/ui/v5_remote_ui_contract.py	/usr/libexec/8ax/v5_remote_ui_contract.py	0644
 module	services/ui/v5_remote_ui_protocol.py	/usr/libexec/8ax/v5_remote_ui_protocol.py	0644
 module	services/ui/v5_remote_ui_shared_payload.py	/usr/libexec/8ax/v5_remote_ui_shared_payload.py	0644
+module	services/ui/v5_remote_ui_dirty_geometry.py	/usr/libexec/8ax/v5_remote_ui_dirty_geometry.py	0644
 module	services/ui/v5_remote_ui_state.py	/usr/libexec/8ax/v5_remote_ui_state.py	0644
 module	services/ui/v5_remote_ui_support.py	/usr/libexec/8ax/v5_remote_ui_support.py	0644
 module	petalinux/project-spec/meta-user/recipes-apps/v5-base-overlay/files/network/v5_net_core.sh	/usr/local/sbin/v5_net_core.sh	0644
 script	petalinux/project-spec/meta-user/recipes-apps/v5-base-overlay/files/network/v5_usb_wifi_apply.sh	/usr/local/sbin/v5_usb_wifi_apply.sh	0755
 init	services/state_publisher/init.d/v5-wcs-status-publisher	/etc/init.d/v5-wcs-status-publisher	0755
+init	services/state_publisher/init.d/v5-position-status-publisher	/etc/init.d/v5-position-status-publisher	0755
 init	services/state_publisher/init.d/v5-state-publisher	/etc/init.d/v5-state-publisher	0755
 init	services/command_gate/init.d/v5-linuxcnc-command-gate	/etc/init.d/v5-linuxcnc-command-gate	0755
 module	services/command_gate/v5_ethercat_backend_lifecycle.sh	/usr/libexec/8ax/v5_ethercat_backend_lifecycle.sh	0644

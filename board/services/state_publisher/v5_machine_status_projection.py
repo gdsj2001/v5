@@ -472,11 +472,27 @@ def write_position_status(
         stat,
         rotary_projection=None,
         publish_cadence=None,
-        now_monotonic=None) -> bool:
-    raw_mcs, mcs_present = normalized_axis_with_presence(getattr(stat, 'joint_actual_position', ()))
+        now_monotonic=None,
+        native_positions=None,
+        native_scalars=None) -> bool:
+    if native_positions is None:
+        actual_values = getattr(stat, 'joint_actual_position', ())
+        command_values = getattr(stat, 'joint_position', ())
+    else:
+        try:
+            actual_values, command_values = native_positions
+        except (TypeError, ValueError):
+            raise RuntimeError('native_joint_position_sample_invalid')
+        actual_values = list(actual_values)
+        command_values = list(command_values)
+        if (len(actual_values) != POSITION_AXIS_COUNT or
+                len(command_values) != POSITION_AXIS_COUNT or
+                not all(finite_float(value) is not None
+                        for value in actual_values + command_values)):
+            raise RuntimeError('native_joint_position_sample_invalid')
+    raw_mcs, mcs_present = normalized_axis_with_presence(actual_values)
     mcs = display_position_projection(raw_mcs)
-    raw_cmd, cmd_present = normalized_axis_with_presence(
-        getattr(stat, 'joint_position', ()))
+    raw_cmd, cmd_present = normalized_axis_with_presence(command_values)
     cmd = display_position_projection(raw_cmd)
     if rotary_projection is not None:
         try:
@@ -492,9 +508,27 @@ def write_position_status(
             cmd = [0.0] * POSITION_AXIS_COUNT
             mcs_present = False
             cmd_present = False
-    spindle = first_spindle(stat)
-    spindle_speed = float(spindle.get('speed', 0.0)) if isinstance(spindle, dict) else 0.0
-    spindle_override = float(spindle.get('override', 1.0)) * 100.0 if isinstance(spindle, dict) else 100.0
+    if native_scalars is None:
+        spindle = first_spindle(stat)
+        spindle_speed = (
+            float(spindle.get('speed', 0.0))
+            if isinstance(spindle, dict) else 0.0)
+        spindle_override = (
+            float(spindle.get('override', 1.0)) * 100.0
+            if isinstance(spindle, dict) else 100.0)
+        feed_override = float(getattr(stat, 'feedrate', 1.0)) * 100.0
+        linear_velocity = float(getattr(stat, 'current_vel', 0.0)) * 60.0
+    else:
+        try:
+            (spindle_speed, linear_velocity,
+             feed_override, spindle_override) = [
+                float(value) for value in native_scalars]
+        except (TypeError, ValueError):
+            raise RuntimeError('native_position_scalar_sample_invalid')
+        if not all(math.isfinite(value) for value in (
+                spindle_speed, linear_velocity,
+                feed_override, spindle_override)):
+            raise RuntimeError('native_position_scalar_sample_invalid')
     valid_mask = (
         V5_STATUS_VALID_SPINDLE_SPEED |
         V5_STATUS_VALID_LINEAR_VELOCITY |
@@ -505,8 +539,6 @@ def write_position_status(
         valid_mask |= V5_STATUS_VALID_MCS
     if cmd_present:
         valid_mask |= V5_STATUS_VALID_CMD_MCS
-    feed_override = float(getattr(stat, 'feedrate', 1.0)) * 100.0
-    linear_velocity = float(getattr(stat, 'current_vel', 0.0)) * 60.0
     signature = (
         valid_mask,
         tuple(mcs),

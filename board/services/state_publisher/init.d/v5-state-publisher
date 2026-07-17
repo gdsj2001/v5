@@ -9,7 +9,7 @@ DAEMON=/usr/libexec/8ax/v5_state_publisher
 PIDFILE=/run/8ax/v5_state_publisher.pid
 LOGFILE=/run/8ax/v5_state_publisher.log
 STATUS_PATH=${V5_STATUS_SHM_PATH:-/dev/shm/v3_status_shm}
-INTERVAL_MS=${V5_STATE_PUBLISHER_INTERVAL_MS:-30}
+INTERVAL_MS=${V5_STATE_PUBLISHER_INTERVAL_MS:-33}
 NON_MICROKERNEL_NICE=10
 
 is_running() {

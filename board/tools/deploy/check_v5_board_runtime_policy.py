@@ -24,6 +24,7 @@ import pwd
 PIDFILES = {
     "v5_command_gate": "/run/8ax/v5_command_gate.pid",
     "v5_state_publisher": "/run/8ax/v5_state_publisher.pid",
+    "v5_position_status_publisher": "/run/8ax/v5_position_status_publisher.pid",
     "v5_wcs_status_publisher": "/run/8ax/v5_wcs_status_publisher.pid",
     "v5_ui_relay": "/run/8ax/v5_ui_relay.pid",
     "v5_lvgl_shell": "/run/8ax/v5_ui_shell.pid",
@@ -34,6 +35,7 @@ PIDFILES = {
 EXPECTED_NICE = {
     "v5_command_gate": -5,
     "v5_state_publisher": 10,
+    "v5_position_status_publisher": 0,
     "v5_wcs_status_publisher": 10,
     "v5_lvgl_shell": 0,
 }

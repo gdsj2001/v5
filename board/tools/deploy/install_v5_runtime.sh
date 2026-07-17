@@ -251,6 +251,8 @@ manifest_cpu_policy_command_gate=0
 manifest_cpu_policy_ui=0
 manifest_cpu_policy_state=0
 manifest_cpu_policy_wcs=0
+manifest_cpu_policy_position=0
+manifest_position_publisher=0
 manifest_drive_profiles=0
 manifest_row_count=0
 while IFS="$tab" read -r scope_kind scope_source scope_destination scope_mode scope_extra; do
@@ -280,6 +282,10 @@ while IFS="$tab" read -r scope_kind scope_source scope_destination scope_mode sc
     /etc/init.d/v5-wcs-status-publisher)
       manifest_cpu_policy_wcs=1
       ;;
+    /etc/init.d/v5-position-status-publisher)
+      manifest_cpu_policy_position=1
+      manifest_position_publisher=1
+      ;;
     *)
       manifest_cpu_policy_only=0
       ;;
@@ -303,11 +309,21 @@ while IFS="$tab" read -r scope_kind scope_source scope_destination scope_mode sc
       ;;
   esac
   case "$scope_destination" in
+    /usr/libexec/8ax/v5_position_status_publisher.py|\
+    /usr/libexec/8ax/v5_polling_cadence.py|\
+    /etc/init.d/v5-position-status-publisher)
+      manifest_position_publisher=1
+      ;;
+  esac
+  case "$scope_destination" in
+    /usr/libexec/8ax/v5_position_status_publisher.py|\
     /usr/libexec/8ax/v5_wcs_status_publisher.py|\
+    /usr/libexec/8ax/v5_polling_cadence.py|\
     /usr/libexec/8ax/v5_machine_status_projection.py|\
     /usr/libexec/8ax/v5_wcs_status_codec.py|\
     /usr/libexec/8ax/v5_native_operator_error_map.py|\
-    /etc/init.d/v5-wcs-status-publisher)
+    /etc/init.d/v5-wcs-status-publisher|\
+    /etc/init.d/v5-position-status-publisher)
       manifest_ui_only=0
       manifest_actiond_only=0
       manifest_settings_only=0
@@ -393,7 +409,8 @@ case "$restart_scope_requested" in
          [ "$manifest_cpu_policy_command_gate" -eq 1 ] &&
          [ "$manifest_cpu_policy_ui" -eq 1 ] &&
          [ "$manifest_cpu_policy_state" -eq 1 ] &&
-         [ "$manifest_cpu_policy_wcs" -eq 1 ]; then
+         [ "$manifest_cpu_policy_wcs" -eq 1 ] &&
+         [ "$manifest_cpu_policy_position" -eq 1 ]; then
       restart_scope=cpu_policy
     elif [ "$linuxcnc_bundle_enabled" -eq 0 ] &&
          [ "$manifest_row_count" -gt 0 ] &&
@@ -465,7 +482,8 @@ case "$restart_scope_requested" in
        [ "$manifest_cpu_policy_command_gate" -ne 1 ] ||
        [ "$manifest_cpu_policy_ui" -ne 1 ] ||
        [ "$manifest_cpu_policy_state" -ne 1 ] ||
-       [ "$manifest_cpu_policy_wcs" -ne 1 ]; then
+       [ "$manifest_cpu_policy_wcs" -ne 1 ] ||
+       [ "$manifest_cpu_policy_position" -ne 1 ]; then
       echo "CPU-policy restart scope requires the complete registered CPU-policy manifest and no LinuxCNC bundle" >&2
       exit 8
     fi
@@ -490,12 +508,38 @@ case "$restart_scope_requested" in
 esac
 echo "V5_RUNTIME_RESTART_SCOPE scope=$restart_scope rows=$manifest_row_count gcode_only=$manifest_gcode_only ui_only=$manifest_ui_only actiond_only=$manifest_actiond_only command_gate_only=$manifest_command_gate_only backend_only=$manifest_backend_only wcs_only=$manifest_wcs_only cpu_policy_only=$manifest_cpu_policy_only settings_only=$manifest_settings_only"
 
+stop_position_publisher_before_backend() {
+  if [ -x /etc/init.d/v5-position-status-publisher ]; then
+    /etc/init.d/v5-position-status-publisher stop
+  fi
+}
+
+restart_position_publisher_after_backend() {
+  [ -x /etc/init.d/v5-position-status-publisher ] || {
+    echo "position status publisher init is missing after backend restart" >&2
+    return 1
+  }
+  /etc/init.d/v5-position-status-publisher restart
+}
+
+if [ "$apply" -eq 1 ] &&
+   [ "$restart_scope" = "wcs" ] &&
+   [ "$manifest_position_publisher" -eq 1 ]; then
+  for pin in motion.feed-override spindle.0.override; do
+    halcmd getp "$pin" >/dev/null 2>&1 || {
+      echo "position publisher focused deploy requires an active native override pin: $pin; deploy the verified LinuxCNC package first" >&2
+      exit 8
+    }
+  done
+fi
+
 if [ "$apply" -eq 1 ] && [ "$linuxcnc_bundle_enabled" -eq 1 ]; then
   verify_linuxcnc_deploy_bundle
   [ -x /etc/init.d/v5-linuxcnc-command-gate ] || {
     echo "LinuxCNC command-gate init is missing before deploy" >&2
     exit 7
   }
+  stop_position_publisher_before_backend
   /etc/init.d/v5-linuxcnc-command-gate stop
   install_linuxcnc_deploy_bundle
 fi
@@ -504,6 +548,7 @@ if [ "$apply" -eq 1 ] && [ "$restart_scope" = "backend" ]; then
     echo "LinuxCNC command-gate init is missing before backend module deploy" >&2
     exit 7
   }
+  stop_position_publisher_before_backend
   /etc/init.d/v5-linuxcnc-command-gate stop
 fi
 while IFS="$tab" read -r kind source destination mode extra; do
@@ -572,12 +617,13 @@ enable_boot_service() {
 
 enable_boot_services() {
   enable_boot_service v5-linuxcnc-command-gate 91 19
-  enable_boot_service v5-wcs-status-publisher 92 18
-  enable_boot_service v5-state-publisher 93 17
-  enable_boot_service v5-ui-relay 94 16
-  enable_boot_service v5-settings-actiond 95 15
-  enable_boot_service v5-touch-diagnostics 96 14
-  enable_boot_service v5-remote-ssh 97 13
+  enable_boot_service v5-position-status-publisher 92 18
+  enable_boot_service v5-wcs-status-publisher 93 17
+  enable_boot_service v5-state-publisher 94 16
+  enable_boot_service v5-ui-relay 95 15
+  enable_boot_service v5-settings-actiond 96 14
+  enable_boot_service v5-touch-diagnostics 97 13
+  enable_boot_service v5-remote-ssh 98 12
 }
 
 retired_pid_matches_path() {
@@ -692,10 +738,10 @@ if [ "$apply" -eq 1 ]; then
   if [ "$restart_scope" = "gcode" ]; then
     rm -f /opt/8ax/v5/gcode/golden/cc.ngc
   elif [ "$restart_scope" = "ui" ]; then
-    enable_boot_service v5-ui-relay 94 16
+    enable_boot_service v5-ui-relay 95 15
     /etc/init.d/v5-ui-relay restart
   elif [ "$restart_scope" = "actiond" ]; then
-    enable_boot_service v5-settings-actiond 95 15
+    enable_boot_service v5-settings-actiond 96 14
     [ "$manifest_drive_profiles" -eq 0 ] || install_runtime_drive_profiles
     /etc/init.d/v5-settings-actiond restart
   elif [ "$restart_scope" = "command_gate" ]; then
@@ -703,31 +749,40 @@ if [ "$apply" -eq 1 ]; then
     /etc/init.d/v5-linuxcnc-command-gate restart-native
   elif [ "$restart_scope" = "backend" ]; then
     enable_boot_service v5-linuxcnc-command-gate 91 19
+    enable_boot_service v5-position-status-publisher 92 18
     /etc/init.d/v5-linuxcnc-command-gate start
+    restart_position_publisher_after_backend
   elif [ "$restart_scope" = "wcs" ]; then
-    enable_boot_service v5-wcs-status-publisher 92 18
+    enable_boot_service v5-position-status-publisher 92 18
+    enable_boot_service v5-wcs-status-publisher 93 17
+    /etc/init.d/v5-position-status-publisher restart
     /etc/init.d/v5-wcs-status-publisher restart
   elif [ "$restart_scope" = "cpu_policy" ]; then
     enable_boot_service v5-linuxcnc-command-gate 91 19
-    enable_boot_service v5-wcs-status-publisher 92 18
-    enable_boot_service v5-state-publisher 93 17
-    enable_boot_service v5-ui-relay 94 16
+    enable_boot_service v5-position-status-publisher 92 18
+    enable_boot_service v5-wcs-status-publisher 93 17
+    enable_boot_service v5-state-publisher 94 16
+    enable_boot_service v5-ui-relay 95 15
     (
       LOG=/run/8ax/v5_cpu_policy.log
       . /usr/local/sbin/v5_net_core.sh
       apply_network_cpu_isolation
     )
     /etc/init.d/v5-linuxcnc-command-gate restart-native
+    /etc/init.d/v5-position-status-publisher restart
     /etc/init.d/v5-wcs-status-publisher restart
     /etc/init.d/v5-state-publisher restart
     /etc/init.d/v5-ui-relay restart
   elif [ "$restart_scope" = "settings" ]; then
     enable_boot_service v5-linuxcnc-command-gate 91 19
-    enable_boot_service v5-wcs-status-publisher 92 18
-    enable_boot_service v5-state-publisher 93 17
-    enable_boot_service v5-settings-actiond 95 15
+    enable_boot_service v5-position-status-publisher 92 18
+    enable_boot_service v5-wcs-status-publisher 93 17
+    enable_boot_service v5-state-publisher 94 16
+    enable_boot_service v5-settings-actiond 96 14
     [ "$manifest_drive_profiles" -eq 0 ] || install_runtime_drive_profiles
+    stop_position_publisher_before_backend
     /etc/init.d/v5-linuxcnc-command-gate restart
+    restart_position_publisher_after_backend
     /etc/init.d/v5-wcs-status-publisher restart
     /etc/init.d/v5-state-publisher restart
     /etc/init.d/v5-settings-actiond restart
@@ -735,7 +790,9 @@ if [ "$apply" -eq 1 ]; then
     enable_boot_services
     cleanup_retired_runtime_files
     install_runtime_drive_profiles
+    stop_position_publisher_before_backend
     /etc/init.d/v5-linuxcnc-command-gate restart
+    restart_position_publisher_after_backend
     /etc/init.d/v5-wcs-status-publisher restart
     /etc/init.d/v5-state-publisher restart
     /etc/init.d/v5-ui-relay restart

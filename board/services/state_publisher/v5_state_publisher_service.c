@@ -1,10 +1,10 @@
 #include "v5_state_publisher_service.h"
 
 #include "v5_native_sample.h"
+#include <errno.h>
 #include <signal.h>
 #include <stdint.h>
 #include <time.h>
-#include <unistd.h>
 
 void v5_status_shm_writer_seed_display_frame(V5StatusShmFrame *frame);
 void v5_status_shm_writer_apply_sample(V5StatusShmFrame *frame, const V5NativeDisplaySample *sample);
@@ -31,12 +31,27 @@ static uint64_t v5_state_publisher_epoch_ns(void)
 }
 
 
-static void v5_state_publisher_sleep_ms(unsigned int interval_ms)
+static void v5_state_publisher_wait_for_next_start(
+    uint64_t start_ns,
+    unsigned int interval_ms)
 {
-    struct timespec delay;
-    delay.tv_sec = (time_t)(interval_ms / 1000u);
-    delay.tv_nsec = (long)(interval_ms % 1000u) * 1000000L;
-    while (!g_v5_state_publisher_stop_requested && nanosleep(&delay, &delay) != 0) {
+    while (!g_v5_state_publisher_stop_requested) {
+        uint64_t now_ns = v5_state_publisher_epoch_ns();
+        uint64_t wait_ns = v5_state_publisher_cadence_wait_ns(
+            start_ns, now_ns, interval_ms);
+        struct timespec delay;
+
+        if (wait_ns == 0ull) {
+            break;
+        }
+        delay.tv_sec = (time_t)(wait_ns / 1000000000ull);
+        delay.tv_nsec = (long)(wait_ns % 1000000000ull);
+        if (nanosleep(&delay, 0) == 0) {
+            break;
+        }
+        if (errno != EINTR) {
+            break;
+        }
     }
 }
 
@@ -94,6 +109,8 @@ int v5_state_publisher_run_loop(const char *path, unsigned int interval_ms, unsi
     v5_state_publisher_reset_stop();
 
     do {
+        uint64_t sample_start_ns = v5_state_publisher_epoch_ns();
+
         if (!v5_state_publisher_publish_once(path, out)) {
             return 0;
         }
@@ -106,7 +123,7 @@ int v5_state_publisher_run_loop(const char *path, unsigned int interval_ms, unsi
         if (g_v5_state_publisher_stop_requested) {
             break;
         }
-        v5_state_publisher_sleep_ms(period);
+        v5_state_publisher_wait_for_next_start(sample_start_ns, period);
     } while (!g_v5_state_publisher_stop_requested && (!max_frames || count < max_frames));
 
     return 1;

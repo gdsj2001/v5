@@ -147,11 +147,6 @@ int v5_main_page_internal_active_preview_line_from_readback(
     }
     readback = &page->native_readback;
     runtime_epoch = v5_main_page_internal_program_preview_highlight_epoch(runtime);
-    line_allowed = readback_execution_line_active(readback) ||
-        (runtime_epoch != 0U && page->program_preview_started_loaded_epoch == runtime_epoch) ||
-        (runtime_epoch != 0U &&
-            page->program_preview_highlight_loaded_epoch == runtime_epoch &&
-            page->program_preview_highlight_line > 0);
     if (v5_program_runtime_has_mdi(runtime) &&
         v5_native_readback_mdi_run_known(readback) &&
         readback->mdi_run_active && readback->mdi_run_line > 0) {
@@ -160,6 +155,16 @@ int v5_main_page_internal_active_preview_line_from_readback(
         }
         return readback->mdi_run_line;
     }
+    if (v5_native_readback_interpreter_idle_known(readback) &&
+        readback->interpreter_idle &&
+        (!v5_native_readback_interpreter_known(readback) || !readback->interpreter_paused)) {
+        return 0;
+    }
+    line_allowed = readback_execution_line_active(readback) ||
+        (runtime_epoch != 0U && page->program_preview_started_loaded_epoch == runtime_epoch) ||
+        (runtime_epoch != 0U &&
+            page->program_preview_highlight_loaded_epoch == runtime_epoch &&
+            page->program_preview_highlight_line > 0);
     if (!line_allowed) {
         return 0;
     }
@@ -199,6 +204,30 @@ void v5_main_page_internal_clear_program_preview_highlight(V5MainPage *page)
     }
     page->program_preview_highlight_line = 0;
     page->program_preview_highlight_loaded_epoch = 0U;
+}
+
+void v5_main_page_internal_sync_program_preview_after_execution(
+    V5MainPage *page,
+    V5CommandKind request_kind)
+{
+    const V5ProgramRuntime *runtime;
+    unsigned int epoch;
+    if (!page || request_kind != V5_COMMAND_START || !page->program_controller) {
+        return;
+    }
+    runtime = v5_program_controller_runtime(page->program_controller);
+    epoch = v5_main_page_internal_program_preview_highlight_epoch(runtime);
+    if (epoch == 0U) {
+        return;
+    }
+    page->program_preview_scroll_start_line = 1U;
+    page->program_preview_highlight_line = 1;
+    page->program_preview_highlight_loaded_epoch = epoch;
+    page->program_preview_started_loaded_epoch = epoch;
+    page->program_preview_touch_active = 0;
+    page->program_preview_touch_accum_y = 0;
+    page->program_preview_dragged = 0;
+    v5_main_page_internal_refresh_program_preview_rows(page, runtime);
 }
 
 int v5_main_page_internal_remembered_program_preview_highlight_line(

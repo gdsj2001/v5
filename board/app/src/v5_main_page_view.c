@@ -277,6 +277,7 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
     if ((refresh_flags & V5_MAIN_PAGE_REFRESH_DYNAMIC) != 0U) {
         page->toolpath_dynamic_refresh_count += 1U;
         v5_coordinate_panel_from_status(status, &panel);
+        v5_coordinate_digits_begin_update(&page->coordinate_digits);
         for (i = 0; i < V5_MAIN_PAGE_AXIS_COUNT; ++i) {
             const char display_axis = v5_main_page_internal_main_page_axis_display_char(page, i);
             if (page->axis_labels[i]) {
@@ -305,6 +306,7 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
                 v5_main_page_internal_set_label_text_if_changed(page->error_labels[i], error_text);
             }
         }
+        v5_coordinate_digits_end_update(&page->coordinate_digits);
         v5_main_page_internal_set_label_text_if_changed(page->spindle_speed_label, panel.spindle_speed_text);
         v5_main_page_internal_set_label_text_if_changed(page->linear_velocity_label, panel.linear_velocity_text);
         v5_main_page_internal_set_label_text_if_changed(page->feed_override_label, panel.feed_override_text);
@@ -328,6 +330,7 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
     if ((refresh_flags & (V5_MAIN_PAGE_REFRESH_DYNAMIC |
                           V5_MAIN_PAGE_REFRESH_POSE |
                           V5_MAIN_PAGE_REFRESH_STRUCTURE)) != 0U) {
+        v5_main_page_internal_coalesce_toolpath_invalidations(page);
         static_toolpath_due =
             structure_refresh_due &&
             ((runtime_has_program && !page->toolpath_program_visible) ||
@@ -462,6 +465,8 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
             sizeof(page->toolpath_program_model_scene));
     }
 
+    v5_main_page_internal_coalesce_toolpath_invalidations(page);
+
     if (static_toolpath_due || program_model_changed || static_pose_changed ||
         (refresh_flags & V5_MAIN_PAGE_REFRESH_SLOW) != 0U) {
         v5_main_page_internal_update_toolpath_state_lines(page, status);
@@ -487,6 +492,10 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
                 v5_main_page_internal_hide_toolpath_unproven_geometry(page);
             }
         }
+        if (structure_refresh_due) {
+            lv_obj_update_layout(page->root);
+        }
+        v5_main_page_internal_coalesce_toolpath_invalidations(page);
     }
 
     if ((refresh_flags & V5_MAIN_PAGE_REFRESH_BUTTONS) != 0U) {

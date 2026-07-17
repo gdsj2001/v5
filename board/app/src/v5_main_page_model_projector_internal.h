@@ -22,12 +22,6 @@ typedef struct V5MainPageModelProjectorOps {
 extern const V5MainPageModelProjectorOps v5_main_page_model_projector_ac_ops;
 extern const V5MainPageModelProjectorOps v5_main_page_model_projector_bc_ops;
 
-void v5_main_page_model_rotate_point_about_axis(
-    double point[V5_STATUS_AXIS_COUNT],
-    const double center[V5_STATUS_AXIS_COUNT],
-    const double axis[3],
-    double angle_deg);
-
 int v5_main_page_model_copy_center(
     const V5NativeReadback *readback,
     unsigned int center_index,

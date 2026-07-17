@@ -239,6 +239,50 @@ int v5_coordinate_digits_create_settings(V5CoordinateDigits *digits, lv_obj_t *p
     return 1;
 }
 
+void v5_coordinate_digits_begin_update(V5CoordinateDigits *digits)
+{
+    if (!digits) {
+        return;
+    }
+    if (digits->update_batch_depth == 0U) {
+        digits->update_dirty_valid = 0U;
+        memset(&digits->update_dirty, 0, sizeof(digits->update_dirty));
+    }
+    ++digits->update_batch_depth;
+}
+
+static void invalidate_value_area(V5CoordinateDigits *digits, const lv_area_t *dirty)
+{
+    if (!digits || !digits->canvas || !dirty) {
+        return;
+    }
+    if (digits->update_batch_depth == 0U) {
+        lv_obj_invalidate_area(digits->canvas, dirty);
+        return;
+    }
+    if (!digits->update_dirty_valid) {
+        digits->update_dirty = *dirty;
+        digits->update_dirty_valid = 1U;
+        return;
+    }
+    if (dirty->x1 < digits->update_dirty.x1) digits->update_dirty.x1 = dirty->x1;
+    if (dirty->y1 < digits->update_dirty.y1) digits->update_dirty.y1 = dirty->y1;
+    if (dirty->x2 > digits->update_dirty.x2) digits->update_dirty.x2 = dirty->x2;
+    if (dirty->y2 > digits->update_dirty.y2) digits->update_dirty.y2 = dirty->y2;
+}
+
+void v5_coordinate_digits_end_update(V5CoordinateDigits *digits)
+{
+    if (!digits || digits->update_batch_depth == 0U) {
+        return;
+    }
+    --digits->update_batch_depth;
+    if (digits->update_batch_depth == 0U && digits->update_dirty_valid) {
+        lv_obj_invalidate_area(digits->canvas, &digits->update_dirty);
+        digits->update_dirty_valid = 0U;
+    }
+}
+
 int v5_coordinate_digits_set_value(V5CoordinateDigits *digits, unsigned int col, unsigned int axis, const char *text, lv_color_t color)
 {
     char text_snapshot[24];
@@ -274,7 +318,7 @@ int v5_coordinate_digits_set_value(V5CoordinateDigits *digits, unsigned int col,
         dirty.y1 = coords.y1 + (lv_coord_t)y;
         dirty.x2 = dirty.x1 + (lv_coord_t)digits->value_width - 1;
         dirty.y2 = dirty.y1 + (lv_coord_t)digits->row_height - 1;
-        lv_obj_invalidate_area(digits->canvas, &dirty);
+        invalidate_value_area(digits, &dirty);
     }
     return 1;
 }

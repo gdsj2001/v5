@@ -194,25 +194,19 @@ int v5_main_page_internal_main_page_handle_program_preview_touch(
     int pressed,
     int *changed);
 
-V5ToolpathScreenPoint v5_main_page_internal_apply_toolpath_view_transform(const V5MainPage *page, V5ToolpathScreenPoint point)
+static V5ToolpathScreenPoint apply_toolpath_view_transform_prepared(
+    const V5MainPage *page,
+    V5ToolpathScreenPoint point,
+    double scale,
+    double s,
+    double c)
 {
     const double cx = (double)V5_TOOLPATH_W * 0.5;
     const double cy = (double)V5_TOOLPATH_H * 0.5;
-    double scale = 1.0;
-    double rad;
-    double s;
-    double c;
     double dx;
     double dy;
     double rx;
     double ry;
-    if (!page) {
-        return point;
-    }
-    scale = page->toolpath_manual_scale > 0.0 ? page->toolpath_manual_scale : 1.0;
-    rad = page->toolpath_manual_rotate_deg * M_PI / 180.0;
-    s = sin(rad);
-    c = cos(rad);
     dx = point.x - cx;
     dy = point.y - cy;
     rx = (dx * c) - (dy * s);
@@ -222,16 +216,62 @@ V5ToolpathScreenPoint v5_main_page_internal_apply_toolpath_view_transform(const 
     return point;
 }
 
+V5ToolpathScreenPoint v5_main_page_internal_apply_toolpath_view_transform(const V5MainPage *page, V5ToolpathScreenPoint point)
+{
+    double scale;
+    double rad;
+    if (!page) {
+        return point;
+    }
+    scale = page->toolpath_manual_scale > 0.0 ? page->toolpath_manual_scale : 1.0;
+    if (fabs(scale - 1.0) <= 1.0e-12 &&
+        fabs(page->toolpath_manual_rotate_deg) <= 1.0e-12 &&
+        fabs(page->toolpath_manual_pan_x) <= 1.0e-12 &&
+        fabs(page->toolpath_manual_pan_y) <= 1.0e-12) {
+        return point;
+    }
+    rad = page->toolpath_manual_rotate_deg * M_PI / 180.0;
+    return apply_toolpath_view_transform_prepared(
+        page, point, scale, sin(rad), cos(rad));
+}
+
+void v5_main_page_internal_apply_toolpath_view_transform_points(
+    const V5MainPage *page,
+    V5ToolpathScreenPoint *points,
+    unsigned int count)
+{
+    double scale;
+    double rad;
+    double s;
+    double c;
+    unsigned int i;
+    if (!page || !points || count == 0U) {
+        return;
+    }
+    scale = page->toolpath_manual_scale > 0.0 ? page->toolpath_manual_scale : 1.0;
+    if (fabs(scale - 1.0) <= 1.0e-12 &&
+        fabs(page->toolpath_manual_rotate_deg) <= 1.0e-12 &&
+        fabs(page->toolpath_manual_pan_x) <= 1.0e-12 &&
+        fabs(page->toolpath_manual_pan_y) <= 1.0e-12) {
+        return;
+    }
+    rad = page->toolpath_manual_rotate_deg * M_PI / 180.0;
+    s = sin(rad);
+    c = cos(rad);
+    for (i = 0U; i < count; ++i) {
+        points[i] = apply_toolpath_view_transform_prepared(
+            page, points[i], scale, s, c);
+    }
+}
+
 void v5_main_page_internal_apply_toolpath_view_transform_to_snapshot(const V5MainPage *page, V5ToolpathDisplaySnapshot *display)
 {
-    unsigned int i;
     if (!page || !display) {
         return;
     }
     if (display->trajectory_valid) {
-        for (i = 0U; i < display->point_count; ++i) {
-            display->trajectory[i] = v5_main_page_internal_apply_toolpath_view_transform(page, display->trajectory[i]);
-        }
+        v5_main_page_internal_apply_toolpath_view_transform_points(
+            page, display->trajectory, display->point_count);
     }
     if (display->mcs_valid) {
         display->mcs_point = v5_main_page_internal_apply_toolpath_view_transform(page, display->mcs_point);

@@ -252,9 +252,17 @@ int v5_main_page_action_prepare(
     } else {
         switch (action) {
         case V5_MAIN_PAGE_ACTION_START:
-            ok = v5_program_runtime_prepare_start(program_runtime, &request);
-            if (ok) {
-                ok = v5_command_start_prepare(program_runtime, &prepared);
+            if (v5_native_readback_interpreter_known(native_readback)) {
+                if (native_readback->interpreter_paused) {
+                    ok = v5_command_resume_prepare(&prepared, &request);
+                } else {
+                    ok = v5_program_runtime_prepare_start(program_runtime, &request);
+                    if (ok) {
+                        ok = v5_command_start_prepare(program_runtime, &prepared);
+                    }
+                }
+            } else {
+                ok = 0;
             }
             break;
         case V5_MAIN_PAGE_ACTION_PAUSE:

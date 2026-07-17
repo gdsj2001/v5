@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import threading
 import time
 from collections import deque
@@ -21,6 +22,38 @@ if TYPE_CHECKING:
 
 
 FRAME_PRODUCER_NICE = 10
+PRIO_PROCESS = getattr(os, "PRIO_PROCESS", 0)
+
+
+def ensure_frame_producer_priority(getpriority_fn=None, setpriority_fn=None) -> int:
+    """Set the current producer thread to the absolute CPU1 niceness policy."""
+
+    if getpriority_fn is None:
+        getpriority_fn = os.getpriority
+    if setpriority_fn is None:
+        setpriority_fn = os.setpriority
+    current = int(getpriority_fn(PRIO_PROCESS, 0))
+    if current != FRAME_PRODUCER_NICE:
+        setpriority_fn(PRIO_PROCESS, 0, FRAME_PRODUCER_NICE)
+        current = int(getpriority_fn(PRIO_PROCESS, 0))
+    if current != FRAME_PRODUCER_NICE:
+        raise OSError(
+            f"frame producer nice readback mismatch: {current} != {FRAME_PRODUCER_NICE}"
+        )
+    return current
+
+
+def apply_frame_producer_priority(state, priority_fn=None) -> bool:
+    if priority_fn is None:
+        if os.name != "posix":
+            return True
+        priority_fn = ensure_frame_producer_priority
+    try:
+        priority_fn()
+    except OSError:
+        state.mark_metric("dirty_payload_shared_producer_priority_errors")
+        return False
+    return True
 
 
 @dataclass(frozen=True)
@@ -34,7 +67,8 @@ class PreparedDirtyFrame:
 @dataclass(frozen=True)
 class PreparedFrameDelivery:
     frame: PreparedDirtyFrame | None = None
-    needs_full: bool = False
+    restart_stream: bool = False
+    reason: str = ""
 
 
 class SharedDirtyPayloadProducer:
@@ -63,7 +97,9 @@ class SharedDirtyPayloadProducer:
         self.generation = 0
         self.cursor_frame_id = int(state.frame_id)
         self.latest_frame_id = self.cursor_frame_id
+        self.latest_reset_reason = ""
         self.last_large_dirty_sent_at = 0.0
+        self.next_error_log_at = 0.0
 
     def _clear_history_locked(self) -> None:
         self.history.clear()
@@ -98,6 +134,7 @@ class SharedDirtyPayloadProducer:
                 self._clear_history_locked()
                 self.cursor_frame_id = initial
                 self.latest_frame_id = initial
+                self.latest_reset_reason = ""
                 self.last_large_dirty_sent_at = 0.0
             self.subscribers += 1
             self.condition.notify_all()
@@ -127,7 +164,10 @@ class SharedDirtyPayloadProducer:
                         return PreparedFrameDelivery(frame=prepared)
                 if requested < self.latest_frame_id:
                     self.state.mark_metric("dirty_payload_shared_history_misses")
-                    return PreparedFrameDelivery(needs_full=True)
+                    return PreparedFrameDelivery(
+                        restart_stream=True,
+                        reason=self.latest_reset_reason or "history_gap",
+                    )
                 remaining = deadline - time.monotonic()
                 if remaining <= 0.0:
                     return None
@@ -173,7 +213,7 @@ class SharedDirtyPayloadProducer:
             and self.cursor_frame_id == cursor_frame_id
         )
 
-    def _reset_after_gap(self, generation: int) -> None:
+    def _reset_after_discontinuity(self, generation: int, reason: str) -> None:
         with self.state.condition:
             current_frame_id = int(self.state.frame_id)
         with self.condition:
@@ -182,35 +222,39 @@ class SharedDirtyPayloadProducer:
             self._clear_history_locked()
             self.cursor_frame_id = max(self.cursor_frame_id, current_frame_id)
             self.latest_frame_id = self.cursor_frame_id
+            self.latest_reset_reason = str(reason or "dirty_discontinuity")
             self.condition.notify_all()
-        self.state.mark_metric("dirty_payload_shared_producer_repairs")
+        self.state.mark_metric("dirty_payload_shared_producer_resets")
 
     def _run(self) -> None:
-        if os.name == "posix":
-            try:
-                if os.nice(FRAME_PRODUCER_NICE) != FRAME_PRODUCER_NICE:
-                    raise OSError("frame producer nice readback below policy")
-            except OSError:
-                self.state.mark_metric("dirty_payload_shared_producer_priority_errors")
-                return
+        apply_frame_producer_priority(self.state)
+        cadence_generation = -1
+        next_emit_at = 0.0
         while not self.stop_requested.is_set():
             active = self._wait_for_active_generation()
             if active is None:
                 return
             generation, cursor_frame_id = active
+            if cadence_generation != generation:
+                cadence_generation = generation
+                next_emit_at = time.monotonic() + self.coalesce_seconds
             try:
                 batch = self.state.wait_dirty_batch_after(
                     cursor_frame_id,
                     self.poll_seconds,
                     self.coalesce_seconds,
+                    coalesce_deadline=next_emit_at,
                 )
                 if batch is None:
                     continue
                 with self.condition:
                     if not self._generation_is_current(generation, cursor_frame_id):
                         continue
-                if batch.get("needs_full"):
-                    self._reset_after_gap(generation)
+                if batch.get("stream_reset"):
+                    self._reset_after_discontinuity(
+                        generation,
+                        str(batch.get("reason") or "dirty_discontinuity"),
+                    )
                     continue
                 self.last_large_dirty_sent_at = self.state.throttle_large_dirty(
                     batch,
@@ -218,7 +262,7 @@ class SharedDirtyPayloadProducer:
                 )
                 prepared = self._build(batch)
                 if prepared is None:
-                    self._reset_after_gap(generation)
+                    self._reset_after_discontinuity(generation, "payload_unavailable")
                     continue
                 with self.condition:
                     if not self._generation_is_current(generation, cursor_frame_id):
@@ -226,13 +270,31 @@ class SharedDirtyPayloadProducer:
                     self._append_history_locked(prepared)
                     self.cursor_frame_id = prepared.frame_id
                     self.latest_frame_id = prepared.frame_id
+                    self.latest_reset_reason = ""
                     self.condition.notify_all()
                 merged = int(batch.get("merged_events", 1))
                 if merged > 1:
                     self.state.mark_metric("dirty_coalesced_events", merged - 1)
                 self.state.mark_metric("dirty_rect_frames")
                 self.state.mark_metric("dirty_payload_shared_builds")
-            except Exception:
+                next_emit_at += self.coalesce_seconds
+                now = time.monotonic()
+                if next_emit_at <= now:
+                    # The build itself may cross the scheduled cadence boundary.
+                    # In that case the next already-pending dirty generation is
+                    # immediately eligible; adding a fresh 33 ms here turns the
+                    # target period into build_time + 33 ms and halves the stream.
+                    next_emit_at = now
+            except Exception as exc:
                 self.state.mark_metric("dirty_payload_shared_producer_errors")
-                self._reset_after_gap(generation)
+                error_now = time.monotonic()
+                if error_now >= self.next_error_log_at:
+                    print(
+                        "v5_remote_ui_shared_payload producer error "
+                        f"type={type(exc).__name__} message={exc}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    self.next_error_log_at = error_now + 5.0
+                self._reset_after_discontinuity(generation, "producer_exception")
                 time.sleep(0.02)

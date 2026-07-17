@@ -1,0 +1,70 @@
+{
+  "generated_at": "2026-07-17T01:40:21.816505+00:00",
+  "nodes": {
+    "v5_main_page_toolpath_program_toolpath_program_dirty_add": {
+      "code_fingerprint": "4a6773c6a33958803fb3ddbaa2c3d2c25e4ca329030cedb74a69ccd8241c9163",
+      "label": "toolpath_program_dirty_add()",
+      "last": "2026-07-17T00:22:33.694857+00:00",
+      "provenance": [
+        {
+          "date": "2026-07-17T00:22:33.694857+00:00",
+          "outcome": "useful",
+          "q": "现在跑 g 代码的时候 CPU1 被拉爆是什么原因，如何满足功能需求改进，是否残留代码造成脏数据"
+        }
+      ],
+      "score": 0.99875244,
+      "source_file": "v5_main_page_toolpath_program.c",
+      "status": "tentative",
+      "uses": 1
+    },
+    "v5_main_page_view_v5_main_page_apply_status_flags": {
+      "code_fingerprint": "22dd4ba0d7a4c286b2177343326ed3a8aba2c17db6f3e0263cf553e28ec278ef",
+      "label": "v5_main_page_apply_status_flags()",
+      "last": "2026-07-17T00:22:33.694857+00:00",
+      "provenance": [
+        {
+          "date": "2026-07-17T00:22:33.694857+00:00",
+          "outcome": "useful",
+          "q": "现在跑 g 代码的时候 CPU1 被拉爆是什么原因，如何满足功能需求改进，是否残留代码造成脏数据"
+        }
+      ],
+      "score": 0.99875244,
+      "source_file": "v5_main_page_view.c",
+      "status": "tentative",
+      "uses": 1
+    },
+    "v5_ui_shell_navigation_shell_sync_current_page_cache_if_dirty": {
+      "code_fingerprint": "90600c101dca63ac4cab214bf5b61dc5071585a132f6721360b55ae2c2948f23",
+      "label": "shell_sync_current_page_cache_if_dirty()",
+      "last": "2026-07-17T00:22:33.694857+00:00",
+      "provenance": [
+        {
+          "date": "2026-07-17T00:22:33.694857+00:00",
+          "outcome": "useful",
+          "q": "现在跑 g 代码的时候 CPU1 被拉爆是什么原因，如何满足功能需求改进，是否残留代码造成脏数据"
+        }
+      ],
+      "score": 0.99875244,
+      "source_file": "v5_ui_shell_navigation.c",
+      "status": "tentative",
+      "uses": 1
+    },
+    "v5_ui_shell_refresh_v5_ui_shell_refresh_once": {
+      "code_fingerprint": "5194b3f312297cc250ed2ba31dd4471711629321d9379af9a7efe96795d0e168",
+      "label": "v5_ui_shell_refresh_once()",
+      "last": "2026-07-17T00:22:33.694857+00:00",
+      "provenance": [
+        {
+          "date": "2026-07-17T00:22:33.694857+00:00",
+          "outcome": "useful",
+          "q": "现在跑 g 代码的时候 CPU1 被拉爆是什么原因，如何满足功能需求改进，是否残留代码造成脏数据"
+        }
+      ],
+      "score": 0.99875244,
+      "source_file": "v5_ui_shell_refresh.c",
+      "status": "tentative",
+      "uses": 1
+    }
+  },
+  "version": 1
+}

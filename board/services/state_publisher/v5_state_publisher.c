@@ -41,7 +41,7 @@ int main(int argc, char **argv)
         } else if (strcmp(argv[i], "--unlink-after") == 0) {
             unlink_after = 1;
         } else if (strcmp(argv[i], "--help") == 0) {
-            printf("usage: v5_state_publisher_smoke [--path PATH] [--frames N|--daemon] [--interval-ms 30] [--unlink-after]\n");
+            printf("usage: v5_state_publisher_smoke [--path PATH] [--frames N|--daemon] [--interval-ms 33] [--unlink-after]\n");
             return 0;
         } else {
             fprintf(stderr, "unknown argument: %s\n", argv[i]);

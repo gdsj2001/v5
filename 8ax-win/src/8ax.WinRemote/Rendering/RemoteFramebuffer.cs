@@ -1,5 +1,6 @@
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Runtime.InteropServices;
 using EightAxis.WinRemote.Input;
 
 namespace EightAxis.WinRemote.Rendering;
@@ -14,6 +15,8 @@ public sealed class RemoteFramebuffer
     public int Height { get; } = PointerMapper.RemoteHeight;
 
     public long FrameId { get; private set; }
+
+    public int BitmapCommitCount { get; private set; }
 
     public WriteableBitmap Bitmap { get; } = new(
         PointerMapper.RemoteWidth,
@@ -41,38 +44,73 @@ public sealed class RemoteFramebuffer
                     bgra32Pixels,
                     Width * 4,
                     0);
+                BitmapCommitCount++;
             }
 
             FrameId = frameId;
         }
     }
 
-    public void ApplyDirtyRect(int x, int y, int width, int height, byte[] bgra32Pixels)
+    public void ApplyDirtyRects(IReadOnlyList<RemoteDirtyRectUpdate> updates, long frameId)
     {
-        ValidateRect(x, y, width, height);
-        int expectedBytes = width * height * 4;
-        if (bgra32Pixels.Length != expectedBytes)
+        ArgumentNullException.ThrowIfNull(updates);
+        foreach (RemoteDirtyRectUpdate update in updates)
         {
-            throw new ArgumentException($"Expected {expectedBytes} BGRA32 rect bytes, got {bgra32Pixels.Length}.", nameof(bgra32Pixels));
+            ValidateRect(update.X, update.Y, update.Width, update.Height);
+            int expectedBytes = checked(update.Width * update.Height * 4);
+            if (update.Bgra32Pixels.Length != expectedBytes)
+            {
+                throw new ArgumentException($"Expected {expectedBytes} BGRA32 rect bytes, got {update.Bgra32Pixels.Length}.", nameof(updates));
+            }
         }
 
         lock (_sync)
         {
-            for (int row = 0; row < height; row++)
+            if (updates.Count == 0)
             {
-                int sourceOffset = row * width * 4;
-                int targetOffset = (((y + row) * Width) + x) * 4;
-                Buffer.BlockCopy(bgra32Pixels, sourceOffset, _bgra32, targetOffset, width * 4);
+                FrameId = frameId;
+                return;
+            }
+
+            foreach (RemoteDirtyRectUpdate update in updates)
+            {
+                for (int row = 0; row < update.Height; row++)
+                {
+                    int sourceOffset = row * update.Width * 4;
+                    int targetOffset = (((update.Y + row) * Width) + update.X) * 4;
+                    Buffer.BlockCopy(update.Bgra32Pixels, sourceOffset, _bgra32, targetOffset, update.Width * 4);
+                }
             }
 
             if (Bitmap.Dispatcher.CheckAccess())
             {
-                Bitmap.WritePixels(
-                    new System.Windows.Int32Rect(x, y, width, height),
-                    bgra32Pixels,
-                    width * 4,
-                    0);
+                Bitmap.Lock();
+                try
+                {
+                    foreach (RemoteDirtyRectUpdate update in updates)
+                    {
+                        int rowBytes = checked(update.Width * 4);
+                        for (int row = 0; row < update.Height; row++)
+                        {
+                            int sourceOffset = row * rowBytes;
+                            IntPtr target = IntPtr.Add(
+                                Bitmap.BackBuffer,
+                                checked(((update.Y + row) * Bitmap.BackBufferStride) + (update.X * 4)));
+                            Marshal.Copy(update.Bgra32Pixels, sourceOffset, target, rowBytes);
+                        }
+
+                        Bitmap.AddDirtyRect(new System.Windows.Int32Rect(update.X, update.Y, update.Width, update.Height));
+                    }
+                }
+                finally
+                {
+                    Bitmap.Unlock();
+                }
+
+                BitmapCommitCount++;
             }
+
+            FrameId = frameId;
         }
     }
 
@@ -100,3 +138,5 @@ public sealed class RemoteFramebuffer
         }
     }
 }
+
+public sealed record RemoteDirtyRectUpdate(int X, int Y, int Width, int Height, byte[] Bgra32Pixels);

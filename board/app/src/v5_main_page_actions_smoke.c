@@ -952,6 +952,9 @@ int main(void)
         v5_native_readback_set_interpreter_paused(&readback, 1);
         v5_native_readback_set_all_homed(&readback, 1);
         v5_main_page_set_native_readback(&page, &readback);
+        if (!expect_command_line(&page, V5_MAIN_PAGE_ACTION_START, "resume", "native_linuxcncrsh", "Set Resume")) {
+            return 121;
+        }
         if (!expect_command_line(&page, V5_MAIN_PAGE_ACTION_PAUSE, "resume", "native_linuxcncrsh", "Set Resume")) {
             return 23;
         }
@@ -1124,6 +1127,7 @@ int main(void)
         v5_native_readback_set_safety_estop(&line_readback, 0);
         v5_native_readback_set_machine_enabled(&line_readback, 1);
         v5_native_readback_set_interpreter_idle(&line_readback, 0);
+        v5_native_readback_set_interpreter_paused(&line_readback, 0);
         v5_native_readback_set_all_homed(&line_readback, 1);
         v5_native_readback_set_current_line(&line_readback, 1);
         v5_main_page_set_native_readback(&page, &line_readback);
@@ -1301,6 +1305,7 @@ int main(void)
         v5_native_readback_set_safety_estop(&stopped_readback, 1);
         v5_native_readback_set_machine_enabled(&stopped_readback, 0);
         v5_native_readback_set_interpreter_idle(&stopped_readback, 1);
+        v5_native_readback_set_interpreter_paused(&stopped_readback, 0);
         v5_native_readback_set_current_line(&stopped_readback, 0);
         v5_native_readback_set_motion_line(&stopped_readback, 0);
         v5_main_page_set_native_readback(&page, &stopped_readback);
@@ -1310,6 +1315,48 @@ int main(void)
             unlink(preview_scroll_path);
             v5_program_controller_destroy(&controller);
             return 60;
+        }
+        v5_native_readback_set_safety_estop(&stopped_readback, 0);
+        v5_native_readback_set_machine_enabled(&stopped_readback, 1);
+        v5_native_readback_set_all_homed(&stopped_readback, 1);
+        v5_native_readback_set_current_line(&stopped_readback, 8);
+        v5_native_readback_set_motion_line(&stopped_readback, 8);
+        v5_main_page_set_native_readback(&page, &stopped_readback);
+        if (!expect_command(&page, V5_MAIN_PAGE_ACTION_START, "start", "native_linuxcncrsh")) {
+            unlink(preview_scroll_path);
+            v5_program_controller_destroy(&controller);
+            return 122;
+        }
+        v5_main_page_internal_sync_program_preview_after_execution(&page, V5_COMMAND_START);
+        if (page.program_preview_scroll_start_line != 1U ||
+            !program_row_text_has(&page, 0U, "001 ") ||
+            !program_row_bg_matches(&page, 0U, 43, 133, 83)) {
+            unlink(preview_scroll_path);
+            v5_program_controller_destroy(&controller);
+            return 123;
+        }
+        v5_native_readback_init(&line_readback);
+        v5_native_readback_set_safety_estop(&line_readback, 0);
+        v5_native_readback_set_machine_enabled(&line_readback, 1);
+        v5_native_readback_set_interpreter_idle(&line_readback, 0);
+        v5_native_readback_set_interpreter_paused(&line_readback, 0);
+        v5_native_readback_set_current_line(&line_readback, 3);
+        v5_main_page_set_native_readback(&page, &line_readback);
+        if (!program_row_text_has(&page, 0U, "003 ") ||
+            !program_row_bg_matches(&page, 0U, 43, 133, 83)) {
+            unlink(preview_scroll_path);
+            v5_program_controller_destroy(&controller);
+            return 124;
+        }
+        v5_native_readback_set_interpreter_paused(&line_readback, 1);
+        v5_native_readback_set_current_line(&line_readback, 8);
+        v5_main_page_set_native_readback(&page, &line_readback);
+        v5_main_page_internal_sync_program_preview_after_execution(&page, V5_COMMAND_RESUME);
+        if (!program_row_text_has(&page, 3U, "008 ") ||
+            !program_row_bg_matches(&page, 3U, 43, 133, 83)) {
+            unlink(preview_scroll_path);
+            v5_program_controller_destroy(&controller);
+            return 125;
         }
         unlink(preview_scroll_path);
     }

@@ -155,19 +155,31 @@ def check_remote_relay_access_control() -> int:
     rc = 0
     source = ROOT / "app" / "src" / "v5_lvgl_remote_display.c"
     relay = ROOT / "services" / "ui" / "v5_remote_ui_relay.py"
+    relay_smoke = (
+        ROOT / "services" / "ui" / "v5_remote_ui_relay_coalesce_smoke.py"
+    )
     relay_modules = (
         relay,
         ROOT / "services" / "ui" / "v5_remote_ui_state.py",
+        ROOT / "services" / "ui" / "v5_remote_ui_dirty_geometry.py",
+        ROOT / "services" / "ui" / "v5_remote_ui_shared_payload.py",
         ROOT / "services" / "ui" / "v5_remote_ui_support.py",
         ROOT / "services" / "ui" / "v5_remote_ui_protocol.py",
         ROOT / "services" / "ui" / "v5_remote_ui_contract.py",
     )
     init = ROOT / "services" / "ui" / "init.d" / "v5-ui-relay"
-    if not source.exists() or not all(path.exists() for path in relay_modules) or not init.exists():
+    if (
+        not source.exists()
+        or not all(path.exists() for path in relay_modules)
+        or not relay_smoke.exists()
+        or not init.exists()
+    ):
         print("REMOTE_RELAY_ACCESS_CONTROL_MISSING_SOURCE", file=sys.stderr)
         return 1
     source_text = source.read_text(encoding="utf-8", errors="ignore")
     relay_text = "\n".join(path.read_text(encoding="utf-8", errors="ignore") for path in relay_modules)
+    relay_source_text = relay.read_text(encoding="utf-8", errors="ignore")
+    relay_smoke_text = relay_smoke.read_text(encoding="utf-8", errors="ignore")
     init_text = init.read_text(encoding="utf-8", errors="ignore")
     required_source = (
         "remote_framebuffer.bgra",
@@ -217,6 +229,13 @@ def check_remote_relay_access_control() -> int:
         "dirty_large_throttle_sleeps",
         "dirty_payload_union_frames",
         "stream_repair_full_frames",
+        "stream_runtime_resets",
+        "stream_runtime_history_gap_disconnects",
+        "stream_runtime_invalid_dirty_disconnects",
+        "previous_bands",
+        '"stream_reset": True',
+        "restart_stream=True",
+        "if delivery.restart_stream:",
         "stream_idle_pings",
         "stream_send_failures",
         "input_active_sessions",
@@ -225,6 +244,37 @@ def check_remote_relay_access_control() -> int:
         if token not in relay_text:
             print(f"REMOTE_RELAY_PYTHON_BOUNDARY_MISSING: canonical relay modules lack {token}", file=sys.stderr)
             rc = 1
+    for token in (
+        "PreparedFrameDelivery(needs_full=True)",
+        "if delivery.needs_full:",
+    ):
+        if token in relay_text:
+            print(
+                f"REMOTE_RELAY_RUNTIME_FULL_REPAIR_SURVIVOR: {token}",
+                file=sys.stderr,
+            )
+            rc = 1
+    try:
+        stream_body = relay_source_text[
+            relay_source_text.index("    def handle_stream(self) -> None:"):
+            relay_source_text.index("    def handle_input(self) -> None:")
+        ]
+    except ValueError:
+        print("REMOTE_RELAY_STREAM_HANDLER_BOUNDARY_MISSING", file=sys.stderr)
+        rc = 1
+    else:
+        if stream_body.count("self.state.full_frame()") != 1:
+            print(
+                "REMOTE_RELAY_INITIAL_FULL_FRAME_COUNT_INVALID",
+                file=sys.stderr,
+            )
+            rc = 1
+        if "if delivery.restart_stream:\n" not in stream_body:
+            print("REMOTE_RELAY_RUNTIME_RESET_MISSING", file=sys.stderr)
+            rc = 1
+    if "cadence_hz < 29.0" not in relay_smoke_text:
+        print("REMOTE_RELAY_30HZ_SMOKE_THRESHOLD_MISSING", file=sys.stderr)
+        rc = 1
     required_init = (
         "V5_UI_REMOTE_BIND",
         "V5_UI_REMOTE_ALLOW_CIDRS",
@@ -283,6 +333,18 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         ROOT / "services" / "state_publisher" / "init.d" / "v5-state-publisher",
         ROOT / "services" / "state_publisher" / "init.d" / "v5-wcs-status-publisher",
     )
+    position_publisher_init = (
+        ROOT / "services" / "state_publisher" / "init.d" /
+        "v5-position-status-publisher"
+    )
+    position_publisher = (
+        ROOT / "services" / "state_publisher" /
+        "v5_position_status_publisher.py"
+    )
+    bus_ini = ROOT / "linuxcnc" / "ini" / "v5_bus.ini"
+    motion_private = ROOT.parent / "linuxcnc" / "src" / "emc" / "motion" / "mot_priv.h"
+    motion_export = ROOT.parent / "linuxcnc" / "src" / "emc" / "motion" / "motion.c"
+    motion_control = ROOT.parent / "linuxcnc" / "src" / "emc" / "motion" / "control.c"
     relay_producer = ROOT / "services" / "ui" / "v5_remote_ui_shared_payload.py"
     deploy_manifest = ROOT / "config" / "deploy" / "v5_runtime_deploy_manifest.tsv"
     runtime_installer = ROOT / "tools" / "deploy" / "install_v5_runtime.sh"
@@ -305,6 +367,12 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         or not relay_producer.exists()
         or not deploy_manifest.exists()
         or not runtime_installer.exists()
+        or not position_publisher_init.exists()
+        or not position_publisher.exists()
+        or not bus_ini.exists()
+        or not motion_private.exists()
+        or not motion_export.exists()
+        or not motion_control.exists()
         or any(not path.exists() for path in publisher_inits)
     ):
         print("CPU_ISOLATION_OWNER_MISSING", file=sys.stderr)
@@ -360,6 +428,30 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
     ):
         if token not in lifecycle_text:
             print(f"LINUXCNC_RTAPI_SCHEDULER_READINESS_MISSING: {token}", file=sys.stderr)
+            rc = 1
+    if "HALUI = halui" in bus_ini.read_text(
+            encoding="utf-8", errors="ignore"):
+        print(
+            "POSITION_DISPLAY_BACKGROUND_HALUI_SURVIVOR: linuxcnc/ini/v5_bus.ini",
+            file=sys.stderr,
+        )
+        rc = 1
+    motion_private_text = motion_private.read_text(encoding="utf-8", errors="ignore")
+    motion_export_text = motion_export.read_text(encoding="utf-8", errors="ignore")
+    motion_control_text = motion_control.read_text(encoding="utf-8", errors="ignore")
+    for token, source_text in (
+        ("hal_float_t *feed_override", motion_private_text),
+        ("hal_float_t *spindle_override", motion_private_text),
+        ('"motion.feed-override"', motion_export_text),
+        ('"spindle.%d.override"', motion_export_text),
+        ("*(emcmot_hal_data->feed_override) = emcmotStatus->feed_scale;", motion_control_text),
+        ("emcmotStatus->spindle_status[spindle_num].scale;", motion_control_text),
+    ):
+        if token not in source_text:
+            print(
+                f"POSITION_DISPLAY_NATIVE_OVERRIDE_PIN_MISSING: {token}",
+                file=sys.stderr,
+            )
             rc = 1
     board_runtime_text = board_runtime_policy.read_text(encoding="utf-8", errors="ignore")
     for token in (
@@ -448,10 +540,50 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
                     file=sys.stderr,
                 )
                 rc = 1
+    position_init_text = position_publisher_init.read_text(
+        encoding="utf-8", errors="ignore")
+    for token in (
+        "POSITION_NICE=0",
+        'taskset -c 1 nice -n "$POSITION_NICE"',
+        'renice -n "$POSITION_NICE"',
+        "V5_POSITION_STATUS_INTERVAL_MS:-33",
+        "motion.feed-override",
+        "spindle.0.override",
+    ):
+        if token not in position_init_text:
+            print(
+                "POSITION_DISPLAY_PUBLISHER_CPU_POLICY_MISSING: "
+                f"{position_publisher_init.relative_to(ROOT)} lacks {token}",
+                file=sys.stderr,
+            )
+            rc = 1
+    position_text = position_publisher.read_text(
+        encoding="utf-8", errors="ignore")
+    for forbidden in ("import linuxcnc", "linuxcnc.stat", "error_channel"):
+        if forbidden in position_text:
+            print(
+                f"POSITION_DISPLAY_FAST_PATH_BLOCKING_SOURCE_PRESENT: {forbidden}",
+                file=sys.stderr,
+            )
+            rc = 1
+    for token in (
+        "StartToStartPollingCadence",
+        "motion.feed-override",
+        "spindle.0.override",
+        "motion.current-vel",
+        "spindle.0.speed-cmd-rps",
+    ):
+        if token not in position_text:
+            print(
+                f"POSITION_DISPLAY_FAST_PATH_CONTRACT_MISSING: {token}",
+                file=sys.stderr,
+            )
+            rc = 1
     relay_producer_text = relay_producer.read_text(encoding="utf-8", errors="ignore")
     for token in (
         "FRAME_PRODUCER_NICE = 10",
-        "os.nice(FRAME_PRODUCER_NICE)",
+        "ensure_frame_producer_priority",
+        "os.setpriority",
         "dirty_payload_shared_producer_priority_errors",
     ):
         if token not in relay_producer_text:
@@ -463,7 +595,11 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
             rc = 1
     manifest_text = deploy_manifest.read_text(encoding="utf-8", errors="ignore")
     required_cpu_policy_rows = (
+        "services/state_publisher/v5_position_status_publisher.py\t/usr/libexec/8ax/v5_position_status_publisher.py\t0755",
+        "services/state_publisher/v5_polling_cadence.py\t/usr/libexec/8ax/v5_polling_cadence.py\t0644",
+        "services/state_publisher/init.d/v5-position-status-publisher\t/etc/init.d/v5-position-status-publisher\t0755",
         "services/ui/v5_remote_ui_shared_payload.py\t/usr/libexec/8ax/v5_remote_ui_shared_payload.py\t0644",
+        "services/ui/v5_remote_ui_dirty_geometry.py\t/usr/libexec/8ax/v5_remote_ui_dirty_geometry.py\t0644",
         "petalinux/project-spec/meta-user/recipes-apps/v5-base-overlay/files/network/v5_net_core.sh\t/usr/local/sbin/v5_net_core.sh\t0644",
         "petalinux/project-spec/meta-user/recipes-apps/v5-base-overlay/files/network/v5_usb_wifi_apply.sh\t/usr/local/sbin/v5_usb_wifi_apply.sh\t0755",
     )
@@ -474,13 +610,17 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
     installer_text = runtime_installer.read_text(encoding="utf-8", errors="ignore")
     required_cpu_policy_installer = (
         "manifest_cpu_policy_only=1",
+        "manifest_cpu_policy_position=0",
         "restart_scope=cpu_policy",
         'LOG=/run/8ax/v5_cpu_policy.log',
         "apply_network_cpu_isolation",
         "/etc/init.d/v5-linuxcnc-command-gate restart-native",
+        "/etc/init.d/v5-position-status-publisher restart",
         "/etc/init.d/v5-wcs-status-publisher restart",
         "/etc/init.d/v5-state-publisher restart",
         "/etc/init.d/v5-ui-relay restart",
+        "stop_position_publisher_before_backend",
+        "restart_position_publisher_after_backend",
     )
     for token in required_cpu_policy_installer:
         if token not in installer_text:

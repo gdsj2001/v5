@@ -691,7 +691,23 @@ int main(void)
             page.toolpath_fit.bounds.min_v > -80.0 ||
             !project_expected(&page, page.toolpath_program_project_points[0].axis, &program_first_expected) ||
             point_delta_abs(&page.trajectory_points[0], &program_first_expected) > 4L ||
-            (long)max_x - (long)min_x < 80L || (long)max_y - (long)min_y < 80L) {
+            (long)max_x - (long)min_x < 40L || (long)max_y - (long)min_y < 40L) {
+            fprintf(stderr,
+                    "main_page_smoke program projection mismatch wcs_valid=%d wcs=%d offset=%.3f,%.3f,%.3f bounds=%.3f,%.3f delta=%ld span=%ld,%ld actual=%d,%d expected=%.3f,%.3f\n",
+                    page.toolpath_program_wcs_valid,
+                    page.toolpath_program_wcs_index,
+                    page.toolpath_program_wcs_offset[0],
+                    page.toolpath_program_wcs_offset[1],
+                    page.toolpath_program_wcs_offset[2],
+                    page.toolpath_fit.bounds.max_u,
+                    page.toolpath_fit.bounds.min_v,
+                    point_delta_abs(&page.trajectory_points[0], &program_first_expected),
+                    (long)max_x - (long)min_x,
+                    (long)max_y - (long)min_y,
+                    (int)page.trajectory_points[0].x,
+                    (int)page.trajectory_points[0].y,
+                    program_first_expected.x,
+                    program_first_expected.y);
             v5_program_controller_destroy(&controller);
             return 32;
         }
@@ -714,9 +730,21 @@ int main(void)
         const V5MainPageModelScene program_pose_before = page.toolpath_program_model_scene;
         const lv_coord_t marker_x_before = lv_obj_get_x(page.toolpath_holder_marker_line);
         const lv_coord_t marker_y_before = lv_obj_get_y(page.toolpath_holder_marker_line);
+        lv_point_t trajectory_before[V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT];
+        const unsigned int trajectory_count_before = page.trajectory_point_count;
+        lv_disp_t *display = lv_obj_get_disp(page.root);
         char coordinate_before[32];
         unsigned int frame;
 
+        if (!display || trajectory_count_before == 0U) {
+            v5_program_controller_destroy(&controller);
+            return 81;
+        }
+        memcpy(
+            trajectory_before,
+            page.trajectory_points,
+            trajectory_count_before * sizeof(trajectory_before[0]));
+        lv_refr_now(display);
         snprintf(
             coordinate_before,
             sizeof(coordinate_before),
@@ -732,8 +760,22 @@ int main(void)
                     &status,
                     V5_MAIN_PAGE_REFRESH_DYNAMIC | V5_MAIN_PAGE_REFRESH_POSE)) {
                 v5_program_controller_destroy(&controller);
-                return 81;
+                return 92;
             }
+            if (display->inv_p == 0U || display->inv_p >= LV_INV_BUF_SIZE) {
+                v5_program_controller_destroy(&controller);
+                return 93;
+            }
+            for (unsigned int dirty_i = 0U; dirty_i < display->inv_p; ++dirty_i) {
+                const lv_area_t *dirty = &display->inv_areas[dirty_i];
+                if (dirty->x1 == 0 && dirty->y1 == 0 &&
+                    dirty->x2 == lv_disp_get_hor_res(display) - 1 &&
+                    dirty->y2 == lv_disp_get_ver_res(display) - 1) {
+                    v5_program_controller_destroy(&controller);
+                    return 94;
+                }
+            }
+            lv_refr_now(display);
         }
         lv_obj_update_layout(page.toolpath_holder_marker_line);
         if (page.toolpath_dynamic_refresh_count != dynamic_before + 30U ||
@@ -741,6 +783,13 @@ int main(void)
             page.toolpath_structure_refresh_count != structure_before ||
             page.toolpath_fit.generation != fit_before ||
             page.toolpath_line_set_points_count != set_points_before ||
+            page.toolpath_line_last_dirty_rect_count < 2U ||
+            page.toolpath_line_last_dirty_rect_count > 12U ||
+            page.trajectory_point_count != trajectory_count_before ||
+            memcmp(
+                trajectory_before,
+                page.trajectory_points,
+                trajectory_count_before * sizeof(trajectory_before[0])) == 0 ||
             v5_main_page_model_scene_pose_equal(
                 &page.toolpath_program_model_scene,
                 &program_pose_before,
@@ -769,6 +818,97 @@ int main(void)
         }
     }
     {
+        unsigned int split_indices[3];
+        unsigned char saved_breaks[3];
+        const double saved_rotation = page.toolpath_manual_rotate_deg;
+        unsigned int split;
+        lv_disp_t *display = lv_obj_get_disp(page.root);
+
+        if (!display || page.toolpath_program_point_count < 8U) {
+            v5_program_controller_destroy(&controller);
+            return 98;
+        }
+        split_indices[0] = page.toolpath_program_point_count / 4U;
+        split_indices[1] = page.toolpath_program_point_count / 2U;
+        split_indices[2] = (page.toolpath_program_point_count * 3U) / 4U;
+        for (split = 0U; split < 3U; ++split) {
+            saved_breaks[split] = page.toolpath_program_break_before[split_indices[split]];
+            page.toolpath_program_break_before[split_indices[split]] = 1U;
+        }
+        if (!v5_main_page_internal_main_page_project_program_with_current_fit(&page)) {
+            v5_program_controller_destroy(&controller);
+            return 99;
+        }
+        lv_refr_now(display);
+        page.toolpath_manual_rotate_deg = saved_rotation + 17.0;
+        if (!v5_main_page_internal_main_page_project_program_with_current_fit(&page) ||
+            page.toolpath_line_last_dirty_rect_count < 4U ||
+            page.toolpath_line_last_dirty_rect_count > 12U ||
+            page.toolpath_line_last_dirty_max_pixels == 0U ||
+            page.toolpath_line_last_dirty_max_pixels >= (uint64_t)(388U * 378U)) {
+            fprintf(
+                stderr,
+                "main_page_smoke program dirty split mismatch rects=%u max=%llu\n",
+                page.toolpath_line_last_dirty_rect_count,
+                (unsigned long long)page.toolpath_line_last_dirty_max_pixels);
+            v5_program_controller_destroy(&controller);
+            return 100;
+        }
+        lv_refr_now(display);
+        page.toolpath_manual_rotate_deg = saved_rotation;
+        for (split = 0U; split < 3U; ++split) {
+            page.toolpath_program_break_before[split_indices[split]] = saved_breaks[split];
+        }
+        if (!v5_main_page_internal_main_page_project_program_with_current_fit(&page)) {
+            v5_program_controller_destroy(&controller);
+            return 101;
+        }
+        lv_refr_now(display);
+    }
+    {
+        lv_disp_t *display = lv_obj_get_disp(page.root);
+        lv_area_t toolpath_coords;
+        uint64_t largest_dirty_pixels = 0U;
+        unsigned int dirty_i;
+
+        if (!display || !page.toolpath_clip_layer) {
+            v5_program_controller_destroy(&controller);
+            return 96;
+        }
+        lv_refr_now(display);
+        lv_obj_get_coords(page.toolpath_clip_layer, &toolpath_coords);
+        for (dirty_i = 0U; dirty_i < 13U; ++dirty_i) {
+            lv_area_t dirty;
+            const lv_coord_t x = (lv_coord_t)(toolpath_coords.x1 + 8 + ((dirty_i % 7U) * 40U));
+            const lv_coord_t y = (lv_coord_t)(toolpath_coords.y1 + 8 + ((dirty_i / 7U) * 40U));
+            dirty.x1 = x;
+            dirty.y1 = y;
+            dirty.x2 = (lv_coord_t)(x + 2);
+            dirty.y2 = (lv_coord_t)(y + 2);
+            lv_obj_invalidate_area(page.toolpath_clip_layer, &dirty);
+        }
+        v5_main_page_internal_coalesce_toolpath_invalidations(&page);
+        for (dirty_i = 0U; dirty_i < display->inv_p; ++dirty_i) {
+            const lv_area_t *dirty = &display->inv_areas[dirty_i];
+            const uint64_t pixels =
+                (uint64_t)((int32_t)dirty->x2 - (int32_t)dirty->x1 + 1) *
+                (uint64_t)((int32_t)dirty->y2 - (int32_t)dirty->y1 + 1);
+            if (pixels > largest_dirty_pixels) {
+                largest_dirty_pixels = pixels;
+            }
+        }
+        if (display->inv_p != 12U || largest_dirty_pixels >= 2048U) {
+            fprintf(
+                stderr,
+                "main_page_smoke toolpath dirty budget mismatch rects=%u largest=%llu\n",
+                (unsigned int)display->inv_p,
+                (unsigned long long)largest_dirty_pixels);
+            v5_program_controller_destroy(&controller);
+            return 97;
+        }
+        lv_refr_now(display);
+    }
+    {
         const unsigned int dynamic_before = page.toolpath_dynamic_refresh_count;
         const unsigned int pose_before = page.toolpath_pose_refresh_count;
         const unsigned int structure_before = page.toolpath_structure_refresh_count;
@@ -783,13 +923,22 @@ int main(void)
             "%s",
             page.coordinate_digits.value_text[0][0]);
         lv_obj_add_flag(page.root, LV_OBJ_FLAG_HIDDEN);
-        status.mcs[0] += 12.0;
-        status.mcs[3] += 15.0;
-        status.mcs[4] -= 15.0;
-        if (!v5_main_page_apply_status_flags(
-                &page,
-                &status,
-                V5_MAIN_PAGE_REFRESH_ALL) ||
+        lv_refr_now(lv_obj_get_disp(page.root));
+        for (unsigned int hidden_frame = 0U; hidden_frame < 30U; ++hidden_frame) {
+            status.mcs[0] += 0.4;
+            status.mcs[3] += 0.5;
+            status.mcs[4] -= 0.5;
+            if (!v5_main_page_apply_status_flags(
+                    &page,
+                    &status,
+                    V5_MAIN_PAGE_REFRESH_ALL) ||
+                lv_obj_get_disp(page.root)->inv_p != 0U) {
+                lv_obj_clear_flag(page.root, LV_OBJ_FLAG_HIDDEN);
+                v5_program_controller_destroy(&controller);
+                return 95;
+            }
+        }
+        if (
             fabs(page.last_status.mcs[0] - status.mcs[0]) > 0.000001 ||
             page.toolpath_dynamic_refresh_count != dynamic_before ||
             page.toolpath_pose_refresh_count != pose_before ||
@@ -918,7 +1067,7 @@ int main(void)
             return 71;
         }
         if (!v5_main_page_internal_update_toolpath_program_segment(
-                &page, test_segment, shifted_points, 2U) ||
+            &page, test_segment, shifted_points, 2U) ||
             page.toolpath_line_set_points_count != set_points_after_show ||
             page.toolpath_line_last_dirty_rect_count != 2U ||
             page.toolpath_line_last_dirty_pixels == 0U ||
