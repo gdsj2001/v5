@@ -143,6 +143,40 @@ static int shell_status_display_equal(const V5UiStatusView *before, const V5UiSt
     return 1;
 }
 
+static int shell_status_pose_equal(const V5UiStatusView *before, const V5UiStatusView *after)
+{
+    uint32_t pose_mask = V5_STATUS_VALID_MCS |
+        V5_STATUS_VALID_CMD_MCS | V5_STATUS_VALID_TRAJECTORY;
+    if (((before->valid_mask ^ after->valid_mask) & pose_mask) != 0U) {
+        return 0;
+    }
+    if ((before->valid_mask & V5_STATUS_VALID_MCS) != 0U &&
+        (!shell_axis_values_equal(before->mcs, after->mcs, 1000.0) ||
+         !shell_axis_values_equal(before->raw_mcs, after->raw_mcs, 1000.0))) {
+        return 0;
+    }
+    if ((before->valid_mask & V5_STATUS_VALID_CMD_MCS) != 0U &&
+        (!shell_axis_values_equal(before->cmd_mcs, after->cmd_mcs, 1000.0) ||
+         !shell_axis_values_equal(before->raw_cmd_mcs, after->raw_cmd_mcs, 1000.0))) {
+        return 0;
+    }
+    return (before->valid_mask & V5_STATUS_VALID_TRAJECTORY) == 0U ||
+        shell_trajectory_equal(before, after);
+}
+
+static int shell_native_pose_equal(
+    const V5NativeReadback *before,
+    const V5NativeReadback *after)
+{
+    return before->rtcp_actual_available == after->rtcp_actual_available &&
+        before->rtcp_enabled == after->rtcp_enabled &&
+        before->motion_model_available == after->motion_model_available &&
+        strcmp(before->motion_model, after->motion_model) == 0 &&
+        before->g53_geometry_available == after->g53_geometry_available &&
+        before->g53_geometry_stale == after->g53_geometry_stale &&
+        before->g53_geometry_epoch == after->g53_geometry_epoch;
+}
+
 static int shell_settings_status_equal(const V5UiStatusView *before, const V5UiStatusView *after)
 {
     int before_valid;
@@ -219,6 +253,8 @@ int v5_ui_shell_refresh_once(void)
     now = shell_monotonic_ns();
     if (shell_refresh_due(now, &g_v5_shell_ui_dynamic_last_refresh_ns, V5_UI_DYNAMIC_REFRESH_NS)) {
         V5UiStatusView before = g_v5_shell_model.status_view;
+        int display_changed;
+        int pose_changed;
         (void)v5_ui_model_refresh_status_from_shm(&g_v5_shell_model, V5_STATUS_SHM_PATH);
         if (shell_refresh_modal_line_readback(0)) {
             flags |= V5_MAIN_PAGE_REFRESH_DYNAMIC;
@@ -227,18 +263,20 @@ int v5_ui_shell_refresh_once(void)
         if (shell_refresh_operator_error(0)) {
             flags |= V5_MAIN_PAGE_REFRESH_DYNAMIC;
         }
-        if (!shell_status_display_equal(&before, &g_v5_shell_model.status_view)) {
-            flags |= V5_MAIN_PAGE_REFRESH_DYNAMIC;
+        display_changed = !shell_status_display_equal(&before, &g_v5_shell_model.status_view);
+        pose_changed = !shell_status_pose_equal(&before, &g_v5_shell_model.status_view);
+        if (display_changed) {
             main_cache_changed = 1;
         }
+        flags |= shell_refresh_classify_changes(
+            display_changed,
+            pose_changed,
+            0,
+            g_v5_shell_current_page == V5_SHELL_PAGE_MAIN);
         if (!shell_settings_status_equal(&before, &g_v5_shell_model.status_view)) {
             settings_cache_changed = 1;
             settings_projection_changed = 1;
         }
-    }
-    if (g_v5_shell_current_page == V5_SHELL_PAGE_MAIN &&
-        (flags & V5_MAIN_PAGE_REFRESH_DYNAMIC) != 0U) {
-        flags |= V5_MAIN_PAGE_REFRESH_POSE;
     }
     if (shell_refresh_due(now, &g_v5_shell_ui_estop_last_refresh_ns, V5_UI_ESTOP_REFRESH_NS)) {
         if (shell_refresh_safety_readback(0)) {
@@ -250,9 +288,15 @@ int v5_ui_shell_refresh_once(void)
         flags |= V5_MAIN_PAGE_REFRESH_BUTTONS;
     }
     if (shell_refresh_due(now, &g_v5_shell_ui_slow_last_refresh_ns, V5_UI_SLOW_REFRESH_NS)) {
+        V5NativeReadback before_native = g_v5_shell_main_page.native_readback;
         if (shell_refresh_native_readback(0)) {
             main_cache_changed = 1;
         }
+        flags |= shell_refresh_classify_changes(
+            0,
+            0,
+            !shell_native_pose_equal(&before_native, &g_v5_shell_main_page.native_readback),
+            g_v5_shell_current_page == V5_SHELL_PAGE_MAIN);
         flags |= V5_MAIN_PAGE_REFRESH_SLOW;
     }
     if (g_v5_shell_current_page == V5_SHELL_PAGE_MAIN &&

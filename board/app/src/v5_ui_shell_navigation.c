@@ -174,38 +174,6 @@ static int shell_capture_current_page(void)
     return 1;
 }
 
-int shell_sync_current_page_cache_if_dirty(void)
-{
-    V5ShellPageKind page = g_v5_shell_current_page;
-    unsigned int slot;
-    lv_disp_t *disp;
-
-    if ((unsigned int)page >= (unsigned int)V5_SHELL_PAGE_COUNT ||
-        !g_v5_shell_page_cache_dirty[page] ||
-        !g_v5_shell_shell_pages[page]) {
-        return 0;
-    }
-    if (!shell_apply_page_resident_model(page)) {
-        return -1;
-    }
-    lv_timer_handler();
-    disp = lv_obj_get_disp(g_v5_shell_shell_pages[page]);
-    if (!disp || disp->rendering_in_progress || disp->inv_p != 0U) {
-        return -1;
-    }
-    if (!g_v5_shell_remote_display_active) {
-        g_v5_shell_page_cache_dirty[page] = 0;
-        return 1;
-    }
-    slot = shell_page_cache_slot(page);
-    if (slot >= V5_REMOTE_DISPLAY_CACHE_PAGE_COUNT ||
-        !v5_lvgl_remote_display_cache_capture(slot)) {
-        return -1;
-    }
-    g_v5_shell_page_cache_dirty[page] = 0;
-    return 1;
-}
-
 static int shell_restore_previous_page_after_failed_prepare(V5ShellPageKind previous_page)
 {
     unsigned int slot = shell_page_cache_slot(previous_page);

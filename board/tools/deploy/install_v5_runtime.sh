@@ -19,6 +19,7 @@ linuxcnc_bundle_enabled=0
 linuxcnc_bundle_count=0
 restart_scope_requested="${V5_RUNTIME_RESTART_SCOPE:-auto}"
 restart_scope=all
+PROC_ROOT=/proc
 
 if [ "${2:-}" = "--apply" ]; then
   apply=1
@@ -253,6 +254,7 @@ manifest_cpu_policy_state=0
 manifest_cpu_policy_wcs=0
 manifest_cpu_policy_position=0
 manifest_position_publisher=0
+manifest_wcs_publisher=0
 manifest_drive_profiles=0
 manifest_row_count=0
 while IFS="$tab" read -r scope_kind scope_source scope_destination scope_mode scope_extra; do
@@ -313,6 +315,18 @@ while IFS="$tab" read -r scope_kind scope_source scope_destination scope_mode sc
     /usr/libexec/8ax/v5_polling_cadence.py|\
     /etc/init.d/v5-position-status-publisher)
       manifest_position_publisher=1
+      ;;
+  esac
+  case "$scope_destination" in
+    /usr/libexec/8ax/v5_wcs_status_publisher.py|\
+    /etc/init.d/v5-wcs-status-publisher)
+      manifest_wcs_publisher=1
+      ;;
+    /usr/libexec/8ax/v5_polling_cadence.py|\
+    /usr/libexec/8ax/v5_machine_status_projection.py|\
+    /usr/libexec/8ax/v5_wcs_status_codec.py)
+      manifest_position_publisher=1
+      manifest_wcs_publisher=1
       ;;
   esac
   case "$scope_destination" in
@@ -522,6 +536,51 @@ restart_position_publisher_after_backend() {
   /etc/init.d/v5-position-status-publisher restart
 }
 
+writer_pid_matches_path() {
+  writer_pid="$1"
+  writer_path="$2"
+  [ -r "$PROC_ROOT/$writer_pid/cmdline" ] || return 1
+  tr '\000' '\n' <"$PROC_ROOT/$writer_pid/cmdline" | grep -Fqx "$writer_path"
+}
+
+stop_writer_before_upgrade() {
+  writer_service="$1"
+  writer_path="$2"
+  writer_init="/etc/init.d/$writer_service"
+  if [ -x "$writer_init" ]; then
+    "$writer_init" stop || return 1
+  fi
+  for writer_cmdline in "$PROC_ROOT"/[0-9]*/cmdline; do
+    [ -r "$writer_cmdline" ] || continue
+    writer_pid=${writer_cmdline#"$PROC_ROOT"/}
+    writer_pid=${writer_pid%/cmdline}
+    writer_pid_matches_path "$writer_pid" "$writer_path" || continue
+    kill "$writer_pid" || return 1
+    writer_wait=0
+    while writer_pid_matches_path "$writer_pid" "$writer_path" && [ "$writer_wait" -lt 20 ]; do
+      writer_wait=$((writer_wait + 1))
+      sleep 0.1
+    done
+    if writer_pid_matches_path "$writer_pid" "$writer_path"; then
+      echo "writer did not stop before upgrade: $writer_path pid=$writer_pid" >&2
+      return 1
+    fi
+  done
+}
+
+stop_affected_writers_before_install() {
+  if [ "$manifest_position_publisher" -eq 1 ]; then
+    stop_writer_before_upgrade \
+      v5-position-status-publisher \
+      /usr/libexec/8ax/v5_position_status_publisher.py
+  fi
+  if [ "$manifest_wcs_publisher" -eq 1 ]; then
+    stop_writer_before_upgrade \
+      v5-wcs-status-publisher \
+      /usr/libexec/8ax/v5_wcs_status_publisher.py
+  fi
+}
+
 if [ "$apply" -eq 1 ] &&
    [ "$restart_scope" = "wcs" ] &&
    [ "$manifest_position_publisher" -eq 1 ]; then
@@ -550,6 +609,9 @@ if [ "$apply" -eq 1 ] && [ "$restart_scope" = "backend" ]; then
   }
   stop_position_publisher_before_backend
   /etc/init.d/v5-linuxcnc-command-gate stop
+fi
+if [ "$apply" -eq 1 ]; then
+  stop_affected_writers_before_install
 fi
 while IFS="$tab" read -r kind source destination mode extra; do
   case "$kind" in
@@ -662,11 +724,6 @@ stop_retired_runtime_path() {
 }
 
 cleanup_retired_runtime_files() {
-  for retired_init in /etc/init.d/v5-rtcp-status-publisher /etc/init.d/v5-g53-geometry-memory-owner; do
-    if [ -x "$retired_init" ]; then
-      "$retired_init" stop
-    fi
-  done
   for retired_path in \
     /usr/libexec/8ax/v5_rtcp_status_publisher.py \
     /usr/libexec/8ax/v5_g53_geometry_memory_owner.py \

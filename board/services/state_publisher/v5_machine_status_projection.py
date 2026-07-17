@@ -474,7 +474,11 @@ def write_position_status(
         publish_cadence=None,
         now_monotonic=None,
         native_positions=None,
-        native_scalars=None) -> bool:
+        native_scalars=None,
+        writer_identity=0) -> bool:
+    writer_identity = int(writer_identity)
+    if writer_identity < 0 or writer_identity > 0xffffffff:
+        raise RuntimeError('native_position_writer_identity_invalid')
     if native_positions is None:
         actual_values = getattr(stat, 'joint_actual_position', ())
         command_values = getattr(stat, 'joint_position', ())
@@ -554,11 +558,11 @@ def write_position_status(
     monotonic_ns = time.monotonic_ns()
     prefix = struct.pack(
         '<IIIIIIQ' + ('d' * (POSITION_AXIS_COUNT * 2)) + ('d' * 4),
-        POSITION_MAGIC, POSITION_STATUS_VERSION, POSITION_BLOCK_STRUCT.size, valid_mask, POSITION_AXIS_COUNT, 0, monotonic_ns,
+        POSITION_MAGIC, POSITION_STATUS_VERSION, POSITION_BLOCK_STRUCT.size, valid_mask, POSITION_AXIS_COUNT, writer_identity, monotonic_ns,
         *(mcs + cmd), spindle_speed, linear_velocity, feed_override, spindle_override)
     crc = crc32_like(prefix)
     payload = POSITION_BLOCK_STRUCT.pack(
-        POSITION_MAGIC, POSITION_STATUS_VERSION, POSITION_BLOCK_STRUCT.size, valid_mask, POSITION_AXIS_COUNT, 0, monotonic_ns,
+        POSITION_MAGIC, POSITION_STATUS_VERSION, POSITION_BLOCK_STRUCT.size, valid_mask, POSITION_AXIS_COUNT, writer_identity, monotonic_ns,
         *(mcs + cmd), spindle_speed, linear_velocity, feed_override, spindle_override, crc, 0)
     atomic_write(path, payload)
     if publish_cadence is not None:
@@ -566,7 +570,9 @@ def write_position_status(
     return True
 
 
-def write_mock_position_status(path: str, mcs_values, cmd_values, modal: str = 'G90 G17 G54') -> None:
+def write_mock_position_status(
+        path: str, mcs_values, cmd_values, modal: str = 'G90 G17 G54',
+        writer_identity=0) -> None:
     class MockStat:
         pass
     stat = MockStat()
@@ -578,4 +584,4 @@ def write_mock_position_status(path: str, mcs_values, cmd_values, modal: str = '
     stat.spindle = ({'speed': 0.0, 'override': 1.0},)
     stat.feedrate = 1.0
     stat.current_vel = 0.0
-    write_position_status(path, stat)
+    write_position_status(path, stat, writer_identity=writer_identity)

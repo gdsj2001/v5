@@ -662,6 +662,15 @@ if(NOT WIN32)
     target_link_libraries(v5_ui_shm_refresh_smoke PRIVATE m)
 endif()
 
+add_executable(v5_ui_shell_refresh_smoke
+    src/v5_ui_shell_refresh_smoke.c
+)
+target_include_directories(v5_ui_shell_refresh_smoke PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${V5_ROOT_DIR}/services/command_gate"
+)
+
 add_executable(v5_command_gate_smoke
     ../services/command_gate/v5_command_gate_smoke.c
 )

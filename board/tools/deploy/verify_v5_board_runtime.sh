@@ -131,12 +131,12 @@ fi
 
 wcs_block_check='import struct,sys; p="/dev/shm/v5_native_wcs_status.bin"; fmt=struct.Struct("<IIIIiIIIIIQ"+("d"*45)+"II"); data=open(p,"rb").read(fmt.size); v=fmt.unpack(data); sys.exit(0 if v[1]==2 and v[3]==1 and v[5]==9 and v[6]==5 and v[7]==1 and v[8] else 1)'
 wcs_block_info='import struct; p="/dev/shm/v5_native_wcs_status.bin"; fmt=struct.Struct("<IIIIiIIIIIQ"+("d"*45)+"II"); v=fmt.unpack(open(p,"rb").read(fmt.size)); print("wcs_block version=%d valid=%d active=%d wcs_count=%d axis_count=%d epoch=%d" % (v[1], v[3], v[4], v[5], v[6], v[8]))'
-if remote "PYTHONPATH=/usr/lib/python3/dist-packages /usr/libexec/8ax/v5_wcs_status_publisher.py --once --path /dev/shm/v5_native_wcs_status.bin --ini /opt/8ax/v5/linuxcnc/ini/v5_bus.ini >/tmp/v5_wcs_status_publisher_once.out 2>&1 && test -s /dev/shm/v5_native_wcs_status.bin && /usr/bin/python3 -c '$wcs_block_check'" >/dev/null 2>&1; then
-  ok "wcs status publisher one-shot publishes resident native WCS memory full table"
-  remote "tail -n 3 /tmp/v5_wcs_status_publisher_once.out 2>/dev/null || true; /usr/bin/python3 -c '$wcs_block_info' 2>/dev/null || true" | sed 's/^/INFO wcs status publisher: /'
+if remote "test -s /dev/shm/v5_native_wcs_status.bin && /usr/bin/python3 -c '$wcs_block_check'" >/dev/null 2>&1; then
+  ok "resident native WCS memory full table is valid"
+  remote "/usr/bin/python3 -c '$wcs_block_info' 2>/dev/null || true" | sed 's/^/INFO wcs status publisher: /'
 else
-  fail_msg "wcs status publisher one-shot publishes resident native WCS memory full table"
-  remote 'tail -n 10 /tmp/v5_wcs_status_publisher_once.out 2>/dev/null || true; ls -l /dev/shm/v5_native_wcs_status.bin /run/8ax_v5_product_ui/v3_native_wcs_status.bin 2>/dev/null || true' | sed 's/^/INFO wcs status publisher: /'
+  fail_msg "resident native WCS memory full table is valid"
+  remote 'ls -l /dev/shm/v5_native_wcs_status.bin /run/8ax_v5_product_ui/v3_native_wcs_status.bin 2>/dev/null || true' | sed 's/^/INFO wcs status publisher: /'
 fi
 
 check_remote_test "retired /run WCS v3 snapshot absent" 'test ! -e /run/8ax_v5_product_ui/v3_native_wcs_status.bin'

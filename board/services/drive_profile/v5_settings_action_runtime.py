@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 import threading
 import time
@@ -152,24 +151,6 @@ def get_last_status() -> Dict[str, Any]:
         return dict(last_status)
 
 
-def reload_position_publisher() -> Dict[str, Any]:
-    script = Path('/etc/init.d/v5-wcs-status-publisher')
-    if not script.exists():
-        return {"ok": False, "code": "POSITION_PUBLISHER_RELOAD_SCRIPT_MISSING", "script": str(script)}
-    try:
-        proc = subprocess.run([str(script), 'restart'], text=True, capture_output=True, timeout=6.0, check=False)
-    except Exception as exc:
-        return {"ok": False, "code": "POSITION_PUBLISHER_RELOAD_EXCEPTION", "detail": "%s: %s" % (type(exc).__name__, exc), "script": str(script)}
-    return {
-        "ok": proc.returncode == 0,
-        "code": "POSITION_PUBLISHER_RELOADED" if proc.returncode == 0 else "POSITION_PUBLISHER_RELOAD_FAILED",
-        "returncode": proc.returncode,
-        "stdout": proc.stdout[-1000:],
-        "stderr": proc.stderr[-1000:],
-        "script": str(script),
-    }
-
-
 def refresh_drive_profile_resident_snapshot() -> Dict[str, Any]:
     try:
         snapshot = v5_drive_profile_resident_snapshot.build_snapshot(v5_drive_profile_resident_snapshot.RUNTIME_PROFILE_ROOT)
@@ -239,13 +220,6 @@ def execute_action(action: str, request: Optional[Dict[str, Any]] = None) -> Dic
             drive_action = str(spec.get("drive_action", ""))
             result = v5_drive_bus_action.run_action(drive_action, drive_timeout_for_action(drive_action), True, request or {"action": action})
             if action == "settings_axis_zero" and bool(result.get("ok")):
-                reload_result = reload_position_publisher()
-                result["position_publisher_reload"] = reload_result
-                if not reload_result.get("ok"):
-                    result["ok"] = False
-                    result["code"] = "SETTINGS_AXIS_ZERO_POSITION_RELOAD_FAILED"
-                    result["message_cn"] = "设0零点已写入，但坐标显示发布器重载失败，当前机械值未证明已刷新。"
-                    result["display_message_cn"] = result["message_cn"]
                 write_json(result_path, result)
         elif spec.get("handler") == "auth":
             result = run_auth_action(action, spec)

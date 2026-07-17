@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 import v5_drive_bus_contract as contract
+import v5_settings_action_runtime as action_runtime
 import v5_settings_restart as restart
 
 
@@ -101,6 +102,77 @@ class SettingsRestartSmoke(unittest.TestCase):
         _script, _log, armed_marker, go_marker = restart.restart_handoff_paths()
         self.assertFalse(armed_marker.exists())
         self.assertFalse(go_marker.exists())
+
+
+class SettingsAxisZeroRuntimeSmoke(unittest.TestCase):
+    def run_axis_zero(self, drive_result: dict) -> tuple[dict, dict | None]:
+        with tempfile.TemporaryDirectory() as temporary:
+            result_path = Path(temporary) / "axis-zero-result.json"
+            spec = dict(action_runtime.ACTIONS["settings_axis_zero"])
+            spec["result_path"] = str(result_path)
+            with mock.patch.dict(
+                action_runtime.ACTIONS,
+                {"settings_axis_zero": spec},
+            ), mock.patch.object(
+                action_runtime.v5_drive_bus_action,
+                "run_action",
+                return_value=dict(drive_result),
+            ):
+                result = action_runtime.execute_action(
+                    "settings_axis_zero", {"axis": "B", "slave_position": 3}
+                )
+            persisted = (
+                json.loads(result_path.read_text(encoding="utf-8"))
+                if result_path.is_file()
+                else None
+            )
+        return result, persisted
+
+    def test_axis_zero_preserves_drive_success_without_restarting_publisher(self) -> None:
+        drive_result = {
+            "ok": True,
+            "code": "SETTINGS_AXIS_ZERO_OK",
+            "axis": "B",
+            "zero_counts": 1234,
+            "raw_zero_position": 1.234,
+            "backend_restart_required": True,
+            "canonical_clean_restart_required": True,
+            "restart_deferred": True,
+            "drive_position": {"readback": {"actual_position_counts": 1234}},
+        }
+        result, persisted = self.run_axis_zero(drive_result)
+        self.assertTrue(result["ok"])
+        self.assertEqual(drive_result["code"], result["code"])
+        self.assertNotIn("position_publisher_reload", result)
+        self.assertIsNotNone(persisted)
+        self.assertEqual(drive_result, persisted)
+        self.assertEqual(1234, persisted["drive_position"]["readback"]["actual_position_counts"])
+
+    def test_axis_zero_preserves_drive_failure_without_restart_override(self) -> None:
+        drive_result = {
+            "ok": False,
+            "code": "SETTINGS_AXIS_ZERO_READBACK_MISMATCH",
+            "axis": "B",
+            "message_cn": "设0源位置读回不一致。",
+            "drive_position": {"readback": {"actual_position_counts": 1200}},
+        }
+        result, persisted = self.run_axis_zero(drive_result)
+        self.assertFalse(result["ok"])
+        self.assertEqual(drive_result["code"], result["code"])
+        self.assertNotIn("position_publisher_reload", result)
+        self.assertIsNone(persisted)
+
+    def test_action_runtime_contains_no_publisher_restart_path(self) -> None:
+        self.assertFalse(hasattr(action_runtime, "reload_position_publisher"))
+        source = Path(action_runtime.__file__).read_text(encoding="utf-8")
+        for token in (
+            "reload_position_publisher",
+            "position_publisher_reload",
+            "SETTINGS_AXIS_ZERO_POSITION_RELOAD_FAILED",
+            "/etc/init.d/v5-wcs-status-publisher",
+            "subprocess.run",
+        ):
+            self.assertNotIn(token, source)
 
 
 class SettingsModelZeroBindingSmoke(unittest.TestCase):

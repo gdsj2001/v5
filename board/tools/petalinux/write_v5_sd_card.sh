@@ -266,6 +266,7 @@ enable_service() {
 }
 
 enable_service v5-linuxcnc-command-gate 91 19
+enable_service v5-position-status-publisher 92 18
 enable_service v5-wcs-status-publisher 92 18
 enable_service v5-state-publisher 93 17
 enable_service v5-ui-relay 94 16

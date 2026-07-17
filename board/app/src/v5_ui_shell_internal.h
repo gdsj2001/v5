@@ -1,6 +1,21 @@
 #ifndef V5_UI_SHELL_INTERNAL_H
 #define V5_UI_SHELL_INTERNAL_H
 
+static inline unsigned int shell_refresh_classify_changes(
+    int display_changed,
+    int pose_changed,
+    int native_pose_changed,
+    int main_page_visible)
+{
+    unsigned int flags = display_changed ? (1U << 0) : 0U;
+    if (main_page_visible && (pose_changed || native_pose_changed)) {
+        flags |= (1U << 4);
+    }
+    return flags;
+}
+
+#ifndef V5_UI_SHELL_REFRESH_CLASSIFIER_ONLY
+
 #include "v5_app.h"
 #include "v5_main_page.h"
 #include "v5_command_gate_ipc.h"
@@ -53,6 +68,7 @@ typedef struct V5ProgramRow {
 #define V5_SAFETY_READBACK_TIMEOUT_MS 80U
 #define V5_OPERATOR_ERROR_READ_MIN_NS 100000000ULL
 #define V5_OPERATOR_ERROR_SHOW_NS 6000000000ULL
+
 
 extern V5MainPage g_v5_shell_main_page;
 extern V5SettingsPage g_v5_shell_settings_page;
@@ -118,7 +134,6 @@ int shell_run_boot_page_cache_queue(
     struct V5UiPageCacheQueueEvidence *evidence,
     unsigned long long *peak_cpu_pct_x100);
 void shell_mark_page_cache_dirty(V5ShellPageKind page);
-int shell_sync_current_page_cache_if_dirty(void);
 int shell_main_page_structure_refresh_pending(void);
 void shell_main_page_structure_refresh_consume(void);
 unsigned int shell_next_loop_sleep_us(void);
@@ -207,4 +222,5 @@ lv_obj_t *shell_create_aux_page(lv_obj_t *screen, const char *title);
 
 lv_obj_t *shell_create_network_page(lv_obj_t *screen);
 
+#endif
 #endif

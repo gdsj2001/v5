@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import sys
+import subprocess
+import time
+import tempfile
 import types
 from pathlib import Path
 
@@ -205,6 +208,18 @@ def check_native_position_and_scalars_are_packed() -> None:
     assert unpacked[12:17] == (0.75, 1.75, 2.75, 3.75, 4.75)
     assert unpacked[17:21] == (120.0, 180.0, 125.0, 80.0)
 
+    payloads.clear()
+    projection.atomic_write = lambda _path, payload: payloads.append(payload)
+    try:
+        projection.write_position_status(
+            '/dev/null/position', None,
+            native_positions=([0.0] * 5, [0.0] * 5),
+            native_scalars=(0.0, 0.0, 100.0, 100.0),
+            writer_identity=0x1234abcd)
+    finally:
+        projection.atomic_write = original_atomic_write
+    assert codec.POSITION_BLOCK_STRUCT.unpack(payloads[0])[5] == 0x1234abcd
+
     try:
         projection.write_position_status(
             '/dev/null/position',
@@ -247,6 +262,177 @@ def check_fast_owner_has_no_linuxcnc_or_error_channel() -> None:
     assert 'halui.' not in text
 
 
+class FakeFlock:
+    LOCK_EX = 1
+    LOCK_NB = 2
+    LOCK_UN = 4
+
+    def __init__(self):
+        self.locked_inodes = set()
+
+    def flock(self, fd, operation):
+        inode = __import__('os').fstat(fd).st_ino
+        if operation == self.LOCK_UN:
+            self.locked_inodes.discard(inode)
+            return
+        if inode in self.locked_inodes:
+            raise OSError('busy')
+        self.locked_inodes.add(inode)
+
+
+def check_lifecycle_lock_owns_singleton_not_pidfile() -> None:
+    original_start_ticks = publisher.process_start_ticks
+    publisher.process_start_ticks = lambda pid=None: '101'
+    try:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            lock_path = str(root / 'position.lock')
+            pidfile = root / 'position.pid'
+            backend = FakeFlock()
+            first = publisher.PositionLifecycleLock(
+                lock_path, str(pidfile), backend).acquire()
+            assert first.writer_identity != 0
+            assert pidfile.read_text(encoding='ascii') == first.record
+
+            for diagnostic in (
+                    None,
+                    '999999 1 7\n',       # stale PID
+                    f'{__import__("os").getpid()} 1 7\n'):  # PID reuse
+                if diagnostic is None:
+                    pidfile.unlink(missing_ok=True)  # PIDFILE missing/orphan
+                else:
+                    pidfile.write_text(diagnostic, encoding='ascii')
+                second = publisher.PositionLifecycleLock(
+                    lock_path, str(pidfile), backend)
+                try:
+                    second.acquire()
+                except RuntimeError as exc:
+                    assert str(exc) == 'position_publisher_already_running'
+                else:
+                    raise AssertionError('concurrent publisher acquired lock')
+                assert first._fd is not None
+
+            pidfile.write_text(first.record, encoding='ascii')
+            first.release()
+            assert not pidfile.exists()
+            recovered = publisher.PositionLifecycleLock(
+                lock_path, str(pidfile), backend).acquire()
+            recovered.release()
+    finally:
+        publisher.process_start_ticks = original_start_ticks
+
+
+def check_posix_kernel_releases_orphaned_flock() -> None:
+    if __import__('os').name != 'posix':
+        return
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        lock_path = root / 'position.lock'
+        pidfile = root / 'position.pid'
+        ready = root / 'ready'
+        child_code = '''
+import sys
+import time
+from pathlib import Path
+import v5_position_status_publisher as publisher
+lock = publisher.PositionLifecycleLock(sys.argv[1], sys.argv[2]).acquire()
+Path(sys.argv[3]).write_text(lock.record, encoding="ascii")
+while True:
+    time.sleep(1)
+'''
+        environment = __import__('os').environ.copy()
+        environment['PYTHONPATH'] = str(Path(__file__).parent)
+        child = subprocess.Popen(
+            [sys.executable, '-c', child_code,
+             str(lock_path), str(pidfile), str(ready)],
+            env=environment)
+        try:
+            deadline = time.monotonic() + 5.0
+            while not ready.exists() and time.monotonic() < deadline:
+                time.sleep(0.02)
+            assert ready.exists() and child.poll() is None
+            for diagnostic in (
+                    None,
+                    '999999 1 7\n',
+                    f'{__import__("os").getpid()} 1 7\n'):
+                if diagnostic is None:
+                    pidfile.unlink(missing_ok=True)
+                else:
+                    pidfile.write_text(diagnostic, encoding='ascii')
+                contender = publisher.PositionLifecycleLock(
+                    str(lock_path), str(pidfile))
+                try:
+                    contender.acquire()
+                except RuntimeError as exc:
+                    assert str(exc) == 'position_publisher_already_running'
+                else:
+                    raise AssertionError('kernel flock allowed second process')
+            child.terminate()
+            child.wait(timeout=5)
+            recovered = publisher.PositionLifecycleLock(
+                str(lock_path), str(pidfile)).acquire()
+            recovered.release()
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait(timeout=5)
+
+
+def check_init_uses_lock_identity_not_pidfile_authority() -> None:
+    init_path = Path(__file__).parent / 'init.d' / 'v5-position-status-publisher'
+    text = init_path.read_text(encoding='utf-8')
+    assert 'owner_is_live()' in text
+    assert 'RUNTIME_MODULE_ROOT=/usr/libexec/8ax' in text
+    assert 'PYTHONPATH=$RUNTIME_MODULE_ROOT:' in text
+    assert 'command -v python3' in text
+    assert 'flock -n "$LOCKFILE" true' in text
+    assert '/proc/$OWNER_PID/stat' in text
+    assert '/proc/$OWNER_PID/cmdline' in text
+    assert 'kill -0' not in text
+    assert 'echo "$!" >"$PIDFILE"' not in text
+    assert 'rm -f "$PIDFILE" "$STATUS_PATH"' not in text
+
+
+def check_init_requires_matching_canonical_writer_identity() -> None:
+    init_path = Path(__file__).parent / 'init.d' / 'v5-position-status-publisher'
+    text = init_path.read_text(encoding='utf-8')
+    start = text.index('position_block_matches_owner() {')
+    end = text.index('\nset_position_affinity() {', start)
+    function = text[start:end]
+    with tempfile.TemporaryDirectory() as directory:
+        status_path = Path(directory) / 'position.bin'
+        projection.write_position_status(
+            str(status_path), None,
+            native_positions=([0.0] * 5, [0.0] * 5),
+            native_scalars=(0.0, 0.0, 100.0, 100.0),
+            writer_identity=17)
+        environment = __import__('os').environ.copy()
+        installed_modules = Path(directory) / 'usr' / 'libexec' / '8ax'
+        installed_modules.mkdir(parents=True)
+        __import__('shutil').copy2(
+            Path(codec.__file__), installed_modules / 'v5_wcs_status_codec.py')
+        environment['PYTHONPATH'] = str(installed_modules)
+        python_shim = Path(directory) / 'python3'
+        python_shim.write_text(
+            f'#!/bin/sh\nexec "{Path(sys.executable).as_posix()}" "$@"\n',
+            encoding='utf-8')
+        python_shim.chmod(0o755)
+        environment['PATH'] = (
+            f'{Path(directory).as_posix()}:' + environment.get('PATH', ''))
+        command = (
+            f'STATUS_PATH="{status_path.as_posix()}"; OWNER_WRITER=18; '
+            f'{function}\nposition_block_matches_owner')
+        mismatch = subprocess.run(
+            ['sh', '-c', command], env=environment, check=False)
+        assert mismatch.returncode != 0
+        command = (
+            f'STATUS_PATH="{status_path.as_posix()}"; OWNER_WRITER=17; '
+            f'{function}\nposition_block_matches_owner')
+        match = subprocess.run(
+            ['sh', '-c', command], env=environment, check=False)
+        assert match.returncode == 0
+
+
 def main() -> int:
     check_hal_position_binding_and_units()
     check_hal_position_reuses_only_source_owned_signal()
@@ -254,6 +440,10 @@ def main() -> int:
     check_native_position_and_scalars_are_packed()
     check_moving_sample_publishes_at_each_30hz_generation()
     check_fast_owner_has_no_linuxcnc_or_error_channel()
+    check_lifecycle_lock_owns_singleton_not_pidfile()
+    check_posix_kernel_releases_orphaned_flock()
+    check_init_uses_lock_identity_not_pidfile_authority()
+    check_init_requires_matching_canonical_writer_identity()
     print('V5_POSITION_STATUS_PUBLISHER_TEST_OK')
     return 0
 

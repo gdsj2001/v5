@@ -6,8 +6,14 @@ import ctypes
 import math
 import os
 import resource
+import secrets
 import sys
 import time
+
+try:
+    import fcntl
+except ModuleNotFoundError:  # Windows focused tests inject a lock backend.
+    fcntl = None
 
 from v5_machine_status_projection import (
     NativeRotaryDisplayProjection,
@@ -23,6 +29,73 @@ from v5_wcs_status_codec import (
 
 HAL_POSITION_COMPONENT = 'v5-position-display'
 POSITION_HEARTBEAT_SECONDS = 0.1
+POSITION_LOCK_PATH = '/run/8ax/v5_position_status_publisher.lock'
+POSITION_PIDFILE_PATH = '/run/8ax/v5_position_status_publisher.pid'
+
+
+def process_start_ticks(pid=None) -> str:
+    pid = os.getpid() if pid is None else int(pid)
+    fields = open(f'/proc/{pid}/stat', encoding='ascii').read().split()
+    if len(fields) < 22:
+        raise RuntimeError('position_publisher_proc_start_unavailable')
+    return fields[21]
+
+
+class PositionLifecycleLock:
+    def __init__(self, lock_path, pidfile_path, lock_module=None):
+        self.lock_path = lock_path
+        self.pidfile_path = pidfile_path
+        self._lock_module = fcntl if lock_module is None else lock_module
+        self._fd = None
+        self.writer_identity = 0
+        self.record = ''
+
+    def acquire(self):
+        if self._lock_module is None:
+            raise RuntimeError('position_publisher_flock_unavailable')
+        os.makedirs(os.path.dirname(self.lock_path), exist_ok=True)
+        fd = os.open(self.lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            self._lock_module.flock(
+                fd, self._lock_module.LOCK_EX | self._lock_module.LOCK_NB)
+        except OSError as exc:
+            os.close(fd)
+            raise RuntimeError('position_publisher_already_running') from exc
+        self._fd = fd
+        self.writer_identity = secrets.randbits(32) or 1
+        self.record = (
+            f'{os.getpid()} {process_start_ticks()} '
+            f'{self.writer_identity}\n')
+        os.ftruncate(fd, 0)
+        os.write(fd, self.record.encode('ascii'))
+        os.fsync(fd)
+        self._write_pidfile()
+        return self
+
+    def _write_pidfile(self):
+        os.makedirs(os.path.dirname(self.pidfile_path), exist_ok=True)
+        temporary = f'{self.pidfile_path}.{os.getpid()}.tmp'
+        with open(temporary, 'w', encoding='ascii') as stream:
+            stream.write(self.record)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, self.pidfile_path)
+
+    def release(self):
+        if self._fd is None:
+            return
+        try:
+            try:
+                with open(self.pidfile_path, encoding='ascii') as stream:
+                    owned = stream.read() == self.record
+            except OSError:
+                owned = False
+            if owned:
+                os.unlink(self.pidfile_path)
+        finally:
+            self._lock_module.flock(self._fd, self._lock_module.LOCK_UN)
+            os.close(self._fd)
+            self._fd = None
 
 
 class PositionPublishCadence:
@@ -233,7 +306,6 @@ def parse_offsets(text: str):
 
 
 def main() -> int:
-    lock_process_memory('v5_position_status_publisher')
     parser = argparse.ArgumentParser(
         description='Publish the 30 Hz native position display projection.')
     parser.add_argument('--path', default=DEFAULT_POSITION_PATH)
@@ -243,59 +315,75 @@ def main() -> int:
     parser.add_argument('--mock-cmd-mcs', default='')
     args = parser.parse_args()
 
-    if args.mock_mcs:
-        write_mock_position_status(
-            args.path,
-            parse_offsets(args.mock_mcs),
-            parse_offsets(args.mock_cmd_mcs))
-        return 0
+    canonical = args.path == DEFAULT_POSITION_PATH
+    lifecycle = PositionLifecycleLock(
+        POSITION_LOCK_PATH if canonical else f'{args.path}.publisher.lock',
+        POSITION_PIDFILE_PATH if canonical else f'{args.path}.publisher.pid')
+    try:
+        lifecycle.acquire()
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr, flush=True)
+        return 3
+    try:
+        lock_process_memory('v5_position_status_publisher')
 
-    hal_access = load_hal()
-    rotary_projection = NativeRotaryDisplayProjection(hal_access)
-    interval = max(args.interval_ms, 20) / 1000.0
-    polling_cadence = StartToStartPollingCadence(interval)
-    publish_cadence = PositionPublishCadence()
-    consecutive_failures = 0
-    next_status_log = 0.0
-    sample_count = 0
-    published_count = 0
-    missed_slots = 0
-    while True:
-        sample_now = time.monotonic()
-        try:
-            published = write_position_status(
+        if args.mock_mcs:
+            write_mock_position_status(
+                args.path,
+                parse_offsets(args.mock_mcs),
+                parse_offsets(args.mock_cmd_mcs),
+                writer_identity=lifecycle.writer_identity)
+            return 0
+
+        hal_access = load_hal()
+        rotary_projection = NativeRotaryDisplayProjection(hal_access)
+        interval = max(args.interval_ms, 20) / 1000.0
+        polling_cadence = StartToStartPollingCadence(interval)
+        publish_cadence = PositionPublishCadence()
+        consecutive_failures = 0
+        next_status_log = 0.0
+        sample_count = 0
+        published_count = 0
+        missed_slots = 0
+        while True:
+            sample_now = time.monotonic()
+            try:
+                published = write_position_status(
                 args.path,
                 None,
                 rotary_projection=rotary_projection,
                 publish_cadence=publish_cadence,
                 now_monotonic=sample_now,
-                native_positions=hal_access.read_joint_positions(),
-                native_scalars=hal_access.read_display_scalars())
-            consecutive_failures = 0
-            sample_count += 1
-            published_count += 1 if published else 0
-            if args.once:
-                return 0
-        except Exception as exc:
-            consecutive_failures += 1
-            if consecutive_failures == 1 or time.monotonic() >= next_status_log:
-                print(
+                    native_positions=hal_access.read_joint_positions(),
+                    native_scalars=hal_access.read_display_scalars(),
+                    writer_identity=lifecycle.writer_identity)
+                consecutive_failures = 0
+                sample_count += 1
+                published_count += 1 if published else 0
+                if args.once:
+                    return 0
+            except Exception as exc:
+                consecutive_failures += 1
+                if consecutive_failures == 1 or time.monotonic() >= next_status_log:
+                    print(
                     'v5_position_status_publisher sample unavailable: '
                     f'{exc}', file=sys.stderr, flush=True)
-            if args.once:
-                return 1
-        now = time.monotonic()
-        if now >= next_status_log:
-            print(
+                if args.once:
+                    return 1
+            now = time.monotonic()
+            if now >= next_status_log:
+                print(
                 'v5_position_status_publisher '
                 f'samples={sample_count} published={published_count} '
                 f'missed_slots={missed_slots}', flush=True)
-            sample_count = 0
-            published_count = 0
-            missed_slots = 0
-            next_status_log = now + 5.0
-        _, missed = polling_cadence.wait_next()
-        missed_slots += missed
+                sample_count = 0
+                published_count = 0
+                missed_slots = 0
+                next_status_log = now + 5.0
+            _, missed = polling_cadence.wait_next()
+            missed_slots += missed
+    finally:
+        lifecycle.release()
 
 
 if __name__ == '__main__':

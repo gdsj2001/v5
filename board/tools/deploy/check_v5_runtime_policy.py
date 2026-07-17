@@ -549,11 +549,33 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         "V5_POSITION_STATUS_INTERVAL_MS:-33",
         "motion.feed-override",
         "spindle.0.override",
+        "LOCKFILE=/run/8ax/v5_position_status_publisher.lock",
+        "owner_is_live()",
+        'flock -n "$LOCKFILE" true',
+        '/proc/$OWNER_PID/stat',
+        '/proc/$OWNER_PID/cmdline',
+        "position_block_matches_owner()",
+        "RUNTIME_MODULE_ROOT=/usr/libexec/8ax",
+        "PYTHONPATH=$RUNTIME_MODULE_ROOT:",
+        "command -v python3",
+        "values[5] != expected_writer",
+        "values[-2] != crc32_like(payload[:-8])",
     ):
         if token not in position_init_text:
             print(
                 "POSITION_DISPLAY_PUBLISHER_CPU_POLICY_MISSING: "
                 f"{position_publisher_init.relative_to(ROOT)} lacks {token}",
+                file=sys.stderr,
+            )
+            rc = 1
+    for retired in (
+        'kill -0',
+        'echo "$!" >"$PIDFILE"',
+        'rm -f "$PIDFILE" "$STATUS_PATH"',
+    ):
+        if retired in position_init_text:
+            print(
+                f"POSITION_PIDFILE_SINGLETON_AUTHORITY_RESURRECTED: {retired}",
                 file=sys.stderr,
             )
             rc = 1
@@ -568,6 +590,8 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
             rc = 1
     for token in (
         "StartToStartPollingCadence",
+        "PositionLifecycleLock",
+        "writer_identity=lifecycle.writer_identity",
         "motion.feed-override",
         "spindle.0.override",
         "motion.current-vel",
@@ -621,11 +645,28 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         "/etc/init.d/v5-ui-relay restart",
         "stop_position_publisher_before_backend",
         "restart_position_publisher_after_backend",
+        "manifest_wcs_publisher=0",
+        "stop_writer_before_upgrade()",
+        "stop_affected_writers_before_install",
+        'PROC_ROOT=/proc',
+        '"$PROC_ROOT"/[0-9]*/cmdline',
+        'grep -Fqx "$writer_path"',
+        "writer did not stop before upgrade",
     )
     for token in required_cpu_policy_installer:
         if token not in installer_text:
             print(f"CPU_POLICY_DEPLOY_SCOPE_MISSING: {token}", file=sys.stderr)
             rc = 1
+    writer_stop = installer_text.find("stop_affected_writers_before_install\nfi")
+    manifest_install = installer_text.find(
+        'while IFS="$tab" read -r kind source destination mode extra; do',
+        writer_stop)
+    if writer_stop < 0 or manifest_install < 0 or writer_stop >= manifest_install:
+        print("RUNTIME_WRITER_STOP_BARRIER_ORDER_INVALID", file=sys.stderr)
+        rc = 1
+    if '"$retired_init" stop' in installer_text:
+        print("RETIRED_WRITER_INIT_EXECUTION_RESURRECTED", file=sys.stderr)
+        rc = 1
     cpu_scope_start = installer_text.find('elif [ "$restart_scope" = "cpu_policy" ]')
     cpu_scope_end = installer_text.find('elif [ "$restart_scope" = "settings" ]', cpu_scope_start)
     cpu_scope = installer_text[cpu_scope_start:cpu_scope_end] if cpu_scope_start >= 0 and cpu_scope_end > cpu_scope_start else ""
@@ -1799,6 +1840,7 @@ def check_product_runtime_closure_policy() -> int:
         "v5-rootfs-file-manifest.tsv",
         '"$product_file_manifest_tool" create',
         '"$product_file_manifest_tool" verify',
+        "enable_service v5-position-status-publisher 92 18",
         "schema=v5-sd-card-build-v2",
     ):
         if token not in write_sd:
