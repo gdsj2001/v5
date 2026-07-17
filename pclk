@@ -1,1 +1,0 @@
-309:	ret = clk_set_rate(dpi->pclk, dpi->vm->pixelclock);
