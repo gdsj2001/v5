@@ -125,9 +125,6 @@ repo_ignored/**/*metrics*.json
 repo_ignored/**/*events*.json
 repo_ignored/**/*summary*.json
 
-# Regenerable Graphify analysis/cache output
-**/graphify-out/
-
 # Accidental root-level command/probe process output
 /-e
 /event
