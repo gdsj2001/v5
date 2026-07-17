@@ -16,6 +16,13 @@ __pycache__/
 .ruff_cache/
 .coverage
 htmlcov/
+*.gcda
+*.gcno
+*.profraw
+*.profdata
+*.dmp
+core
+core.*
 
 # Node/package caches
 node_modules/
@@ -120,3 +127,11 @@ repo_ignored/**/*summary*.json
 
 # Regenerable Graphify analysis/cache output
 **/graphify-out/
+
+# Accidental root-level command/probe process output
+/-e
+/event
+/pclk
+/restart_required
+/rtcp_force_off
+/source_path
