@@ -150,7 +150,7 @@ class NativeRotaryDisplayProjection:
             if not valid_before or not generation_before:
                 self._invalidate_wcheckpoint_cache(axis)
                 continue
-            logical_counts = exact_native_count(
+            logical_counts = finite_float(
                 self._get(f'v5-native-hal-owner.wcp-{axis}-logical-counts'))
             metadata = self._wcheckpoint_metadata.get(axis)
             needs_metadata_reload = (
@@ -164,7 +164,7 @@ class NativeRotaryDisplayProjection:
                 self._invalidate_wcheckpoint_cache(axis)
                 base_counts = exact_native_count(
                     self._get(f'v5-native-hal-owner.wcp-{axis}-base-counts'))
-                runtime_counts = exact_native_count(
+                runtime_counts = finite_float(
                     self._get(f'v5-native-hal-owner.wcp-{axis}-runtime-counts'))
             generation_after = int(self._get(f'v5-native-hal-owner.wcp-{axis}-generation'))
             valid_after = bool(self._get(f'v5-native-hal-owner.wcp-{axis}-valid'))
@@ -174,7 +174,11 @@ class NativeRotaryDisplayProjection:
                 continue
             if needs_metadata_reload:
                 if (base_counts is None or runtime_counts is None or
-                        runtime_counts != logical_counts - base_counts):
+                        not math.isclose(
+                            runtime_counts,
+                            logical_counts - base_counts,
+                            rel_tol=0.0,
+                            abs_tol=1.0e-6)):
                     continue
                 metadata = {
                     'generation': generation_before,

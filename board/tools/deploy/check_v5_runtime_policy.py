@@ -36,6 +36,10 @@ BOARD_OWNER_DEPLOY_ROWS = {
 }
 
 
+def position_status_writer_identity_bound(text: str) -> bool:
+    return "values[5] != int(sys.argv[2])" in text
+
+
 def iter_sources(root: Path):
     for path in root.rglob("*"):
         if path.is_file() and path.suffix in SOURCE_SUFFIXES:
@@ -531,7 +535,6 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         for token in (
             "NON_MICROKERNEL_NICE=10",
             'taskset -c 1 nice -n "$NON_MICROKERNEL_NICE"',
-            'renice -n "$NON_MICROKERNEL_NICE"',
         ):
             if token not in publisher_text:
                 print(
@@ -542,13 +545,13 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
                 rc = 1
     position_init_text = position_publisher_init.read_text(
         encoding="utf-8", errors="ignore")
+    if not position_status_writer_identity_bound(position_init_text):
+        print("POSITION_STATUS_WRITER_IDENTITY_BINDING_MISSING", file=sys.stderr)
+        rc = 1
     for token in (
         "POSITION_NICE=0",
         'taskset -c 1 nice -n "$POSITION_NICE"',
-        'renice -n "$POSITION_NICE"',
         "V5_POSITION_STATUS_INTERVAL_MS:-33",
-        "motion.feed-override",
-        "spindle.0.override",
         "LOCKFILE=/run/8ax/v5_position_status_publisher.lock",
         "owner_is_live()",
         'flock -n "$LOCKFILE" true',
@@ -558,7 +561,6 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         "RUNTIME_MODULE_ROOT=/usr/libexec/8ax",
         "PYTHONPATH=$RUNTIME_MODULE_ROOT:",
         "command -v python3",
-        "values[5] != expected_writer",
         "values[-2] != crc32_like(payload[:-8])",
     ):
         if token not in position_init_text:
@@ -673,6 +675,38 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
     if not cpu_scope or "/etc/init.d/v5-linuxcnc-command-gate restart\n" in cpu_scope:
         print("CPU_POLICY_SCOPE_RESTARTS_LINUXCNC_BACKEND", file=sys.stderr)
         rc = 1
+    barrier_call = "\n    wait_publisher_actual_barrier\n"
+    if installer_text.count(barrier_call) != 3:
+        print("PUBLISHER_ACTUAL_BARRIER_CALL_COUNT_INVALID", file=sys.stderr)
+        rc = 1
+    for token in (
+        "wait_publisher_actual_barrier()",
+        "PUBLISHER_ACTUAL_BARRIER=/usr/libexec/8ax/v5_ui_boot_ready.py",
+        "active_ini=conflict",
+        "publisher actual barrier rejects disabled Pulse runtime mode",
+        '--pre-ui-inputs --expected-ini "$expected_ini" --timeout 120',
+    ):
+        if token not in installer_text:
+            print(f"PUBLISHER_ACTUAL_BARRIER_CONTRACT_MISSING: {token}", file=sys.stderr)
+            rc = 1
+    scope_bounds = (
+        ("backend", 'elif [ "$restart_scope" = "backend" ]',
+         'elif [ "$restart_scope" = "wcs" ]', True),
+        ("wcs", 'elif [ "$restart_scope" = "wcs" ]',
+         'elif [ "$restart_scope" = "cpu_policy" ]', True),
+        ("cpu_policy", 'elif [ "$restart_scope" = "cpu_policy" ]',
+         'elif [ "$restart_scope" = "settings" ]', False),
+        ("settings", 'elif [ "$restart_scope" = "settings" ]',
+         "\n  else\n", True),
+    )
+    for name, start_token, end_token, expected in scope_bounds:
+        start = installer_text.find(start_token)
+        end = installer_text.find(end_token, start)
+        body = installer_text[start:end] if start >= 0 and end > start else ""
+        actual = body.count("wait_publisher_actual_barrier") == 1
+        if not body or actual != expected:
+            print(f"PUBLISHER_ACTUAL_BARRIER_SCOPE_INVALID: {name}", file=sys.stderr)
+            rc = 1
     for token in (
         "drive_faults_clear",
         "wait_drive_faults_clear_for_machine_on",

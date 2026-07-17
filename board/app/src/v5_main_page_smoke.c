@@ -389,7 +389,9 @@ int main(void)
     if (!settings_page.restart_pending ||
         strcmp(lv_label_get_text(settings_page.save_return_label), "保存并重启") != 0 ||
         settings_page.button_actions[V5_SETTINGS_PAGE_BUTTON_COUNT - 1U] !=
-            V5_MAIN_PAGE_ACTION_SETTINGS_SAVE_RETURN) {
+            V5_MAIN_PAGE_ACTION_SETTINGS_SAVE_RETURN ||
+        !lv_obj_has_state(settings_page.buttons[0], LV_STATE_DISABLED) ||
+        lv_obj_has_state(settings_page.save_return_button, LV_STATE_DISABLED)) {
         return 75;
     }
     v5_settings_page_popup_show(

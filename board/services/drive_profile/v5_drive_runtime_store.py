@@ -260,7 +260,10 @@ def write_text_atomic(path: Path, text: str) -> None:
     tmp.replace(path)
 
 
-def update_runtime_ini_raw_limits(axis: str, axis_index: int, old_zero_physical: float, new_zero_physical: float) -> Dict[str, Any]:
+def update_runtime_ini_raw_limits(axis: str, axis_index: int,
+                                  old_zero_physical: float,
+                                  new_zero_physical: float,
+                                  counts_per_unit: float) -> Dict[str, Any]:
     if not contract.RUNTIME_SETTINGS_INI.is_file():
         raise DriveActionError("SETTINGS_AXIS_ZERO_RUNTIME_INI_MISSING", "runtime INI 不存在，不能同次写入 raw limit。", str(contract.RUNTIME_SETTINGS_INI))
     original = contract.RUNTIME_SETTINGS_INI.read_text(encoding="utf-8", errors="ignore")
@@ -270,6 +273,25 @@ def update_runtime_ini_raw_limits(axis: str, axis_index: int, old_zero_physical:
     sections = read_runtime_ini_sections(contract.RUNTIME_SETTINGS_INI)
     joint_index, joint_index_source = runtime_ini_joint_index(sections, axis, axis_index)
     joint_section = "JOINT_%d" % joint_index
+    rotary_axis = str(axis or "").upper() in {"A", "B", "C"}
+    wcheckpoint_counts_per_rev = None
+    if rotary_axis:
+        counts_per_rev = finite_float(counts_per_unit)
+        if counts_per_rev is None or counts_per_rev <= 0.0:
+            raise DriveActionError(
+                "SETTINGS_AXIS_ZERO_ROTARY_SCALE_INVALID",
+                "Rotary active SCALE is invalid; wcheckpoint Crev was not written.",
+                {"axis": axis, "counts_per_unit": counts_per_unit})
+        counts_per_rev *= 360.0
+        rounded_counts_per_rev = int(round(counts_per_rev))
+        if (rounded_counts_per_rev <= 0 or
+                abs(counts_per_rev - rounded_counts_per_rev) > 1.0e-6):
+            raise DriveActionError(
+                "SETTINGS_AXIS_ZERO_ROTARY_CREV_NON_INTEGER",
+                "Rotary SCALE does not produce an integer wcheckpoint Crev.",
+                {"axis": axis, "counts_per_unit": counts_per_unit,
+                 "counts_per_rev": counts_per_rev})
+        wcheckpoint_counts_per_rev = rounded_counts_per_rev
     values: Dict[str, Dict[str, float]] = {axis_section: {}, joint_section: {}}
     for raw in lines:
         stripped = raw.strip()
@@ -303,6 +325,7 @@ def update_runtime_ini_raw_limits(axis: str, axis_index: int, old_zero_physical:
     out = []
     section = ""
     touched: Dict[str, Dict[str, bool]] = {axis_section: {"MIN_LIMIT": False, "MAX_LIMIT": False}, joint_section: {"MIN_LIMIT": False, "MAX_LIMIT": False}}
+    wcheckpoint_write_count = 0
     for raw in lines:
         stripped = raw.strip()
         if stripped.startswith("[") and stripped.endswith("]"):
@@ -320,9 +343,20 @@ def update_runtime_ini_raw_limits(axis: str, axis_index: int, old_zero_physical:
                 out.append("%s = %.10g" % (key.strip(), new_max))
                 touched[section]["MAX_LIMIT"] = True
                 continue
+            if (section == axis_section and rotary_axis and
+                    key_u == "WCHECKPOINT_COUNTS_PER_REV"):
+                out.append("%s = %d" % (key.strip(), wcheckpoint_counts_per_rev))
+                wcheckpoint_write_count += 1
+                continue
         out.append(raw)
     if not any(v["MIN_LIMIT"] and v["MAX_LIMIT"] for v in touched.values()):
         raise DriveActionError("SETTINGS_AXIS_ZERO_RAW_LIMIT_WRITE_MISSING", "runtime INI raw limit 未找到可写字段。", touched)
+    if rotary_axis and wcheckpoint_write_count != 1:
+        raise DriveActionError(
+            "SETTINGS_AXIS_ZERO_WCHECKPOINT_CREV_WRITE_MISSING",
+            "Rotary runtime INI requires one WCHECKPOINT_COUNTS_PER_REV owner.",
+            {"axis_section": axis_section,
+             "write_count": wcheckpoint_write_count})
     write_text_atomic(contract.RUNTIME_SETTINGS_INI, "\n".join(out) + "\n")
     context.runtime_ini_sections_cache.pop(str(contract.RUNTIME_SETTINGS_INI), None)
     old_preload = context.resident_preload_active
@@ -344,6 +378,8 @@ def update_runtime_ini_raw_limits(axis: str, axis_index: int, old_zero_physical:
         "ui_max_limit_distance": max_distance,
         "raw_min_limit": new_min,
         "raw_max_limit": new_max,
+        "wcheckpoint_counts_per_rev": wcheckpoint_counts_per_rev,
+        "wcheckpoint_profile_updated": bool(rotary_axis),
         "updated_sections": [name for name, item in touched.items() if item["MIN_LIMIT"] and item["MAX_LIMIT"]],
     }
 
@@ -354,7 +390,8 @@ def persist_axis_zero_model(runtime: Dict[str, Any],
                             current_counts: float,
                             counts_per_unit: float,
                             scale_evidence: Dict[str, Any],
-                            read_evidence: Dict[str, Any]) -> Dict[str, Any]:
+                            read_evidence: Dict[str, Any],
+                            zero_run_id: str = "") -> Dict[str, Any]:
     try:
         slave_position = int(str(read_evidence.get("position") or "").strip())
     except (TypeError, ValueError):
@@ -386,7 +423,9 @@ def persist_axis_zero_model(runtime: Dict[str, Any],
             old_zero_physical = old_counts / counts_per_unit
         old_zero_source = "existing_zero_model"
     new_zero_physical = current_counts / counts_per_unit
-    raw_limit_save = update_runtime_ini_raw_limits(axis, axis_index, old_zero_physical, new_zero_physical)
+    raw_limit_save = update_runtime_ini_raw_limits(
+        axis, axis_index, old_zero_physical, new_zero_physical,
+        counts_per_unit)
     new_zero_model = dict(zero_model)
     drive_position = dict(new_zero_model.get("drive_position")) if isinstance(new_zero_model.get("drive_position"), dict) else {}
     drive_position.update({
@@ -416,6 +455,9 @@ def persist_axis_zero_model(runtime: Dict[str, Any],
         "scale_chain": drive_only_scale_evidence(scale_evidence),
         "drive_position": drive_position,
     })
+    if zero_run_id:
+        new_zero_model["zero_run_id"] = zero_run_id
+    new_zero_model.pop("zero_generation", None)
     axis_cfg["zero_model"] = new_zero_model
     axis_cfg["zero_model_writeback"] = {
         "ok": True,

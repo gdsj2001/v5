@@ -91,6 +91,16 @@ def check_one_count_displays_one_count_not_clamped() -> None:
     assert math.isclose(mcs[3], 0.001, abs_tol=1.0e-12)
 
 
+def check_fractional_actual_count_is_preserved() -> None:
+    values = projection_values()
+    values['v5-native-hal-owner.wcp-a-logical-counts'] = 251835.5
+    values['v5-native-hal-owner.wcp-a-runtime-counts'] = 251835.5
+    projection = NativeRotaryDisplayProjection(FakeHal(values))
+    mcs, _ = projection.project(
+        [0.0, 0.0, 0.0, 251.8355, -18000.0], None)
+    assert math.isclose(mcs[3], 251.8355, abs_tol=1.0e-12)
+
+
 def check_fractional_command_phase_is_not_truncated() -> None:
     values = projection_values()
     projection = NativeRotaryDisplayProjection(FakeHal(values))
@@ -271,6 +281,7 @@ def check_invalid_sample_drops_cache_before_same_generation_recovers() -> None:
 def main() -> int:
     check_router_zero_relative_counts_are_not_offset_twice()
     check_one_count_displays_one_count_not_clamped()
+    check_fractional_actual_count_is_preserved()
     check_fractional_command_phase_is_not_truncated()
     check_actual_projects_without_command_input()
     check_bc_mapping_projects_b_and_c()

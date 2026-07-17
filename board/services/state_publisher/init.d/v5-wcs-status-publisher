@@ -28,51 +28,26 @@ fi
 HOME=$LINUXCNC_PY_HOME
 export PYTHONPATH HOME
 
-is_running() {
+process_start_ticks() {
+  stat_line=$(cat "/proc/$1/stat" 2>/dev/null) || return 1
+  stat_tail=${stat_line##*) }
+  set -- $stat_tail
+  [ "$#" -ge 20 ] || return 1
+  shift 19
+  case "$1" in *[!0-9]*|'') return 1 ;; esac
+  printf '%s\n' "$1"
+}
+
+read_pid_record() {
   [ -r "$PIDFILE" ] || return 1
-  pid=$(cat "$PIDFILE" 2>/dev/null || true)
-  [ -n "$pid" ] || return 1
-  kill -0 "$pid" 2>/dev/null
+  read -r pid pid_start extra <"$PIDFILE" || return 1
+  [ -n "$pid" ] && [ -n "$pid_start" ] && [ -z "${extra:-}" ]
 }
 
-set_non_microkernel_affinity() {
-  pid="$1"
-  [ -n "$pid" ] || return 0
-  command -v taskset >/dev/null 2>&1 || return 1
-  command -v renice >/dev/null 2>&1 || return 1
-  taskset -a -pc 1 "$pid" >>"$LOGFILE" 2>&1 || return 1
-  for task in /proc/"$pid"/task/[0-9]*; do
-    [ -r "$task/stat" ] || return 1
-    tid=${task##*/}
-    renice -n "$NON_MICROKERNEL_NICE" -p "$tid" >>"$LOGFILE" 2>&1 || return 1
-    [ "$(awk '{print $19}' "$task/stat" 2>/dev/null || true)" = "$NON_MICROKERNEL_NICE" ] || return 1
-  done
+is_running() {
+  read_pid_record || return 1
+  [ "$(process_start_ticks "$pid" 2>/dev/null || true)" = "$pid_start" ]
 }
-
-wait_linuxcnc_stat_ready() {
-  i=0
-  while [ "$i" -lt 90 ]; do
-    if PYTHONPATH="$PYTHONPATH" /usr/bin/python3 - <<'PY' >/tmp/v5_wcs_start_probe.out 2>&1
-import sys, time
-sys.path.insert(0, '/usr/lib/python3/dist-packages')
-import linuxcnc
-stat = linuxcnc.stat()
-for _ in range(20):
-    stat.poll()
-    time.sleep(0.1)
-PY
-    then
-      rm -f /tmp/v5_wcs_start_probe.out
-      return 0
-    fi
-    i=$((i + 1))
-    sleep 0.5
-  done
-  echo "v5_wcs_status_publisher linuxcnc stat not stable before start" >>"$LOGFILE"
-  tail -n 20 /tmp/v5_wcs_start_probe.out >>"$LOGFILE" 2>/dev/null || true
-  return 0
-}
-
 
 start_service() {
   if is_running; then
@@ -83,22 +58,14 @@ start_service() {
   test -r "$OPERATOR_ERROR_MAP"
   command -v taskset >/dev/null 2>&1
   command -v nice >/dev/null 2>&1
-  command -v renice >/dev/null 2>&1
   mkdir -p /run/8ax /run/8ax_v5_product_ui
-  rm -f "$PIDFILE" "$OPERATOR_ERROR_PATH" $RETIRED_STATUS_PATHS
+  rm -f "$PIDFILE" "$STATUS_PATH" "$MODAL_TOOL_PATH" "$OPERATOR_ERROR_PATH" $RETIRED_STATUS_PATHS
   cd "$LINUXCNC_PY_HOME"
-  wait_linuxcnc_stat_ready
   setsid taskset -c 1 nice -n "$NON_MICROKERNEL_NICE" "$DAEMON" --path "$STATUS_PATH" --modal-tool-path "$MODAL_TOOL_PATH" --operator-error-path "$OPERATOR_ERROR_PATH" --operator-error-map "$OPERATOR_ERROR_MAP" --ini "$LINUXCNC_INI" --interval-ms "$INTERVAL_MS" >>"$LOGFILE" 2>&1 &
-  echo "$!" >"$PIDFILE"
-  sleep 1
-  if is_running; then
-    set_non_microkernel_affinity "$(cat "$PIDFILE")"
-    echo "v5_wcs_status_publisher started pid=$(cat "$PIDFILE") path=$STATUS_PATH modal_tool_path=$MODAL_TOOL_PATH operator_error_path=$OPERATOR_ERROR_PATH interval_ms=$INTERVAL_MS home=$LINUXCNC_PY_HOME"
-    return 0
-  fi
-  echo "v5_wcs_status_publisher failed to start" >&2
-  tail -n 20 "$LOGFILE" 2>/dev/null || true
-  return 1
+  pid=$!
+  pid_start=$(process_start_ticks "$pid") || { kill "$pid" 2>/dev/null || true; return 1; }
+  printf '%s %s\n' "$pid" "$pid_start" >"$PIDFILE"
+  echo "v5_wcs_status_publisher spawned pid=$pid start_ticks=$pid_start path=$STATUS_PATH modal_tool_path=$MODAL_TOOL_PATH operator_error_path=$OPERATOR_ERROR_PATH interval_ms=$INTERVAL_MS home=$LINUXCNC_PY_HOME"
 }
 
 stop_service() {
@@ -107,7 +74,7 @@ stop_service() {
     echo "v5_wcs_status_publisher not running"
     return 0
   fi
-  pid=$(cat "$PIDFILE")
+  read_pid_record
   kill "$pid" 2>/dev/null || true
   i=0
   while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 50 ]; do
@@ -135,7 +102,7 @@ case "${1:-}" in
     ;;
   status)
     if is_running; then
-      echo "v5_wcs_status_publisher running pid=$(cat "$PIDFILE")"
+      echo "v5_wcs_status_publisher running pid=$pid start_ticks=$pid_start"
     else
       echo "v5_wcs_status_publisher not running"
       exit 1

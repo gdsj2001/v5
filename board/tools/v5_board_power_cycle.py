@@ -139,8 +139,16 @@ def send_state(ser: serial.Serial, channel: int, state: str) -> dict[str, Any]:
     payload = RELAY_COMMANDS[channel][state]
     ser.write(payload)
     ser.flush()
+    command_monotonic_ns = time.monotonic_ns()
+    command_wall = stamp()
     time.sleep(0.12)
-    return {"channel": channel, "state": state, "payload": hex_bytes(payload), "wall": stamp()}
+    return {
+        "channel": channel,
+        "state": state,
+        "payload": hex_bytes(payload),
+        "wall": command_wall,
+        "host_monotonic_ns": command_monotonic_ns,
+    }
 
 
 def run_command(args: list[str], timeout_s: float) -> dict[str, Any]:
@@ -284,6 +292,11 @@ def main(argv: list[str]) -> int:
                 time.sleep(max(0.0, args.strap_settle_seconds))
             steps.append(send_state(ser, 4, "off"))
         result["relay_steps"] = steps
+        power_on = steps[-1]
+        if power_on.get("channel") != 4 or power_on.get("state") != "off":
+            raise RuntimeError("CH4 power-on command boundary missing")
+        result["power_on_monotonic_s"] = power_on["host_monotonic_ns"] / 1_000_000_000.0
+        result["power_on_wall"] = power_on["wall"]
         time.sleep(max(0.0, args.post_power_on_wait_s))
         if args.skip_net_check:
             result["network"] = {"skipped": True}

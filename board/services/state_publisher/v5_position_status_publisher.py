@@ -3,17 +3,13 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import errno
 import math
 import os
 import resource
 import secrets
 import sys
 import time
-
-try:
-    import fcntl
-except ModuleNotFoundError:  # Windows focused tests inject a lock backend.
-    fcntl = None
 
 from v5_machine_status_projection import (
     NativeRotaryDisplayProjection,
@@ -33,6 +29,26 @@ POSITION_LOCK_PATH = '/run/8ax/v5_position_status_publisher.lock'
 POSITION_PIDFILE_PATH = '/run/8ax/v5_position_status_publisher.pid'
 
 
+class PosixFlock:
+    LOCK_EX = 2
+    LOCK_NB = 4
+    LOCK_UN = 8
+
+    def __init__(self):
+        self._libc = ctypes.CDLL('libc.so.6', use_errno=True)
+        self._libc.flock.argtypes = (ctypes.c_int, ctypes.c_int)
+        self._libc.flock.restype = ctypes.c_int
+
+    def flock(self, fd, operation):
+        while self._libc.flock(int(fd), int(operation)) != 0:
+            error_number = ctypes.get_errno()
+            if error_number != errno.EINTR:
+                raise OSError(error_number, os.strerror(error_number))
+
+
+DEFAULT_LOCK_MODULE = PosixFlock() if os.name == 'posix' else None
+
+
 def process_start_ticks(pid=None) -> str:
     pid = os.getpid() if pid is None else int(pid)
     fields = open(f'/proc/{pid}/stat', encoding='ascii').read().split()
@@ -45,7 +61,8 @@ class PositionLifecycleLock:
     def __init__(self, lock_path, pidfile_path, lock_module=None):
         self.lock_path = lock_path
         self.pidfile_path = pidfile_path
-        self._lock_module = fcntl if lock_module is None else lock_module
+        self._lock_module = (
+            DEFAULT_LOCK_MODULE if lock_module is None else lock_module)
         self._fd = None
         self.writer_identity = 0
         self.record = ''
@@ -60,7 +77,10 @@ class PositionLifecycleLock:
                 fd, self._lock_module.LOCK_EX | self._lock_module.LOCK_NB)
         except OSError as exc:
             os.close(fd)
-            raise RuntimeError('position_publisher_already_running') from exc
+            if exc.errno in (errno.EACCES, errno.EAGAIN, errno.EWOULDBLOCK):
+                raise RuntimeError('position_publisher_already_running') from exc
+            raise RuntimeError(
+                f'position_publisher_flock_failed:{exc.errno}') from exc
         self._fd = fd
         self.writer_identity = secrets.randbits(32) or 1
         self.record = (

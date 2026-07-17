@@ -87,6 +87,7 @@ script	services/drive_profile/v5_drive_profile_resident_snapshot.py	/usr/libexec
 script	services/drive_profile/v5_settings_actiond.py	/usr/libexec/8ax/drive_profile/v5_settings_actiond.py	0755
 module	services/drive_profile/v5_settings_action_contract.py	/usr/libexec/8ax/drive_profile/v5_settings_action_contract.py	0644
 module	services/drive_profile/v5_settings_action_runtime.py	/usr/libexec/8ax/drive_profile/v5_settings_action_runtime.py	0644
+script	services/drive_profile/v5_bus_zero_resident_gate.py	/usr/libexec/8ax/drive_profile/v5_bus_zero_resident_gate.py	0755
 module	services/drive_profile/v5_settings_restart.py	/usr/libexec/8ax/drive_profile/v5_settings_restart.py	0644
 init	services/drive_profile/init.d/v5-settings-actiond	/etc/init.d/v5-settings-actiond	0755
 config	config/drive-profiles/public/driver_profile_map.json	/opt/8ax/v5/config/drive-profiles/public/driver_profile_map.json	0644

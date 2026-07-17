@@ -6,6 +6,7 @@ export LD_BIND_NOW
 ulimit -l unlimited 2>/dev/null || true
 
 RUN_DIR=/run/8ax
+RTAPI_FIFO_PATH=$RUN_DIR/v5_rtapi_fifo
 LINUXCNC_INI=/opt/8ax/v5/linuxcnc/ini/v5_bus.ini
 SETTINGS_RUNTIME=/opt/8ax/phase0_bus5/settings_runtime.json
 SETTINGS_PROJECT_ROOT=/opt/8ax/v5
@@ -389,7 +390,7 @@ stop_gate() {
 }
 
 stop_backend() {
-  su petalinux -c 'TCLLIBPATH=/usr/lib/tcltk /usr/bin/linuxcnc -r -k' >/dev/null 2>&1 || true
+  su petalinux -c "RTAPI_FIFO_PATH='$RTAPI_FIFO_PATH' TCLLIBPATH=/usr/lib/tcltk /usr/bin/linuxcnc -r -k" >/dev/null 2>&1 || true
   halcmd stop >/dev/null 2>&1 || true
   halcmd unload all >/dev/null 2>&1 || true
   killall axis linuxcncsvr milltask io rtapi_app 2>/dev/null || true
@@ -442,7 +443,7 @@ start_backend() {
     /dev/shm/v5_native_g53_geometry_status.bin
   : >"$LINUXCNC_LOG"
   chown petalinux:petalinux "$LINUXCNC_LOG" 2>/dev/null || true
-  su petalinux -c "cd /opt/8ax/v5/linuxcnc/ini && TCLLIBPATH=/usr/lib/tcltk /usr/bin/linuxcnc -r '$LINUXCNC_INI' >>'$LINUXCNC_LOG' 2>&1" &
+  su petalinux -c "cd /opt/8ax/v5/linuxcnc/ini && RTAPI_FIFO_PATH='$RTAPI_FIFO_PATH' TCLLIBPATH=/usr/lib/tcltk /usr/bin/linuxcnc -r '$LINUXCNC_INI' >>'$LINUXCNC_LOG' 2>&1" &
   echo "$!" >"$LINUXCNC_PID"
   if wait_linuxcnc_backend_ready; then
     echo "RTAPI and EtherCAT realtime paths pinned to CPU0; LinuxCNC non-realtime motion paths protected on CPU1"

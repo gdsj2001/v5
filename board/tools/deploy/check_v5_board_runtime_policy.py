@@ -16,6 +16,8 @@ from pathlib import Path
 import json
 import re
 import stat
+import struct
+import subprocess
 import sys
 import time
 import urllib.request
@@ -80,12 +82,62 @@ def cpu_list_contains_zero(text: str) -> bool:
 def read_pid(path: str):
     try:
         text = Path(path).read_text(encoding="ascii").strip()
-        pid = int(text)
+        pid = int(text.split()[0])
         if not Path(f"/proc/{pid}").exists():
             return None
         return pid
     except Exception:
         return None
+
+def position_identity_audit(pid: int, pidfile: str) -> int:
+    try:
+        fields = Path(pidfile).read_text(encoding="ascii").split()
+        if len(fields) != 3 or int(fields[0]) != pid:
+            raise RuntimeError("pidfile_fields")
+        start_ticks = fields[1]
+        writer_identity = int(fields[2])
+        if writer_identity <= 0 or writer_identity > 0xffffffff:
+            raise RuntimeError("writer_identity")
+        proc_fields = Path(f"/proc/{pid}/stat").read_text(encoding="ascii").split()
+        if len(proc_fields) < 22 or proc_fields[21] != start_ticks:
+            raise RuntimeError("start_ticks")
+        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ").decode("utf-8", "replace")
+        if "/usr/libexec/8ax/v5_position_status_publisher.py" not in cmdline:
+            raise RuntimeError("canonical_cmdline")
+        matches = 0
+        for proc in Path("/proc").glob("[0-9]*/cmdline"):
+            try:
+                text = proc.read_bytes().replace(b"\0", b" ").decode("utf-8", "replace")
+            except OSError:
+                continue
+            if "/usr/libexec/8ax/v5_position_status_publisher.py" in text:
+                matches += 1
+        if matches != 1:
+            raise RuntimeError("unique_process")
+        lock_path = "/run/8ax/v5_position_status_publisher.lock"
+        if Path(lock_path).read_text(encoding="ascii").split() != fields:
+            raise RuntimeError("lock_record")
+        if subprocess.run(["flock", "-n", lock_path, "true"], check=False).returncode == 0:
+            raise RuntimeError("lock_not_held")
+        payload = Path("/dev/shm/v5_native_position_status.bin").read_bytes()
+        if len(payload) != 152:
+            raise RuntimeError("block_size")
+        magic, version, size, _mask, _axes, block_writer = struct.unpack_from("<6I", payload, 0)
+        if (magic, version, size, block_writer) != (0x56504F53, 2, 152, writer_identity):
+            raise RuntimeError("block_identity")
+        expected_crc = struct.unpack_from("<I", payload, 144)[0]
+        actual_crc = 2166136261
+        for byte in payload[:144]:
+            actual_crc = ((actual_crc ^ byte) * 16777619) & 0xffffffff
+        if actual_crc != expected_crc:
+            raise RuntimeError("block_crc")
+    except Exception as exc:
+        print(f"FAIL v5_position_status_publisher: identity={exc}", file=sys.stderr)
+        return 1
+    print(
+        f"OK_POSITION_IDENTITY pid={pid} start_ticks={start_ticks} "
+        f"writer_identity={writer_identity}")
+    return 0
 
 def read_status_field(pid: int, field: str) -> str:
     for line in Path(f"/proc/{pid}/status").read_text(encoding="utf-8", errors="ignore").splitlines():
@@ -546,6 +598,8 @@ for name, pidfile in PIDFILES.items():
         print(f"SKIP {name}: no live pid")
         continue
     service_rc = 0
+    if name == "v5_position_status_publisher":
+        service_rc |= position_identity_audit(pid, pidfile)
     cpus = read_status_field(pid, "Cpus_allowed_list")
     policy = read_sched_policy(pid)
     task_records = read_task_records(pid)

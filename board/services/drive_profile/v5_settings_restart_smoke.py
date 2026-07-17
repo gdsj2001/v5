@@ -34,8 +34,21 @@ class SettingsRestartSmoke(unittest.TestCase):
             },
         )
         self.zero_binding_patch.start()
+        self.rotary_profile_patch = mock.patch.object(
+            restart,
+            "sync_active_rotary_wcheckpoint_profiles_for_restart",
+            return_value={
+                "ok": True,
+                "code": "SETTINGS_ROTARY_PROFILE_CREV_VALID",
+                "active_axes": ["A", "C"],
+                "counts_per_rev": {"A": 360000, "C": 360000},
+                "changed": False,
+            },
+        )
+        self.rotary_profile_patch.start()
 
     def tearDown(self) -> None:
+        self.rotary_profile_patch.stop()
         self.zero_binding_patch.stop()
         self.run_dir_patch.stop()
         self.temporary.cleanup()
@@ -187,7 +200,11 @@ class SettingsModelZeroBindingSmoke(unittest.TestCase):
         ]
         for patcher in self.path_patches:
             patcher.start()
-        self.write(contract.RUNTIME_SETTINGS_INI, "[TRAJ]\nCOORDINATES = X Y Z B C\n")
+        self.write(
+            contract.RUNTIME_SETTINGS_INI,
+            "[TRAJ]\nCOORDINATES = X Y Z B C\n"
+            "[AXIS_B]\nWCHECKPOINT_COUNTS_PER_REV = 360000\n"
+            "[AXIS_C]\nWCHECKPOINT_COUNTS_PER_REV = 360000\n")
         self.write(contract.SELF_PARAMETER_TABLE, "A\tslave\tNAT\nB\tslave\t3\n")
 
     def tearDown(self) -> None:
@@ -226,7 +243,14 @@ class SettingsModelZeroBindingSmoke(unittest.TestCase):
                     "raw_zero_position": 0.005,
                     "slave_position": 3,
                 }},
-                {"axis": "B", "zero_model": b_zero},
+                {"axis": "B", "zero_model": b_zero,
+                 "rotary_load_counts_per_rev": 360000},
+                {"axis": "C", "zero_model": {
+                    "zero_counts": 0.0,
+                    "counts_per_unit": 10000.0,
+                    "raw_zero_position": 0.0,
+                    "slave_position": 4,
+                }, "rotary_load_counts_per_rev": 3600000},
             ],
         }
 
@@ -248,6 +272,12 @@ class SettingsModelZeroBindingSmoke(unittest.TestCase):
             "settings_save_and_restart", {"owner": "settings_restart"})
         self.assertTrue(handoff["ok"])
         self.assertTrue(Path(handoff["handoff_script"]).is_file())
+        self.assertTrue(handoff["rotary_wcheckpoint_profile"]["changed"])
+        ini_text = contract.RUNTIME_SETTINGS_INI.read_text(encoding="utf-8")
+        self.assertIn(
+            "[AXIS_B]\nWCHECKPOINT_COUNTS_PER_REV = 360000", ini_text)
+        self.assertIn(
+            "[AXIS_C]\nWCHECKPOINT_COUNTS_PER_REV = 3600000", ini_text)
 
     def test_conflicting_b_evidence_rejects_restart(self) -> None:
         self.write(contract.SETTINGS_RUNTIME_JSON, json.dumps(self.runtime(self.b_zero("4"))))

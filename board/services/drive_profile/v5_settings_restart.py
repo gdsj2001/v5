@@ -14,6 +14,7 @@ from v5_drive_runtime_store import (
     find_runtime_axis,
     persist_settings_runtime,
     validate_settings_runtime_drive_only,
+    write_text_atomic,
 )
 from v5_settings_action_contract import CANONICAL_CLEAN_RESTART_SERVICES, RUN_DIR
 
@@ -75,6 +76,105 @@ def _active_rotary_axis_from_runtime_ini() -> str:
             {"coordinates": coordinates, "active_rotary_axes": active},
         )
     return active[0]
+
+
+def _active_rotary_axes_from_runtime_ini() -> tuple[str, str]:
+    primary = _active_rotary_axis_from_runtime_ini()
+    text = drive_contract.RUNTIME_SETTINGS_INI.read_text(
+        encoding="utf-8", errors="ignore")
+    coordinates = ""
+    section = ""
+    for raw in text.splitlines():
+        line = raw.split("#", 1)[0].split(";", 1)[0].strip()
+        if line.startswith("[") and line.endswith("]"):
+            section = line[1:-1].strip().upper()
+        elif section == "TRAJ" and "=" in line:
+            key, value = line.split("=", 1)
+            if key.strip().upper() == "COORDINATES":
+                coordinates = value.upper()
+                break
+    if "C" not in re.findall(r"[XYZABCUVW]", coordinates):
+        raise DriveActionError(
+            "SETTINGS_MODEL_ROTARY_C_AXIS_MISSING",
+            "Active AC/BC model does not contain the C rotary axis.",
+            {"coordinates": coordinates})
+    return primary, "C"
+
+
+def sync_active_rotary_wcheckpoint_profiles_for_restart() -> Dict[str, Any]:
+    active_axes = _active_rotary_axes_from_runtime_ini()
+    try:
+        runtime = json.loads(
+            drive_contract.SETTINGS_RUNTIME_JSON.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise DriveActionError(
+            "SETTINGS_ROTARY_PROFILE_RUNTIME_OWNER_INVALID",
+            "Drive runtime owner is unavailable; rotary Crev was not committed.",
+            "%s: %s" % (type(exc).__name__, exc))
+    validate_settings_runtime_drive_only(runtime)
+    expected: Dict[str, int] = {}
+    for axis in active_axes:
+        axis_cfg, _axis_index = find_runtime_axis(runtime, axis)
+        zero = axis_cfg.get("zero_model")
+        counts_per_unit = finite_float(
+            zero.get("counts_per_unit")) if isinstance(zero, dict) else None
+        runtime_counts_per_rev = finite_float(
+            axis_cfg.get("rotary_load_counts_per_rev"))
+        if counts_per_unit is None or counts_per_unit <= 0.0:
+            raise DriveActionError(
+                "SETTINGS_ROTARY_PROFILE_SCALE_MISSING",
+                "Rotary zero owner does not contain a valid counts_per_unit.",
+                {"axis": axis, "counts_per_unit": counts_per_unit})
+        counts_per_rev_float = counts_per_unit * 360.0
+        counts_per_rev = int(round(counts_per_rev_float))
+        if (counts_per_rev <= 0 or
+                abs(counts_per_rev_float - counts_per_rev) > 1.0e-6 or
+                runtime_counts_per_rev is None or
+                abs(runtime_counts_per_rev - counts_per_rev) > 1.0e-6):
+            raise DriveActionError(
+                "SETTINGS_ROTARY_PROFILE_CREV_MISMATCH",
+                "Rotary runtime Crev does not match active SCALE.",
+                {"axis": axis, "counts_per_unit": counts_per_unit,
+                 "expected_counts_per_rev": counts_per_rev,
+                 "runtime_counts_per_rev": runtime_counts_per_rev})
+        expected[axis] = counts_per_rev
+
+    original = drive_contract.RUNTIME_SETTINGS_INI.read_text(
+        encoding="utf-8", errors="ignore")
+    section = ""
+    writes = {axis: 0 for axis in active_axes}
+    out = []
+    for raw in original.splitlines():
+        stripped = raw.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            section = stripped[1:-1].strip().upper()
+            out.append(raw)
+            continue
+        axis = section[5:] if section.startswith("AXIS_") else ""
+        if axis in expected and "=" in raw:
+            key, _value = raw.split("=", 1)
+            if key.strip().upper() == "WCHECKPOINT_COUNTS_PER_REV":
+                out.append("%s = %d" % (key.strip(), expected[axis]))
+                writes[axis] += 1
+                continue
+        out.append(raw)
+    if any(count != 1 for count in writes.values()):
+        raise DriveActionError(
+            "SETTINGS_ROTARY_PROFILE_CREV_OWNER_MISSING",
+            "Each active rotary axis requires one wcheckpoint Crev owner.",
+            {"writes": writes})
+    updated = "\n".join(out) + "\n"
+    changed = updated != original
+    if changed:
+        write_text_atomic(drive_contract.RUNTIME_SETTINGS_INI, updated)
+    return {
+        "ok": True,
+        "code": "SETTINGS_ROTARY_PROFILE_CREV_SYNCED" if changed else
+                "SETTINGS_ROTARY_PROFILE_CREV_VALID",
+        "active_axes": list(active_axes),
+        "counts_per_rev": expected,
+        "changed": changed,
+    }
 
 
 def _fresh_rotary_slave_bindings() -> Dict[str, str]:
@@ -225,6 +325,7 @@ def ensure_active_rotary_zero_binding_for_restart() -> Dict[str, Any]:
 def run_restart_handoff(action: str, spec: Dict[str, Any]) -> Dict[str, Any]:
     try:
         rotary_zero_binding = ensure_active_rotary_zero_binding_for_restart()
+        rotary_profile = sync_active_rotary_wcheckpoint_profiles_for_restart()
     except DriveActionError as exc:
         return {
             "schema": "v5.settings_action_result.v1",
@@ -324,7 +425,9 @@ fi
         "code": "SETTINGS_SAVE_RESTART_BOARD_REBOOT_SCHEDULED",
         "message_cn": "系统级重启已准备，等待关闭结果窗后提交。",
         "display_message_cn": "系统级重启已准备，点击关闭后黑屏并重启。",
-        "write_executed": bool(rotary_zero_binding.get("changed")),
+        "write_executed": bool(
+            rotary_zero_binding.get("changed") or
+            rotary_profile.get("changed")),
         "motion_executed": False,
         "restart_executed": False,
         "restart_commit_required": True,
@@ -333,6 +436,7 @@ fi
         "handoff_log": str(handoff_log),
         "stop_order": CANONICAL_CLEAN_RESTART_SERVICES,
         "rotary_zero_binding": rotary_zero_binding,
+        "rotary_wcheckpoint_profile": rotary_profile,
     }
     return result
 

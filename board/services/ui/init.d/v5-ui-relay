@@ -22,6 +22,7 @@ REMOTE_HEIGHT=${V5_UI_REMOTE_HEIGHT:-600}
 PROJECT_ROOT=${V5_PROJECT_ROOT:-/opt/8ax/v5}
 UI_INPUT_NICE=0
 PROFILE_SNAPSHOT=/usr/libexec/8ax/drive_profile/v5_drive_profile_resident_snapshot.py
+BUS_ZERO_GATE=/usr/libexec/8ax/drive_profile/v5_bus_zero_resident_gate.py
 LINUXCNCRSH_PORT=${V5_LINUXCNCRSH_PORT:-5007}
 LINUXCNCRSH_CONNECTPW=${V5_LINUXCNCRSH_CONNECTPW:-EMC}
 
@@ -113,79 +114,53 @@ build_profile_snapshot() {
 }
 
 wait_boot_inputs_ready() {
-  python3 - "$PROJECT_ROOT" >>"$LOGFILE" 2>&1 <<'PY'
-import binascii
-import json
-import os
-import struct
-import sys
-import time
-
-project_root = sys.argv[1]
-snapshot_path = "/run/8ax_v5_drive/drive_profile_resident_snapshot.json"
-shm_path = "/dev/shm/v3_status_shm"
-required_files = [
-    os.path.join(project_root, "config/settings/self_parameter_table.tsv"),
-    os.path.join(project_root, "config/settings/drive_parameter_table.tsv"),
-]
-
-def check_params():
-    for path in required_files:
-        if not os.path.isfile(path) or os.path.getsize(path) <= 0:
-            return False, "missing_parameter_owner:%s" % path
-    if not os.path.isfile(snapshot_path) or os.path.getsize(snapshot_path) <= 0:
-        return False, "missing_drive_profile_snapshot"
-    try:
-        with open(snapshot_path, "r", encoding="utf-8") as fp:
-            payload = json.load(fp)
-    except Exception as exc:
-        return False, "bad_drive_profile_snapshot:%s" % type(exc).__name__
-    if not payload.get("loaded") or int(payload.get("profile_count") or 0) <= 0 or int(payload.get("map_file_count") or 0) <= 0:
-        return False, "drive_profile_snapshot_not_loaded"
-    return True, "params_ready"
-
-def check_shm():
-    try:
-        with open(shm_path, "rb") as fp:
-            data = fp.read(808)
-    except OSError:
-        return False, "missing_status_shm"
-    if len(data) != 808:
-        return False, "short_status_shm"
-    magic, version, header, total, payload, flags, seq, crc = struct.unpack_from("<8I", data, 0)
-    if (magic, version, header, total, payload) != (0x56355348, 1, 808, 808, 776):
-        return False, "bad_status_shm_header"
-    if not seq or seq & 1:
-        return False, "status_shm_seq_not_even"
-    calc = binascii.crc32(data[:24])
-    calc = binascii.crc32(data[32:808], calc) & 0xFFFFFFFF
-    if crc != calc:
-        return False, "status_shm_crc_mismatch"
-    epoch = struct.unpack_from("<Q", data, 32)[0]
-    valid_mask, typed_flags = struct.unpack_from("<2I", data, 40)
-    now = time.monotonic_ns()
-    if not epoch or epoch > now or now - epoch > 500_000_000:
-        return False, "status_shm_not_fresh"
-    if (valid_mask & 0x3) != 0x3:
-        return False, "status_shm_coordinates_not_ready"
-    if typed_flags & 0x4:
-        return False, "status_shm_unavailable"
-    return True, "shm_ready"
-
-deadline = time.monotonic() + 120.0
-last_reason = "not_checked"
-while time.monotonic() < deadline:
-    ok, reason = check_params()
-    if ok:
-        ok, reason = check_shm()
-    if ok:
-        print("v5_ui_relay boot inputs ready: %s" % reason)
-        raise SystemExit(0)
-    last_reason = reason
-    time.sleep(0.1)
-print("v5_ui_relay boot inputs not ready: %s" % last_reason, file=sys.stderr)
-raise SystemExit(1)
-PY
+  active_ini=""
+  record_active_ini() {
+    found="$1"
+    case "$active_ini:$found" in
+      :bus) active_ini=bus ;;
+      :pulse) active_ini=pulse ;;
+      bus:bus|pulse:pulse) ;;
+      *) active_ini=conflict ;;
+    esac
+  }
+  for cmdline in /proc/[0-9]*/cmdline; do
+    [ -r "$cmdline" ] || continue
+    cmd=$(tr '\000' ' ' <"$cmdline" 2>/dev/null || true)
+    case "$cmd" in
+      *milltask*"$PROJECT_ROOT/linuxcnc/ini/v5_bus.ini"*) record_active_ini bus ;;
+      *milltask*"$PROJECT_ROOT/linuxcnc/ini/v5_pulse.ini"*) record_active_ini pulse ;;
+    esac
+  done
+  case "$active_ini" in
+    bus)
+      expected_ini="$PROJECT_ROOT/linuxcnc/ini/v5_bus.ini"
+      halcmd show comp 2>/dev/null | grep -Eq '(^|[[:space:]])(lcec|cia402)([[:space:]]|$)' || return 1
+      "$BUS_ZERO_GATE" \
+        --runtime /opt/8ax/phase0_bus5/settings_runtime.json \
+        --ini "$PROJECT_ROOT/linuxcnc/ini/v5_bus.ini" >>"$LOGFILE" 2>&1 || {
+          echo "v5_ui_relay BUS zero resident gate failed" >&2
+          return 1
+        }
+      ;;
+    pulse)
+      echo "v5_ui_relay rejects disabled Pulse runtime mode" >&2
+      return 1
+      ;;
+    conflict)
+      echo "v5_ui_relay conflicting BUS/Pulse motion owners" >&2
+      return 1
+      ;;
+    *)
+      echo "v5_ui_relay active motion driver mode unavailable" >&2
+      return 1
+      ;;
+  esac
+  test -s "$PROJECT_ROOT/config/settings/self_parameter_table.tsv"
+  test -s "$PROJECT_ROOT/config/settings/drive_parameter_table.tsv"
+  python3 -c 'import json,sys; p=json.load(open(sys.argv[1])); raise SystemExit(0 if p.get("loaded") and int(p.get("profile_count") or 0)>0 and int(p.get("map_file_count") or 0)>0 else 1)' \
+    /run/8ax_v5_drive/drive_profile_resident_snapshot.json
+  "$BOOT_READY" --pre-ui-inputs --expected-ini "$expected_ini" --timeout 120 >>"$LOGFILE" 2>&1
 }
 
 stale_service_pids() {

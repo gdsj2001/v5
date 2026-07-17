@@ -37,65 +37,18 @@ position_block_matches_owner() {
   command -v python3 >/dev/null 2>&1 || return 1
   python3 - "$STATUS_PATH" "$OWNER_WRITER" <<'PY'
 import sys
-from v5_wcs_status_codec import (
-    POSITION_BLOCK_STRUCT,
-    POSITION_MAGIC,
-    POSITION_STATUS_VERSION,
-    crc32_like,
-)
+from v5_wcs_status_codec import POSITION_BLOCK_STRUCT, POSITION_MAGIC, POSITION_STATUS_VERSION, crc32_like
 
 try:
     payload = open(sys.argv[1], 'rb').read()
     values = POSITION_BLOCK_STRUCT.unpack(payload)
-    expected_writer = int(sys.argv[2])
 except (OSError, ValueError, TypeError):
     raise SystemExit(1)
-if (
-    len(payload) != POSITION_BLOCK_STRUCT.size
-    or values[0] != POSITION_MAGIC
-    or values[1] != POSITION_STATUS_VERSION
-    or values[2] != POSITION_BLOCK_STRUCT.size
-    or values[5] != expected_writer
-    or values[-2] != crc32_like(payload[:-8])
-):
+if (len(payload) != POSITION_BLOCK_STRUCT.size or values[0] != POSITION_MAGIC or
+        values[1] != POSITION_STATUS_VERSION or values[2] != POSITION_BLOCK_STRUCT.size or
+        values[5] != int(sys.argv[2]) or values[-2] != crc32_like(payload[:-8])):
     raise SystemExit(1)
 PY
-}
-
-set_position_affinity() {
-  pid="$1"
-  command -v taskset >/dev/null 2>&1 || return 1
-  command -v renice >/dev/null 2>&1 || return 1
-  taskset -a -pc 1 "$pid" >>"$LOGFILE" 2>&1 || return 1
-  for task in /proc/"$pid"/task/[0-9]*; do
-    [ -r "$task/stat" ] || return 1
-    tid=${task##*/}
-    renice -n "$POSITION_NICE" -p "$tid" >>"$LOGFILE" 2>&1 || return 1
-    [ "$(awk '{print $19}' "$task/stat" 2>/dev/null || true)" = "$POSITION_NICE" ] || return 1
-  done
-}
-
-wait_position_hal_ready() {
-  i=0
-  while [ "$i" -lt 120 ]; do
-    ready=1
-    for pin in \
-      joint.0.pos-fb \
-      joint.4.pos-cmd \
-      motion.current-vel \
-      spindle.0.speed-cmd-rps \
-      motion.feed-override \
-      spindle.0.override \
-      v5-native-hal-owner.home-table-mapping-valid
-    do
-      halcmd getp "$pin" >/dev/null 2>&1 || ready=0
-    done
-    [ "$ready" -eq 0 ] || return 0
-    i=$((i + 1))
-    sleep 0.1
-  done
-  echo "v5_position_status_publisher HAL display sources not ready" >>"$LOGFILE"
-  return 1
 }
 
 start_service() {
@@ -104,37 +57,16 @@ start_service() {
     return 0
   fi
   test -x "$DAEMON"
-  command -v halcmd >/dev/null 2>&1
   command -v taskset >/dev/null 2>&1
   command -v nice >/dev/null 2>&1
-  command -v renice >/dev/null 2>&1
   command -v flock >/dev/null 2>&1
   mkdir -p /run/8ax
   rm -f "$PIDFILE"
-  wait_position_hal_ready
+  rm -f "$STATUS_PATH"
   setsid taskset -c 1 nice -n "$POSITION_NICE" "$DAEMON" \
     --path "$STATUS_PATH" --interval-ms "$INTERVAL_MS" >>"$LOGFILE" 2>&1 &
   launched_pid=$!
-  i=0
-  while [ "$i" -lt 20 ] && ! owner_is_live; do
-    i=$((i + 1))
-    sleep 0.1
-  done
-  if owner_is_live && [ "$OWNER_PID" = "$launched_pid" ]; then
-    i=0
-    while [ "$i" -lt 20 ] && ! position_block_matches_owner; do
-      i=$((i + 1))
-      sleep 0.1
-    done
-  fi
-  if owner_is_live && [ "$OWNER_PID" = "$launched_pid" ] && position_block_matches_owner; then
-    set_position_affinity "$OWNER_PID"
-    echo "v5_position_status_publisher started pid=$OWNER_PID writer=$OWNER_WRITER path=$STATUS_PATH interval_ms=$INTERVAL_MS"
-    return 0
-  fi
-  echo "v5_position_status_publisher failed to start" >&2
-  tail -n 20 "$LOGFILE" 2>/dev/null || true
-  return 1
+  echo "v5_position_status_publisher spawned pid=$launched_pid path=$STATUS_PATH interval_ms=$INTERVAL_MS"
 }
 
 stop_service() {
@@ -172,7 +104,7 @@ case "${1:-}" in
     start_service
     ;;
   status)
-    if owner_is_live; then
+    if owner_is_live && position_block_matches_owner; then
       echo "v5_position_status_publisher running pid=$OWNER_PID writer=$OWNER_WRITER"
     else
       echo "v5_position_status_publisher not running"

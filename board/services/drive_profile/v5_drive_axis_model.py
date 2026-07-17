@@ -304,7 +304,16 @@ def axis_zero_verify(request: Dict[str, Any], timeout_s: float) -> Dict[str, Any
     unit = axis_unit(axis)
     counts_per_unit, scale_evidence = derive_counts_per_unit(axis, axis_cfg, axis_index)
     captured_counts, capture_read_evidence = current_axis_counts(axis_cfg, timeout_s, slave_position)
-    disk_write = persist_axis_zero_model(runtime, axis, axis_index, captured_counts, counts_per_unit, scale_evidence, capture_read_evidence)
+    zero_run_id = str(request.get("_run_id") or request.get("run_id") or "")
+    if not zero_run_id:
+        raise DriveActionError(
+            "SETTINGS_AXIS_ZERO_RUN_ID_REQUIRED",
+            "BUS 设零缺少本次 action run_id，拒绝保存不可关联的零点。",
+            {"axis": axis})
+    disk_write = persist_axis_zero_model(
+        runtime, axis, axis_index, captured_counts, counts_per_unit,
+        scale_evidence, capture_read_evidence,
+        zero_run_id=zero_run_id)
     axis_after, _ = find_runtime_axis(runtime, axis)
     saved_counts = saved_zero_counts(axis_after)
     current_counts, verify_read_evidence = current_axis_counts(axis_after, timeout_s, slave_position)
@@ -346,6 +355,7 @@ def axis_zero_verify(request: Dict[str, Any], timeout_s: float) -> Dict[str, Any
         "delta_physical": delta,
         "settings_runtime_json": str(contract.SETTINGS_RUNTIME_JSON),
         "zero_model_source": (axis_after.get("zero_model") or {}).get("source", "") if isinstance(axis_after.get("zero_model"), dict) else "",
+        "zero_run_id": zero_run_id,
         "scale_chain": scale_evidence,
         "disk_write": disk_write,
         "capture_encoder_read": capture_read_evidence,

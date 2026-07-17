@@ -41,7 +41,9 @@ void v5_settings_page_mark_restart_pending(V5SettingsPage *page)
     for (i = 0U; i < page->button_count; ++i) {
         if (page->buttons[i] == page->save_return_button) {
             page->button_actions[i] = V5_MAIN_PAGE_ACTION_SETTINGS_SAVE_RETURN;
-            break;
+            lv_obj_clear_state(page->buttons[i], LV_STATE_DISABLED);
+        } else if (page->buttons[i]) {
+            lv_obj_add_state(page->buttons[i], LV_STATE_DISABLED);
         }
     }
     if (page->save_return_button) {

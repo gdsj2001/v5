@@ -41,6 +41,7 @@ def main() -> int:
             "[AXIS_A]\nPITCH = 360\nMOTOR_REV = 50\nLOAD_REV = 1\n"
             "[JOINT_3]\nSCALE = 1000\n"
             "[AXIS_C]\nPITCH = 360\nMOTOR_REV = 10\nLOAD_REV = 1\nMIN_LIMIT = -100\nMAX_LIMIT = 100\n"
+            "WCHECKPOINT_COUNTS_PER_REV = 360000\n"
             "[JOINT_4]\nSCALE = 1000\nMIN_LIMIT = -100\nMAX_LIMIT = 100\n",
         )
         write_text(contract.SELF_PARAMETER_TABLE, "X\tslave\t0\n")
@@ -95,7 +96,8 @@ def main() -> int:
         if counts_per_unit != 1000 or scale_evidence.get("joint_section") != "JOINT_4":
             print("C count-domain scale used settings row index", counts_per_unit, scale_evidence)
             return 10
-        raw_limits = runtime_store.update_runtime_ini_raw_limits("C", 5, 0.0, 10.0)
+        raw_limits = runtime_store.update_runtime_ini_raw_limits(
+            "C", 5, 0.0, 10.0, 1000.0)
         if raw_limits.get("joint_section") != "JOINT_4" or "JOINT_5" in raw_limits.get("updated_sections", []):
             print("C raw limit update used settings row index", raw_limits)
             return 11

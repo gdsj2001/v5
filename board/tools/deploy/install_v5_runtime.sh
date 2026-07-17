@@ -20,6 +20,8 @@ linuxcnc_bundle_count=0
 restart_scope_requested="${V5_RUNTIME_RESTART_SCOPE:-auto}"
 restart_scope=all
 PROC_ROOT=/proc
+RUNTIME_PROJECT_ROOT=/opt/8ax/v5
+PUBLISHER_ACTUAL_BARRIER=/usr/libexec/8ax/v5_ui_boot_ready.py
 
 if [ "${2:-}" = "--apply" ]; then
   apply=1
@@ -536,6 +538,48 @@ restart_position_publisher_after_backend() {
   /etc/init.d/v5-position-status-publisher restart
 }
 
+wait_publisher_actual_barrier() {
+  active_ini=""
+  record_active_ini() {
+    found="$1"
+    case "$active_ini:$found" in
+      :bus) active_ini=bus ;;
+      :pulse) active_ini=pulse ;;
+      bus:bus|pulse:pulse) ;;
+      *) active_ini=conflict ;;
+    esac
+  }
+  for cmdline in "$PROC_ROOT"/[0-9]*/cmdline; do
+    [ -r "$cmdline" ] || continue
+    command=$(tr '\000' ' ' <"$cmdline" 2>/dev/null || true)
+    case "$command" in
+      *milltask*"$RUNTIME_PROJECT_ROOT/linuxcnc/ini/v5_bus.ini"*) record_active_ini bus ;;
+      *milltask*"$RUNTIME_PROJECT_ROOT/linuxcnc/ini/v5_pulse.ini"*) record_active_ini pulse ;;
+    esac
+  done
+  case "$active_ini" in
+    bus) expected_ini="$RUNTIME_PROJECT_ROOT/linuxcnc/ini/v5_bus.ini" ;;
+    pulse)
+      echo "publisher actual barrier rejects disabled Pulse runtime mode" >&2
+      return 1
+      ;;
+    conflict)
+      echo "publisher actual barrier found conflicting BUS/Pulse motion owners" >&2
+      return 1
+      ;;
+    *)
+      echo "publisher actual barrier found no canonical BUS/Pulse motion owner" >&2
+      return 1
+      ;;
+  esac
+  [ -x "$PUBLISHER_ACTUAL_BARRIER" ] || {
+    echo "publisher actual barrier is missing: $PUBLISHER_ACTUAL_BARRIER" >&2
+    return 1
+  }
+  "$PUBLISHER_ACTUAL_BARRIER" \
+    --pre-ui-inputs --expected-ini "$expected_ini" --timeout 120
+}
+
 writer_pid_matches_path() {
   writer_pid="$1"
   writer_path="$2"
@@ -809,11 +853,13 @@ if [ "$apply" -eq 1 ]; then
     enable_boot_service v5-position-status-publisher 92 18
     /etc/init.d/v5-linuxcnc-command-gate start
     restart_position_publisher_after_backend
+    wait_publisher_actual_barrier
   elif [ "$restart_scope" = "wcs" ]; then
     enable_boot_service v5-position-status-publisher 92 18
     enable_boot_service v5-wcs-status-publisher 93 17
     /etc/init.d/v5-position-status-publisher restart
     /etc/init.d/v5-wcs-status-publisher restart
+    wait_publisher_actual_barrier
   elif [ "$restart_scope" = "cpu_policy" ]; then
     enable_boot_service v5-linuxcnc-command-gate 91 19
     enable_boot_service v5-position-status-publisher 92 18
@@ -842,6 +888,7 @@ if [ "$apply" -eq 1 ]; then
     restart_position_publisher_after_backend
     /etc/init.d/v5-wcs-status-publisher restart
     /etc/init.d/v5-state-publisher restart
+    wait_publisher_actual_barrier
     /etc/init.d/v5-settings-actiond restart
   else
     enable_boot_services

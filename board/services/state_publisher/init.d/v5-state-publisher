@@ -12,25 +12,25 @@ STATUS_PATH=${V5_STATUS_SHM_PATH:-/dev/shm/v3_status_shm}
 INTERVAL_MS=${V5_STATE_PUBLISHER_INTERVAL_MS:-33}
 NON_MICROKERNEL_NICE=10
 
-is_running() {
-  [ -r "$PIDFILE" ] || return 1
-  pid=$(cat "$PIDFILE" 2>/dev/null || true)
-  [ -n "$pid" ] || return 1
-  kill -0 "$pid" 2>/dev/null
+process_start_ticks() {
+  stat_line=$(cat "/proc/$1/stat" 2>/dev/null) || return 1
+  stat_tail=${stat_line##*) }
+  set -- $stat_tail
+  [ "$#" -ge 20 ] || return 1
+  shift 19
+  case "$1" in *[!0-9]*|'') return 1 ;; esac
+  printf '%s\n' "$1"
 }
 
-set_non_microkernel_affinity() {
-  pid="$1"
-  [ -n "$pid" ] || return 0
-  command -v taskset >/dev/null 2>&1 || return 1
-  command -v renice >/dev/null 2>&1 || return 1
-  taskset -a -pc 1 "$pid" >>"$LOGFILE" 2>&1 || return 1
-  for task in /proc/"$pid"/task/[0-9]*; do
-    [ -r "$task/stat" ] || return 1
-    tid=${task##*/}
-    renice -n "$NON_MICROKERNEL_NICE" -p "$tid" >>"$LOGFILE" 2>&1 || return 1
-    [ "$(awk '{print $19}' "$task/stat" 2>/dev/null || true)" = "$NON_MICROKERNEL_NICE" ] || return 1
-  done
+read_pid_record() {
+  [ -r "$PIDFILE" ] || return 1
+  read -r pid pid_start extra <"$PIDFILE" || return 1
+  [ -n "$pid" ] && [ -n "$pid_start" ] && [ -z "${extra:-}" ]
+}
+
+is_running() {
+  read_pid_record || return 1
+  [ "$(process_start_ticks "$pid" 2>/dev/null || true)" = "$pid_start" ]
 }
 
 start_service() {
@@ -41,20 +41,13 @@ start_service() {
   test -x "$DAEMON"
   command -v taskset >/dev/null 2>&1
   command -v nice >/dev/null 2>&1
-  command -v renice >/dev/null 2>&1
   mkdir -p /run/8ax
-  rm -f "$PIDFILE"
+  rm -f "$PIDFILE" "$STATUS_PATH"
   setsid taskset -c 1 nice -n "$NON_MICROKERNEL_NICE" "$DAEMON" --path "$STATUS_PATH" --interval-ms "$INTERVAL_MS" >>"$LOGFILE" 2>&1 &
-  echo "$!" >"$PIDFILE"
-  sleep 1
-  if is_running; then
-    set_non_microkernel_affinity "$(cat "$PIDFILE")"
-    echo "v5_state_publisher started pid=$(cat "$PIDFILE") path=$STATUS_PATH interval_ms=$INTERVAL_MS"
-    return 0
-  fi
-  echo "v5_state_publisher failed to start" >&2
-  tail -n 20 "$LOGFILE" 2>/dev/null || true
-  return 1
+  pid=$!
+  pid_start=$(process_start_ticks "$pid") || { kill "$pid" 2>/dev/null || true; return 1; }
+  printf '%s %s\n' "$pid" "$pid_start" >"$PIDFILE"
+  echo "v5_state_publisher spawned pid=$pid start_ticks=$pid_start path=$STATUS_PATH interval_ms=$INTERVAL_MS"
 }
 
 stop_service() {
@@ -63,7 +56,7 @@ stop_service() {
     echo "v5_state_publisher not running"
     return 0
   fi
-  pid=$(cat "$PIDFILE")
+  read_pid_record
   kill "$pid" 2>/dev/null || true
   i=0
   while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 50 ]; do
@@ -91,7 +84,7 @@ case "${1:-}" in
     ;;
   status)
     if is_running; then
-      echo "v5_state_publisher running pid=$(cat "$PIDFILE")"
+      echo "v5_state_publisher running pid=$pid start_ticks=$pid_start"
     else
       echo "v5_state_publisher not running"
       exit 1

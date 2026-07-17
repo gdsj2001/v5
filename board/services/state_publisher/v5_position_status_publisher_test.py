@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import importlib.util
 import sys
 import subprocess
 import time
@@ -276,7 +277,7 @@ class FakeFlock:
             self.locked_inodes.discard(inode)
             return
         if inode in self.locked_inodes:
-            raise OSError('busy')
+            raise BlockingIOError(__import__('errno').EAGAIN, 'busy')
         self.locked_inodes.add(inode)
 
 
@@ -320,6 +321,32 @@ def check_lifecycle_lock_owns_singleton_not_pidfile() -> None:
             recovered.release()
     finally:
         publisher.process_start_ticks = original_start_ticks
+
+
+def check_lock_backend_has_no_python_fcntl_dependency() -> None:
+    text = Path(publisher.__file__).read_text(encoding='utf-8')
+    assert 'import fcntl' not in text
+    assert "ctypes.CDLL('libc.so.6'" in text
+    assert 'DEFAULT_LOCK_MODULE = PosixFlock()' in text
+
+
+def check_lock_backend_error_is_not_reported_as_contention() -> None:
+    class BrokenFlock(FakeFlock):
+        def flock(self, fd, operation):
+            del fd, operation
+            raise OSError(__import__('errno').EIO, 'backend failure')
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        lifecycle = publisher.PositionLifecycleLock(
+            str(root / 'position.lock'), str(root / 'position.pid'),
+            BrokenFlock())
+        try:
+            lifecycle.acquire()
+        except RuntimeError as exc:
+            assert str(exc) == 'position_publisher_flock_failed:5'
+        else:
+            raise AssertionError('flock backend failure was accepted')
 
 
 def check_posix_kernel_releases_orphaned_flock() -> None:
@@ -397,8 +424,12 @@ def check_init_requires_matching_canonical_writer_identity() -> None:
     init_path = Path(__file__).parent / 'init.d' / 'v5-position-status-publisher'
     text = init_path.read_text(encoding='utf-8')
     start = text.index('position_block_matches_owner() {')
-    end = text.index('\nset_position_affinity() {', start)
+    end = text.index('\nstart_service() {', start)
     function = text[start:end]
+    start_body = text[end:text.index('\nstop_service() {', end)]
+    assert text.count('set_position_affinity') == 0
+    assert 'position_block_matches_owner' not in start_body
+    assert 'while ' not in start_body and 'sleep ' not in start_body
     with tempfile.TemporaryDirectory() as directory:
         status_path = Path(directory) / 'position.bin'
         projection.write_position_status(
@@ -433,6 +464,21 @@ def check_init_requires_matching_canonical_writer_identity() -> None:
         assert match.returncode == 0
 
 
+def check_runtime_policy_rejects_writer_identity_unbinding() -> None:
+    board_root = Path(__file__).resolve().parents[2]
+    policy_path = board_root / 'tools' / 'deploy' / 'check_v5_runtime_policy.py'
+    spec = importlib.util.spec_from_file_location('v5_runtime_policy_position_test', policy_path)
+    assert spec and spec.loader
+    policy = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(policy)
+    init_text = (Path(__file__).parent / 'init.d' /
+                 'v5-position-status-publisher').read_text(encoding='utf-8')
+    assert policy.position_status_writer_identity_bound(init_text)
+    mutated = init_text.replace('values[5] != int(sys.argv[2])',
+                                'values[5] == int(sys.argv[2])', 1)
+    assert not policy.position_status_writer_identity_bound(mutated)
+
+
 def main() -> int:
     check_hal_position_binding_and_units()
     check_hal_position_reuses_only_source_owned_signal()
@@ -441,9 +487,12 @@ def main() -> int:
     check_moving_sample_publishes_at_each_30hz_generation()
     check_fast_owner_has_no_linuxcnc_or_error_channel()
     check_lifecycle_lock_owns_singleton_not_pidfile()
+    check_lock_backend_has_no_python_fcntl_dependency()
+    check_lock_backend_error_is_not_reported_as_contention()
     check_posix_kernel_releases_orphaned_flock()
     check_init_uses_lock_identity_not_pidfile_authority()
     check_init_requires_matching_canonical_writer_identity()
+    check_runtime_policy_rejects_writer_identity_unbinding()
     print('V5_POSITION_STATUS_PUBLISHER_TEST_OK')
     return 0
 
