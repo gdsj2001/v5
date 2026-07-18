@@ -145,6 +145,7 @@ add_executable(v5_lvgl_shell
     src/v5_ui_shell_program_actions.c
     src/v5_ui_shell_program_delete.c
     src/v5_ui_shell_pages.c
+    src/v5_ui_shell_mdi_editor.c
     src/v5_ui_shell_navigation.c
     src/v5_ui_shell_boot_cache.c
     src/v5_ui_shell_bootstrap.c
@@ -217,6 +218,7 @@ add_executable(v5_program_page_double_click_smoke
     src/v5_ui_shell_program_actions.c
     src/v5_ui_shell_program_delete.c
     src/v5_ui_shell_pages.c
+    src/v5_ui_shell_mdi_editor.c
     src/v5_ui_shell_navigation.c
     src/v5_ui_shell_boot_cache.c
     src/v5_ui_shell_bootstrap.c

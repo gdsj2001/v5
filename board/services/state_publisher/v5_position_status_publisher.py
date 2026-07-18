@@ -22,6 +22,7 @@ from v5_wcs_status_codec import (
     DEFAULT_INTERVAL_MS,
     DEFAULT_POSITION_PATH,
     POSITION_AXIS_COUNT,
+    ROTARY_FULL_TURN_DEG,
 )
 
 HAL_POSITION_COMPONENT = 'v5-position-display'
@@ -149,6 +150,7 @@ class PositionDisplayStabilizer:
                  boundary_hysteresis=DISPLAY_BOUNDARY_HYSTERESIS):
         self._scale = float(coordinate_scale)
         self._hysteresis = max(0.0, float(boundary_hysteresis)) * self._scale
+        self._rotary_period = int(round(ROTARY_FULL_TURN_DEG * self._scale))
         self.reset()
 
     def reset(self):
@@ -160,6 +162,29 @@ class PositionDisplayStabilizer:
     def _values(self):
         values = [bucket / self._scale for bucket in self._stable]
         return values[:POSITION_AXIS_COUNT], values[POSITION_AXIS_COUNT:]
+
+    def _is_rotary(self, index):
+        return index % POSITION_AXIS_COUNT in (3, 4)
+
+    def _bucket_distance(self, index, left, right):
+        distance = abs(left - right)
+        if self._is_rotary(index):
+            distance %= self._rotary_period
+            distance = min(distance, self._rotary_period - distance)
+        return distance
+
+    def _source_boundary_distance(self, index, stable, bucket, source):
+        scaled_source = float(source) * self._scale
+        if (self._is_rotary(index) and
+                ((stable == 0 and bucket == self._rotary_period - 1) or
+                 (bucket == 0 and stable == self._rotary_period - 1))):
+            phase = scaled_source % self._rotary_period
+            return min(phase, self._rotary_period - phase)
+        boundary = (
+            min(stable, bucket)
+            if max(stable, bucket) <= 0
+            else max(stable, bucket))
+        return abs(scaled_source - boundary)
 
     def stabilize(self, mcs, cmd, source_generation,
                   source_mcs=None, source_cmd=None):
@@ -188,15 +213,14 @@ class PositionDisplayStabilizer:
                 self._candidate = [None] * len(self._candidate)
         for index, bucket in enumerate(buckets):
             stable = self._stable[index]
-            if stable is None or abs(bucket - stable) > 1:
+            if stable is None or self._bucket_distance(index, bucket, stable) > 1:
                 self._stable[index] = bucket
                 self._candidate[index] = None
             elif bucket == stable:
                 self._candidate[index] = None
-            elif abs(
-                    float(sources[index]) * self._scale -
-                    (min(stable, bucket) if max(stable, bucket) <= 0
-                     else max(stable, bucket))) + 1.0e-9 < self._hysteresis:
+            elif self._source_boundary_distance(
+                    index, stable, bucket, sources[index]
+                    ) <= self._hysteresis + 1.0e-9:
                 self._candidate[index] = None
             elif self._candidate[index] == bucket:
                 self._stable[index] = bucket

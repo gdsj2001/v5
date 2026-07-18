@@ -1711,6 +1711,7 @@ def _gcode_numeric_words(line: str) -> dict[str, float]:
 def _check_cc_golden_arc_chain(
     program: Path,
     expected_axis: str,
+    start_c: float,
     spring_arcs: list[tuple[int, dict[str, float]]],
 ) -> int:
     if len(spring_arcs) != 20:
@@ -1737,7 +1738,7 @@ def _check_cc_golden_arc_chain(
         expected_x, expected_y = quarter_xy[index % 4]
         expected_z = -2.5 * (index + 1)
         expected_rotary = quarter_axis[index % 4]
-        expected_c = -90.0 * (index + 1)
+        expected_c = start_c - 90.0 * (index + 1)
         expected_values = {
             "X": expected_x,
             "Y": expected_y,
@@ -1775,7 +1776,12 @@ def _check_cc_golden_arc_chain(
     return 0
 
 
-def _check_cc_golden_program(program: Path, expected_axis: str, forbidden_axis: str) -> int:
+def _check_cc_golden_program(
+    program: Path,
+    expected_axis: str,
+    forbidden_axis: str,
+    start_c: float,
+) -> int:
     pending_spring_anchor = False
     seen_spring_anchor = False
     seen_cutting_trajectory = False
@@ -1819,6 +1825,23 @@ def _check_cc_golden_program(program: Path, expected_axis: str, forbidden_axis: 
         has_spring_feed = re.search(r"\bG(?:3|03)\b", line) is not None
         has_g53 = re.search(r"\bG53\b", line) is not None
         if pending_spring_anchor and has_motion:
+            anchor_words = _gcode_numeric_words(line)
+            expected_anchor = {
+                "X": 0.0,
+                "Y": 10.0,
+                "Z": 0.0,
+                expected_axis: 45.0,
+                "C": start_c,
+            }
+            for word, expected in expected_anchor.items():
+                if word not in anchor_words or abs(anchor_words[word] - expected) > 1e-6:
+                    actual = anchor_words.get(word)
+                    print(
+                        f"CC_GOLDEN_SPRING_ANCHOR_MISMATCH: {program.relative_to(ROOT)}:{line_no}: "
+                        f"word={word} expected={expected:.3f} actual={actual}",
+                        file=sys.stderr,
+                    )
+                    return 1
             seen_spring_anchor = True
             pending_spring_anchor = False
         if re.search(r"\bM64\b", line) and re.search(r"\bP0\b", line):
@@ -1899,13 +1922,13 @@ def _check_cc_golden_program(program: Path, expected_axis: str, forbidden_axis: 
         if not present:
             print(f"CC_GOLDEN_PROGRAM_{code}: {program.relative_to(ROOT)}", file=sys.stderr)
             return 1
-    return _check_cc_golden_arc_chain(program, expected_axis, spring_arcs)
+    return _check_cc_golden_arc_chain(program, expected_axis, start_c, spring_arcs)
 
 
 def check_cc_golden_model_specific_motion() -> int:
     programs = (
-        (ROOT / "gcode" / "golden" / "cc-ac.ngc", "A", "B"),
-        (ROOT / "gcode" / "golden" / "cc-bc.ngc", "B", "A"),
+        (ROOT / "gcode" / "golden" / "cc-ac.ngc", "A", "B", 0.0),
+        (ROOT / "gcode" / "golden" / "cc-bc.ngc", "B", "A", 90.0),
     )
     legacy_program = ROOT / "gcode" / "golden" / "cc.ngc"
     runner = ROOT / "services" / "command_gate" / "v5_linuxcncrsh_golden_run.c"
@@ -1917,12 +1940,12 @@ def check_cc_golden_model_specific_motion() -> int:
     if legacy_program.exists():
         print("CC_GOLDEN_LEGACY_PROGRAM_SURVIVOR: gcode/golden/cc.ngc", file=sys.stderr)
         rc = 1
-    for program, expected_axis, forbidden_axis in programs:
+    for program, expected_axis, forbidden_axis, start_c in programs:
         if not program.exists():
             print(f"CC_GOLDEN_PROGRAM_MISSING: {program.relative_to(ROOT)}", file=sys.stderr)
             rc = 1
             continue
-        rc |= _check_cc_golden_program(program, expected_axis, forbidden_axis)
+        rc |= _check_cc_golden_program(program, expected_axis, forbidden_axis, start_c)
     if not runner.exists():
         print("CC_GOLDEN_RUNNER_MISSING: services/command_gate/v5_linuxcncrsh_golden_run.c", file=sys.stderr)
         return 1

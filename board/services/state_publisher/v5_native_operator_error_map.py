@@ -52,9 +52,16 @@ GROUP_PRESENTATION = {
 
 GROUP_DISPLAY_MODE = {group: DISPLAY_POPUP for group in GROUP_PRESENTATION}
 GROUP_DISPLAY_MODE["MOTION_JOG"] = DISPLAY_TOP_STATUS
+GROUP_DISPLAY_MODE["MACHINE_MODE"] = DISPLAY_TOP_STATUS
 SOURCE_DISPLAY_MODE = {
     "MOTION_FMT_73BD5ADAF3CF": DISPLAY_LOG_ONLY,
     "MOTION_FMT_B1C1DF723CAD": DISPLAY_LOG_ONLY,
+}
+SOURCE_CAPTURE_DISPLAY_MODE = {
+    (
+        "TASK_FMT_71643D285DD0",
+        ("EMC_TASK_PLAN_INIT",),
+    ): DISPLAY_LOG_ONLY,
 }
 
 ALIAS_PRESENTATION = {
@@ -499,14 +506,21 @@ class NativeOperatorErrorMap:
                 )
             else:
                 reason_cn = _render_template(entry.reason_cn, match.groups())
+            capture_key = (
+                entry.source_id,
+                tuple(_normalize(value) for value in match.groups()),
+            )
             return NativeOperatorMessage(
                 entry.source_id,
                 _sanitize_operator_text(title_cn),
                 _sanitize_operator_text(reason_cn),
                 _sanitize_operator_text(next_cn),
-                SOURCE_DISPLAY_MODE.get(
-                    entry.source_id,
-                    GROUP_DISPLAY_MODE[entry.handling_group],
+                SOURCE_CAPTURE_DISPLAY_MODE.get(
+                    capture_key,
+                    SOURCE_DISPLAY_MODE.get(
+                        entry.source_id,
+                        GROUP_DISPLAY_MODE[entry.handling_group],
+                    ),
                 ),
                 fingerprint,
                 True,

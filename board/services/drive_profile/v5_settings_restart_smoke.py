@@ -20,13 +20,14 @@ class SettingsRestartSmoke(unittest.TestCase):
         self.run_dir_patch.start()
         self.zero_binding_patch = mock.patch.object(
             restart,
-            "ensure_active_rotary_zero_binding_for_restart",
+            "migrate_active_rotary_drive_owner_for_restart",
             return_value={
                 "ok": True,
-                "code": "SETTINGS_MODEL_ROTARY_ZERO_BINDING_VALID",
+                "code": "SETTINGS_MODEL_ROTARY_DRIVE_OWNER_VALID",
                 "axis": "A",
                 "inactive_axis": "B",
                 "slave_position": 3,
+                "donor_axis": "A",
                 "zero_counts": 5.0,
                 "counts_per_unit": 10000.0,
                 "raw_zero_position": 0.0005,
@@ -223,8 +224,9 @@ class SettingsModelZeroBindingSmoke(unittest.TestCase):
     def b_zero(position: str = "3") -> dict:
         return {
             "zero_counts": 0.0,
-            "counts_per_unit": 10000.0,
+            "counts_per_unit": 1000.0,
             "raw_zero_position": 0.0,
+            "captured_at": "2026-07-13T15:54:16Z",
             "drive_position": {
                 "axis": "B",
                 "actual_position_counts": 0.0,
@@ -243,10 +245,13 @@ class SettingsModelZeroBindingSmoke(unittest.TestCase):
                     "zero_counts": 5.0,
                     "counts_per_unit": 10000.0,
                     "raw_zero_position": 0.0005,
+                    "captured_at": "2026-07-17T03:58:51Z",
                     "slave_position": 3,
-                }},
+                }, "rotary_load_counts_per_rev": 3600000,
+                    "actual_counts_per_motor_rev": 3600000},
                 {"axis": "B", "zero_model": b_zero,
-                 "rotary_load_counts_per_rev": 3600000},
+                 "rotary_load_counts_per_rev": 360000,
+                 "actual_counts_per_motor_rev": 360000},
                 {"axis": "C", "zero_model": {
                     "zero_counts": 0.0,
                     "counts_per_unit": 10000.0,
@@ -256,19 +261,24 @@ class SettingsModelZeroBindingSmoke(unittest.TestCase):
             ],
         }
 
-    def test_bc_rebind_uses_b_evidence_without_copying_a_zero(self) -> None:
+    def test_bc_mapping_moves_slave_three_owner_without_copying_b_axis_scale(self) -> None:
         self.write(contract.SETTINGS_RUNTIME_JSON, json.dumps(self.runtime(self.b_zero())))
-        result = restart.ensure_active_rotary_zero_binding_for_restart()
+        result = restart.migrate_active_rotary_drive_owner_for_restart()
         self.assertTrue(result["changed"])
         self.assertEqual("B", result["axis"])
+        self.assertEqual("A", result["donor_axis"])
         self.assertEqual(3, result["slave_position"])
         reread = json.loads(contract.SETTINGS_RUNTIME_JSON.read_text(encoding="utf-8"))
         a_axis = next(item for item in reread["axes"] if item["axis"] == "A")
         b_axis = next(item for item in reread["axes"] if item["axis"] == "B")
-        self.assertEqual(5.0, a_axis["zero_model"]["zero_counts"])
-        self.assertEqual(0.0, b_axis["zero_model"]["zero_counts"])
+        self.assertEqual({"axis": "A"}, a_axis)
+        self.assertEqual(5.0, b_axis["zero_model"]["zero_counts"])
+        self.assertEqual(10000.0, b_axis["zero_model"]["counts_per_unit"])
         self.assertEqual(3, b_axis["zero_model"]["slave_position"])
-        idempotent = restart.ensure_active_rotary_zero_binding_for_restart()
+        self.assertNotIn("axis", b_axis["zero_model"].get("drive_position", {}))
+        self.assertEqual(3600000, b_axis["rotary_load_counts_per_rev"])
+        self.assertEqual(3600000, b_axis["actual_counts_per_motor_rev"])
+        idempotent = restart.migrate_active_rotary_drive_owner_for_restart()
         self.assertFalse(idempotent["changed"])
         handoff = restart.run_restart_handoff(
             "settings_save_and_restart", {"owner": "settings_restart"})
@@ -281,14 +291,18 @@ class SettingsModelZeroBindingSmoke(unittest.TestCase):
         self.assertIn(
             "[AXIS_C]\nWCHECKPOINT_COUNTS_PER_REV = 3600000", ini_text)
 
-    def test_conflicting_b_evidence_rejects_restart(self) -> None:
+    def test_stale_b_axis_zero_for_other_slave_is_removed(self) -> None:
         self.write(contract.SETTINGS_RUNTIME_JSON, json.dumps(self.runtime(self.b_zero("4"))))
         result = restart.run_restart_handoff(
             "settings_save_and_restart", {"owner": "settings_restart"})
-        self.assertFalse(result["ok"])
-        self.assertEqual("SETTINGS_MODEL_ROTARY_ZERO_SLAVE_MISMATCH", result["code"])
-        self.assertFalse(result["restart_commit_required"])
-        self.assertFalse((restart.RUN_DIR / "settings_clean_restart_handoff.sh").exists())
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["restart_commit_required"])
+        reread = json.loads(contract.SETTINGS_RUNTIME_JSON.read_text(encoding="utf-8"))
+        a_axis = next(item for item in reread["axes"] if item["axis"] == "A")
+        b_axis = next(item for item in reread["axes"] if item["axis"] == "B")
+        self.assertEqual({"axis": "A"}, a_axis)
+        self.assertEqual(5.0, b_axis["zero_model"]["zero_counts"])
+        self.assertEqual(3, b_axis["zero_model"]["slave_position"])
 
     def test_wrong_zero_scale_cannot_restart_with_active_runtime_scale(self) -> None:
         runtime = self.runtime(self.b_zero())

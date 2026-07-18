@@ -59,6 +59,9 @@ static inline unsigned int shell_refresh_classify_changes(
 #define V5_PROGRAM_ROW_HIT_H 32
 #define V5_PROGRAM_DOUBLE_CLICK_NS 800000000ULL
 #define V5_MDI_TEXT_CAP 8192U
+#define V5_MDI_VISIBLE_ROWS 18U
+#define V5_MDI_VISUAL_ROW_H 28U
+#define V5_MDI_CURSOR_BLINK_MS 500U
 #define V5_UI_CACHE_BOOT_WORKER_ID 0U
 
 typedef enum V5ShellPageKind {
@@ -220,6 +223,17 @@ void shell_log_program_event(const char *event, const char *path, int ok, const 
 void shell_log_mdi_event(const char *event, const char *line, int ok);
 
 void shell_update_mdi_line(void);
+
+void shell_mdi_editor_bind(
+    lv_obj_t *editor,
+    lv_obj_t *const *line_number_labels,
+    unsigned int line_number_count);
+
+void shell_mdi_editor_sync_from_buffer(void);
+
+int shell_mdi_editor_handle_key(const char *key);
+
+void shell_mdi_editor_set_active(int active);
 
 void shell_mdi_load_cb(lv_event_t *event);
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import re
 import subprocess
@@ -263,7 +264,7 @@ def _zero_evidence_positions(zero_model: Dict[str, Any]) -> Set[int]:
     return positions
 
 
-def ensure_active_rotary_zero_binding_for_restart() -> Dict[str, Any]:
+def migrate_active_rotary_drive_owner_for_restart() -> Dict[str, Any]:
     active_axis = _active_rotary_axis_from_runtime_ini()
     inactive_axis = "B" if active_axis == "A" else "A"
     bindings = _fresh_rotary_slave_bindings()
@@ -275,7 +276,8 @@ def ensure_active_rotary_zero_binding_for_restart() -> Dict[str, Any]:
             {"active_axis": active_axis, "bindings": bindings},
         )
     try:
-        runtime = json.loads(drive_contract.SETTINGS_RUNTIME_JSON.read_text(encoding="utf-8"))
+        runtime = json.loads(
+            drive_contract.SETTINGS_RUNTIME_JSON.read_text(encoding="utf-8"))
     except Exception as exc:
         raise DriveActionError(
             "SETTINGS_MODEL_RUNTIME_OWNER_INVALID",
@@ -283,79 +285,156 @@ def ensure_active_rotary_zero_binding_for_restart() -> Dict[str, Any]:
             "%s: %s" % (type(exc).__name__, exc),
         )
     validate_settings_runtime_drive_only(runtime)
-    axis_cfg, _ = find_runtime_axis(runtime, active_axis)
-    zero_model = axis_cfg.get("zero_model")
-    if not isinstance(zero_model, dict):
+    axis_configs: Dict[str, Dict[str, Any]] = {}
+    candidates: List[tuple[str, Dict[str, Any], Dict[str, Any], str, str]] = []
+    for axis in ROTARY_MODEL_AXES:
+        axis_cfg, _ = find_runtime_axis(runtime, axis)
+        axis_configs[axis] = axis_cfg
+        zero_model = axis_cfg.get("zero_model")
+        if not isinstance(zero_model, dict):
+            continue
+        if _zero_evidence_positions(zero_model) != {active_position}:
+            continue
+        candidates.append((
+            axis,
+            axis_cfg,
+            zero_model,
+            str(zero_model.get("captured_at") or ""),
+            str(zero_model.get("zero_run_id") or ""),
+        ))
+    if not candidates:
         raise DriveActionError(
             "SETTINGS_MODEL_ROTARY_ZERO_EVIDENCE_MISSING",
-            "当前旋转轴尚未保存自己的真实零点，系统未重启。",
-            {"axis": active_axis, "slave_position": active_position},
+            "当前物理从站尚未保存真实零点，系统未重启。",
+            {"active_axis": active_axis, "slave_position": active_position},
         )
+    candidates.sort(key=lambda item: (item[3], item[4]), reverse=True)
+    newest_key = (candidates[0][3], candidates[0][4])
+    newest = [
+        item for item in candidates if (item[3], item[4]) == newest_key
+    ]
+    if len(newest) > 1:
+        first_zero = json.dumps(
+            newest[0][2], ensure_ascii=False, sort_keys=True)
+        if any(
+                json.dumps(item[2], ensure_ascii=False, sort_keys=True) !=
+                first_zero for item in newest[1:]):
+            raise DriveActionError(
+                "SETTINGS_MODEL_ROTARY_ZERO_OWNER_AMBIGUOUS",
+                "同一物理从站存在多个无法裁决的零点 owner，系统未重启。",
+                {
+                    "active_axis": active_axis,
+                    "slave_position": active_position,
+                    "candidate_axes": [item[0] for item in newest],
+                    "captured_at": newest_key[0],
+                    "zero_run_id": newest_key[1],
+                },
+            )
+        donor = next(
+            (item for item in newest if item[0] == active_axis), newest[0])
+    else:
+        donor = newest[0]
+    donor_axis, donor_cfg, zero_model, _captured_at, _zero_run_id = donor
     zero_counts = finite_float(zero_model.get("zero_counts"))
     counts_per_unit = finite_float(zero_model.get("counts_per_unit"))
     raw_zero_position = finite_float(zero_model.get("raw_zero_position"))
-    if zero_counts is None or counts_per_unit is None or counts_per_unit == 0.0 or raw_zero_position is None:
+    if (zero_counts is None or counts_per_unit is None or
+            counts_per_unit == 0.0 or raw_zero_position is None):
         raise DriveActionError(
             "SETTINGS_MODEL_ROTARY_ZERO_EVIDENCE_INCOMPLETE",
-            "当前旋转轴零点证据不完整，系统未重启。",
-            {"axis": active_axis, "slave_position": active_position},
+            "当前物理从站零点证据不完整，系统未重启。",
+            {"active_axis": active_axis, "slave_position": active_position},
         )
     expected_raw = zero_counts / counts_per_unit
-    if abs(raw_zero_position - expected_raw) > max(1.0e-9, abs(expected_raw) * 1.0e-9):
+    if abs(raw_zero_position - expected_raw) > max(
+            1.0e-9, abs(expected_raw) * 1.0e-9):
         raise DriveActionError(
             "SETTINGS_MODEL_ROTARY_ZERO_SCALE_MISMATCH",
-            "当前旋转轴零点 count 与比例证据不一致，系统未重启。",
-            {"axis": active_axis, "zero_counts": zero_counts,
-             "counts_per_unit": counts_per_unit, "raw_zero_position": raw_zero_position},
+            "当前物理从站零点 count 与比例证据不一致，系统未重启。",
+            {
+                "active_axis": active_axis,
+                "slave_position": active_position,
+                "zero_counts": zero_counts,
+                "counts_per_unit": counts_per_unit,
+                "raw_zero_position": raw_zero_position,
+            },
         )
     drive_position = zero_model.get("drive_position")
-    evidence_axis = str(drive_position.get("axis") or "").upper() if isinstance(drive_position, dict) else ""
-    positions = _zero_evidence_positions(zero_model)
-    if evidence_axis and evidence_axis != active_axis:
-        raise DriveActionError(
-            "SETTINGS_MODEL_ROTARY_ZERO_AXIS_MISMATCH",
-            "当前旋转轴零点证据属于另一逻辑轴，系统未重启。",
-            {"axis": active_axis, "evidence_axis": evidence_axis},
-        )
-    if positions != {active_position}:
-        raise DriveActionError(
-            "SETTINGS_MODEL_ROTARY_ZERO_SLAVE_MISMATCH",
-            "当前旋转轴零点证据无法证明来自本次绑定的物理从站，系统未重启。",
-            {"axis": active_axis, "binding": active_position,
-             "evidence_positions": sorted(positions)},
-        )
-    changed = _int_position(zero_model.get("slave_position")) is None
+    writeback = donor_cfg.get("zero_model_writeback")
+    owner_is_canonical = (
+        donor_axis == active_axis and
+        set(axis_configs[inactive_axis].keys()) == {"axis"} and
+        _int_position(zero_model.get("slave_position")) == active_position and
+        (not isinstance(drive_position, dict) or (
+            "axis" not in drive_position and
+            _int_position(
+                drive_position.get("slave_position")) == active_position)) and
+        isinstance(writeback, dict) and
+        writeback.get("code") ==
+            "SETTINGS_MODEL_ROTARY_DRIVE_OWNER_MIGRATED" and
+        _int_position(writeback.get("slave_position")) == active_position)
+    changed = not owner_is_canonical
     if changed:
-        zero_model["slave_position"] = active_position
-        writeback = dict(axis_cfg.get("zero_model_writeback")) if isinstance(
-            axis_cfg.get("zero_model_writeback"), dict) else {}
-        writeback.update({
+        migrated_cfg = copy.deepcopy(donor_cfg)
+        migrated_cfg["axis"] = active_axis
+        migrated_zero = copy.deepcopy(zero_model)
+        migrated_zero["slave_position"] = active_position
+        migrated_drive_position = migrated_zero.get("drive_position")
+        if isinstance(migrated_drive_position, dict):
+            migrated_drive_position.pop("axis", None)
+            migrated_drive_position["slave_position"] = active_position
+        migrated_cfg["zero_model"] = migrated_zero
+        drive_readback = migrated_cfg.get("drive_readback")
+        if isinstance(drive_readback, dict):
+            drive_readback["axis_name"] = active_axis
+        migrated_cfg["zero_model_writeback"] = {
             "ok": True,
-            "code": "SETTINGS_MODEL_ROTARY_ZERO_BINDING_REBOUND",
+            "code": "SETTINGS_MODEL_ROTARY_DRIVE_OWNER_MIGRATED",
             "written_at": now_utc(),
-            "settings_runtime_json": str(drive_contract.SETTINGS_RUNTIME_JSON),
-            "axis": active_axis,
+            "settings_runtime_json": str(
+                drive_contract.SETTINGS_RUNTIME_JSON),
+            "owner_kind": "physical_slave",
             "slave_position": active_position,
-        })
-        axis_cfg["zero_model_writeback"] = writeback
+            "active_axis": active_axis,
+            "donor_axis": donor_axis,
+        }
+        axes = runtime.get("axes", [])
+        for index, item in enumerate(axes):
+            item_axis = (
+                str(item.get("axis") or "").upper()
+                if isinstance(item, dict) else "")
+            if item_axis == active_axis:
+                axes[index] = migrated_cfg
+            elif item_axis == inactive_axis:
+                axes[index] = {"axis": inactive_axis}
         persist_settings_runtime(runtime)
-        reread = json.loads(drive_contract.SETTINGS_RUNTIME_JSON.read_text(encoding="utf-8"))
-        reread_axis, _ = find_runtime_axis(reread, active_axis)
-        reread_zero = reread_axis.get("zero_model") if isinstance(
-            reread_axis.get("zero_model"), dict) else {}
-        if _int_position(reread_zero.get("slave_position")) != active_position:
+        reread = json.loads(
+            drive_contract.SETTINGS_RUNTIME_JSON.read_text(encoding="utf-8"))
+        reread_active, _ = find_runtime_axis(reread, active_axis)
+        reread_inactive, _ = find_runtime_axis(reread, inactive_axis)
+        reread_zero = (
+            reread_active.get("zero_model")
+            if isinstance(reread_active.get("zero_model"), dict) else {})
+        if (_zero_evidence_positions(reread_zero) != {active_position} or
+                "zero_model" in reread_inactive):
             raise DriveActionError(
-                "SETTINGS_MODEL_ROTARY_ZERO_BINDING_READBACK_MISMATCH",
-                "旋转轴零点从站绑定写入后回读不一致，系统未重启。",
-                {"axis": active_axis, "slave_position": active_position},
+                "SETTINGS_MODEL_ROTARY_DRIVE_OWNER_READBACK_MISMATCH",
+                "物理从站零点 owner 迁移后回读不一致，系统未重启。",
+                {
+                    "active_axis": active_axis,
+                    "inactive_axis": inactive_axis,
+                    "slave_position": active_position,
+                },
             )
     return {
         "ok": True,
-        "code": "SETTINGS_MODEL_ROTARY_ZERO_BINDING_REBOUND" if changed else
-                "SETTINGS_MODEL_ROTARY_ZERO_BINDING_VALID",
+        "code": (
+            "SETTINGS_MODEL_ROTARY_DRIVE_OWNER_MIGRATED" if changed else
+            "SETTINGS_MODEL_ROTARY_DRIVE_OWNER_VALID"),
         "axis": active_axis,
         "inactive_axis": inactive_axis,
         "slave_position": active_position,
+        "donor_axis": donor_axis,
         "zero_counts": zero_counts,
         "counts_per_unit": counts_per_unit,
         "raw_zero_position": raw_zero_position,
@@ -365,7 +444,7 @@ def ensure_active_rotary_zero_binding_for_restart() -> Dict[str, Any]:
 
 def run_restart_handoff(action: str, spec: Dict[str, Any]) -> Dict[str, Any]:
     try:
-        rotary_zero_binding = ensure_active_rotary_zero_binding_for_restart()
+        rotary_drive_owner = migrate_active_rotary_drive_owner_for_restart()
         rotary_profile = sync_active_rotary_wcheckpoint_profiles_for_restart()
     except DriveActionError as exc:
         return {
@@ -467,7 +546,7 @@ fi
         "message_cn": "系统级重启已准备，等待关闭结果窗后提交。",
         "display_message_cn": "系统级重启已准备，点击关闭后黑屏并重启。",
         "write_executed": bool(
-            rotary_zero_binding.get("changed") or
+            rotary_drive_owner.get("changed") or
             rotary_profile.get("changed")),
         "motion_executed": False,
         "restart_executed": False,
@@ -476,7 +555,7 @@ fi
         "handoff_script": str(handoff_script),
         "handoff_log": str(handoff_log),
         "stop_order": CANONICAL_CLEAN_RESTART_SERVICES,
-        "rotary_zero_binding": rotary_zero_binding,
+        "rotary_drive_owner": rotary_drive_owner,
         "rotary_wcheckpoint_profile": rotary_profile,
     }
     return result

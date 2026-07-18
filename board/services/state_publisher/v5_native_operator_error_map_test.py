@@ -81,6 +81,8 @@ def main() -> int:
         else:
             assert message.matched, entry.source_id
             assert message.source_id == entry.source_id, (entry.source_id, message.source_id, sample)
+            if entry.handling_group == "MACHINE_MODE":
+                assert message.display_mode == DISPLAY_TOP_STATUS, entry.source_id
         checked += 1
     home = error_map.translate("Can't run a program when not homed")
     assert home.matched and home.title_cn == "需要回零"
@@ -90,6 +92,18 @@ def main() -> int:
     assert jog.matched and jog.display_mode == DISPLAY_TOP_STATUS
     jog_stopped = error_map.translate("Jog aborted by jog-stop-immediate")
     assert jog_stopped.matched and jog_stopped.display_mode == DISPLAY_LOG_ONLY
+    redundant_plan_init = error_map.translate(
+        "can't do that (EMC_TASK_PLAN_INIT) in auto mode with the interpreter waiting"
+    )
+    assert redundant_plan_init.matched
+    assert redundant_plan_init.source_id == "TASK_FMT_71643D285DD0"
+    assert redundant_plan_init.display_mode == DISPLAY_LOG_ONLY
+    other_waiting_mode_request = error_map.translate(
+        "can't do that (EMC_TASK_PLAN_OPEN) in auto mode with the interpreter waiting"
+    )
+    assert other_waiting_mode_request.matched
+    assert other_waiting_mode_request.source_id == "TASK_FMT_71643D285DD0"
+    assert other_waiting_mode_request.display_mode == DISPLAY_TOP_STATUS
     mcode = error_map.translate("Unknown m code used: M123")
     assert mcode.matched and "M123" in mcode.reason_cn
     internal = error_map.translate("invalid V5 wrapped rotary target state")

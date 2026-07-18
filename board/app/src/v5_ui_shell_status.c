@@ -263,9 +263,7 @@ void shell_log_mdi_event(const char *event, const char *line, int ok)
 
 void shell_update_mdi_line(void)
 {
-    if (g_v5_shell_mdi_line_label) {
-        lv_label_set_text(g_v5_shell_mdi_line_label, g_v5_shell_mdi_line[0] ? g_v5_shell_mdi_line : "MDI>");
-    }
+    shell_mdi_editor_sync_from_buffer();
     if (g_v5_shell_mdi_status_label) {
         if (g_v5_shell_mdi_edit_program_path[0]) {
             char status[220];

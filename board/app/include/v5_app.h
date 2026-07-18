@@ -35,6 +35,11 @@ int v5_ui_shell_test_click_program_edit(void);
 int v5_ui_shell_test_double_click_main_program_area(void);
 int v5_ui_shell_test_current_page_is_mdi(void);
 const char *v5_ui_shell_test_mdi_text(void);
+int v5_ui_shell_test_mdi_press_key(const char *key);
+unsigned int v5_ui_shell_test_mdi_cursor_pos(void);
+unsigned int v5_ui_shell_test_mdi_cursor_visual_row(void);
+unsigned int v5_ui_shell_test_mdi_first_visible_row(void);
+unsigned int v5_ui_shell_test_mdi_cursor_blink_ms(void);
 const char *v5_ui_shell_test_top_status_text(void);
 #endif
 

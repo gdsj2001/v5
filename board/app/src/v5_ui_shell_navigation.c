@@ -240,6 +240,7 @@ static int shell_navigate_now(V5MainPageActionKind action)
                 g_v5_shell_page_cache_dirty[previous_page]);
         return 0;
     }
+    shell_mdi_editor_set_active(page == V5_SHELL_PAGE_MDI);
     if (page == V5_SHELL_PAGE_MDI) {
         if (action == V5_MAIN_PAGE_ACTION_NAV_MDI_EDIT) {
             if (!g_v5_shell_mdi_edit_prepared && !shell_load_current_program_for_mdi_edit()) {

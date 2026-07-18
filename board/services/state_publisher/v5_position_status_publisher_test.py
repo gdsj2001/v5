@@ -244,10 +244,14 @@ def check_display_stabilizer_generation_rules() -> None:
     mcs, _ = stabilizer.stabilize(
         point(29.991, 359.218), point(29.991, 359.218), 5,
         point(29.9912, 359.2182), point(29.9912, 359.2182))
+    assert mcs == point(29.990, 359.217)
+    mcs, _ = stabilizer.stabilize(
+        point(29.991, 359.218), point(29.991, 359.218), 6,
+        point(29.9912, 359.2182), point(29.9912, 359.2182))
     assert mcs == point(29.991, 359.218)
 
     mcs, _ = stabilizer.stabilize(
-        point(29.994, 0.0), point(29.994, 0.0), 6)
+        point(29.994, 0.0), point(29.994, 0.0), 7)
     assert mcs == point(29.994, 0.0)
     stabilizer.stabilize(None, None, 7)
     mcs, _ = stabilizer.stabilize(
@@ -266,6 +270,10 @@ def check_display_stabilizer_generation_rules() -> None:
     mcs, _ = stabilizer.stabilize(
         point(-1.003, -0.003), point(-1.003, -0.003), 4,
         point(-1.0032, -0.0032), point(-1.0032, -0.0032))
+    assert mcs == point(-1.002, -0.002)
+    mcs, _ = stabilizer.stabilize(
+        point(-1.003, -0.003), point(-1.003, -0.003), 5,
+        point(-1.0032, -0.0032), point(-1.0032, -0.0032))
     assert mcs == point(-1.003, -0.003)
 
 
@@ -280,6 +288,7 @@ def check_display_stabilizer_suppresses_boundary_writes() -> None:
         (29.9910, 359.2180),
         (29.9904, 359.2174),
         (29.9911, 359.2181),
+        (29.9912, 359.2182),
         (29.9912, 359.2182),
         (29.9941, 0.0001),
     )
@@ -301,6 +310,40 @@ def check_display_stabilizer_suppresses_boundary_writes() -> None:
     assert (unpacked[0][8], unpacked[0][11]) == (29.990, 359.217)
     assert (unpacked[1][8], unpacked[1][11]) == (29.991, 359.218)
     assert (unpacked[2][8], unpacked[2][11]) == (29.994, 0.0)
+
+
+def check_display_stabilizer_filters_rotary_wrap_one_count() -> None:
+    def point(c):
+        return [0.0, 0.0, 0.0, 0.0, c]
+
+    stabilizer = publisher.PositionDisplayStabilizer()
+    mcs, cmd = stabilizer.stabilize(
+        point(0.0), point(0.0), 1, point(0.0), point(0.0))
+    assert mcs == point(0.0) and cmd == point(0.0)
+
+    mcs, cmd = stabilizer.stabilize(
+        point(359.999), point(359.999), 2,
+        point(359.9999), point(359.9999))
+    assert mcs == point(0.0) and cmd == point(0.0)
+    mcs, cmd = stabilizer.stabilize(
+        point(0.0), point(0.0), 3, point(0.0), point(0.0))
+    assert mcs == point(0.0) and cmd == point(0.0)
+
+    mcs, cmd = stabilizer.stabilize(
+        point(359.999), point(359.999), 4,
+        point(359.9995), point(359.9995))
+    assert mcs == point(0.0) and cmd == point(0.0)
+    mcs, cmd = stabilizer.stabilize(
+        point(0.0), point(0.0), 5, point(0.0), point(0.0))
+    assert mcs == point(0.0) and cmd == point(0.0)
+
+    stabilizer.stabilize(
+        point(359.999), point(359.999), 6,
+        point(359.9995), point(359.9995))
+    mcs, cmd = stabilizer.stabilize(
+        point(359.999), point(359.999), 7,
+        point(359.9995), point(359.9995))
+    assert mcs == point(359.999) and cmd == point(359.999)
 
 
 def check_native_position_and_scalars_are_packed() -> None:
@@ -601,6 +644,7 @@ def main() -> int:
     check_start_to_start_polling_cadence()
     check_display_stabilizer_generation_rules()
     check_display_stabilizer_suppresses_boundary_writes()
+    check_display_stabilizer_filters_rotary_wrap_one_count()
     check_native_position_and_scalars_are_packed()
     check_moving_sample_publishes_at_each_30hz_generation()
     check_fast_owner_has_no_linuxcnc_or_error_channel()

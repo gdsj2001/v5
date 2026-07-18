@@ -222,26 +222,9 @@ static void shell_mdi_save_cb(lv_event_t *event)
     }
 }
 
-static void shell_append_mdi_text(const char *text)
-{
-    size_t used;
-    size_t add;
-    if (!text || !text[0]) {
-        return;
-    }
-    used = strlen(g_v5_shell_mdi_line);
-    add = strlen(text);
-    if (used + add >= sizeof(g_v5_shell_mdi_line)) {
-        return;
-    }
-    memcpy(g_v5_shell_mdi_line + used, text, add + 1U);
-    shell_update_mdi_line();
-}
-
 static void shell_mdi_key_cb(lv_event_t *event)
 {
     const char *key;
-    size_t len;
     if (lv_event_get_code(event) != LV_EVENT_CLICKED) {
         return;
     }
@@ -249,26 +232,7 @@ static void shell_mdi_key_cb(lv_event_t *event)
     if (!key) {
         return;
     }
-    len = strlen(g_v5_shell_mdi_line);
-    if (strcmp(key, "BKSP") == 0) {
-        if (len > 0U) {
-            g_v5_shell_mdi_line[len - 1U] = '\0';
-        }
-    } else if (strcmp(key, "SP") == 0) {
-        shell_append_mdi_text(" ");
-        return;
-    } else if (strcmp(key, "EOB") == 0) {
-        shell_append_mdi_text(";");
-        return;
-    } else if (strcmp(key, "CAN") == 0) {
-        g_v5_shell_mdi_line[0] = '\0';
-    } else if (strcmp(key, "UP\nPAGE") == 0 || strcmp(key, "PAGE\nDN") == 0 || strcmp(key, "<") == 0 || strcmp(key, "^") == 0 || strcmp(key, "v") == 0 || strcmp(key, ">") == 0) {
-        return;
-    } else {
-        shell_append_mdi_text(key);
-        return;
-    }
-    shell_update_mdi_line();
+    (void)shell_mdi_editor_handle_key(key);
 }
 
 static void shell_keyboard_key_label(lv_obj_t *key, const char *text, int w, int h)
@@ -407,6 +371,9 @@ lv_obj_t *shell_create_program_page(lv_obj_t *screen)
 lv_obj_t *shell_create_mdi_page(lv_obj_t *screen)
 {
     lv_obj_t *root = lv_obj_create(screen);
+    lv_obj_t *line_number_labels[V5_MDI_VISIBLE_ROWS];
+    const lv_font_t *mdi_font;
+    int mdi_line_space;
     int i;
     shell_clear_style(root);
     lv_obj_set_pos(root, 0, 0);
@@ -417,13 +384,46 @@ lv_obj_t *shell_create_mdi_page(lv_obj_t *screen)
     shell_make_label(root, 56, 7, 120, 22, "MDI edit", shell_rgb(214, 209, 194), LV_TEXT_ALIGN_LEFT);
 
     shell_make_panel(root, 0, 28, 512, 548, 16, 24, 32);
-    for (i = 0; i < 18; ++i) {
+    for (i = 0; i < (int)V5_MDI_VISIBLE_ROWS; ++i) {
         char line_no[8];
         snprintf(line_no, sizeof(line_no), "%03d", i + 1);
-        shell_make_label(root, 12, 37 + i * 28, 42, 18, line_no, shell_rgb(127, 138, 148), LV_TEXT_ALIGN_LEFT);
+        line_number_labels[i] =
+            shell_make_label(root, 12, 37 + i * 28, 42, 18, line_no,
+                shell_rgb(127, 138, 148), LV_TEXT_ALIGN_LEFT);
     }
-    g_v5_shell_mdi_line_label = shell_make_label(root, 62, 38, 450, 492, "MDI>", shell_rgb(247, 250, 252), LV_TEXT_ALIGN_LEFT);
-    lv_label_set_long_mode(g_v5_shell_mdi_line_label, LV_LABEL_LONG_WRAP);
+    g_v5_shell_mdi_line_label = lv_textarea_create(root);
+    lv_obj_set_pos(g_v5_shell_mdi_line_label, 62, 38);
+    lv_obj_set_size(g_v5_shell_mdi_line_label, 450, 492);
+    lv_obj_set_style_bg_opa(g_v5_shell_mdi_line_label, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(g_v5_shell_mdi_line_label, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(g_v5_shell_mdi_line_label, 0, LV_PART_MAIN);
+    lv_obj_set_style_text_color(
+        g_v5_shell_mdi_line_label,
+        shell_rgb(247, 250, 252),
+        LV_PART_MAIN);
+    mdi_font = lv_obj_get_style_text_font(g_v5_shell_mdi_line_label, LV_PART_MAIN);
+    mdi_line_space =
+        (int)V5_MDI_VISUAL_ROW_H - (int)lv_font_get_line_height(mdi_font);
+    lv_obj_set_style_text_line_space(
+        g_v5_shell_mdi_line_label,
+        mdi_line_space > 0 ? mdi_line_space : 0,
+        LV_PART_MAIN);
+    lv_obj_set_scrollbar_mode(g_v5_shell_mdi_line_label, LV_SCROLLBAR_MODE_OFF);
+    lv_textarea_set_one_line(g_v5_shell_mdi_line_label, false);
+    lv_textarea_set_placeholder_text(g_v5_shell_mdi_line_label, "MDI>");
+    lv_textarea_set_cursor_click_pos(g_v5_shell_mdi_line_label, true);
+    lv_textarea_set_max_length(g_v5_shell_mdi_line_label, V5_MDI_TEXT_CAP - 1U);
+    lv_obj_set_style_bg_opa(g_v5_shell_mdi_line_label, LV_OPA_TRANSP, LV_PART_CURSOR);
+    lv_obj_set_style_border_width(g_v5_shell_mdi_line_label, 2, LV_PART_CURSOR);
+    lv_obj_set_style_border_side(g_v5_shell_mdi_line_label, LV_BORDER_SIDE_LEFT, LV_PART_CURSOR);
+    lv_obj_set_style_border_color(
+        g_v5_shell_mdi_line_label,
+        shell_rgb(255, 255, 255),
+        LV_PART_CURSOR);
+    shell_mdi_editor_bind(
+        g_v5_shell_mdi_line_label,
+        line_number_labels,
+        V5_MDI_VISIBLE_ROWS);
     g_v5_shell_mdi_status_label = shell_make_label(root, 62, 536, 390, 24, "Native MDI", shell_rgb(150, 162, 174), LV_TEXT_ALIGN_LEFT);
     shell_make_label(root, 62, 558, 390, 24, "LinuxCNC RS274/NGC 原生输入", shell_rgb(150, 162, 174), LV_TEXT_ALIGN_LEFT);
 
