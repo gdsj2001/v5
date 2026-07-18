@@ -356,8 +356,14 @@ static int v5_start_motion_leg(
     v5_config_snapshot *cfg = &C[j];
     emcmot_joint_t *joint = &joints[j];
     int64_t delta;
+    int64_t runtime_target;
     double target_position;
-    if (!v5_home_sub_i64(target, current, &delta)) return V5_COUNT_INPUT;
+    if (!v5_home_sub_i64(target, current, &delta) ||
+        !v5_home_runtime_target_position(
+            current, runtime, target, cfg->counts_per_unit,
+            &runtime_target, &target_position)) {
+        return V5_COUNT_INPUT;
+    }
     s->phase = V5_MOVING;
     s->motion_start_runtime_counts = runtime;
     s->motion_target_counts = target;
@@ -369,7 +375,6 @@ static int v5_start_motion_leg(
         joint->free_tp.enable = 0;
         return V5_OK;
     }
-    target_position = joint->pos_fb + (double)delta / cfg->counts_per_unit;
     if (!v5_target_allowed(joint, target_position) ||
         !isfinite(joint->vel_limit) || joint->vel_limit <= 0) return V5_LIMIT;
     s->motion_timeout = v5_home_motion_timeout_cycles(

@@ -87,6 +87,7 @@ static void test_timeout_and_rebase(void)
 {
     int64_t runtime_target = 0, remaining = 0, rounded = 0, target = 0, delta = 0;
     int64_t logical = 0;
+    double target_position = 0.0;
     unsigned int stable = 2;
     int last_valid = 1, sample_valid = 1, observed = 1;
     assert(v5_home_exact_i64(123.0, &rounded) && rounded == 123);
@@ -104,6 +105,14 @@ static void test_timeout_and_rebase(void)
     assert(v5_home_rebase_remaining(1000, 250, 700, &runtime_target, &remaining));
     assert(runtime_target == 750 && remaining == 50);
     assert(runtime_target + 250 == 1000); /* fixed logical target unchanged */
+    /* A fresh raw count and joint feedback may be sampled on different servo
+     * cycles.  The absolute joint command must therefore come from the fixed
+     * logical target and base, never from joint.pos_fb plus a relative delta. */
+    assert(v5_home_runtime_target_position(
+        -1371599650, -71999650, -1371600000, 10000.0,
+        &runtime_target, &target_position));
+    assert(runtime_target == -72000000);
+    assert(target_position == -7200.0);
     /* Rebase during a zero-cycle outbound leg keeps its fixed outbound target. */
     assert(v5_home_rebase_remaining(1100, 250, 800, &runtime_target, &remaining));
     assert(runtime_target == 850 && remaining == 50);

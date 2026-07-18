@@ -333,6 +333,7 @@ def main() -> int:
         raise AssertionError("Home sequence/barrier/terminal/atomic-commit order regressed")
     for token in (
         "runtime != s->transaction_start_runtime_counts",
+        "v5_home_runtime_target_position(",
         "resume_target = s->zero_cycle_return_pending",
         "s->motion_target_counts : s->target_counts",
         "start_ready_mask = ready",
@@ -360,6 +361,9 @@ def main() -> int:
         raise AssertionError("homed must have one atomic terminal owner")
     if "v5_home_target_reached" in home_motion or "v5_home_target_reached" in home_math:
         raise AssertionError("retired Home exact target terminal gate survived")
+    require(home_math, "static int v5_home_runtime_target_position")
+    if "joint->pos_fb + (double)delta / cfg->counts_per_unit" in home_motion:
+        raise AssertionError("Home motion target regressed to relative joint feedback arithmetic")
     require(home_math, "static int v5_home_terminal_sample_stable")
     require(home_motion, "v5_home_terminal_sample_stable(")
     ready = home_motion.index("start_ready_mask = ready")

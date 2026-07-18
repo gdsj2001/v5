@@ -261,6 +261,34 @@ static int v5_home_bind_runtime_actual(
     return v5_home_add_i64(base_counts, runtime_counts, logical_counts);
 }
 
+/* Build the absolute joint target from the fixed logical count target and the
+ * current wcheckpoint base.  Do not add a count delta to joint->pos_fb: those
+ * samples are acquired on different servo cycles and can bake their skew into
+ * the final command even though the logical target itself is exact. */
+static int v5_home_runtime_target_position(
+    int64_t logical_current, int64_t runtime_current,
+    int64_t logical_target, double counts_per_unit,
+    int64_t *runtime_target, double *target_position)
+{
+    int64_t base_counts;
+    int64_t roundtrip_counts;
+    double position;
+    if (!runtime_target || !target_position ||
+        !isfinite(counts_per_unit) || counts_per_unit == 0.0 ||
+        !v5_home_sub_i64(logical_current, runtime_current, &base_counts) ||
+        !v5_home_sub_i64(logical_target, base_counts, runtime_target)) {
+        return 0;
+    }
+    position = (double)*runtime_target / counts_per_unit;
+    if (!isfinite(position) ||
+        !v5_home_exact_i64(position * counts_per_unit, &roundtrip_counts) ||
+        roundtrip_counts != *runtime_target) {
+        return 0;
+    }
+    *target_position = position;
+    return 1;
+}
+
 /* Completion comes only from observed motion, planner completion, in-position
  * and stable fresh actual samples. */
 static int v5_home_motion_sample_complete(
