@@ -105,7 +105,6 @@ void v5_main_page_internal_hide_toolpath_program_line(V5MainPage *page)
     memset(page->trajectory_break_before, 0, sizeof(page->trajectory_break_before));
     page->toolpath_program_visible = 0;
     page->trajectory_point_count = 0U;
-    page->toolpath_scene_last_pose_render_tick = 0U;
     if (was_drawn) {
         page->toolpath_line_rewrite_count += 1U;
     }
@@ -124,7 +123,6 @@ void v5_main_page_internal_mark_toolpath_static_dirty(V5MainPage *page)
     memset(page->toolpath_program_wcs_offset, 0, sizeof(page->toolpath_program_wcs_offset));
     page->toolpath_program_visible = 0;
     page->toolpath_program_point_count = 0U;
-    page->toolpath_scene_last_pose_render_tick = 0U;
     page->toolpath_program_model_scene_valid = 0;
     memset(
         &page->toolpath_program_model_scene,

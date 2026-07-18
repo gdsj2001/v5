@@ -316,7 +316,8 @@ int v5_settings_apply_commit_motion_model(
             traj_coordinates,
             sizeof(traj_coordinates),
             &wrapped_rotary_mask) ||
-        !v5_settings_apply_build_runtime_ini_path(ini_path, sizeof(ini_path), request->project_root)) {
+        !v5_settings_apply_build_runtime_ini_path(
+            ini_path, sizeof(ini_path), request->project_root, request->runtime_ini_path)) {
         return 0;
     }
     target_model = v5_motion_model_find(canonical);

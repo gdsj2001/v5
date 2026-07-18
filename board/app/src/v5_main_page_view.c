@@ -216,7 +216,6 @@ int v5_main_page_create(V5MainPage *page, lv_obj_t *parent)
 int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *status, unsigned int refresh_flags)
 {
     V5CoordinatePanelSnapshot panel;
-    V5ToolpathDisplaySnapshot dynamic_display;
     const V5ProgramRuntime *runtime = page && page->program_controller ? v5_program_controller_runtime(page->program_controller) : 0;
     unsigned int preview_count = 0U;
     unsigned int runtime_generation = 0U;
@@ -229,7 +228,6 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
     int program_model_changed = 0;
     int static_pose_changed = 0;
     int program_refresh_due = 0;
-    int program_pose_refresh_ready = 1;
     int model_projection_fresh = 0;
     int program_projection_ready = 0;
     int model_scene_stale = 0;
@@ -348,17 +346,9 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
             page->toolpath_program_wcs_epoch != page->native_readback.wcs_offsets_epoch) {
             program_wcs_changed = 1;
         }
-        if (!structure_refresh_due &&
-            status &&
-            fabs(status->linear_velocity_mm_per_min) > 0.001 &&
-            page->toolpath_scene_last_pose_render_tick != 0U &&
-            lv_tick_elaps(page->toolpath_scene_last_pose_render_tick) <
-                V5_TOOLPATH_SCENE_POSE_REFRESH_MS) {
-            program_pose_refresh_ready = 0;
-        }
         program_refresh_due =
             (static_toolpath_due || program_wcs_changed ||
-             (program_model_changed && program_pose_refresh_ready)) &&
+             program_model_changed) &&
             program_projection_ready;
 
         if (structure_refresh_due && !runtime_has_program && status && !model_scene_stale &&
@@ -396,11 +386,6 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
                 program_wcs_offset[2] = page->toolpath_program_wcs_offset[2];
             }
             if (preview_count > 0U) {
-                if (!v5_main_page_internal_main_page_update_program_project_points(page, preview_count)) {
-                    preview_count = 0U;
-                }
-            }
-            if (preview_count > 0U) {
                 program_wcs_changed =
                     !page->toolpath_program_wcs_valid ||
                     page->toolpath_program_wcs_epoch != page->native_readback.wcs_offsets_epoch ||
@@ -421,19 +406,32 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
                 program_wcs_changed ||
                 page->toolpath_program_view_generation != page->toolpath_view_generation;
             if (preview_count > 0U && program_projection_dirty) {
-                if (!program_fit_dirty ||
-                    v5_toolpath_display_fit_from_points(
-                        page->toolpath_program_project_points,
-                        preview_count,
-                        page->view_plane,
-                        &page->toolpath_fit)) {
-                    if (program_fit_dirty) {
-                        v5_main_page_internal_main_page_expand_visible_toolpath_fit(page, status, &page->toolpath_fit);
+                int projection_applied = 0;
+                page->toolpath_program_point_count = preview_count;
+                if (program_fit_dirty) {
+                    if (v5_main_page_internal_main_page_prepare_program_fit_points(
+                            page, preview_count) &&
+                        v5_toolpath_display_fit_from_points(
+                            page->toolpath_program_project_points,
+                            preview_count,
+                            page->view_plane,
+                            &page->toolpath_fit)) {
+                        v5_main_page_internal_main_page_expand_visible_toolpath_fit(
+                            page, status, &page->toolpath_fit);
+                        projection_applied =
+                            v5_main_page_internal_main_page_project_program_with_current_fit(
+                                page);
                     }
-                    page->toolpath_program_point_count = preview_count;
-                    if (v5_main_page_internal_main_page_project_program_with_current_fit(page)) {
-                        page->toolpath_scene_last_pose_render_tick = lv_tick_get();
-                    }
+                } else if (program_model_changed || program_wcs_changed) {
+                    projection_applied =
+                        v5_main_page_internal_main_page_project_program_fused(
+                            page);
+                } else {
+                    projection_applied =
+                        v5_main_page_internal_main_page_project_program_with_current_fit(
+                            page);
+                }
+                if (projection_applied) {
                     page->toolpath_program_generation = runtime_generation;
                     page->toolpath_program_view_generation = page->toolpath_view_generation;
                     page->toolpath_program_plane = page->view_plane;
@@ -477,32 +475,19 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
     v5_main_page_internal_coalesce_toolpath_invalidations(page);
 
     if (static_toolpath_due || program_wcs_changed ||
-        ((program_model_changed || static_pose_changed ||
-          (refresh_flags & V5_MAIN_PAGE_REFRESH_SLOW) != 0U) &&
-         program_pose_refresh_ready)) {
+        program_model_changed || static_pose_changed ||
+        (refresh_flags & V5_MAIN_PAGE_REFRESH_SLOW) != 0U) {
         v5_main_page_internal_update_toolpath_state_lines(page, status);
         v5_main_page_internal_main_page_store_static_pose(page);
-        page->toolpath_scene_last_pose_render_tick = lv_tick_get();
     }
 
         if ((refresh_flags & V5_MAIN_PAGE_REFRESH_DYNAMIC) != 0U) {
-            v5_toolpath_display_from_status_with_fit(
+            v5_main_page_internal_build_dynamic_scene(
+                page,
                 status,
-                &page->toolpath_fit,
-                (double)V5_TOOLPATH_W,
-                (double)V5_TOOLPATH_H,
-                &dynamic_display);
-            v5_main_page_internal_apply_toolpath_view_transform_to_snapshot(page, &dynamic_display);
-            {
-                V5ToolpathScreenPoint cmd_tip_point;
-                int cmd_tip_valid = v5_main_page_internal_main_page_project_cmd_tip(page, status, &cmd_tip_point);
-                v5_main_page_internal_set_toolpath_v3_dot_center(page->toolpath_microkernel_marker_dot, &cmd_tip_point, cmd_tip_valid);
-            }
-            v5_main_page_internal_set_toolpath_v3_dot_center(page->toolpath_holder_marker_line, &dynamic_display.mcs_point, dynamic_display.mcs_valid);
-            v5_main_page_internal_update_toolpath_holder_line(page, status, dynamic_display.mcs_valid ? &dynamic_display.mcs_point : 0);
-            if (!dynamic_display.mcs_valid) {
-                v5_main_page_internal_hide_toolpath_unproven_geometry(page);
-            }
+                &page->toolpath_dynamic_scene);
+            v5_main_page_internal_apply_dynamic_scene(
+                page, &page->toolpath_dynamic_scene);
         }
         if (structure_refresh_due) {
             lv_obj_update_layout(page->root);

@@ -150,7 +150,8 @@ int v5_settings_apply_commit_runtime_ini(
     char display[64];
     unsigned int joint_index = 0U;
     int has_joint = 0;
-    if (!v5_settings_apply_build_runtime_ini_path(ini_path, sizeof(ini_path), request->project_root)) {
+    if (!v5_settings_apply_build_runtime_ini_path(
+            ini_path, sizeof(ini_path), request->project_root, request->runtime_ini_path)) {
         return 0;
     }
     if (!settings_apply_runtime_target(ini_path, request->axis, request->field_key,
@@ -187,9 +188,13 @@ int v5_settings_apply_commit_runtime_ini(
         snprintf(result->readback_value, sizeof(result->readback_value), "%s", display);
     }
     if (result && result->apply.raw_limits_recompute_required) {
-        if (!v5_settings_apply_scale_chain_commit(request->project_root, 0, request->axis,
-                                                  has_joint, joint_index,
-                                                  request->field_name, &result->scale_chain)) {
+        if (!v5_settings_apply_scale_chain_commit(
+                request->project_root,
+                request->runtime_ini_path,
+                0,
+                request->axis,
+                has_joint, joint_index,
+                request->field_name, &result->scale_chain)) {
             return 0;
         }
     }

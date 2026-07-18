@@ -42,6 +42,7 @@ typedef struct V5SettingsApplyScaleChainResult {
 
 typedef struct V5SettingsApplyAxisCommitRequest {
     const char *project_root;
+    const char *runtime_ini_path;
     const char *axis;
     unsigned int axis_index;
     const char *field_key;
@@ -70,6 +71,7 @@ int v5_settings_apply_commit_axis_value(
 
 int v5_settings_apply_scale_chain_commit(
     const char *project_root,
+    const char *runtime_ini_path,
     const char *settings_runtime_json_path,
     const char *axis,
     int joint_active,

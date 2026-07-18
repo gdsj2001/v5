@@ -27,7 +27,8 @@ int v5_settings_apply_json_number_value(
 int v5_settings_apply_runtime_axis_object(
     const char *json, const char *axis, const char **axis_start, const char **axis_end);
 int v5_settings_apply_build_runtime_ini_path(
-    char *out, size_t out_cap, const char *project_root);
+    char *out, size_t out_cap, const char *project_root,
+    const char *runtime_ini_path);
 int v5_settings_apply_ini_section_line(
     const char *raw, char *section, size_t section_cap);
 int v5_settings_apply_ini_key_line(

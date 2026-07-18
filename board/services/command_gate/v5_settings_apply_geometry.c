@@ -38,7 +38,8 @@ int v5_settings_apply_commit_g53_geometry(
         return v5_settings_apply_commit_motion_model(request, result);
     }
     if (!v5_settings_apply_numeric_text(request->value_text) ||
-        !v5_settings_apply_build_runtime_ini_path(ini_path, sizeof(ini_path), request->project_root)) {
+        !v5_settings_apply_build_runtime_ini_path(
+            ini_path, sizeof(ini_path), request->project_root, request->runtime_ini_path)) {
         return 0;
     }
     ini_key = settings_apply_g53_rtcp_key(request->field_name);

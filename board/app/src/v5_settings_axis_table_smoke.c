@@ -476,6 +476,9 @@ int main(void)
     if (!copy_file(ini_src, "linuxcnc/ini/v5_bus.ini")) {
         return 7;
     }
+    if (!copy_file(ini_src, "linuxcnc/ini/v5_pulse.ini")) {
+        return 7;
+    }
     fp = fopen("settings_runtime.json", "wb");
     if (!fp) {
         return 7;
@@ -1199,8 +1202,50 @@ int main(void)
             return 42;
         }
     }
+    {
+        V5SettingsApplyAxisCommitRequest request;
+        V5SettingsApplyAxisCommitResult result;
+        char bus_scale_before[64];
+        char bus_scale_after[64];
+        char pulse_scale_after[64];
+        memset(&request, 0, sizeof(request));
+        memset(&result, 0, sizeof(result));
+        if (!read_section_ini_key(
+                "linuxcnc/ini/v5_bus.ini", "JOINT_0", "SCALE",
+                bus_scale_before, sizeof(bus_scale_before))) {
+            return 58;
+        }
+        request.project_root = ".";
+        request.runtime_ini_path = "./linuxcnc/ini/v5_pulse.ini";
+        request.axis = "X";
+        request.axis_index = 0U;
+        request.field_key = "precision";
+        request.field_name = "axis_X_precision";
+        request.value_text = "0.0002";
+        request.owner_generation = 1U;
+        request.readback_token = 1U;
+        if (!v5_settings_apply_commit_axis_value(&request, &result) ||
+            !result.source_readback_confirmed ||
+            strcmp(result.readback_value, "0.0002") != 0 ||
+            !read_section_ini_key(
+                "linuxcnc/ini/v5_pulse.ini", "JOINT_0", "SCALE",
+                pulse_scale_after, sizeof(pulse_scale_after)) ||
+            strcmp(pulse_scale_after, "5000") != 0 ||
+            !read_section_ini_key(
+                "linuxcnc/ini/v5_bus.ini", "JOINT_0", "SCALE",
+                bus_scale_after, sizeof(bus_scale_after)) ||
+            strcmp(bus_scale_after, bus_scale_before) != 0) {
+            fprintf(stderr,
+                    "active runtime INI precision commit crossed modes: "
+                    "bus_before=%s bus_after=%s pulse_after=%s readback=%s\n",
+                    bus_scale_before, bus_scale_after, pulse_scale_after,
+                    result.readback_value);
+            return 58;
+        }
+    }
 
     unlink("linuxcnc/ini/v5_bus.ini");
+    unlink("linuxcnc/ini/v5_pulse.ini");
     rmdir("linuxcnc/ini");
     rmdir("linuxcnc");
     unlink("config/settings/self_parameter_table.tsv");

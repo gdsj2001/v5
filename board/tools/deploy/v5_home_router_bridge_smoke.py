@@ -172,6 +172,7 @@ def main() -> int:
     for token in (
         "pin in u32 joint-axis-code-##[5]",
         "pin out float wcp-base-##[3]",
+        "pin out s32 wcp-runtime-##[3]",
         "pin out u32 wcp-gen-##[3]",
         "v5_bus_router_wcheckpoint_quantum",
         "v5_bus_router_nearest_quantized",
@@ -180,12 +181,15 @@ def main() -> int:
         require(router, token)
     for token in (
         "v5-bus-axis-router.wcp-base-00 => motion.v5-wcheckpoint-a-router-base-counts",
+        "v5-bus-axis-router.wcp-runtime-00 => motion.v5-wcheckpoint-a-router-runtime-counts",
         "v5-bus-axis-router.wcp-base-02 => motion.v5-wcheckpoint-c-router-base-counts",
+        "v5-bus-axis-router.wcp-runtime-02 => motion.v5-wcheckpoint-c-router-runtime-counts",
         "v5-native-hal-owner.home-axis-code-04 => v5-bus-axis-router.joint-axis-code-04",
     ):
         require(hal, token)
     for token in (
         "motion.v5-wcheckpoint-%c-router-base-counts",
+        "motion.v5-wcheckpoint-%c-router-runtime-counts",
         "motion.v5-wcheckpoint-%c-router-generation",
         "motion.v5-wcheckpoint-%c-router-valid",
         "fmod(fabs(router_base_counts), quantum_counts) == 0.0",
@@ -199,6 +203,8 @@ def main() -> int:
     base_counts = nearest_quantized(current_counts, output_crev * turn_quantum)
     if base_counts != -1072800000 or current_counts - base_counts != 209:
         raise AssertionError("boot wcheckpoint did not center the observed C-axis count")
+    if base_counts + (current_counts - base_counts) != current_counts:
+        raise AssertionError("router base/runtime readback did not preserve logical counts")
     five_turn_target = current_counts - 5 * output_crev
     if five_turn_target - base_counts != -17999791:
         raise AssertionError("cc-ac five-turn target did not consume the boot base")

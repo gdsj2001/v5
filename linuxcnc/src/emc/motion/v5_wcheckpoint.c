@@ -269,6 +269,9 @@ int v5_wcheckpoint_export_hal(int component_id)
         result = hal_pin_float_newf(HAL_IN, &hal_axis->router_base_counts,
                                     component_id, "motion.v5-wcheckpoint-%c-router-base-counts", axis_name[index]);
         if (result != 0) return result;
+        result = hal_pin_s32_newf(HAL_IN, &hal_axis->router_runtime_counts,
+                                  component_id, "motion.v5-wcheckpoint-%c-router-runtime-counts", axis_name[index]);
+        if (result != 0) return result;
         result = hal_pin_u32_newf(HAL_IN, &hal_axis->router_generation,
                                   component_id, "motion.v5-wcheckpoint-%c-router-generation", axis_name[index]);
         if (result != 0) return result;
@@ -331,6 +334,10 @@ void v5_wcheckpoint_update_before_inputs(void)
         new_base_turns[index] = axis_state[index].base_turns;
         reason = profile_reason(index, &axis_state[index].safe_half_counts,
                                 &turn_quantum[index]);
+        axis_state[index].raw_bits = (unsigned int)(
+            v5_wcheckpoint_command_raw_bits[index] < v5_wcheckpoint_feedback_raw_bits[index]
+                ? v5_wcheckpoint_command_raw_bits[index]
+                : v5_wcheckpoint_feedback_raw_bits[index]);
         if (*hal_axis->router_valid && *hal_axis->router_generation != 0U &&
             (reason == V5_WCHECKPOINT_OK ||
              reason == V5_WCHECKPOINT_DRIVE_WINDOW_UNPROVEN)) {
@@ -358,10 +365,6 @@ void v5_wcheckpoint_update_before_inputs(void)
          * rebase, but its current logical/base/runtime window is still valid
          * and may be used for bounded motion inside the mapped safe range. */
         axis_state[index].valid = snapshot_truth_available(reason);
-        axis_state[index].raw_bits = (unsigned int)(
-            v5_wcheckpoint_command_raw_bits[index] < v5_wcheckpoint_feedback_raw_bits[index]
-                ? v5_wcheckpoint_command_raw_bits[index]
-                : v5_wcheckpoint_feedback_raw_bits[index]);
         if (reason != V5_WCHECKPOINT_OK || !isfinite(logical_deg)) {
             continue;
         }
@@ -416,10 +419,16 @@ void v5_wcheckpoint_publish(void)
         if (state->valid && state->generation == 0U) {
             state->generation = 1U;
         }
-        state->logical_counts = logical_deg * counts_per_degree;
-        state->base_counts = state->base_turns *
-            (double)v5_wcheckpoint_counts_per_rev[index];
-        state->runtime_counts = state->logical_counts - state->base_counts;
+        if (state->router_synced && *hal_axis->router_valid) {
+            state->base_counts = *hal_axis->router_base_counts;
+            state->runtime_counts = (double)*hal_axis->router_runtime_counts;
+            state->logical_counts = state->base_counts + state->runtime_counts;
+        } else {
+            state->logical_counts = logical_deg * counts_per_degree;
+            state->base_counts = state->base_turns *
+                (double)v5_wcheckpoint_counts_per_rev[index];
+            state->runtime_counts = state->logical_counts - state->base_counts;
+        }
         state->sample_sequence++;
         if (state->sample_sequence == 0U) state->sample_sequence = 1U;
         *hal_axis->logical_abs_counts = state->logical_counts;

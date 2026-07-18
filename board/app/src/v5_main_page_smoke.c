@@ -715,6 +715,8 @@ int main(void)
     }
     {
         const unsigned int dynamic_before = page.toolpath_dynamic_refresh_count;
+        const unsigned int dynamic_scene_build_before =
+            page.toolpath_dynamic_scene_build_count;
         const unsigned int pose_before = page.toolpath_pose_refresh_count;
         const unsigned int structure_before = page.toolpath_structure_refresh_count;
         const unsigned int rewrite_before = page.toolpath_line_rewrite_count;
@@ -776,6 +778,8 @@ int main(void)
         }
         lv_obj_update_layout(page.toolpath_holder_marker_line);
         if (page.toolpath_dynamic_refresh_count != dynamic_before + 30U ||
+            page.toolpath_dynamic_scene_build_count !=
+                dynamic_scene_build_before + 30U ||
             page.toolpath_pose_refresh_count != pose_before + 30U ||
             page.toolpath_structure_refresh_count != structure_before ||
             page.toolpath_fit.generation != fit_before ||
@@ -792,8 +796,10 @@ int main(void)
             (lv_obj_get_x(page.toolpath_holder_marker_line) == marker_x_before &&
              lv_obj_get_y(page.toolpath_holder_marker_line) == marker_y_before)) {
             fprintf(stderr,
-                    "main_page_smoke dynamic tier mismatch dynamic=%u/%u pose=%u/%u structure=%u/%u rewrite=%u/%u transform=%u/%u set_points=%u/%u coordinate_changed=%d marker=%d,%d/%d,%d\n",
+                    "main_page_smoke dynamic tier mismatch dynamic=%u/%u scene=%u/%u pose=%u/%u structure=%u/%u rewrite=%u/%u transform=%u/%u set_points=%u/%u coordinate_changed=%d marker=%d,%d/%d,%d\n",
                     page.toolpath_dynamic_refresh_count, dynamic_before + 30U,
+                    page.toolpath_dynamic_scene_build_count,
+                    dynamic_scene_build_before + 30U,
                     page.toolpath_pose_refresh_count, pose_before + 30U,
                     page.toolpath_structure_refresh_count, structure_before,
                     page.toolpath_line_rewrite_count, rewrite_before,
@@ -1043,6 +1049,8 @@ int main(void)
         double projected_before[3];
         unsigned int rewrite_before = page.toolpath_line_rewrite_count;
         unsigned int rtcp_transform_before = page.toolpath_program_rtcp_transform_count;
+        unsigned int fused_frame_before =
+            page.toolpath_program_fused_frame_count;
         unsigned int fit_before = page.toolpath_fit.generation;
         unsigned int wi;
         memcpy(wcs_origin_before, page.toolpath_wcs_origin_points, sizeof(wcs_origin_before));
@@ -1108,18 +1116,21 @@ int main(void)
             if (!applied ||
                 page.toolpath_line_rewrite_count <= rewrite_before ||
                 page.toolpath_program_rtcp_transform_count != rtcp_transform_before + 1U ||
+                page.toolpath_program_fused_frame_count != fused_frame_before + 1U ||
                 !page.toolpath_program_model_scene_valid ||
                 page.toolpath_fit.generation != fit_before ||
                 !wcs_match ||
                 !program_changed) {
                 fprintf(
                     stderr,
-                    "main_page_smoke rtcp pose mismatch applied=%d rewrite=%u/%u transform=%u/%u fit=%u/%u wcs=%d program=%d\n",
+                    "main_page_smoke rtcp pose mismatch applied=%d rewrite=%u/%u transform=%u/%u fused=%u/%u fit=%u/%u wcs=%d program=%d\n",
                     applied,
                     page.toolpath_line_rewrite_count,
                     rewrite_before,
                     page.toolpath_program_rtcp_transform_count,
                     rtcp_transform_before + 1U,
+                    page.toolpath_program_fused_frame_count,
+                    fused_frame_before + 1U,
                     page.toolpath_fit.generation,
                     fit_before,
                     wcs_match,

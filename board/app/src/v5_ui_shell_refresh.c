@@ -275,6 +275,9 @@ int v5_ui_shell_refresh_once(void)
         if (shell_refresh_safety_readback(0)) {
             main_cache_changed = 1;
         }
+        if (g_v5_shell_current_page == V5_SHELL_PAGE_MAIN) {
+            shell_update_top_status_label();
+        }
         flags |= V5_MAIN_PAGE_REFRESH_ESTOP;
     }
     if (shell_refresh_due(now, &g_v5_shell_ui_button_last_refresh_ns, V5_UI_BUTTON_REFRESH_NS)) {

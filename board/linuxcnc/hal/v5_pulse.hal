@@ -36,12 +36,12 @@ setp iocontrol.0.lube_level TRUE
 
 setp motion.digital-in-00 TRUE
 
-setp zynq_stepgen_hw.0.scale 10000.0
-setp zynq_stepgen_hw.1.scale 10000.0
-setp zynq_stepgen_hw.2.scale 10000.0
-setp zynq_stepgen_hw.3.scale 1000.0
-setp zynq_stepgen_hw.4.scale 1000.0
-setp zynq_stepgen_hw.5.scale 1000.0
+setp zynq_stepgen_hw.0.scale [JOINT_0]SCALE
+setp zynq_stepgen_hw.1.scale [JOINT_1]SCALE
+setp zynq_stepgen_hw.2.scale [JOINT_2]SCALE
+setp zynq_stepgen_hw.3.scale [JOINT_3]SCALE
+setp zynq_stepgen_hw.4.scale [JOINT_4]SCALE
+setp zynq_stepgen_hw.5.scale [JOINT_5]SCALE
 
 setp zynq_stepgen_hw.0.step-width-ns 1000
 setp zynq_stepgen_hw.0.step-space-ns 1000

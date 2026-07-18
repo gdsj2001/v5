@@ -332,11 +332,33 @@ int v5_main_page_internal_main_page_tool_length_mm(const V5MainPage *page, doubl
     return 1;
 }
 
+static int project_dynamic_scene_point(
+    const V5MainPage *page,
+    const V5ToolpathViewTransform *view_transform,
+    const double world[V5_STATUS_AXIS_COUNT],
+    V5ToolpathScreenPoint *point)
+{
+    if (!page || !view_transform || !world || !point ||
+        !page->toolpath_fit.valid ||
+        !v5_toolpath_display_project_world_point(
+            world,
+            &page->toolpath_fit,
+            (double)V5_TOOLPATH_W,
+            (double)V5_TOOLPATH_H,
+            point)) {
+        return 0;
+    }
+    *point = v5_main_page_internal_apply_toolpath_view_transform_prepared(
+        *point, view_transform);
+    return 1;
+}
+
 void v5_main_page_internal_build_dynamic_scene(
     V5MainPage *page,
     const V5UiStatusView *status,
     V5MainPageDynamicScene *scene)
 {
+    V5ToolpathViewTransform view_transform;
     unsigned int generation;
     double world[V5_STATUS_AXIS_COUNT];
     double tool_len = 0.0;
@@ -344,7 +366,7 @@ void v5_main_page_internal_build_dynamic_scene(
     if (!page || !scene) {
         return;
     }
-    generation = scene->generation + 1U;
+    generation = page->toolpath_dynamic_scene.generation + 1U;
     if (generation == 0U) {
         generation = 1U;
     }
@@ -354,10 +376,15 @@ void v5_main_page_internal_build_dynamic_scene(
     if (!status) {
         return;
     }
+    v5_main_page_internal_prepare_toolpath_view_transform(
+        page, &view_transform);
     if ((status->valid_mask & V5_STATUS_VALID_MCS) != 0U) {
         scene->mcs_valid =
-            v5_main_page_internal_main_page_project_world_point_transformed(
-                page, status->mcs, &scene->mcs_point);
+            project_dynamic_scene_point(
+                page,
+                &view_transform,
+                status->mcs,
+                &scene->mcs_point);
     }
     if ((status->valid_mask & V5_STATUS_VALID_CMD_MCS) != 0U) {
         memcpy(world, status->cmd_mcs, sizeof(world));
@@ -365,8 +392,11 @@ void v5_main_page_internal_build_dynamic_scene(
             world[2] -= tool_len;
         }
         scene->cmd_tip_valid =
-            v5_main_page_internal_main_page_project_world_point_transformed(
-                page, world, &scene->cmd_tip_point);
+            project_dynamic_scene_point(
+                page,
+                &view_transform,
+                world,
+                &scene->cmd_tip_point);
     }
     if (!scene->mcs_valid ||
         !v5_main_page_internal_main_page_tool_length_mm(page, &tool_len) ||
@@ -376,8 +406,11 @@ void v5_main_page_internal_build_dynamic_scene(
     memcpy(world, status->mcs, sizeof(world));
     world[2] -= tool_len;
     scene->holder_end_valid =
-        v5_main_page_internal_main_page_project_world_point_transformed(
-            page, world, &scene->holder_end_point);
+        project_dynamic_scene_point(
+            page,
+            &view_transform,
+            world,
+            &scene->holder_end_point);
 }
 
 void v5_main_page_internal_apply_dynamic_scene(

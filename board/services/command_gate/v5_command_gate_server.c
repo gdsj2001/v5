@@ -658,6 +658,7 @@ static void execute_settings_axis_commit(
     }
     memset(&request, 0, sizeof(request));
     request.project_root = frame->settings_project_root;
+    request.runtime_ini_path = g_ini_path;
     request.axis = frame->settings_axis;
     request.axis_index = frame->settings_axis_index;
     request.field_key = frame->settings_field_key;

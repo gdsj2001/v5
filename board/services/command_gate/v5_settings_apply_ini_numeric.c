@@ -12,14 +12,53 @@
 #include <sys/stat.h>
 #include "v5_settings_apply_internal.h"
 
-int v5_settings_apply_build_runtime_ini_path(char *out, size_t out_cap, const char *project_root)
+static int settings_apply_build_mode_ini_path(
+    char *out,
+    size_t out_cap,
+    const char *project_root,
+    const char *relative_path)
 {
     int n;
     const char *root = (project_root && project_root[0]) ? project_root : ".";
-    if (!out || out_cap == 0U) {
+    const char *separator;
+    size_t root_len;
+    if (!out || out_cap == 0U || !relative_path || !relative_path[0]) {
         return 0;
     }
-    n = snprintf(out, out_cap, "%s/%s", root, "linuxcnc/ini/v5_bus.ini");
+    root_len = strlen(root);
+    separator = root_len > 0U && (root[root_len - 1U] == '/' || root[root_len - 1U] == '\\')
+        ? "" : "/";
+    n = snprintf(out, out_cap, "%s%s%s", root, separator, relative_path);
+    return n > 0 && (size_t)n < out_cap;
+}
+
+int v5_settings_apply_build_runtime_ini_path(
+    char *out,
+    size_t out_cap,
+    const char *project_root,
+    const char *runtime_ini_path)
+{
+    char bus_path[512];
+    char pulse_path[512];
+    const char *selected;
+    int n;
+    if (!out || out_cap == 0U ||
+        !settings_apply_build_mode_ini_path(
+            bus_path, sizeof(bus_path), project_root, "linuxcnc/ini/v5_bus.ini") ||
+        !settings_apply_build_mode_ini_path(
+            pulse_path, sizeof(pulse_path), project_root, "linuxcnc/ini/v5_pulse.ini")) {
+        return 0;
+    }
+    if (!runtime_ini_path || !runtime_ini_path[0]) {
+        selected = bus_path;
+    } else if (strcmp(runtime_ini_path, bus_path) == 0) {
+        selected = bus_path;
+    } else if (strcmp(runtime_ini_path, pulse_path) == 0) {
+        selected = pulse_path;
+    } else {
+        return 0;
+    }
+    n = snprintf(out, out_cap, "%s", selected);
     return n > 0 && (size_t)n < out_cap;
 }
 

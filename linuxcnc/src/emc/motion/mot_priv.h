@@ -122,6 +122,7 @@ typedef struct {
 
 typedef struct {
     hal_float_t *router_base_counts;
+    hal_s32_t *router_runtime_counts;
     hal_u32_t *router_generation;
     hal_bit_t *router_valid;
     hal_float_t *logical_abs_counts;

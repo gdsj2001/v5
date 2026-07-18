@@ -138,6 +138,7 @@ static int commit_wcheckpoint_profile(
 
 int v5_settings_apply_scale_chain_commit(
     const char *project_root,
+    const char *runtime_ini_path,
     const char *settings_runtime_json_path,
     const char *axis,
     int joint_active,
@@ -187,7 +188,8 @@ int v5_settings_apply_scale_chain_commit(
     if (result) {
         result->attempted = 1;
     }
-    if (!v5_settings_apply_build_runtime_ini_path(ini_path, sizeof(ini_path), project_root)) {
+    if (!v5_settings_apply_build_runtime_ini_path(
+            ini_path, sizeof(ini_path), project_root, runtime_ini_path)) {
         v5_settings_apply_scale_chain_result_code(result, "RUNTIME_INI_PATH_INVALID");
         return 0;
     }

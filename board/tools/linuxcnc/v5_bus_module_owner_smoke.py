@@ -27,12 +27,24 @@ def validate(bus_hal: str, bus_ini: str, launcher: str) -> None:
 
 hal_text = BUS_HAL.read_text(encoding="utf-8")
 ini_text = BUS_INI.read_text(encoding="utf-8")
+pulse_text = PULSE_HAL.read_text(encoding="utf-8")
 launcher_text = LINUXCNC_LAUNCHER.read_text(encoding="utf-8")
 validate(hal_text, ini_text, launcher_text)
 
 # Pulse remains an independently supported owner and is not rewritten by this
 # BUS-only retirement slice.
 assert PULSE_HAL.exists()
+for joint in range(6):
+    assert re.search(
+        rf"^\s*setp\s+zynq_stepgen_hw\.{joint}\.scale\s+\[JOINT_{joint}\]SCALE\s*$",
+        pulse_text,
+        flags=re.MULTILINE,
+    ), f"Pulse stepgen {joint} scale is not sourced from its runtime JOINT"
+assert re.search(
+    r"^\s*setp\s+zynq_stepgen_hw\.\d+\.scale\s+[-+]?\d",
+    pulse_text,
+    flags=re.MULTILINE,
+) is None, "Pulse stepgen scale must not retain a numeric fallback"
 
 for retired_line in ("loadrt [EMCMOT]TPMOD", "loadrt [EMCMOT]HOMEMOD"):
     try:

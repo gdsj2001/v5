@@ -66,6 +66,8 @@ pin out s32 slave-target-position-##[5]
     "Target position count routed to physical slave position ##";
 pin out float wcp-base-##[3]
     "Resident software window base in exact integer counts for A/B/C";
+pin out s32 wcp-runtime-##[3]
+    "Same-cycle zero-relative runtime actual count for A/B/C";
 pin out u32 wcp-gen-##[3]
     "Generation advanced after boot initialization or an integer-period shift";
 pin out bit wcp-valid-##[3]
@@ -210,6 +212,9 @@ FUNCTION(read) {
         joint_statusword(joint) = 0;
         joint_actual_position(joint) = 0;
         joint_digital_inputs(joint) = 0;
+    }
+    for (axis = 0; axis < V5_BUS_AXIS_ROUTER_ROTARY_AXES; axis++) {
+        wcp_runtime(axis) = 0;
     }
 
     /* A canonical validity withdrawal revokes the active route immediately. */
@@ -403,6 +408,7 @@ FUNCTION(read) {
                 joint_actual_position(joint) = v5_bus_router_sub_offset(
                     joint_actual_position(joint),
                     v5_bus_router_base_low(wcheckpoint_base_state[axis]));
+                wcp_runtime(axis) = joint_actual_position(joint);
             }
         }
         joint_digital_inputs(joint) = slave_digital_inputs(slave);
