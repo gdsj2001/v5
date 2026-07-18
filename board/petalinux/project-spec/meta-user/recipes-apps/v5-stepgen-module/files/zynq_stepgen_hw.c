@@ -8,7 +8,9 @@
 #include <rtapi_app.h>
 #include <hal.h>
 #include <fcntl.h>
+#include <grp.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <stdint.h>
 #include <errno.h>
@@ -23,6 +25,7 @@ MODULE_LICENSE("GPL");
 
 #define V5_STEPGEN_BUILD_TAG "wrapped-rotary-command-reset-20260426"
 #define V5_WRAPPED_ROTARY_RESET_TOLERANCE_DEG 0.01
+#define V5_STEPGEN_UIO_PATH "/dev/v5-stepgen-uio"
 
 #define STEPGEN_BASE    0x41240000
 #define STEPGEN_SIZE    0x1000
@@ -184,36 +187,92 @@ static int read_hex_file(const char *path, uint32_t *value)
     return 0;
 }
 
-static const char *stepgen_uio_device_path(void)
+static int read_text_file(const char *path, char *value, size_t value_size)
 {
-    const char *env_path = getenv("V5_STEPGEN_UIO_DEVICE");
-    if (env_path && env_path[0])
-        return env_path;
-    return "/dev/v5-stepgen-uio";
+    FILE *fp;
+    size_t length;
+
+    if (!path || !value || value_size < 2)
+        return -1;
+    fp = fopen(path, "r");
+    if (!fp)
+        return -1;
+    if (!fgets(value, value_size, fp)) {
+        fclose(fp);
+        return -1;
+    }
+    fclose(fp);
+    length = strlen(value);
+    while (length > 0 && (value[length - 1] == '\n' || value[length - 1] == '\r'))
+        value[--length] = '\0';
+    return length > 0 ? 0 : -1;
 }
 
-static int uio_node_from_path(const char *path, char *node, size_t node_size)
+typedef struct {
+    dev_t st_dev;
+    ino_t st_ino;
+    dev_t st_rdev;
+} v5_uio_identity_t;
+
+static int validate_stepgen_uio_device(char *node, size_t node_size,
+                                       v5_uio_identity_t *identity)
 {
     char resolved[128];
+    char name_path[160];
+    char name[128];
     const char *base;
-    ssize_t link_len;
+    const char *digit;
+    struct stat link_info;
+    struct stat target_info;
+    struct group *petalinux;
 
-    if (!path || !path[0] || !node || node_size < 5)
+    if (!node || node_size < 5 || !identity)
         return -1;
-
-    link_len = readlink(path, resolved, sizeof(resolved) - 1);
-    if (link_len > 0) {
-        resolved[link_len] = '\0';
-        base = strrchr(resolved, '/');
-        base = base ? base + 1 : resolved;
-    } else {
-        base = strrchr(path, '/');
-        base = base ? base + 1 : path;
-    }
-
+    if (lstat(V5_STEPGEN_UIO_PATH, &link_info) != 0 || !S_ISLNK(link_info.st_mode))
+        return -1;
+    if (stat(V5_STEPGEN_UIO_PATH, &target_info) != 0 || !S_ISCHR(target_info.st_mode))
+        return -1;
+    petalinux = getgrnam("petalinux");
+    if (!petalinux || target_info.st_uid != 0 || target_info.st_gid != petalinux->gr_gid ||
+        (target_info.st_mode & 07777) != 0660)
+        return -1;
+    if (!realpath(V5_STEPGEN_UIO_PATH, resolved))
+        return -1;
+    base = strrchr(resolved, '/');
+    if (!base || base - resolved != 4 || strncmp(resolved, "/dev", 4) != 0)
+        return -1;
+    base++;
     if (strncmp(base, "uio", 3) != 0 || !base[3])
         return -1;
+    for (digit = base + 3; *digit; digit++) {
+        if (*digit < '0' || *digit > '9')
+            return -1;
+    }
     if (snprintf(node, node_size, "%s", base) >= (int)node_size)
+        return -1;
+    if (snprintf(name_path, sizeof(name_path), "/sys/class/uio/%s/name", node) >= (int)sizeof(name_path))
+        return -1;
+    if (read_text_file(name_path, name, sizeof(name)) != 0 || strstr(name, "stepgen") == NULL)
+        return -1;
+    identity->st_dev = target_info.st_dev;
+    identity->st_ino = target_info.st_ino;
+    identity->st_rdev = target_info.st_rdev;
+    return 0;
+}
+
+static int validate_stepgen_uio_fd(int device_fd, const v5_uio_identity_t *identity)
+{
+    struct stat target_info;
+    struct group *petalinux;
+
+    if (!identity || fstat(device_fd, &target_info) != 0 || !S_ISCHR(target_info.st_mode))
+        return -1;
+    petalinux = getgrnam("petalinux");
+    if (!petalinux || target_info.st_uid != 0 || target_info.st_gid != petalinux->gr_gid ||
+        (target_info.st_mode & 07777) != 0660 ||
+        target_info.st_dev != identity->st_dev ||
+        target_info.st_ino != identity->st_ino ||
+        target_info.st_rdev != identity->st_rdev)
         return -1;
     return 0;
 }
@@ -976,6 +1035,7 @@ int rtapi_app_main(void)
     char uio_node[32];
     char uio_addr_path[128];
     char uio_size_path[128];
+    v5_uio_identity_t uio_identity;
 
     fd = -1;
     map_base = NULL;
@@ -1059,8 +1119,8 @@ int rtapi_app_main(void)
     if (exec_delta_clamp_any_ptr && *exec_delta_clamp_any_ptr)
         **exec_delta_clamp_any_ptr = 0;
 
-    uio_path = stepgen_uio_device_path();
-    if (uio_node_from_path(uio_path, uio_node, sizeof(uio_node)) != 0) {
+    uio_path = V5_STEPGEN_UIO_PATH;
+    if (validate_stepgen_uio_device(uio_node, sizeof(uio_node), &uio_identity) != 0) {
         retval = -ENODEV;
         rtapi_print_msg(RTAPI_MSG_ERR,
             "zynq_stepgen_hw: invalid UIO device path: %s\n", uio_path);
@@ -1068,8 +1128,7 @@ int rtapi_app_main(void)
     }
     snprintf(uio_addr_path, sizeof(uio_addr_path), "/sys/class/uio/%s/maps/map0/addr", uio_node);
     snprintf(uio_size_path, sizeof(uio_size_path), "/sys/class/uio/%s/maps/map0/size", uio_node);
-    if (access(uio_path, R_OK | W_OK) != 0 ||
-        read_hex_file(uio_addr_path, &uio_addr) != 0 ||
+    if (read_hex_file(uio_addr_path, &uio_addr) != 0 ||
         read_hex_file(uio_size_path, &uio_size) != 0 ||
         uio_addr != STEPGEN_BASE || uio_size < STEPGEN_SIZE) {
         retval = -ENODEV;
@@ -1084,6 +1143,13 @@ int rtapi_app_main(void)
         retval = (errno != 0) ? -errno : -1;
         rtapi_print_msg(RTAPI_MSG_ERR,
             "zynq_stepgen_hw: open(%s) failed: %s\n", uio_path, strerror(errno));
+        goto error;
+    }
+    if (validate_stepgen_uio_fd(fd, &uio_identity) != 0) {
+        retval = -EACCES;
+        rtapi_print_msg(RTAPI_MSG_ERR,
+            "zynq_stepgen_hw: opened UIO device identity or permissions changed: %s\n",
+            uio_path);
         goto error;
     }
     map_size = uio_size;

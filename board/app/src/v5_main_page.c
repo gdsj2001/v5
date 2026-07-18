@@ -194,12 +194,9 @@ int v5_main_page_internal_main_page_handle_program_preview_touch(
     int pressed,
     int *changed);
 
-static V5ToolpathScreenPoint apply_toolpath_view_transform_prepared(
-    const V5MainPage *page,
+V5ToolpathScreenPoint v5_main_page_internal_apply_toolpath_view_transform_prepared(
     V5ToolpathScreenPoint point,
-    double scale,
-    double s,
-    double c)
+    const V5ToolpathViewTransform *transform)
 {
     const double cx = (double)V5_TOOLPATH_W * 0.5;
     const double cy = (double)V5_TOOLPATH_H * 0.5;
@@ -207,32 +204,59 @@ static V5ToolpathScreenPoint apply_toolpath_view_transform_prepared(
     double dy;
     double rx;
     double ry;
+    if (!transform || transform->identity) {
+        return point;
+    }
     dx = point.x - cx;
     dy = point.y - cy;
-    rx = (dx * c) - (dy * s);
-    ry = (dx * s) + (dy * c);
-    point.x = cx + (rx * scale) + page->toolpath_manual_pan_x;
-    point.y = cy + (ry * scale) + page->toolpath_manual_pan_y;
+    rx = (dx * transform->cosine) - (dy * transform->sine);
+    ry = (dx * transform->sine) + (dy * transform->cosine);
+    point.x = cx + (rx * transform->scale) + transform->pan_x;
+    point.y = cy + (ry * transform->scale) + transform->pan_y;
     return point;
 }
 
-V5ToolpathScreenPoint v5_main_page_internal_apply_toolpath_view_transform(const V5MainPage *page, V5ToolpathScreenPoint point)
+void v5_main_page_internal_prepare_toolpath_view_transform(
+    const V5MainPage *page,
+    V5ToolpathViewTransform *transform)
 {
-    double scale;
     double rad;
-    if (!page) {
-        return point;
+    if (!transform) {
+        return;
     }
-    scale = page->toolpath_manual_scale > 0.0 ? page->toolpath_manual_scale : 1.0;
-    if (fabs(scale - 1.0) <= 1.0e-12 &&
+    memset(transform, 0, sizeof(*transform));
+    transform->scale =
+        page && page->toolpath_manual_scale > 0.0 ?
+            page->toolpath_manual_scale :
+            1.0;
+    transform->cosine = 1.0;
+    if (!page) {
+        transform->identity = 1;
+        return;
+    }
+    transform->pan_x = page->toolpath_manual_pan_x;
+    transform->pan_y = page->toolpath_manual_pan_y;
+    transform->identity =
+        fabs(transform->scale - 1.0) <= 1.0e-12 &&
         fabs(page->toolpath_manual_rotate_deg) <= 1.0e-12 &&
         fabs(page->toolpath_manual_pan_x) <= 1.0e-12 &&
-        fabs(page->toolpath_manual_pan_y) <= 1.0e-12) {
-        return point;
+        fabs(page->toolpath_manual_pan_y) <= 1.0e-12;
+    if (transform->identity) {
+        return;
     }
     rad = page->toolpath_manual_rotate_deg * M_PI / 180.0;
-    return apply_toolpath_view_transform_prepared(
-        page, point, scale, sin(rad), cos(rad));
+    transform->sine = sin(rad);
+    transform->cosine = cos(rad);
+}
+
+V5ToolpathScreenPoint v5_main_page_internal_apply_toolpath_view_transform(
+    const V5MainPage *page,
+    V5ToolpathScreenPoint point)
+{
+    V5ToolpathViewTransform transform;
+    v5_main_page_internal_prepare_toolpath_view_transform(page, &transform);
+    return v5_main_page_internal_apply_toolpath_view_transform_prepared(
+        point, &transform);
 }
 
 void v5_main_page_internal_apply_toolpath_view_transform_points(
@@ -240,27 +264,19 @@ void v5_main_page_internal_apply_toolpath_view_transform_points(
     V5ToolpathScreenPoint *points,
     unsigned int count)
 {
-    double scale;
-    double rad;
-    double s;
-    double c;
+    V5ToolpathViewTransform transform;
     unsigned int i;
     if (!page || !points || count == 0U) {
         return;
     }
-    scale = page->toolpath_manual_scale > 0.0 ? page->toolpath_manual_scale : 1.0;
-    if (fabs(scale - 1.0) <= 1.0e-12 &&
-        fabs(page->toolpath_manual_rotate_deg) <= 1.0e-12 &&
-        fabs(page->toolpath_manual_pan_x) <= 1.0e-12 &&
-        fabs(page->toolpath_manual_pan_y) <= 1.0e-12) {
+    v5_main_page_internal_prepare_toolpath_view_transform(page, &transform);
+    if (transform.identity) {
         return;
     }
-    rad = page->toolpath_manual_rotate_deg * M_PI / 180.0;
-    s = sin(rad);
-    c = cos(rad);
     for (i = 0U; i < count; ++i) {
-        points[i] = apply_toolpath_view_transform_prepared(
-            page, points[i], scale, s, c);
+        points[i] =
+            v5_main_page_internal_apply_toolpath_view_transform_prepared(
+                points[i], &transform);
     }
 }
 

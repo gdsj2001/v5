@@ -12,6 +12,7 @@ import sys
 import time
 
 from v5_machine_status_projection import (
+    DISPLAY_COORDINATE_SCALE,
     NativeRotaryDisplayProjection,
     write_mock_position_status,
     write_position_status,
@@ -25,6 +26,7 @@ from v5_wcs_status_codec import (
 
 HAL_POSITION_COMPONENT = 'v5-position-display'
 POSITION_HEARTBEAT_SECONDS = 0.1
+DISPLAY_BOUNDARY_HYSTERESIS = 0.0001
 POSITION_LOCK_PATH = '/run/8ax/v5_position_status_publisher.lock'
 POSITION_PIDFILE_PATH = '/run/8ax/v5_position_status_publisher.pid'
 
@@ -140,6 +142,71 @@ class PositionPublishCadence:
         self._last_time = time.monotonic() if now is None else float(now)
 
 
+class PositionDisplayStabilizer:
+    """Hold one-count boundary noise and confirm adjacent display changes."""
+
+    def __init__(self, coordinate_scale=DISPLAY_COORDINATE_SCALE,
+                 boundary_hysteresis=DISPLAY_BOUNDARY_HYSTERESIS):
+        self._scale = float(coordinate_scale)
+        self._hysteresis = max(0.0, float(boundary_hysteresis)) * self._scale
+        self.reset()
+
+    def reset(self):
+        field_count = POSITION_AXIS_COUNT * 2
+        self._stable = [None] * field_count
+        self._candidate = [None] * field_count
+        self._last_generation = None
+
+    def _values(self):
+        values = [bucket / self._scale for bucket in self._stable]
+        return values[:POSITION_AXIS_COUNT], values[POSITION_AXIS_COUNT:]
+
+    def stabilize(self, mcs, cmd, source_generation,
+                  source_mcs=None, source_cmd=None):
+        if mcs is None or cmd is None:
+            self.reset()
+            return mcs, cmd
+        values = list(mcs) + list(cmd)
+        sources = list(source_mcs or mcs) + list(source_cmd or cmd)
+        if (len(values) != POSITION_AXIS_COUNT * 2 or
+                len(sources) != POSITION_AXIS_COUNT * 2):
+            raise RuntimeError('native_position_display_sample_invalid')
+        try:
+            generation = int(source_generation)
+            buckets = [int(round(float(value) * self._scale)) for value in values]
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise RuntimeError('native_position_source_generation_invalid') from exc
+        if generation <= 0 or not all(
+                math.isfinite(float(value)) for value in values + sources):
+            raise RuntimeError('native_position_display_sample_invalid')
+        if self._last_generation is not None:
+            if generation == self._last_generation:
+                return self._values()
+            if generation < self._last_generation:
+                self.reset()
+            elif generation != self._last_generation + 1:
+                self._candidate = [None] * len(self._candidate)
+        for index, bucket in enumerate(buckets):
+            stable = self._stable[index]
+            if stable is None or abs(bucket - stable) > 1:
+                self._stable[index] = bucket
+                self._candidate[index] = None
+            elif bucket == stable:
+                self._candidate[index] = None
+            elif abs(
+                    float(sources[index]) * self._scale -
+                    (min(stable, bucket) if max(stable, bucket) <= 0
+                     else max(stable, bucket))) + 1.0e-9 < self._hysteresis:
+                self._candidate[index] = None
+            elif self._candidate[index] == bucket:
+                self._stable[index] = bucket
+                self._candidate[index] = None
+            else:
+                self._candidate[index] = bucket
+        self._last_generation = generation
+        return self._values()
+
+
 class HalPositionReadAccess:
     """One HAL component owns all 30 Hz display-source pin bindings."""
 
@@ -235,6 +302,20 @@ class HalPositionReadAccess:
                 preferred_signal,
                 hal_module.HAL_FLOAT)
         self._component.ready()
+        self._native_pins = {
+            name: self._component.getitem(local_name)
+            for name, local_name in self._pin_names.items()
+        }
+        self._joint_actual_pins = tuple(
+            self._component.getitem(name)
+            for name in self._joint_actual_names)
+        self._joint_command_pins = tuple(
+            self._component.getitem(name)
+            for name in self._joint_command_names)
+        self._scalar_pins = {
+            key: self._component.getitem(local_name)
+            for key, local_name in self._scalar_names.items()
+        }
 
     def _bind_source(
             self, signal_info, local_name, source_pin, preferred_signal, pin_type):
@@ -270,29 +351,29 @@ class HalPositionReadAccess:
             f'{HAL_POSITION_COMPONENT}.{local_name}', signal_name)
 
     def get_value(self, name):
-        return self._component[self._pin_names[name]]
+        return self._native_pins[name].get()
 
     def read_joint_positions(self):
-        actual = [
-            float(self._component[name]) for name in self._joint_actual_names]
-        command = [
-            float(self._component[name]) for name in self._joint_command_names]
+        actual = [float(pin.get()) for pin in self._joint_actual_pins]
+        command = [float(pin.get()) for pin in self._joint_command_pins]
         if not all(math.isfinite(value) for value in actual + command):
             raise RuntimeError('native_joint_position_readback_invalid')
         return actual, command
 
     def read_display_scalars(self):
-        values = {
-            key: float(self._component[local_name])
-            for key, local_name in self._scalar_names.items()
-        }
-        if not all(math.isfinite(value) for value in values.values()):
+        values = tuple(float(self._scalar_pins[key].get()) for key in (
+            'spindle_speed_rps',
+            'linear_velocity_per_second',
+            'feed_override_ratio',
+            'spindle_override_ratio',
+        ))
+        if not all(math.isfinite(value) for value in values):
             raise RuntimeError('native_position_scalar_readback_invalid')
         return (
-            values['spindle_speed_rps'] * 60.0,
-            values['linear_velocity_per_second'] * 60.0,
-            values['feed_override_ratio'] * 100.0,
-            values['spindle_override_ratio'] * 100.0,
+            values[0] * 60.0,
+            values[1] * 60.0,
+            values[2] * 100.0,
+            values[3] * 100.0,
         )
 
 
@@ -360,6 +441,8 @@ def main() -> int:
         interval = max(args.interval_ms, 20) / 1000.0
         polling_cadence = StartToStartPollingCadence(interval)
         publish_cadence = PositionPublishCadence()
+        display_stabilizer = PositionDisplayStabilizer()
+        source_generation = 0
         consecutive_failures = 0
         next_status_log = 0.0
         sample_count = 0
@@ -368,21 +451,27 @@ def main() -> int:
         while True:
             sample_now = time.monotonic()
             try:
+                native_positions = hal_access.read_joint_positions()
+                native_scalars = hal_access.read_display_scalars()
+                source_generation += 1
                 published = write_position_status(
-                args.path,
-                None,
-                rotary_projection=rotary_projection,
-                publish_cadence=publish_cadence,
-                now_monotonic=sample_now,
-                    native_positions=hal_access.read_joint_positions(),
-                    native_scalars=hal_access.read_display_scalars(),
-                    writer_identity=lifecycle.writer_identity)
+                    args.path,
+                    None,
+                    rotary_projection=rotary_projection,
+                    publish_cadence=publish_cadence,
+                    now_monotonic=sample_now,
+                    native_positions=native_positions,
+                    native_scalars=native_scalars,
+                    writer_identity=lifecycle.writer_identity,
+                    display_stabilizer=display_stabilizer,
+                    source_generation=source_generation)
                 consecutive_failures = 0
                 sample_count += 1
                 published_count += 1 if published else 0
                 if args.once:
                     return 0
             except Exception as exc:
+                display_stabilizer.reset()
                 consecutive_failures += 1
                 if consecutive_failures == 1 or time.monotonic() >= next_status_log:
                     print(

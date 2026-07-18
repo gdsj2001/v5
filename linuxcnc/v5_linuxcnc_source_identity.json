@@ -10,7 +10,7 @@
     "tree": "cbadbb8d029aefe7a8d0e3218885aaa59798337b"
   },
   "v5_source_tree": "c1f4c53315c8e614fafbe48992afa91e8aef8014",
-  "content_sha256": "c6fc45879185217751c7ab4a12aaf808ff02682120574ccd2889132953c356e3",
+  "content_sha256": "a36052c27ca614f414bd34d5cc1cbeb41abf1d924c8493b264cf6e07e5bfcab8",
   "implementation": "in_tree",
   "changed_files": [
     "scripts/linuxcnc.in",
@@ -159,7 +159,10 @@
       "&emcmotStatus->carte_pos_fb",
       "state->generation = 1U",
       "v5_wcheckpoint_read_snapshot",
-      "motion.v5-wcheckpoint-%c-raw-count-bits"
+      "motion.v5-wcheckpoint-%c-raw-count-bits",
+      "motion.v5-wcheckpoint-%c-router-base-counts",
+      "motion.v5-wcheckpoint-%c-router-generation",
+      "motion.v5-wcheckpoint-%c-router-valid"
     ],
     "src/emc/usr_intf/axis/Submakefile": [
       "V5_HEADLESS_RUNTIME",
@@ -176,7 +179,10 @@
       "JOINT_STATE %d %.9f %s %u %d",
       "scTaskState",
       "TASK_STATE state=%d mode=%d interp=%d exec=%d paused=%d ",
-      "(cmd != scAbort)"
+      "(cmd != scAbort)",
+      "{\"bind\", 1, NULL, 'b'}",
+      "inet_pton(AF_INET, optarg, &bind_address) != 1",
+      "server_address.sin_addr = bind_address"
     ],
     "src/emc/usr_intf/shcom.cc": [
       "return emcCommandWaitReceived();"
@@ -187,6 +193,9 @@
       "function read fp;",
       "function write nofp;",
       "joint-zero-counts-##[5]",
+      "joint-axis-code-##[5]",
+      "wcp-base-##[3]",
+      "v5_bus_router_nearest_quantized",
       "rejected-commit-seq"
     ],
     "src/hal/components/v5_bus_home_api.h": [
@@ -296,6 +305,9 @@
     ],
     "src/emc/motion/control.c": [
       "z20_wrapped_rotary_planner_idle"
+    ],
+    "src/emc/usr_intf/emcrsh.cc": [
+      "server_address.sin_addr.s_addr = htonl(INADDR_ANY)"
     ]
   },
   "artifacts": [
@@ -305,6 +317,7 @@
         "v5_wrapped_rotary_mask",
         "v5_wcheckpoint_command_raw_bits",
         "motion.v5-wcheckpoint-%c-valid",
+        "motion.v5-wcheckpoint-%c-router-base-counts",
         "motion.feed-override",
         "spindle.%d.override",
         "invalid V5 wrapped rotary target state"
@@ -326,7 +339,8 @@
     {
       "path": "usr/bin/linuxcncrsh",
       "required_ascii": [
-        "JOINT_STATE %d %.9f %s %u %d"
+        "JOINT_STATE %d %.9f %s %u %d",
+        "invalid bind address: %s"
       ],
       "forbidden_ascii": []
     },
@@ -385,6 +399,7 @@
       "required_ascii": [
         "v5_bus_axis_router",
         "mapping-valid",
+        "wcp-base",
         "rejected-commit-seq"
       ],
       "forbidden_ascii": []

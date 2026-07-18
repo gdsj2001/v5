@@ -1,6 +1,8 @@
 #include "v5_state_publisher_service.h"
 
+#include "v5_cpu_usage_snapshot.h"
 #include "v5_native_sample.h"
+#include <math.h>
 #include <errno.h>
 #include <signal.h>
 #include <stdint.h>
@@ -10,6 +12,10 @@ void v5_status_shm_writer_seed_display_frame(V5StatusShmFrame *frame);
 void v5_status_shm_writer_apply_sample(V5StatusShmFrame *frame, const V5NativeDisplaySample *sample);
 
 static volatile sig_atomic_t g_v5_state_publisher_stop_requested = 0;
+static V5CpuUsageSnapshotSampler g_v5_cpu_usage_sampler;
+static int g_v5_cpu_usage_sampler_initialized;
+
+#define V5_CPU_USAGE_MAX_AGE_NS 5000000000ull
 
 void v5_state_publisher_request_stop(void)
 {
@@ -19,6 +25,8 @@ void v5_state_publisher_request_stop(void)
 void v5_state_publisher_reset_stop(void)
 {
     g_v5_state_publisher_stop_requested = 0;
+    v5_cpu_usage_snapshot_sampler_init(&g_v5_cpu_usage_sampler);
+    g_v5_cpu_usage_sampler_initialized = 1;
 }
 
 static uint64_t v5_state_publisher_epoch_ns(void)
@@ -28,6 +36,40 @@ static uint64_t v5_state_publisher_epoch_ns(void)
         return 0;
     }
     return ((uint64_t)now.tv_sec * 1000000000ull) + (uint64_t)now.tv_nsec;
+}
+
+static void v5_state_publisher_apply_cpu_usage(
+    V5StatusShmFrame *frame,
+    uint64_t now_ns)
+{
+    V5CpuUsageSnapshot snapshot;
+
+    if (!frame || !now_ns) {
+        return;
+    }
+    if (!g_v5_cpu_usage_sampler_initialized) {
+        v5_cpu_usage_snapshot_sampler_init(&g_v5_cpu_usage_sampler);
+        g_v5_cpu_usage_sampler_initialized = 1;
+    }
+    if (!v5_cpu_usage_snapshot_read_at(
+            &g_v5_cpu_usage_sampler,
+            &snapshot,
+            now_ns,
+            V5_CPU_USAGE_SNAPSHOT_DEFAULT_SYSFS_ROOT,
+            V5_CPU_USAGE_SNAPSHOT_DEFAULT_PROC_PATH) ||
+        snapshot.valid_mask != 3U || snapshot.generation == 0ULL ||
+        snapshot.monotonic_ns == 0ULL || snapshot.monotonic_ns > now_ns ||
+        now_ns - snapshot.monotonic_ns > V5_CPU_USAGE_MAX_AGE_NS ||
+        !isfinite(snapshot.busy_percent[0]) || snapshot.busy_percent[0] < 0.0 || snapshot.busy_percent[0] > 100.0 ||
+        !isfinite(snapshot.busy_percent[1]) || snapshot.busy_percent[1] < 0.0 || snapshot.busy_percent[1] > 100.0) {
+        frame->typed_valid_mask &= ~V5_STATUS_VALID_CPU_USAGE;
+        return;
+    }
+    frame->cpu0_percent = snapshot.busy_percent[0];
+    frame->cpu1_percent = snapshot.busy_percent[1];
+    frame->cpu_sample_generation = snapshot.generation;
+    frame->cpu_sample_monotonic_ns = snapshot.monotonic_ns;
+    frame->typed_valid_mask |= V5_STATUS_VALID_CPU_USAGE;
 }
 
 
@@ -71,6 +113,7 @@ int v5_state_publisher_build_frame(V5StatusShmFrame *frame, V5StatePublisherRepo
         v5_status_shm_writer_seed_display_frame(frame);
     }
     frame->status_epoch = v5_state_publisher_epoch_ns();
+    v5_state_publisher_apply_cpu_usage(frame, frame->status_epoch);
 
     if (report) {
         report->sample_available = available;
@@ -103,15 +146,23 @@ int v5_state_publisher_run_loop(const char *path, unsigned int interval_ms, unsi
 {
     unsigned int count = 0;
     unsigned int period = interval_ms ? interval_ms : V5_STATE_PUBLISHER_INTERVAL_MS;
+    V5StatusShmMmapWriter writer;
     V5StatePublisherReport local_report = {0};
     V5StatePublisherReport *out = report ? report : &local_report;
 
     v5_state_publisher_reset_stop();
+    v5_status_shm_mmap_writer_init(&writer);
+    if (!v5_status_shm_mmap_writer_open(&writer, path)) {
+        return 0;
+    }
 
     do {
+        V5StatusShmFrame frame;
         uint64_t sample_start_ns = v5_state_publisher_epoch_ns();
 
-        if (!v5_state_publisher_publish_once(path, out)) {
+        if (!v5_state_publisher_build_frame(&frame, out) ||
+            !v5_status_shm_mmap_writer_publish(&writer, &frame, 0)) {
+            v5_status_shm_mmap_writer_close(&writer);
             return 0;
         }
         count += 1u;
@@ -126,5 +177,7 @@ int v5_state_publisher_run_loop(const char *path, unsigned int interval_ms, unsi
         v5_state_publisher_wait_for_next_start(sample_start_ns, period);
     } while (!g_v5_state_publisher_stop_requested && (!max_frames || count < max_frames));
 
+    out->path = (path && path[0]) ? path : V5_STATUS_SHM_PATH;
+    v5_status_shm_mmap_writer_close(&writer);
     return 1;
 }

@@ -618,6 +618,7 @@ static void VerifySystemMetricsTopBarContract()
     Require(true, xaml.Contains("x:Name=\"MemoryMetricValue\"", StringComparison.Ordinal), "top bar memory value field exists");
     Require(true, xaml.Contains("x:Name=\"DiskMetricValue\"", StringComparison.Ordinal), "top bar disk value field exists");
     Require(true, mainWindow.Contains("RefreshSystemMetricsAsync", StringComparison.Ordinal), "win remote refreshes system metrics");
+    Require(true, mainWindow.Contains("SystemMetricsRefreshMs = 2000", StringComparison.Ordinal), "win remote consumes the board CPU producer on its stable two-second window");
     Require(true, mainWindow.Contains("FormatSystemMetrics", StringComparison.Ordinal), "win remote formats system metrics");
     Require(true, mainWindow.Contains("Cpu0MetricValue.Text = Percent(metrics?.Cpu0Percent)", StringComparison.Ordinal), "cpu0 refresh updates only the value field");
     Require(true, mainWindow.Contains("Cpu1MetricValue.Text = Percent(metrics?.Cpu1Percent)", StringComparison.Ordinal), "cpu1 refresh updates only the value field");

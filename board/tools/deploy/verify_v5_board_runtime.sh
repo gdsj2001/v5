@@ -54,6 +54,7 @@ check_remote_test "v5_linuxcncrsh_probe installed executable" 'test -x /usr/libe
 check_remote_test "v5_command_gate_server installed executable" 'test -x /usr/libexec/8ax/v5_command_gate_server'
 check_remote_test "v5_linuxcncrsh_golden_run installed executable" 'test -x /usr/libexec/8ax/v5_linuxcncrsh_golden_run'
 check_remote_test "v5 remote ui relay installed executable" 'test -x /usr/libexec/8ax/v5_remote_ui_relay.py'
+check_remote_test "typed status SHM reader installed module" 'test -r /usr/libexec/8ax/v5_status_shm_reader.py'
 check_remote_test "v5 UI boot ready helper installed executable" 'test -x /usr/libexec/8ax/v5_ui_boot_ready.py'
 check_remote_test "v5 UI cache queue contract installed module" 'test -r /usr/libexec/8ax/v5_ui_cache_queue_contract.py'
 check_remote_test "state publisher init installed" 'test -x /etc/init.d/v5-state-publisher'
@@ -70,6 +71,13 @@ check_remote_test "v5 auth dna register installed executable" 'test -x /usr/libe
 check_remote_test "v5 auth authorization download installed executable" 'test -x /usr/libexec/8ax/auth_download/v5_device_authorization_download.py'
 check_remote_test "v5 drive profile download installed executable" 'test -x /usr/libexec/8ax/auth_download/v5_drive_profile_download.py'
 check_remote_test "v5 auth support modules installed" 'test -r /usr/libexec/8ax/auth_download/drive_profile_download_flow.py && test -r /usr/libexec/8ax/auth_download/drive_profile_download_transport.py && test -r /usr/libexec/8ax/auth_download/device_vps_identity.py'
+
+tcf_absence_check='from pathlib import Path; import re,sys; bad=[]; root=Path("/"); paths=("usr/bin/tcf-agent","usr/sbin/tcf-agent","etc/init.d/tcf-agent"); bad += [p for p in paths if (root/p).exists()]; bad += [str(p) for d in (root/"etc").glob("rc*.d") for p in d.glob("*tcf-agent*")]; token=re.compile(r"(?<![A-Za-z0-9_-])tcf-agent(?![A-Za-z0-9_-])"); manifests=(root/"boot/v5-rootfs-file-manifest.tsv",); bad += [str(p) for p in manifests if p.exists() and token.search(p.read_text(encoding="utf-8",errors="ignore"))]; bad += [str(p) for p in (root/"proc").glob("[0-9]*") if (lambda a: bool(a) and Path(a[0].decode("utf-8","ignore")).name=="tcf-agent")((p/"cmdline").read_bytes().split(b"\0") if (p/"cmdline").exists() else [])]; listeners=[]; [(listeners.append((p.name,f[1])) if len(f)>=4 and f[3]=="0A" and ":" in f[1] and int(f[1].rsplit(":",1)[1],16)==1534 else None) for p in (root/"proc/net/tcp",root/"proc/net/tcp6") if p.exists() for f in (line.split() for line in p.read_text(encoding="ascii",errors="ignore").splitlines()[1:])]; bad += ["listener:%s:%s"%v for v in listeners]; sys.exit(1 if bad else 0)'
+if remote "/usr/bin/python3 -c '$tcf_absence_check'" >/dev/null 2>&1; then
+  ok "production TCF files, services, processes, and port 1534 absent"
+else
+  fail_msg "production TCF files, services, processes, and port 1534 absent"
+fi
 
 if remote '/etc/init.d/v5-state-publisher status' >/tmp/v5_verify_init_status.out 2>&1; then
   ok "v5-state-publisher init status running"
@@ -154,12 +162,13 @@ else
 fi
 remote 'rm -f /dev/shm/v5_verify_native_operator_error.bin /tmp/v5_operator_error_mock.out' >/dev/null 2>&1 || true
 
-if remote "/usr/libexec/8ax/v5_state_publisher --path /dev/shm/v5_verify_state_publisher --once >/tmp/v5_verify_state_publisher.out 2>&1 && test -s /dev/shm/v5_verify_state_publisher && rm -f /dev/shm/v5_verify_state_publisher" >/dev/null 2>&1; then
+if remote "/usr/libexec/8ax/v5_state_publisher --path /dev/shm/v5_verify_state_publisher --once >/tmp/v5_verify_state_publisher.out 2>&1 && test -s /dev/shm/v5_verify_state_publisher" >/dev/null 2>&1; then
   ok "state publisher one-shot writes shm"
   remote 'cat /tmp/v5_verify_state_publisher.out 2>/dev/null || true' | sed 's/^/INFO state publisher: /'
 else
   fail_msg "state publisher one-shot writes shm"
 fi
+remote 'rm -f /dev/shm/v5_verify_state_publisher /tmp/v5_verify_state_publisher.out' >/dev/null 2>&1 || true
 
 if remote "test -s '$state_path'" >/dev/null 2>&1; then
   ok "runtime shm exists: $state_path"
@@ -240,10 +249,10 @@ fi
 rm -f /tmp/v5_rtapi_affinity.out
 
 if remote "/etc/init.d/v5-linuxcnc-command-gate status && /usr/libexec/8ax/v5_linuxcncrsh_probe --host 127.0.0.1 --port '$linuxcncrsh_port' --password EMC --timeout-ms 1000 >/tmp/v5_linuxcncrsh_probe.out 2>&1 && grep -q 'MACHINE ON' /tmp/v5_linuxcncrsh_probe.out" >/dev/null 2>&1; then
-  ok "linuxcncrsh machine auto-on confirmed: $linuxcncrsh_port"
+  ok "linuxcncrsh read-only machine-state confirmed: $linuxcncrsh_port"
   remote 'tail -n 5 /tmp/v5_linuxcncrsh_probe.out 2>/dev/null || true' | sed 's/^/INFO linuxcncrsh: /'
 else
-  fail_msg "linuxcncrsh machine auto-on confirmed: $linuxcncrsh_port"
+  fail_msg "linuxcncrsh read-only machine-state confirmed: $linuxcncrsh_port"
   remote 'tail -n 10 /tmp/v5_linuxcncrsh_probe.out 2>/dev/null || true' | sed 's/^/INFO linuxcncrsh: /'
 fi
 

@@ -78,9 +78,43 @@ do_install_append() {
         sed -i -E 's@^MASTER0_DEVICE=.*@MASTER0_DEVICE="eth1"@' ${D}${sysconfdir}/sysconfig/ethercat
         sed -i -E 's@^DEVICE_MODULES=.*@DEVICE_MODULES="generic"@' ${D}${sysconfdir}/sysconfig/ethercat
     fi
-    if [ -f ${D}${sysconfdir}/init.d/ethercat ]; then
-        sed -i '/if \$ETHERCATCTL start; then/a\        chmod 0666 /dev/EtherCAT* 2>/dev/null || true' ${D}${sysconfdir}/init.d/ethercat
-    fi
+    v5_ethercat_count_exact() {
+        awk -v v5_line="$1" '$0 == v5_line { count += 1 } END { print count + 0 }' "$2"
+    }
+    v5_ethercat_init=${D}${sysconfdir}/init.d/ethercat
+    [ -f "$v5_ethercat_init" ] || bbfatal "EtherCAT init is missing: $v5_ethercat_init"
+    v5_ethercat_start_line='    if $ETHERCATCTL start; then'
+    v5_ethercat_start_count=$(v5_ethercat_count_exact "$v5_ethercat_start_line" "$v5_ethercat_init")
+    [ "$v5_ethercat_start_count" -eq 1 ] || bbfatal "EtherCAT init start target count is $v5_ethercat_start_count, expected 1"
+    [ "$(v5_ethercat_count_exact 'v5_ethercat_permission_fail() {' "$v5_ethercat_init")" -eq 0 ] || bbfatal "EtherCAT permission fail function already exists"
+    [ "$(v5_ethercat_count_exact 'v5_ethercat_apply_permissions() {' "$v5_ethercat_init")" -eq 0 ] || bbfatal "EtherCAT permission apply function already exists"
+    [ "$(v5_ethercat_count_exact '        v5_ethercat_apply_permissions' "$v5_ethercat_init")" -eq 0 ] || bbfatal "EtherCAT permission call already exists"
+    sed -i '1a\
+v5_ethercat_permission_fail() {\
+    $ETHERCATCTL stop >/dev/null 2>&1\
+    exit 1\
+}\
+v5_ethercat_apply_permissions() {\
+    v5_ethercat_gid=$(id -g petalinux) || v5_ethercat_permission_fail\
+    v5_ethercat_found=0\
+    for v5_ethercat_node in /dev/EtherCAT*; do\
+        [ -c "$v5_ethercat_node" ] || continue\
+        v5_ethercat_found=1\
+        chown root:petalinux "$v5_ethercat_node" || v5_ethercat_permission_fail\
+        chmod 0660 "$v5_ethercat_node" || v5_ethercat_permission_fail\
+        v5_ethercat_actual=$(stat -c "%u:%g:%a" "$v5_ethercat_node") || v5_ethercat_permission_fail\
+        [ "$v5_ethercat_actual" = "0:${v5_ethercat_gid}:660" ] || v5_ethercat_permission_fail\
+    done\
+    [ "$v5_ethercat_found" = 1 ] || v5_ethercat_permission_fail\
+}' "$v5_ethercat_init"
+    sed -i '/^    if \$ETHERCATCTL start; then$/a\        v5_ethercat_apply_permissions' "$v5_ethercat_init"
+    [ "$(v5_ethercat_count_exact 'v5_ethercat_permission_fail() {' "$v5_ethercat_init")" -eq 1 ] || bbfatal "EtherCAT permission fail function count is not 1"
+    [ "$(v5_ethercat_count_exact 'v5_ethercat_apply_permissions() {' "$v5_ethercat_init")" -eq 1 ] || bbfatal "EtherCAT permission apply function count is not 1"
+    v5_ethercat_call_count=$(v5_ethercat_count_exact '        v5_ethercat_apply_permissions' "$v5_ethercat_init")
+    [ "$v5_ethercat_call_count" -eq 1 ] || bbfatal "EtherCAT permission call count is $v5_ethercat_call_count, expected 1"
+    v5_ethercat_start_number=$(awk -v v5_line="$v5_ethercat_start_line" '$0 == v5_line { print NR }' "$v5_ethercat_init")
+    v5_ethercat_call_number=$(awk '$0 == "        v5_ethercat_apply_permissions" { print NR }' "$v5_ethercat_init")
+    [ "$v5_ethercat_call_number" -eq $((v5_ethercat_start_number + 1)) ] || bbfatal "EtherCAT permission call is not adjacent to start target"
 }
 
 FILES_${PN} += " \

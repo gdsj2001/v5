@@ -1,6 +1,33 @@
 #ifndef V5_UI_SHELL_INTERNAL_H
 #define V5_UI_SHELL_INTERNAL_H
 
+#include "v5_ui_status_view.h"
+
+static inline long long shell_refresh_quantized_pose_value(double value)
+{
+    const double scaled = value * 1000.0;
+    return (long long)(scaled >= 0.0 ? scaled + 1.0e-9 : scaled - 1.0e-9);
+}
+
+static inline int shell_refresh_model_pose_equal(
+    const V5UiStatusView *before,
+    const V5UiStatusView *after)
+{
+    if (!before || !after) {
+        return 0;
+    }
+    if (((before->valid_mask ^ after->valid_mask) & V5_STATUS_VALID_MCS) != 0U) {
+        return 0;
+    }
+    if ((before->valid_mask & V5_STATUS_VALID_MCS) == 0U) {
+        return 1;
+    }
+    return shell_refresh_quantized_pose_value(before->mcs[3]) ==
+            shell_refresh_quantized_pose_value(after->mcs[3]) &&
+        shell_refresh_quantized_pose_value(before->mcs[4]) ==
+            shell_refresh_quantized_pose_value(after->mcs[4]);
+}
+
 static inline unsigned int shell_refresh_classify_changes(
     int display_changed,
     int pose_changed,

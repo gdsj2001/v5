@@ -1,5 +1,6 @@
 #include "v5_coordinate_panel.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -15,10 +16,15 @@ static void text_unavailable(char *out, size_t cap)
 
 static void text_value(char *out, size_t cap, double value)
 {
+    double scaled;
     if (!out || cap == 0u) {
         return;
     }
-    if (value > -0.0005 && value < 0.0005) {
+    scaled = value * 1000.0;
+    if (isfinite(scaled)) {
+        value = (scaled >= 0.0 ? floor(scaled + 1.0e-9) : ceil(scaled - 1.0e-9)) / 1000.0;
+    }
+    if (value == 0.0) {
         value = 0.0;
     }
     snprintf(out, cap, "%+010.3f", value);

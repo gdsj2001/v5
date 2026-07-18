@@ -332,39 +332,83 @@ int v5_main_page_internal_main_page_tool_length_mm(const V5MainPage *page, doubl
     return 1;
 }
 
-int v5_main_page_internal_main_page_project_cmd_tip(const V5MainPage *page, const V5UiStatusView *status, V5ToolpathScreenPoint *point)
+void v5_main_page_internal_build_dynamic_scene(
+    V5MainPage *page,
+    const V5UiStatusView *status,
+    V5MainPageDynamicScene *scene)
 {
+    unsigned int generation;
     double world[V5_STATUS_AXIS_COUNT];
     double tool_len = 0.0;
-    if (!page || !status || !point || (status->valid_mask & V5_STATUS_VALID_CMD_MCS) == 0U ||
-        !isfinite(status->cmd_mcs[0]) || !isfinite(status->cmd_mcs[1]) || !isfinite(status->cmd_mcs[2])) {
-        return 0;
-    }
-    memcpy(world, status->cmd_mcs, sizeof(world));
-    if (v5_main_page_internal_main_page_tool_length_mm(page, &tool_len)) {
-        world[2] -= tool_len;
-    }
-    return v5_main_page_internal_main_page_project_world_point_transformed(page, world, point);
-}
 
-void v5_main_page_internal_update_toolpath_holder_line(V5MainPage *page, const V5UiStatusView *status, const V5ToolpathScreenPoint *holder_point)
-{
-    double tool_len;
-    double world[V5_STATUS_AXIS_COUNT];
-    V5ToolpathScreenPoint holder_end;
-    if (!page || !status || !holder_point || (status->valid_mask & V5_STATUS_VALID_MCS) == 0U ||
-        !isfinite(status->mcs[0]) || !isfinite(status->mcs[1]) || !isfinite(status->mcs[2]) ||
-        !v5_main_page_internal_main_page_tool_length_mm(page, &tool_len) || fabs(tool_len) <= 1.0e-9) {
-        v5_main_page_internal_hide_toolpath_line(page ? page->toolpath_holder_line : 0);
+    if (!page || !scene) {
+        return;
+    }
+    generation = scene->generation + 1U;
+    if (generation == 0U) {
+        generation = 1U;
+    }
+    memset(scene, 0, sizeof(*scene));
+    scene->generation = generation;
+    page->toolpath_dynamic_scene_build_count += 1U;
+    if (!status) {
+        return;
+    }
+    if ((status->valid_mask & V5_STATUS_VALID_MCS) != 0U) {
+        scene->mcs_valid =
+            v5_main_page_internal_main_page_project_world_point_transformed(
+                page, status->mcs, &scene->mcs_point);
+    }
+    if ((status->valid_mask & V5_STATUS_VALID_CMD_MCS) != 0U) {
+        memcpy(world, status->cmd_mcs, sizeof(world));
+        if (v5_main_page_internal_main_page_tool_length_mm(page, &tool_len)) {
+            world[2] -= tool_len;
+        }
+        scene->cmd_tip_valid =
+            v5_main_page_internal_main_page_project_world_point_transformed(
+                page, world, &scene->cmd_tip_point);
+    }
+    if (!scene->mcs_valid ||
+        !v5_main_page_internal_main_page_tool_length_mm(page, &tool_len) ||
+        fabs(tool_len) <= 1.0e-9) {
         return;
     }
     memcpy(world, status->mcs, sizeof(world));
     world[2] -= tool_len;
-    if (!v5_main_page_internal_main_page_project_world_point_transformed(page, world, &holder_end)) {
-        v5_main_page_internal_hide_toolpath_line(page->toolpath_holder_line);
+    scene->holder_end_valid =
+        v5_main_page_internal_main_page_project_world_point_transformed(
+            page, world, &scene->holder_end_point);
+}
+
+void v5_main_page_internal_apply_dynamic_scene(
+    V5MainPage *page,
+    const V5MainPageDynamicScene *scene)
+{
+    if (!page || !scene) {
         return;
     }
-    v5_main_page_internal_set_toolpath_axis_line(page->toolpath_holder_line, page->toolpath_holder_points, holder_point, &holder_end, 1);
+    v5_main_page_internal_set_toolpath_v3_dot_center(
+        page->toolpath_microkernel_marker_dot,
+        &scene->cmd_tip_point,
+        scene->cmd_tip_valid);
+    v5_main_page_internal_set_toolpath_v3_dot_center(
+        page->toolpath_holder_marker_line,
+        &scene->mcs_point,
+        scene->mcs_valid);
+    if (scene->mcs_valid && scene->holder_end_valid) {
+        v5_main_page_internal_set_toolpath_axis_line(
+            page->toolpath_holder_line,
+            page->toolpath_holder_points,
+            &scene->mcs_point,
+            &scene->holder_end_point,
+            1);
+    } else {
+        v5_main_page_internal_hide_toolpath_line(
+            page->toolpath_holder_line);
+    }
+    if (!scene->mcs_valid) {
+        v5_main_page_internal_hide_toolpath_unproven_geometry(page);
+    }
 }
 
 void v5_main_page_internal_set_toolpath_origin_cross(lv_obj_t *line, lv_point_t points[5], const V5ToolpathScreenPoint *origin, int valid)

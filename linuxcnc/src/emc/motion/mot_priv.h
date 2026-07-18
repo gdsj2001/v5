@@ -121,6 +121,9 @@ typedef struct {
 } extrajoint_hal_t;
 
 typedef struct {
+    hal_float_t *router_base_counts;
+    hal_u32_t *router_generation;
+    hal_bit_t *router_valid;
     hal_float_t *logical_abs_counts;
     hal_float_t *base_counts;
     hal_float_t *runtime_window_counts;

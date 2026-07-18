@@ -42,7 +42,7 @@ start_service() {
   command -v taskset >/dev/null 2>&1
   command -v nice >/dev/null 2>&1
   mkdir -p /run/8ax
-  rm -f "$PIDFILE" "$STATUS_PATH"
+  rm -f "$PIDFILE"
   setsid taskset -c 1 nice -n "$NON_MICROKERNEL_NICE" "$DAEMON" --path "$STATUS_PATH" --interval-ms "$INTERVAL_MS" >>"$LOGFILE" 2>&1 &
   pid=$!
   pid_start=$(process_start_ticks "$pid") || { kill "$pid" 2>/dev/null || true; return 1; }

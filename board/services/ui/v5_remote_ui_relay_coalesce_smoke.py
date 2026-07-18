@@ -3,11 +3,16 @@ from __future__ import annotations
 
 import json
 import os
+import socket
+import struct
 import sys
 import tempfile
 import threading
 import time
 from pathlib import Path
+
+from v5_status_shm_reader import V5StatusShmReader
+from v5_status_shm_reader_smoke import NOW_NS, build_frame
 
 
 def write_framebuffer(path: Path, width: int, height: int) -> None:
@@ -26,27 +31,151 @@ def payload_bytes(payload) -> bytes:
     return bytes(payload)
 
 
-def check_cpu_usage_sampler() -> int:
-    samples = {
-        "cpu0": iter([(100, 50), (200, 70), (260, 100)]),
-        "cpu1": iter([(100, 90), (120, 100)]),
-    }
+def masked_client_frame(opcode: int, payload: bytes) -> bytes:
+    mask = b"\x11\x22\x33\x44"
+    if len(payload) >= 126:
+        raise ValueError("smoke payload is too large")
+    masked = bytes(value ^ mask[index & 3] for index, value in enumerate(payload))
+    return bytes((0x80 | opcode, 0x80 | len(payload))) + mask + masked
 
-    def sample(name: str):
-        return next(samples[name])
 
-    sampler = relay.CpuUsageSampler(sample)
-    checks = [
-        ("first cpu0 sample has no delta", sampler.percent("cpu0"), None),
-        ("cpu0 first delta", sampler.percent("cpu0"), 80.0),
-        ("cpu0 second delta", sampler.percent("cpu0"), 50.0),
-        ("first cpu1 sample has no delta", sampler.percent("cpu1"), None),
-        ("cpu1 first delta", sampler.percent("cpu1"), 50.0),
-    ]
-    for label, actual, expected in checks:
-        if actual != expected:
-            print("bad cpu sampler", label, actual, expected)
+def recv_server_frame(sock: socket.socket) -> tuple[int, bytes]:
+    header = sock.recv(2)
+    if len(header) != 2:
+        raise ConnectionError("short websocket header")
+    size = header[1] & 0x7F
+    if size == 126:
+        size = struct.unpack("!H", sock.recv(2))[0]
+    elif size == 127:
+        size = struct.unpack("!Q", sock.recv(8))[0]
+    payload = bytearray()
+    while len(payload) < size:
+        chunk = sock.recv(size - len(payload))
+        if not chunk:
+            raise ConnectionError("short websocket payload")
+        payload.extend(chunk)
+    return header[0] & 0x0F, bytes(payload)
+
+
+def check_stream_receive_loop() -> int:
+    server_sock, client_sock = socket.socketpair()
+    stop_event = threading.Event()
+    send_lock = threading.Lock()
+    wake_event = threading.Event()
+    metrics: dict[str, int] = {}
+
+    def mark_metric(name: str) -> None:
+        metrics[name] = metrics.get(name, 0) + 1
+
+    receiver = threading.Thread(
+        target=relay.stream_ws_receive_loop,
+        args=(server_sock, stop_event, send_lock, wake_event.set, mark_metric),
+        daemon=True,
+    )
+    try:
+        receiver.start()
+        client_sock.sendall(masked_client_frame(0x9, b"probe"))
+        if recv_server_frame(client_sock) != (0xA, b"probe"):
+            print("stream receiver did not answer client ping")
+            return 65
+        client_sock.sendall(masked_client_frame(0x8, b""))
+        if recv_server_frame(client_sock) != (0x8, b""):
+            print("stream receiver did not acknowledge client close")
+            return 66
+        if not stop_event.wait(0.25) or not wake_event.wait(0.25):
+            print("stream close did not wake and stop the subscriber")
+            return 67
+        receiver.join(0.25)
+        if receiver.is_alive() or metrics.get("stream_client_closes") != 1:
+            print("stream receive thread remained subscribed after close", metrics)
+            return 68
+    finally:
+        stop_event.set()
+        try:
+            server_sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        receiver.join(0.25)
+        server_sock.close()
+        client_sock.close()
+    return 0
+
+
+def write_at(fd: int, payload: bytes, offset: int) -> None:
+    if hasattr(os, "pwrite"):
+        os.pwrite(fd, payload, offset)
+        return
+    os.lseek(fd, offset, os.SEEK_SET)
+    os.write(fd, payload)
+
+
+def import_relay_for_smoke():
+    if os.name == "posix":
+        import v5_remote_ui_relay
+        return v5_remote_ui_relay
+    import ctypes
+
+    class FakeFlock:
+        argtypes = None
+        restype = None
+
+        def __call__(self, _fd, _operation):
+            return 0
+
+    original_cdll = ctypes.CDLL
+    ctypes.CDLL = lambda *_args, **_kwargs: type("FakeLibC", (), {"flock": FakeFlock()})()
+    try:
+        import v5_remote_ui_relay
+        return v5_remote_ui_relay
+    finally:
+        ctypes.CDLL = original_cdll
+
+
+def check_shared_cpu_usage_snapshot() -> int:
+    import v5_remote_ui_support as support
+
+    support_source = Path(support.__file__).read_text(encoding="utf-8")
+    for retired in ("class CpuUsageSampler", "\n_CPU_USAGE =", 'cpu_percent("cpu0")'):
+        if retired in support_source:
+            print("retired relay CPU sampler remains", retired)
             return 10
+
+    with tempfile.TemporaryDirectory(prefix="v5_remote_cpu_snapshot_") as temporary:
+        path = Path(temporary) / "v3_status_shm"
+        path.write_bytes(build_frame())
+        previous_reader = support._STATUS_CPU_USAGE
+        previous_memory_reader = support.memory_used_total
+        previous_disk_reader = support.disk_used_total
+        support._STATUS_CPU_USAGE = V5StatusShmReader(
+            path,
+            monotonic_ns=lambda: NOW_NS,
+        )
+        support.memory_used_total = lambda: (1, 2)
+        support.disk_used_total = lambda: (1, 2)
+        try:
+            first = relay.system_metrics()
+            second = relay.system_metrics()
+            expected = {
+                "cpu0_percent": 12.5,
+                "cpu1_percent": 34.5,
+                "cpu_sample_generation": 7,
+                "cpu_sample_monotonic_ns": NOW_NS - 200_000_000,
+            }
+            if any(first.get(key) != value for key, value in expected.items()):
+                print("relay did not consume the typed CPU snapshot", first)
+                return 10
+            if any(second.get(key) != value for key, value in expected.items()):
+                print("relay changed an immutable CPU generation", second)
+                return 10
+            path.unlink()
+            unavailable = relay.system_metrics()
+            if any(unavailable.get(key) is not None for key in expected):
+                print("relay retained stale CPU values after SHM loss", unavailable)
+                return 10
+        finally:
+            support._STATUS_CPU_USAGE = previous_reader
+            support.memory_used_total = previous_memory_reader
+            support.disk_used_total = previous_disk_reader
     return 0
 
 
@@ -57,7 +186,6 @@ def check_refresh_commit_boundary() -> int:
     toolpath_geometry_source = source_path.with_name("v5_main_page_toolpath_geometry.c").read_text(encoding="utf-8")
     relay_source = Path(__file__).with_name("v5_remote_ui_relay.py").read_text(encoding="utf-8")
     state_source = Path(__file__).with_name("v5_remote_ui_state.py").read_text(encoding="utf-8")
-    mirror_source = source_path.parents[2].joinpath("tools", "deploy", "v5_ai_browser_mirror.py").read_text(encoding="utf-8")
     compose_start = source.index("static void compose_area")
     commit_start = source.index("static void commit_composed_frame")
     flush_start = source.index("static void remote_flush")
@@ -136,100 +264,34 @@ def check_refresh_commit_boundary() -> int:
     dirty_end = state_source.index("    def publish_dirty(", dirty_start)
     dirty_body = state_source[dirty_start:dirty_end]
     required_dirty_snapshot = [
-        "payload = bytearray(total_bytes)",
-        "payload_view = memoryview(payload)",
+        "spans: list[tuple[int, int]] = []",
         "mapped_view = memoryview(mapped)",
         "flock(fd, LOCK_SH)",
-        "payload_view[captured_bytes:captured_bytes + length] = mapped_view[start:end]",
-        "payload_view[captured_bytes:captured_bytes + row_bytes] = mapped_view[src_start:src_end]",
-        "return bytes(payload), rects",
+        "spans.append((start, end))",
+        "spans.append((src_start, src_end))",
+        'payload = b"".join(mapped_view[start:end] for start, end in spans)',
+        "return payload, rects",
     ]
     retired_dirty_copy = [
+        "payload = bytearray(total_bytes)",
+        "payload_view = memoryview(payload)",
         "payload_parts: list[memoryview] = []",
         "return PayloadViews(payload_parts, total_bytes), rects",
-        ".toreadonly()",
     ]
     if any(token not in dirty_body for token in required_dirty_snapshot) or any(
         token in dirty_body for token in retired_dirty_copy
     ):
         print("dirty payload is not an owned framebuffer snapshot")
         return 32
-    mirror_tokens = [
-        "let streamGeneration = 0;",
-        "let baseReady = false;",
-        "let pointerForwarded = false;",
-        "const nextRgba = new Uint8ClampedArray",
-        "if (generation !== streamGeneration) return;",
-        "scheduleStreamReconnect('base-repair');",
-        "globalThis.v5AiClick = v5AiClick;",
-        "if (!inputReady || !streamLive || !baseReady) return {ok: false, reason: 'not_ready'};",
-        "if (pointerForwarded) pointerEvent('up', event, false);",
-        "const screenTarget = document.getElementById('screen-wrap');",
-        "const canvas = document.getElementById('screen');",
-        "canvas.getContext('bitmaprenderer');",
-        "new OffscreenCanvas(1024, 600)",
-        "stagingCanvas.transferToImageBitmap();",
-        "bitmapCtx.transferFromImageBitmap(bitmap);",
-        "async function checkStreamProgress()",
-        "scheduleStreamReconnect('stale-stream');",
-        "setInterval(checkStreamProgress, 1000);",
-    ]
-    retired_mirror_tokens = [
-        "repairFull(",
-        "rectRgba",
-        "screen-back",
-        "frontCanvas",
-        "backCanvas",
-        "screenTarget.appendChild",
-        "ctx.drawImage",
-        "ctx.putImageData",
-    ]
-    if any(token not in mirror_source for token in mirror_tokens) or any(
-        token in mirror_source for token in retired_mirror_tokens
-    ):
-        print("AI browser mirror still has competing full-frame bases")
-        return 33
     if '"frame_id": self.state.frame_id' not in relay_source:
         print("remote info does not expose the upstream frame id for stale-stream recovery")
         return 54
-    click_start = mirror_source.index("  async function v5AiClick(")
-    click_end = mirror_source.index("  globalThis.v5AiClick = v5AiClick;", click_start)
-    click_body = mirror_source[click_start:click_end]
-    required_click_order = [
-        "sendPointer('down', point.x, point.y, true)",
-        "await new Promise(resolve => setTimeout",
-        "sendPointer('up', point.x, point.y, false)",
-    ]
-    if any(token not in click_body for token in required_click_order) or not all(
-        click_body.index(required_click_order[index]) < click_body.index(required_click_order[index + 1])
-        for index in range(len(required_click_order) - 1)
-    ):
-        print("AI browser click does not preserve down, hold, up ordering")
-        return 53
-    present_start = mirror_source.index("  function presentRgba(")
-    present_end = mirror_source.index("  function applyFull(", present_start)
-    present_body = mirror_source[present_start:present_end]
-    required_atomic_order = [
-        "stagingCtx.putImageData(new ImageData(rgba, width, height), 0, 0);",
-        "const bitmap = stagingCanvas.transferToImageBitmap();",
-        "bitmapCtx.transferFromImageBitmap(bitmap);",
-    ]
-    if any(token not in present_body for token in required_atomic_order) or not all(
-        present_body.index(required_atomic_order[index]) < present_body.index(required_atomic_order[index + 1])
-        for index in range(len(required_atomic_order) - 1)
-    ):
-        print("AI browser mirror does not finish the offscreen bitmap before the atomic visible commit")
-        return 51
-    full_apply_start = mirror_source.index("  function applyFull(")
-    full_apply_end = mirror_source.index("  function applyDirty(", full_apply_start)
-    full_apply_body = mirror_source[full_apply_start:full_apply_end]
-    if full_apply_body.index("const nextRgba") > full_apply_body.index("presentRgba(width, height)"):
-        print("AI browser mirror clears the canvas before validating the replacement frame")
-        return 34
     return 0
 
 
 def check_full_frame_waits_for_commit(root: Path) -> int:
+    if os.name != "posix":
+        return 0
     import fcntl
 
     state = relay.FrameState(root / "flock", 4, 4)
@@ -253,12 +315,12 @@ def check_full_frame_waits_for_commit(root: Path) -> int:
             print("full frame reader did not start")
             return 16
         midpoint = len(committed) // 2
-        os.pwrite(writer_fd, committed[:midpoint], 0)
+        write_at(writer_fd, committed[:midpoint], 0)
         time.sleep(0.05)
         if finished.is_set():
             print("full frame reader observed a partial writer commit")
             return 17
-        os.pwrite(writer_fd, committed[midpoint:], midpoint)
+        write_at(writer_fd, committed[midpoint:], midpoint)
         fcntl.flock(writer_fd, fcntl.LOCK_UN)
         thread.join(1.0)
     finally:
@@ -293,7 +355,7 @@ def check_dirty_payload_is_owned_snapshot(root: Path) -> int:
     replacement = bytes((31, 37, 41, 255)) * (state.width * state.height)
     writer_fd = os.open(state.framebuffer_path, os.O_RDWR)
     try:
-        os.pwrite(writer_fd, replacement, 0)
+        write_at(writer_fd, replacement, 0)
     finally:
         os.close(writer_fd)
     if payload_bytes(payload) != captured or captured == replacement:
@@ -316,6 +378,9 @@ class ProducerTestState:
         self.build_times: list[float] = []
         self.build_delay_seconds = max(0.0, float(build_delay_seconds))
         self.last_payload = None
+        self.full_frame_build_count = 0
+        self.full_frame_started = threading.Event()
+        self.full_frame_release: threading.Event | None = None
 
     def mark_metric(self, name: str, delta: int = 1) -> None:
         self.metrics[name] = self.metrics.get(name, 0) + int(delta)
@@ -374,8 +439,6 @@ class ProducerTestState:
         return last_sent_at
 
     def dirty_payload(self, batch: dict):
-        from v5_remote_ui_contract import PayloadViews
-
         if self.build_delay_seconds > 0.0:
             time.sleep(self.build_delay_seconds)
         self.build_count += 1
@@ -392,8 +455,17 @@ class ProducerTestState:
         ]
         payload_size = sum(rect["w"] * rect["h"] * 4 for rect in rects)
         payload = bytes([int(batch["frame_id"]) & 0xFF]) * payload_size
-        self.last_payload = PayloadViews([memoryview(payload)], payload_size)
+        self.last_payload = payload
         return self.last_payload, rects
+
+    def full_frame(self):
+        with self.condition:
+            frame_id = self.frame_id
+        self.full_frame_build_count += 1
+        self.full_frame_started.set()
+        if self.full_frame_release is not None:
+            self.full_frame_release.wait(1.0)
+        return frame_id, bytes([frame_id & 0xFF]) * (self.stride * self.height)
 
 
 def check_global_producer_source_contract() -> int:
@@ -416,9 +488,29 @@ def check_global_producer_source_contract() -> int:
         "coalesce_deadline=next_emit_at",
         "next_emit_at += self.coalesce_seconds",
         "next_emit_at = now",
+        "FRAME_PRODUCER_CPU_BUDGET_RATIO = 0.25",
+        "_build_backpressure_seconds",
+        "dirty_payload_shared_backpressure_sleeps",
+        "dirty_payload_shared_backpressure_ms",
+        "repair_target_frame_id=self.latest_frame_id",
+        "prepare_full_repair(",
+        "dirty_payload_shared_full_repair_builds",
+        "dirty_payload_shared_covering_delta_hits",
+        "override_base_frame_id=requested",
+        "send_prepared_full_frame",
+        "FULL_REPAIR_FORBIDDEN_REASONS",
         "restart_stream=True",
         "if delivery.restart_stream:",
-        "stream_runtime_resets",
+        "stream_repair_full_frames",
+        "stream_repair_missing_dirty_events",
+        "stream_runtime_full_repairs",
+        "stream_runtime_covering_deltas",
+        "post_repair_delivery_action",
+        "stream_runtime_slow_client_disconnects",
+        "stream_runtime_post_repair_recoveries",
+        "stream_ws_receive_loop",
+        "cancel_event=stream_stop",
+        "self.server.payload_producer.wake_waiters",
     ]
     if any(token not in relay_source + producer_source for token in required):
         print("global dirty payload producer contract is incomplete")
@@ -434,8 +526,7 @@ def check_global_producer_source_contract() -> int:
         "payload=bytes(payload)",
         "DIRTY_EVENT_HISTORY_LIMIT, STREAM_COALESCE_SECONDS",
         "next_emit_at = now + self.coalesce_seconds",
-        "PreparedFrameDelivery(" + "needs_" + "full=True)",
-        "if delivery." + "needs_" + "full:",
+        "stream_runtime_history_gap_disconnects",
     ]
     if any(token in relay_source + producer_source for token in retired):
         print("retired per-client dirty payload path is still present")
@@ -444,9 +535,38 @@ def check_global_producer_source_contract() -> int:
         relay_source.index("    def handle_stream(self) -> None:"):
         relay_source.index("    def handle_input(self) -> None:")
     ]
-    if handle_stream.count("self.state.full_frame()") != 1 or "if delivery.restart_stream:\n" not in handle_stream:
-        print("runtime stream discontinuity can still fall back to a full frame")
+    if (
+        handle_stream.count("self.state.full_frame()") != 1
+        or "prepare_full_repair(" not in handle_stream
+        or "send_prepared_full_frame" not in handle_stream
+        or "if delivery.restart_stream:\n" not in handle_stream
+    ):
+        print("runtime stream repair is not routed through the shared latest payload")
         return 62
+    prepare_full_repair = producer_source[
+        producer_source.index("    def prepare_full_repair("):
+        producer_source.index("    def _build(")
+    ]
+    if "self._clear_history_locked()" in prepare_full_repair or "self.cursor_frame_id =" in prepare_full_repair:
+        print("one slow client still rebases the global producer")
+        return 63
+    return 0
+
+
+def check_post_repair_delivery_is_bounded() -> int:
+    action = import_relay_for_smoke().post_repair_delivery_action
+    if action(False, 17, False) != "repair":
+        print("first lag after a healthy delta did not request one repair")
+        return 69
+    if action(True, 18, False) != "disconnect":
+        print("second repair before a post-repair delta did not disconnect")
+        return 70
+    if action(True, 0, True) != "delta":
+        print("post-repair covering delta cannot restore normal delivery")
+        return 71
+    if action(False, 0, False) != "continue":
+        print("empty producer wakeup is not ignored")
+        return 72
     return 0
 
 
@@ -535,13 +655,11 @@ def check_skewed_stream_clients_share_prepared_history() -> int:
         if first is None or second is None or first.frame is None or first.frame is not second.frame:
             print("skewed clients did not share one immutable prepared frame", first, second)
             return 44
-        parts = getattr(first.frame.payload, "parts", ())
         if (
             state.build_count != 1
             or not isinstance(first.frame.meta_bytes, bytes)
             or first.frame.payload is not state.last_payload
-            or not isinstance(parts, tuple)
-            or any(not part.readonly for part in parts)
+            or not isinstance(first.frame.payload, bytes)
         ):
             print("global producer rebuilt or exposed mutable payload", state.build_count, first)
             return 45
@@ -594,6 +712,189 @@ def check_slow_client_does_not_block_global_producer() -> int:
     return 0
 
 
+def check_lagging_clients_share_latest_full_repair() -> int:
+    import v5_remote_ui_shared_payload as shared
+
+    state = ProducerTestState()
+    producer = shared.SharedDirtyPayloadProducer(
+        state,
+        history_limit=4,
+        coalesce_seconds=0.001,
+        poll_seconds=0.01,
+    )
+    producer.start()
+    producer.subscribe(1)
+    producer.subscribe(1)
+    try:
+        state.publish_dirty({"frame_id": 2, "base_frame_id": 1, "x": 0, "y": 0, "w": 1, "h": 1})
+        first = producer.wait_after(1, 1.0)
+        if first is None or first.frame is None:
+            print("repair setup did not prepare frame 2", first)
+            return 69
+        state.publish_dirty({"frame_id": 3, "base_frame_id": 2, "x": 1, "y": 1, "w": 1, "h": 1})
+        second = producer.wait_after(2, 1.0)
+        if second is None or second.frame is None:
+            print("repair setup did not prepare frame 3", second)
+            return 70
+
+        lagging_a = producer.wait_after(1, 0.05)
+        lagging_b = producer.wait_after(1, 0.05)
+        if any(
+            delivery is None
+            or delivery.frame is not None
+            or delivery.repair_target_frame_id != 3
+            or delivery.reason != "client_backlog"
+            for delivery in (lagging_a, lagging_b)
+        ):
+            print("lagging clients were not redirected to one latest repair", lagging_a, lagging_b)
+            return 71
+        state.publish_dirty({"frame_id": 4, "base_frame_id": 3, "x": 2, "y": 2, "w": 1, "h": 1})
+        old_chain = producer.wait_after(3, 1.0)
+        if old_chain is None or old_chain.frame is None:
+            print("producer did not advance the old base before repair", old_chain)
+            return 72
+        state.full_frame_release = threading.Event()
+        repair_results = [None, None]
+        start_repairs = threading.Barrier(3)
+
+        def repair_client(index: int, target: int) -> None:
+            start_repairs.wait()
+            repair_results[index] = producer.prepare_full_repair(target)
+
+        repair_a = threading.Thread(
+            target=repair_client,
+            args=(0, lagging_a.repair_target_frame_id),
+            daemon=True,
+        )
+        repair_b = threading.Thread(
+            target=repair_client,
+            args=(1, lagging_b.repair_target_frame_id),
+            daemon=True,
+        )
+        repair_a.start()
+        repair_b.start()
+        start_repairs.wait()
+        if not state.full_frame_started.wait(0.25):
+            print("concurrent full repair build did not start")
+            return 73
+        time.sleep(0.02)
+        state.full_frame_release.set()
+        repair_a.join(1.0)
+        repair_b.join(1.0)
+        repaired_a, repaired_b = repair_results
+        if (
+            repaired_a is None
+            or repaired_b is not repaired_a
+            or state.full_frame_build_count != 1
+            or json.loads(repaired_a.meta_bytes).get("type") != "full_frame"
+            or repaired_a.frame_id != 4
+            or producer.cursor_frame_id != repaired_a.frame_id
+            or producer.latest_frame_id != repaired_a.frame_id
+            or not producer.history
+            or producer.history[-1] is not old_chain.frame
+        ):
+            print("latest full repair was rebuilt per client", repaired_a, repaired_b, state.full_frame_build_count)
+            return 73
+        if (
+            state.metrics.get("dirty_payload_shared_full_repair_builds") != 1
+            or state.metrics.get("dirty_payload_shared_full_repair_cache_hits") != 1
+        ):
+            print("shared full repair metrics are incomplete", state.metrics)
+            return 74
+
+        state.publish_dirty({"frame_id": 5, "base_frame_id": 4, "x": 3, "y": 3, "w": 1, "h": 1})
+        resumed = producer.wait_after(repaired_a.frame_id, 1.0)
+        if resumed is None or resumed.frame is None or resumed.frame.base_frame_id != repaired_a.frame_id:
+            print("dirty stream did not resume from the repaired base", resumed)
+            return 78
+    finally:
+        producer.unsubscribe()
+        producer.unsubscribe()
+        producer.stop()
+    return 0
+
+
+def check_repair_frame_uses_existing_covering_delta() -> int:
+    import v5_remote_ui_shared_payload as shared
+
+    relay_module = import_relay_for_smoke()
+    state = ProducerTestState()
+    state.full_frame_release = threading.Event()
+    producer = shared.SharedDirtyPayloadProducer(
+        state,
+        history_limit=4,
+        coalesce_seconds=0.20,
+        poll_seconds=0.25,
+    )
+    producer.start()
+    producer.subscribe(1)
+    repaired = [None]
+
+    def build_repair() -> None:
+        repaired[0] = producer.prepare_full_repair(1)
+
+    worker = threading.Thread(target=build_repair, daemon=True)
+    server_sock = None
+    client_sock = None
+    try:
+        state.publish_dirty({"frame_id": 2, "base_frame_id": 1, "x": 0, "y": 0, "w": 1, "h": 1})
+        worker.start()
+        if not state.full_frame_started.wait(0.25):
+            print("covering delta repair did not capture frame 2")
+            return 79
+        state.publish_dirty({"frame_id": 3, "base_frame_id": 2, "x": 1, "y": 1, "w": 1, "h": 1})
+        state.full_frame_release.set()
+        worker.join(1.0)
+        if repaired[0] is None or repaired[0].frame_id != 2:
+            print("covering delta repair frame was not stable", repaired[0])
+            return 80
+
+        combined = producer.wait_after(1, 1.0)
+        if (
+            combined is None
+            or combined.frame is None
+            or combined.frame.base_frame_id != 1
+            or combined.frame.frame_id != 3
+        ):
+            print("producer did not preserve its normal combined delta", combined)
+            return 81
+        covering = producer.wait_after(repaired[0].frame_id, 0.05)
+        if (
+            covering is None
+            or covering.frame is not combined.frame
+            or covering.override_base_frame_id != repaired[0].frame_id
+            or covering.repair_target_frame_id != 0
+        ):
+            print("repair base did not reuse the existing covering payload", covering)
+            return 82
+
+        server_sock, client_sock = socket.socketpair()
+        handler = object.__new__(relay_module.RemoteRelayHandler)
+        handler.send_prepared_frame(server_sock, covering.frame, covering.override_base_frame_id)
+        meta_opcode, meta_payload = recv_server_frame(client_sock)
+        data_opcode, data_payload = recv_server_frame(client_sock)
+        meta = json.loads(meta_payload)
+        if (
+            meta_opcode != 0x1
+            or data_opcode != 0x2
+            or meta.get("base_frame_id") != repaired[0].frame_id
+            or meta.get("frame_id") != combined.frame.frame_id
+            or data_payload != bytes(combined.frame.payload)
+        ):
+            print("covering delta envelope changed the shared payload", meta, len(data_payload))
+            return 83
+    finally:
+        state.full_frame_release.set()
+        worker.join(1.0)
+        if server_sock is not None:
+            server_sock.close()
+        if client_sock is not None:
+            client_sock.close()
+        producer.unsubscribe()
+        producer.stop()
+    return 0
+
+
 def check_continuous_30hz_input_keeps_30hz_cadence() -> int:
     import v5_remote_ui_shared_payload as shared
     from v5_remote_ui_contract import STREAM_COALESCE_SECONDS
@@ -637,11 +938,11 @@ def check_continuous_30hz_input_keeps_30hz_cadence() -> int:
     return 0
 
 
-def check_late_build_does_not_add_another_cadence_wait() -> int:
+def check_expensive_build_uses_adaptive_backpressure() -> int:
     import v5_remote_ui_shared_payload as shared
 
-    cadence = 0.02
-    build_delay = 0.03
+    cadence = 0.01
+    build_delay = 0.02
     state = ProducerTestState(build_delay_seconds=build_delay)
     producer = shared.SharedDirtyPayloadProducer(
         state,
@@ -649,12 +950,15 @@ def check_late_build_does_not_add_another_cadence_wait() -> int:
         history_byte_budget=1024 * 1024,
         coalesce_seconds=cadence,
         poll_seconds=0.05,
+        cpu_budget_ratio=0.25,
+        min_backpressure_build_seconds=0.005,
+        max_backpressure_seconds=0.08,
     )
     producer.start()
     producer.subscribe(1)
     started = time.monotonic()
     try:
-        for frame_id in range(2, 26):
+        for frame_id in range(2, 42):
             target = started + 0.002 + ((frame_id - 2) * cadence)
             remaining = target - time.monotonic()
             if remaining > 0.0:
@@ -662,25 +966,31 @@ def check_late_build_does_not_add_another_cadence_wait() -> int:
             state.publish_dirty(
                 {"frame_id": frame_id, "base_frame_id": frame_id - 1, "x": 0, "y": 0, "w": 1, "h": 1}
             )
-        deadline = time.monotonic() + 0.35
-        while state.build_count < 12 and time.monotonic() < deadline:
+        deadline = time.monotonic() + 0.45
+        while state.build_count < 5 and time.monotonic() < deadline:
             time.sleep(0.005)
-        if state.build_count < 10:
-            print("late producer build still paid a second full cadence wait", state.build_count)
+        if state.build_count < 4:
+            print("adaptive producer did not continue the connected stream", state.build_count)
             return 59
         if len(state.build_times) >= 4:
             elapsed = state.build_times[-1] - state.build_times[1]
             average_interval = elapsed / max(1, len(state.build_times) - 2)
-            if average_interval >= build_delay + (cadence * 0.75):
-                print("late producer cadence includes an artificial post-build wait", average_interval)
+            if average_interval < 0.065 or average_interval > 0.13:
+                print("adaptive producer did not bound expensive build load", average_interval)
                 return 60
+        if (
+            state.metrics.get("dirty_payload_shared_backpressure_sleeps", 0) < 3
+            or state.metrics.get("dirty_payload_shared_backpressure_ms", 0) < 100
+        ):
+            print("adaptive producer backpressure metrics are missing", state.metrics)
+            return 61
     finally:
         producer.unsubscribe()
         producer.stop()
     return 0
 
 
-def check_missing_history_restarts_stream() -> int:
+def check_missing_history_uses_latest_full_repair() -> int:
     import v5_remote_ui_shared_payload as shared
 
     state = ProducerTestState()
@@ -698,19 +1008,59 @@ def check_missing_history_restarts_stream() -> int:
             return 49
         if (
             missing is None
-            or not missing.restart_stream
+            or missing.repair_target_frame_id != 3
             or missing.reason != "history_gap"
             or missing.frame is not None
         ):
-            print("missing producer history did not restart the stream", missing)
+            print("missing producer history did not request latest repair", missing)
             return 50
+        repaired = producer.prepare_full_repair(missing.repair_target_frame_id)
+        if repaired is None or repaired.frame_id != 3:
+            print("missing producer history repair was unavailable", repaired)
+            return 75
     finally:
         producer.unsubscribe()
         producer.stop()
     return 0
 
 
-def check_frame_and_byte_budgets_restart_streams() -> int:
+def check_invalid_discontinuity_stays_fail_closed() -> int:
+    import v5_remote_ui_shared_payload as shared
+
+    state = ProducerTestState()
+    producer = shared.SharedDirtyPayloadProducer(
+        state,
+        history_limit=2,
+        coalesce_seconds=0.001,
+        poll_seconds=0.01,
+    )
+    producer.start()
+    producer.subscribe(1)
+    try:
+        cached = producer.prepare_full_repair(1)
+        if cached is None or producer.full_repair is None:
+            print("invalid discontinuity setup did not create a repair cache")
+            return 76
+        with state.condition:
+            state.frame_id = 2
+        producer._reset_after_discontinuity(producer.generation, "invalid_dirty_event")
+        delivery = producer.wait_after(1, 0.05)
+        if (
+            delivery is None
+            or not delivery.restart_stream
+            or delivery.repair_target_frame_id != 0
+            or delivery.reason != "invalid_dirty_event"
+            or producer.full_repair is not None
+        ):
+            print("invalid dirty state was converted into a full repair", delivery, producer.full_repair)
+            return 77
+    finally:
+        producer.unsubscribe()
+        producer.stop()
+    return 0
+
+
+def check_frame_and_byte_budgets_repair_streams() -> int:
     import v5_remote_ui_shared_payload as shared
     from v5_remote_ui_contract import STREAM_COALESCE_SECONDS, STREAM_TARGET_FPS
 
@@ -740,8 +1090,12 @@ def check_frame_and_byte_budgets_restart_streams() -> int:
     try:
         advance(frame_producer, frame_state, 1, 3)
         frame_gap = frame_producer.wait_after(1, 0.05)
-        if len(frame_producer.history) != 2 or frame_gap is None or not frame_gap.restart_stream:
-            print("frame-bounded history did not restart the slow client stream")
+        if (
+            len(frame_producer.history) != 2
+            or frame_gap is None
+            or frame_gap.repair_target_frame_id <= 0
+        ):
+            print("frame-bounded history did not repair the slow client stream")
             return 55
     finally:
         frame_producer.unsubscribe()
@@ -764,9 +1118,9 @@ def check_frame_and_byte_budgets_restart_streams() -> int:
             len(byte_producer.history) != 2
             or byte_producer.history_payload_bytes != 8
             or repaired is None
-            or not repaired.restart_stream
+            or repaired.repair_target_frame_id <= 0
         ):
-            print("byte-bounded history did not restart the slow client stream")
+            print("byte-bounded history did not repair the slow client stream")
             return 56
     finally:
         byte_producer.unsubscribe()
@@ -777,13 +1131,17 @@ def check_frame_and_byte_budgets_restart_streams() -> int:
 def check_shared_payload_producer() -> int:
     for check in (
         check_global_producer_source_contract,
+        check_post_repair_delivery_is_bounded,
         check_shared_payload_producer_priority_is_absolute,
         check_skewed_stream_clients_share_prepared_history,
         check_slow_client_does_not_block_global_producer,
+        check_lagging_clients_share_latest_full_repair,
+        check_repair_frame_uses_existing_covering_delta,
         check_continuous_30hz_input_keeps_30hz_cadence,
-        check_late_build_does_not_add_another_cadence_wait,
-        check_missing_history_restarts_stream,
-        check_frame_and_byte_budgets_restart_streams,
+        check_expensive_build_uses_adaptive_backpressure,
+        check_missing_history_uses_latest_full_repair,
+        check_invalid_discontinuity_stays_fail_closed,
+        check_frame_and_byte_budgets_repair_streams,
     ):
         rc = check()
         if rc != 0:
@@ -793,7 +1151,7 @@ def check_shared_payload_producer() -> int:
 
 def main() -> int:
     global relay
-    import v5_remote_ui_relay as relay
+    relay = import_relay_for_smoke()
 
     expected_input_actions = {
         0x1: "message",
@@ -806,7 +1164,11 @@ def main() -> int:
         print("bad remote input websocket frame actions")
         return 27
 
-    rc = check_cpu_usage_sampler()
+    rc = check_stream_receive_loop()
+    if rc != 0:
+        return rc
+
+    rc = check_shared_cpu_usage_snapshot()
     if rc != 0:
         return rc
     rc = check_refresh_commit_boundary()

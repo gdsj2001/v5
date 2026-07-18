@@ -186,7 +186,7 @@ def state_sample():
  calc=binascii.crc32(raw[:24]); calc=binascii.crc32(raw[32:],calc)&0xffffffff
  epoch=struct.unpack_from("<Q",raw,32)[0]
  valid_mask,typed_flags=struct.unpack_from("<II",raw,40)
- return magic==0x56355348 and ver==1 and hsize==total==len(raw)==808 and payload==776 and seq>0 and not(seq&1) and crc==calc and 0<=time.monotonic_ns()-epoch<=500000000 and valid_mask&3==3 and not(typed_flags&4),seq
+ return magic==0x56355348 and ver==2 and hsize==total==len(raw)==840 and payload==808 and seq>0 and not(seq&1) and crc==calc and 0<=time.monotonic_ns()-epoch<=500000000 and valid_mask&3==3 and not(typed_flags&4),seq
 try:
  sa,sseq=state_sample(); time.sleep(.35); sb,sseq2=state_sample(); out["state_fresh"]=sa and sb and sseq2>sseq
 except Exception as e: out["state_error"]=type(e).__name__+":"+str(e); out["state_fresh"]=False

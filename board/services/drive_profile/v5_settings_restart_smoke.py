@@ -28,8 +28,8 @@ class SettingsRestartSmoke(unittest.TestCase):
                 "inactive_axis": "B",
                 "slave_position": 3,
                 "zero_counts": 5.0,
-                "counts_per_unit": 1000.0,
-                "raw_zero_position": 0.005,
+                "counts_per_unit": 10000.0,
+                "raw_zero_position": 0.0005,
                 "changed": False,
             },
         )
@@ -41,7 +41,7 @@ class SettingsRestartSmoke(unittest.TestCase):
                 "ok": True,
                 "code": "SETTINGS_ROTARY_PROFILE_CREV_VALID",
                 "active_axes": ["A", "C"],
-                "counts_per_rev": {"A": 360000, "C": 360000},
+                "counts_per_rev": {"A": 3600000, "C": 3600000},
                 "changed": False,
             },
         )
@@ -203,8 +203,10 @@ class SettingsModelZeroBindingSmoke(unittest.TestCase):
         self.write(
             contract.RUNTIME_SETTINGS_INI,
             "[TRAJ]\nCOORDINATES = X Y Z B C\n"
-            "[AXIS_B]\nWCHECKPOINT_COUNTS_PER_REV = 360000\n"
-            "[AXIS_C]\nWCHECKPOINT_COUNTS_PER_REV = 360000\n")
+            "[AXIS_B]\nWCHECKPOINT_COUNTS_PER_REV = 3600000\n"
+            "[AXIS_C]\nWCHECKPOINT_COUNTS_PER_REV = 3600000\n"
+            "[JOINT_3]\nSCALE = 10000\n"
+            "[JOINT_4]\nSCALE = 10000\n")
         self.write(contract.SELF_PARAMETER_TABLE, "A\tslave\tNAT\nB\tslave\t3\n")
 
     def tearDown(self) -> None:
@@ -221,7 +223,7 @@ class SettingsModelZeroBindingSmoke(unittest.TestCase):
     def b_zero(position: str = "3") -> dict:
         return {
             "zero_counts": 0.0,
-            "counts_per_unit": 1000.0,
+            "counts_per_unit": 10000.0,
             "raw_zero_position": 0.0,
             "drive_position": {
                 "axis": "B",
@@ -239,12 +241,12 @@ class SettingsModelZeroBindingSmoke(unittest.TestCase):
             "axes": [
                 {"axis": "A", "zero_model": {
                     "zero_counts": 5.0,
-                    "counts_per_unit": 1000.0,
-                    "raw_zero_position": 0.005,
+                    "counts_per_unit": 10000.0,
+                    "raw_zero_position": 0.0005,
                     "slave_position": 3,
                 }},
                 {"axis": "B", "zero_model": b_zero,
-                 "rotary_load_counts_per_rev": 360000},
+                 "rotary_load_counts_per_rev": 3600000},
                 {"axis": "C", "zero_model": {
                     "zero_counts": 0.0,
                     "counts_per_unit": 10000.0,
@@ -272,10 +274,10 @@ class SettingsModelZeroBindingSmoke(unittest.TestCase):
             "settings_save_and_restart", {"owner": "settings_restart"})
         self.assertTrue(handoff["ok"])
         self.assertTrue(Path(handoff["handoff_script"]).is_file())
-        self.assertTrue(handoff["rotary_wcheckpoint_profile"]["changed"])
+        self.assertFalse(handoff["rotary_wcheckpoint_profile"]["changed"])
         ini_text = contract.RUNTIME_SETTINGS_INI.read_text(encoding="utf-8")
         self.assertIn(
-            "[AXIS_B]\nWCHECKPOINT_COUNTS_PER_REV = 360000", ini_text)
+            "[AXIS_B]\nWCHECKPOINT_COUNTS_PER_REV = 3600000", ini_text)
         self.assertIn(
             "[AXIS_C]\nWCHECKPOINT_COUNTS_PER_REV = 3600000", ini_text)
 
@@ -287,6 +289,18 @@ class SettingsModelZeroBindingSmoke(unittest.TestCase):
         self.assertEqual("SETTINGS_MODEL_ROTARY_ZERO_SLAVE_MISMATCH", result["code"])
         self.assertFalse(result["restart_commit_required"])
         self.assertFalse((restart.RUN_DIR / "settings_clean_restart_handoff.sh").exists())
+
+    def test_wrong_zero_scale_cannot_restart_with_active_runtime_scale(self) -> None:
+        runtime = self.runtime(self.b_zero())
+        c_axis = next(item for item in runtime["axes"] if item["axis"] == "C")
+        c_axis["zero_model"]["counts_per_unit"] = 1000.0
+        c_axis["rotary_load_counts_per_rev"] = 360000
+        self.write(contract.SETTINGS_RUNTIME_JSON, json.dumps(runtime))
+        with self.assertRaises(contract.DriveActionError) as caught:
+            restart.sync_active_rotary_wcheckpoint_profiles_for_restart()
+        self.assertEqual(
+            "SETTINGS_ROTARY_PROFILE_SCALE_CHAIN_MISMATCH",
+            caught.exception.code)
 
 
 if __name__ == "__main__":

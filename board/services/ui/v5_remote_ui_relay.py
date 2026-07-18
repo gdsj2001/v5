@@ -8,6 +8,7 @@ import socket
 import socketserver
 import struct
 import sys
+import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
@@ -32,10 +33,13 @@ from v5_remote_ui_contract import (
 )
 from v5_remote_ui_protocol import frame_metadata, recv_ws_frame, send_ws_frame, ws_accept_value
 from v5_remote_ui_programs import MAX_GCODE_BYTES, ProgramApiError, ProgramFileService
-from v5_remote_ui_shared_payload import PreparedDirtyFrame, SharedDirtyPayloadProducer
+from v5_remote_ui_shared_payload import (
+    PreparedDirtyFrame,
+    PreparedFullFrame,
+    SharedDirtyPayloadProducer,
+)
 from v5_remote_ui_state import DirtyReader, FrameState
 from v5_remote_ui_support import (
-    CpuUsageSampler,
     cpu_samples_snapshot,
     now_ms,
     parse_allow_cidrs,
@@ -53,6 +57,46 @@ def input_ws_frame_action(opcode: int) -> str:
     if opcode == 0xA:
         return "continue"
     return "close"
+
+
+def post_repair_delivery_action(
+    waiting_for_post_repair_delta: bool,
+    repair_target_frame_id: int,
+    has_prepared_delta: bool,
+) -> str:
+    if repair_target_frame_id > 0:
+        return "disconnect" if waiting_for_post_repair_delta else "repair"
+    return "delta" if has_prepared_delta else "continue"
+
+
+def stream_ws_receive_loop(
+    sock: socket.socket,
+    stop_event: threading.Event,
+    send_lock: threading.Lock,
+    wake_waiters,
+    mark_metric,
+) -> None:
+    try:
+        while not stop_event.is_set():
+            opcode, payload = recv_ws_frame(sock)
+            action = input_ws_frame_action(opcode)
+            if action == "close":
+                if opcode == 0x8:
+                    with send_lock:
+                        send_ws_frame(sock, 0x8, payload)
+                    mark_metric("stream_client_closes")
+                return
+            if action == "pong":
+                with send_lock:
+                    send_ws_frame(sock, 0xA, payload)
+                mark_metric("stream_client_pings")
+            elif action == "continue":
+                mark_metric("stream_client_pongs")
+    except (BrokenPipeError, ConnectionError, ConnectionResetError, OSError):
+        mark_metric("stream_receive_disconnects")
+    finally:
+        stop_event.set()
+        wake_waiters()
 
 
 def remote_path_requires_ui(path: str) -> bool:
@@ -243,20 +287,44 @@ class RemoteRelayHandler(BaseHTTPRequestHandler):
         self.state.mark_metric("stream_active_sessions")
         sock = self.connection
         subscribed = False
+        stream_stop = threading.Event()
+        stream_send_lock = threading.Lock()
+        stream_receiver = None
+        waiting_for_post_repair_delta = False
         try:
             frame = self.state.full_frame()
             if frame is None:
                 return
             frame_id, payload = frame
             self.state.mark_metric("stream_initial_full_frames")
-            self.send_frame(sock, frame_metadata("full_frame", frame_id, 0, self.state.width, self.state.height, self.state.stride, []), payload)
+            with stream_send_lock:
+                self.send_frame(sock, frame_metadata("full_frame", frame_id, 0, self.state.width, self.state.height, self.state.stride, []), payload)
             last_sent = frame_id
             self.server.payload_producer.subscribe(frame_id)
             subscribed = True
-            while True:
-                delivery = self.server.payload_producer.wait_after(last_sent, STREAM_IDLE_PING_SECONDS)
+            stream_receiver = threading.Thread(
+                target=stream_ws_receive_loop,
+                args=(
+                    sock,
+                    stream_stop,
+                    stream_send_lock,
+                    self.server.payload_producer.wake_waiters,
+                    self.state.mark_metric,
+                ),
+                name="v5-ui-stream-rx",
+                daemon=True,
+            )
+            stream_receiver.start()
+            while not stream_stop.is_set():
+                delivery = self.server.payload_producer.wait_after(last_sent,
+                    STREAM_IDLE_PING_SECONDS,
+                    cancel_event=stream_stop,
+                )
+                if stream_stop.is_set():
+                    return
                 if delivery is None:
-                    send_ws_frame(sock, 0x9, b"")
+                    with stream_send_lock:
+                        send_ws_frame(sock, 0x9, b"")
                     self.state.mark_metric("stream_idle_pings")
                     continue
                 if delivery.restart_stream:
@@ -264,16 +332,60 @@ class RemoteRelayHandler(BaseHTTPRequestHandler):
                     if delivery.reason == "invalid_dirty_event":
                         self.state.mark_metric("stream_runtime_invalid_dirty_disconnects")
                     else:
-                        self.state.mark_metric("stream_runtime_history_gap_disconnects")
+                        self.state.mark_metric("stream_runtime_unrepairable_disconnects")
                     return
                 prepared = delivery.frame
-                if prepared is None:
+                delivery_action = post_repair_delivery_action(
+                    waiting_for_post_repair_delta,
+                    delivery.repair_target_frame_id,
+                    prepared is not None,
+                )
+                if delivery_action == "disconnect":
+                    self.state.mark_metric("stream_runtime_slow_client_disconnects")
+                    return
+                if delivery_action == "repair":
+                    repaired = self.server.payload_producer.prepare_full_repair(
+                        delivery.repair_target_frame_id,
+                        cancel_event=stream_stop,
+                    )
+                    if stream_stop.is_set():
+                        return
+                    if repaired is None:
+                        self.state.mark_metric("stream_runtime_full_repair_failures")
+                        return
+                    with stream_send_lock:
+                        self.send_prepared_full_frame(sock, repaired)
+                    last_sent = repaired.frame_id
+                    waiting_for_post_repair_delta = True
+                    self.state.mark_metric("stream_repair_full_frames")
+                    self.state.mark_metric("stream_runtime_full_repairs")
+                    if delivery.reason in ("client_backlog", "shared_full_repair"):
+                        self.state.mark_metric("stream_runtime_backlog_full_repairs")
+                    else:
+                        self.state.mark_metric("stream_repair_missing_dirty_events")
+                        self.state.mark_metric("stream_runtime_history_gap_full_repairs")
                     continue
-                self.send_prepared_frame(sock, prepared)
+                if delivery_action == "continue":
+                    continue
+                with stream_send_lock:
+                    self.send_prepared_frame(sock, prepared, delivery.override_base_frame_id)
                 last_sent = prepared.frame_id
+                if waiting_for_post_repair_delta:
+                    self.state.mark_metric("stream_runtime_post_repair_recoveries")
+                    waiting_for_post_repair_delta = False
+                if delivery.override_base_frame_id > 0:
+                    self.state.mark_metric("stream_runtime_covering_deltas")
         except (BrokenPipeError, ConnectionError, ConnectionResetError, OSError):
             self.state.mark_metric("stream_send_failures")
         finally:
+            stream_stop.set()
+            self.server.payload_producer.wake_waiters()
+            if stream_receiver is not None and stream_receiver.is_alive():
+                try:
+                    sock.shutdown(socket.SHUT_RD)
+                except OSError:
+                    pass
+                stream_receiver.join(0.25)
             if subscribed:
                 self.server.payload_producer.unsubscribe()
             self.state.mark_metric("stream_disconnects")
@@ -365,7 +477,21 @@ class RemoteRelayHandler(BaseHTTPRequestHandler):
         send_ws_frame(sock, 0x1, json.dumps(meta, separators=(",", ":")).encode("utf-8"))
         send_ws_frame(sock, 0x2, payload)
 
-    def send_prepared_frame(self, sock: socket.socket, prepared: PreparedDirtyFrame) -> None:
+    def send_prepared_frame(
+        self,
+        sock: socket.socket,
+        prepared: PreparedDirtyFrame,
+        override_base_frame_id: int = 0,
+    ) -> None:
+        meta_bytes = prepared.meta_bytes
+        if override_base_frame_id > 0 and override_base_frame_id != prepared.base_frame_id:
+            meta = json.loads(meta_bytes)
+            meta["base_frame_id"] = int(override_base_frame_id)
+            meta_bytes = json.dumps(meta, separators=(",", ":")).encode("utf-8")
+        send_ws_frame(sock, 0x1, meta_bytes)
+        send_ws_frame(sock, 0x2, prepared.payload)
+
+    def send_prepared_full_frame(self, sock: socket.socket, prepared: PreparedFullFrame) -> None:
         send_ws_frame(sock, 0x1, prepared.meta_bytes)
         send_ws_frame(sock, 0x2, prepared.payload)
 

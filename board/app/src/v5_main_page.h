@@ -23,8 +23,6 @@ extern "C" {
 #define V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT V5_PROGRAM_PREVIEW_POINT_COUNT
 #define V5_MAIN_PAGE_BUTTON_COUNT 35u
 #define V5_MAIN_PAGE_TOOLPATH_WCS_COUNT 9u
-#define V5_MAIN_PAGE_TOOLPATH_DRAW_SEGMENTS 64u
-#define V5_MAIN_PAGE_TOOLPATH_SEGMENT_POINT_COUNT 64u
 
 enum {
     V5_MAIN_PAGE_REFRESH_DYNAMIC = 1u << 0,
@@ -64,6 +62,16 @@ typedef struct V5MainPageCoordinateTarget {
     char axis;
 } V5MainPageCoordinateTarget;
 
+typedef struct V5MainPageDynamicScene {
+    V5ToolpathScreenPoint mcs_point;
+    V5ToolpathScreenPoint cmd_tip_point;
+    V5ToolpathScreenPoint holder_end_point;
+    unsigned int generation;
+    int mcs_valid;
+    int cmd_tip_valid;
+    int holder_end_valid;
+} V5MainPageDynamicScene;
+
 typedef struct V5MainPage {
     lv_obj_t *root;
     lv_obj_t *axis_labels[V5_MAIN_PAGE_AXIS_COUNT];
@@ -88,7 +96,6 @@ typedef struct V5MainPage {
     lv_obj_t *cpu1_label;
     lv_obj_t *toolpath_clip_layer;
     lv_obj_t *trajectory_line;
-    lv_obj_t *toolpath_line_segments[V5_MAIN_PAGE_TOOLPATH_DRAW_SEGMENTS];
     lv_obj_t *toolpath_mcs_origin_line;
     lv_obj_t *toolpath_wcs_origin_line;
     lv_obj_t *toolpath_mcs_axis_lines[3];
@@ -163,8 +170,7 @@ typedef struct V5MainPage {
     double jog_step;
     V5MainPageSelection selection;
     lv_point_t trajectory_points[V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT];
-    lv_point_t toolpath_segment_points[V5_MAIN_PAGE_TOOLPATH_DRAW_SEGMENTS][V5_MAIN_PAGE_TOOLPATH_SEGMENT_POINT_COUNT];
-    uint16_t toolpath_segment_point_counts[V5_MAIN_PAGE_TOOLPATH_DRAW_SEGMENTS];
+    unsigned char trajectory_break_before[V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT];
     unsigned int trajectory_point_count;
     lv_point_t toolpath_mcs_origin_points[5];
     lv_point_t toolpath_wcs_origin_points[5];
@@ -206,13 +212,17 @@ typedef struct V5MainPage {
     V5StatusPoint toolpath_program_project_points[V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT];
     unsigned char toolpath_program_break_before[V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT];
     V5ToolpathScreenPoint toolpath_program_screen_points[V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT];
+    V5MainPageDynamicScene toolpath_dynamic_scene;
     unsigned int toolpath_static_cache_hits;
     unsigned int toolpath_static_cache_misses;
     unsigned int toolpath_dynamic_refresh_count;
+    unsigned int toolpath_dynamic_scene_build_count;
     unsigned int toolpath_pose_refresh_count;
     unsigned int toolpath_structure_refresh_count;
     unsigned int toolpath_line_rewrite_count;
     unsigned int toolpath_line_set_points_count;
+    unsigned int toolpath_program_rtcp_transform_count;
+    unsigned int toolpath_program_fused_frame_count;
     unsigned int toolpath_line_last_dirty_rect_count;
     uint64_t toolpath_line_last_dirty_pixels;
     uint64_t toolpath_line_last_dirty_max_pixels;

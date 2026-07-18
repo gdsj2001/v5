@@ -23,8 +23,6 @@ PROJECT_ROOT=${V5_PROJECT_ROOT:-/opt/8ax/v5}
 UI_INPUT_NICE=0
 PROFILE_SNAPSHOT=/usr/libexec/8ax/drive_profile/v5_drive_profile_resident_snapshot.py
 BUS_ZERO_GATE=/usr/libexec/8ax/drive_profile/v5_bus_zero_resident_gate.py
-LINUXCNCRSH_PORT=${V5_LINUXCNCRSH_PORT:-5007}
-LINUXCNCRSH_CONNECTPW=${V5_LINUXCNCRSH_CONNECTPW:-EMC}
 
 boot_stage() {
   stage="$1"

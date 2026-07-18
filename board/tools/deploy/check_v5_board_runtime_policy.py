@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
+import os
 import re
 import stat
 import struct
@@ -22,6 +23,7 @@ import sys
 import time
 import urllib.request
 import pwd
+import grp
 
 PIDFILES = {
     "v5_command_gate": "/run/8ax/v5_command_gate.pid",
@@ -33,6 +35,21 @@ PIDFILES = {
     "v5_settings_actiond": "/run/8ax/v5_settings_actiond.pid",
     "v5_touch_diagnostics": "/run/8ax/v5_touch_diagnostics.pid",
 }
+
+PROC_ROOT = "/proc"
+PROC_LOCKS_PATH = "/proc/locks"
+POSITION_LOCK_PATH = "/run/8ax/v5_position_status_publisher.lock"
+POSITION_BLOCK_PATH = "/dev/shm/v5_native_position_status.bin"
+POSITION_DAEMON_PATH = "/usr/libexec/8ax/v5_position_status_publisher.py"
+SETTINGS_ACTIOND_DAEMON_PATH = "/usr/libexec/8ax/drive_profile/v5_settings_actiond.py"
+DEV_ROOT = "/dev"
+SYS_CLASS_UIO_ROOT = "/sys/class/uio"
+TCF_ROOT = "/"
+TCF_ABSENCE_PATHS = (
+    "usr/bin/tcf-agent",
+    "usr/sbin/tcf-agent",
+)
+TCF_ROOTFS_MANIFEST_PATHS = ("boot/v5-rootfs-file-manifest.tsv",)
 
 EXPECTED_NICE = {
     "v5_command_gate": -5,
@@ -83,43 +100,93 @@ def read_pid(path: str):
     try:
         text = Path(path).read_text(encoding="ascii").strip()
         pid = int(text.split()[0])
-        if not Path(f"/proc/{pid}").exists():
+        if not (Path(PROC_ROOT) / str(pid)).exists():
             return None
         return pid
     except Exception:
         return None
 
-def position_identity_audit(pid: int, pidfile: str) -> int:
+def read_position_start_ticks(pid: int) -> int:
+    text = (Path(PROC_ROOT) / str(pid) / "stat").read_text(encoding="ascii")
+    closing = text.rfind(")")
+    tail = text[closing + 2 :].split() if closing >= 0 else []
+    if len(tail) <= 19 or not tail[19].isdigit():
+        raise RuntimeError("proc_stat")
+    return int(tail[19])
+
+def read_position_argv(pid: int) -> list[str]:
+    raw = (Path(PROC_ROOT) / str(pid) / "cmdline").read_bytes()
+    argv = [item.decode("utf-8", "replace") for item in raw.split(b"\0") if item]
+    if not argv:
+        raise RuntimeError("empty_argv")
+    return argv
+
+def read_position_owner_record(pidfile: str) -> tuple[int, int, int]:
     try:
         fields = Path(pidfile).read_text(encoding="ascii").split()
-        if len(fields) != 3 or int(fields[0]) != pid:
-            raise RuntimeError("pidfile_fields")
-        start_ticks = fields[1]
-        writer_identity = int(fields[2])
-        if writer_identity <= 0 or writer_identity > 0xffffffff:
-            raise RuntimeError("writer_identity")
-        proc_fields = Path(f"/proc/{pid}/stat").read_text(encoding="ascii").split()
-        if len(proc_fields) < 22 or proc_fields[21] != start_ticks:
-            raise RuntimeError("start_ticks")
-        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ").decode("utf-8", "replace")
-        if "/usr/libexec/8ax/v5_position_status_publisher.py" not in cmdline:
+    except OSError as exc:
+        raise RuntimeError("pidfile_missing") from exc
+    if len(fields) != 3 or any(re.fullmatch(r"[0-9]+", field) is None for field in fields):
+        raise RuntimeError("pidfile_fields")
+    pid, start_ticks, writer_identity = (int(field) for field in fields)
+    if not (0 < pid <= 0x7fffffff and 0 < start_ticks <= 0xffffffffffffffff and
+            0 < writer_identity <= 0xffffffff):
+        raise RuntimeError("pidfile_range")
+    if not (Path(PROC_ROOT) / str(pid)).is_dir():
+        raise RuntimeError("dead_pid")
+    if read_position_start_ticks(pid) != start_ticks:
+        raise RuntimeError("start_ticks")
+    return pid, start_ticks, writer_identity
+
+def position_lock_owner_pid() -> int:
+    lock_stat = os.stat(POSITION_LOCK_PATH)
+    expected = (os.major(lock_stat.st_dev), os.minor(lock_stat.st_dev), lock_stat.st_ino)
+    matches = []
+    for line in Path(PROC_LOCKS_PATH).read_text(encoding="ascii").splitlines():
+        parts = line.split()
+        if len(parts) >= 7 and parts[1] == "->":
+            parts = parts[:1] + parts[2:]
+        if len(parts) < 6:
+            continue
+        dev_inode = parts[5].split(":")
+        try:
+            identity = (int(dev_inode[0], 16), int(dev_inode[1], 16), int(dev_inode[2], 10))
+            owner_pid = int(parts[4], 10)
+        except (IndexError, ValueError):
+            continue
+        if identity == expected:
+            matches.append((parts[1], parts[3], owner_pid))
+    if len(matches) != 1:
+        raise RuntimeError("lock_record_count")
+    lock_kind, lock_mode, owner_pid = matches[0]
+    if lock_kind != "FLOCK" or lock_mode != "WRITE":
+        raise RuntimeError("lock_mode")
+    return owner_pid
+
+def position_identity_audit(pid: int, pidfile: str, owner_record=None) -> int:
+    try:
+        record = owner_record or read_position_owner_record(pidfile)
+        owner_pid, start_ticks, writer_identity = record
+        if owner_pid != pid:
+            raise RuntimeError("pidfile_pid")
+        if POSITION_DAEMON_PATH not in read_position_argv(pid):
             raise RuntimeError("canonical_cmdline")
         matches = 0
-        for proc in Path("/proc").glob("[0-9]*/cmdline"):
+        for proc in Path(PROC_ROOT).glob("[0-9]*/cmdline"):
             try:
-                text = proc.read_bytes().replace(b"\0", b" ").decode("utf-8", "replace")
+                argv = [item.decode("utf-8", "replace") for item in proc.read_bytes().split(b"\0") if item]
             except OSError:
                 continue
-            if "/usr/libexec/8ax/v5_position_status_publisher.py" in text:
+            if POSITION_DAEMON_PATH in argv:
                 matches += 1
         if matches != 1:
             raise RuntimeError("unique_process")
-        lock_path = "/run/8ax/v5_position_status_publisher.lock"
-        if Path(lock_path).read_text(encoding="ascii").split() != fields:
+        fields = [str(owner_pid), str(start_ticks), str(writer_identity)]
+        if Path(POSITION_LOCK_PATH).read_text(encoding="ascii").split() != fields:
             raise RuntimeError("lock_record")
-        if subprocess.run(["flock", "-n", lock_path, "true"], check=False).returncode == 0:
-            raise RuntimeError("lock_not_held")
-        payload = Path("/dev/shm/v5_native_position_status.bin").read_bytes()
+        if position_lock_owner_pid() != owner_pid:
+            raise RuntimeError("lock_owner")
+        payload = Path(POSITION_BLOCK_PATH).read_bytes()
         if len(payload) != 152:
             raise RuntimeError("block_size")
         magic, version, size, _mask, _axes, block_writer = struct.unpack_from("<6I", payload, 0)
@@ -138,6 +205,15 @@ def position_identity_audit(pid: int, pidfile: str) -> int:
         f"OK_POSITION_IDENTITY pid={pid} start_ticks={start_ticks} "
         f"writer_identity={writer_identity}")
     return 0
+
+def position_service_audit(pidfile: str):
+    try:
+        record = read_position_owner_record(pidfile)
+    except Exception as exc:
+        print(f"FAIL v5_position_status_publisher: owner_record={exc}", file=sys.stderr)
+        return None, 1
+    pid = record[0]
+    return pid, position_identity_audit(pid, pidfile, record)
 
 def read_status_field(pid: int, field: str) -> str:
     for line in Path(f"/proc/{pid}/status").read_text(encoding="utf-8", errors="ignore").splitlines():
@@ -173,12 +249,24 @@ def read_task_nice_values(pid: int) -> list[int]:
 
 def pids_by_executable_name(name: str) -> list[int]:
     pids = []
-    for proc in Path("/proc").glob("[0-9]*"):
+    for proc in Path(PROC_ROOT).glob("[0-9]*"):
         try:
             argv0 = (proc / "cmdline").read_bytes().split(b"\0", 1)[0].decode("utf-8", errors="ignore")
         except Exception:
             continue
         if Path(argv0).name == name:
+            pids.append(int(proc.name))
+    return sorted(pids)
+
+def pids_by_exact_argv_element(path: str) -> list[int]:
+    pids = []
+    for proc in Path(PROC_ROOT).glob("[0-9]*"):
+        try:
+            argv = [item.decode("utf-8", errors="ignore")
+                    for item in (proc / "cmdline").read_bytes().split(b"\0") if item]
+        except Exception:
+            continue
+        if path in argv:
             pids.append(int(proc.name))
     return sorted(pids)
 
@@ -190,6 +278,163 @@ def read_uid(pid: int):
         return int(uid_text[0])
     except ValueError:
         return None
+
+def read_fs_ids(pid: int):
+    status = Path(PROC_ROOT) / str(pid) / "status"
+    values = {}
+    for line in status.read_text(encoding="ascii", errors="ignore").splitlines():
+        if line.startswith("Uid:") or line.startswith("Gid:"):
+            fields = line.split()[1:]
+            if len(fields) == 4 and all(field.isdigit() for field in fields):
+                values[line[:3]] = tuple(int(field) for field in fields)
+    if "Uid" not in values or "Gid" not in values:
+        raise RuntimeError("fsids_missing")
+    return values["Uid"][3], values["Gid"][3]
+
+def validate_uio_consumer_fsids(records, petalinux_uid: int, petalinux_gid: int):
+    failures = []
+    expected = {
+        "stepgen": ((petalinux_uid, petalinux_gid), "FAIL_UIO_STEPGEN_CONSUMER_MISSING"),
+        "dna": ((0, 0), "FAIL_UIO_DNA_CONSUMER_MISSING"),
+    }
+    for role, (expected_ids, missing_marker) in expected.items():
+        if role not in records:
+            failures.append(missing_marker)
+        elif tuple(records[role]) != expected_ids:
+            ids = records[role]
+            failures.append(f"FAIL_UIO_{role.upper()}_CONSUMER_FSIDS:{ids}")
+    return failures
+
+def validate_uio_records(records, petalinux_gid: int):
+    failures = []
+    by_role = {record.get("role"): record for record in records if record.get("role") != "unexpected"}
+    expected = {
+        "stepgen": {"name": "stepgen", "mode": 0o660, "uid": 0, "gid": petalinux_gid},
+        "dna": {"name": "dna", "mode": 0o600, "uid": 0, "gid": 0},
+    }
+    for role, contract in expected.items():
+        record = by_role.get(role)
+        if record is None:
+            failures.append(f"FAIL_UIO_{role.upper()}_MISSING")
+            continue
+        if not record.get("is_symlink"):
+            failures.append(f"FAIL_UIO_{role.upper()}_SYMLINK")
+        if not record.get("is_char"):
+            failures.append(f"FAIL_UIO_{role.upper()}_CHAR")
+        if contract["name"] not in str(record.get("name", "")).lower():
+            failures.append(f"FAIL_UIO_{role.upper()}_NAME:{record.get('name', '')}")
+        for key in ("mode", "uid", "gid"):
+            if record.get(key) != contract[key]:
+                failures.append(f"FAIL_UIO_{role.upper()}_{key.upper()}:{record.get(key)}")
+    if all(role in by_role for role in expected) and by_role["stepgen"].get("target") == by_role["dna"].get("target"):
+        failures.append("FAIL_UIO_TARGET_ALIAS")
+    for record in records:
+        if record.get("role") == "unexpected" and int(record.get("mode", 0)) & 0o022:
+            failures.append(f"FAIL_UIO_UNEXPECTED_WRITABLE:{record.get('target', '')}")
+    return failures
+
+def collect_uio_record(role: str, link_path: Path):
+    record = {"role": role, "target": "", "is_symlink": link_path.is_symlink(),
+              "is_char": False, "name": "", "mode": None, "uid": None, "gid": None}
+    try:
+        target = link_path.resolve(strict=True)
+        info = target.stat()
+        record.update({"target": str(target), "is_char": stat.S_ISCHR(info.st_mode),
+                       "mode": stat.S_IMODE(info.st_mode), "uid": info.st_uid, "gid": info.st_gid})
+        record["name"] = (Path(SYS_CLASS_UIO_ROOT) / target.name / "name").read_text(
+            encoding="ascii", errors="ignore").strip()
+    except OSError:
+        pass
+    return record
+
+def audit_uio_devices() -> int:
+    try:
+        petalinux = pwd.getpwnam("petalinux")
+        petalinux_gid = grp.getgrnam("petalinux").gr_gid
+    except Exception as exc:
+        print(f"FAIL_UIO_PETALINUX_IDENTITY:{exc}", file=sys.stderr)
+        return 1
+    dev_root = Path(DEV_ROOT)
+    records = [
+        collect_uio_record("stepgen", dev_root / "v5-stepgen-uio"),
+        collect_uio_record("dna", dev_root / "v5-dna-uio"),
+    ]
+    expected_targets = {record["target"] for record in records if record["target"]}
+    for target in dev_root.glob("uio[0-9]*"):
+        try:
+            info = target.stat()
+        except OSError:
+            continue
+        if str(target.resolve()) not in expected_targets:
+            records.append({"role": "unexpected", "target": str(target),
+                            "mode": stat.S_IMODE(info.st_mode)})
+    failures = validate_uio_records(records, petalinux_gid)
+    consumer_ids = {}
+    rtapi_pids = pids_by_executable_name("rtapi_app")
+    if len(rtapi_pids) == 1:
+        try:
+            consumer_ids["stepgen"] = read_fs_ids(rtapi_pids[0])
+        except Exception as exc:
+            failures.append(f"FAIL_UIO_STEPGEN_CONSUMER_FSIDS:{exc}")
+    elif len(rtapi_pids) != 1:
+        failures.append(f"FAIL_UIO_STEPGEN_CONSUMER_COUNT:{len(rtapi_pids)}")
+    actiond_pids = pids_by_exact_argv_element(SETTINGS_ACTIOND_DAEMON_PATH)
+    actiond_pidfile_pid = read_pid(PIDFILES["v5_settings_actiond"])
+    if len(actiond_pids) != 1:
+        failures.append(f"FAIL_UIO_DNA_CONSUMER_COUNT:{len(actiond_pids)}")
+    elif actiond_pidfile_pid != actiond_pids[0]:
+        failures.append(
+            f"FAIL_UIO_DNA_CONSUMER_PIDFILE_MISMATCH:{actiond_pidfile_pid}:{actiond_pids[0]}")
+    else:
+        try:
+            consumer_ids["dna"] = read_fs_ids(actiond_pids[0])
+        except Exception as exc:
+            failures.append(f"FAIL_UIO_DNA_CONSUMER_FSIDS:{exc}")
+    failures.extend(validate_uio_consumer_fsids(
+        consumer_ids, petalinux.pw_uid, petalinux_gid))
+    for failure in failures:
+        print(failure, file=sys.stderr)
+    if not failures:
+        print("OK_UIO_DEVICE_PERMISSIONS")
+    return int(bool(failures))
+
+def validate_ethercat_records(records, petalinux_gid: int):
+    failures = []
+    if not records:
+        return ["FAIL_ETHERCAT_DEVICE_MISSING"]
+    for record in records:
+        path = record.get("path", "")
+        if not record.get("is_char"):
+            failures.append(f"FAIL_ETHERCAT_DEVICE_CHAR:{path}")
+        if record.get("uid") != 0:
+            failures.append(f"FAIL_ETHERCAT_DEVICE_UID:{path}:{record.get('uid')}")
+        if record.get("gid") != petalinux_gid:
+            failures.append(f"FAIL_ETHERCAT_DEVICE_GID:{path}:{record.get('gid')}")
+        if record.get("mode") != 0o660:
+            failures.append(f"FAIL_ETHERCAT_DEVICE_MODE:{path}:{record.get('mode')}")
+    return failures
+
+def audit_ethercat_devices() -> int:
+    try:
+        petalinux_gid = grp.getgrnam("petalinux").gr_gid
+    except Exception as exc:
+        print(f"FAIL_ETHERCAT_PETALINUX_IDENTITY:{exc}", file=sys.stderr)
+        return 1
+    records = []
+    for path in Path(DEV_ROOT).glob("EtherCAT*"):
+        try:
+            info = path.stat()
+        except OSError:
+            continue
+        records.append({"path": str(path), "is_char": stat.S_ISCHR(info.st_mode),
+                        "uid": info.st_uid, "gid": info.st_gid,
+                        "mode": stat.S_IMODE(info.st_mode)})
+    failures = validate_ethercat_records(records, petalinux_gid)
+    for failure in failures:
+        print(failure, file=sys.stderr)
+    if not failures:
+        print("OK_ETHERCAT_DEVICE_PERMISSIONS")
+    return int(bool(failures))
 
 def read_environ(pid: int):
     try:
@@ -256,7 +501,7 @@ def audit_sandbox_paths():
 
 def parse_proc_tcp_listeners(port: int):
     listeners = []
-    for path in (Path("/proc/net/tcp"), Path("/proc/net/tcp6")):
+    for path in (Path(PROC_ROOT) / "net" / "tcp", Path(PROC_ROOT) / "net" / "tcp6"):
         try:
             lines = path.read_text(encoding="ascii", errors="ignore").splitlines()[1:]
         except Exception:
@@ -277,6 +522,109 @@ def parse_proc_tcp_listeners(port: int):
             if parsed_port == port:
                 listeners.append((path.name, local_addr))
     return listeners
+
+def audit_linuxcnc_control_listeners() -> int:
+    rc = 0
+    listeners_5005 = parse_proc_tcp_listeners(5005)
+    if listeners_5005:
+        print(f"FAIL_LINUXCNC_NML_TCP_5005: {listeners_5005}", file=sys.stderr)
+        rc = 1
+    listeners_5007 = parse_proc_tcp_listeners(5007)
+    if not listeners_5007:
+        print("FAIL_LINUXCNCRSH_5007_MISSING", file=sys.stderr)
+        return 1
+    allowed = {
+        ("tcp", "0100007F"),
+        ("tcp6", "00000000000000000000000001000000"),
+    }
+    for listener in listeners_5007:
+        if listener not in allowed:
+            print(f"FAIL_LINUXCNCRSH_5007_NON_LOOPBACK: {listener}", file=sys.stderr)
+            rc = 1
+    if rc == 0:
+        print(f"OK_LINUXCNCRSH_5007_LOOPBACK: {listeners_5007}")
+    return rc
+
+def collect_tcf_proc_evidence(proc_root: Path):
+    failures = []
+    listeners = []
+    tcf_pids = []
+    if not proc_root.is_dir():
+        return [], [], ["FAIL_TCF_PROC_ROOT_EVIDENCE"]
+    proc_dirs = list(proc_root.glob("[0-9]*"))
+    if not proc_dirs:
+        failures.append("FAIL_TCF_PROCESS_EVIDENCE")
+    readable_processes = 0
+    for proc in proc_dirs:
+        try:
+            argv = [item for item in (proc / "cmdline").read_bytes().split(b"\0") if item]
+        except OSError:
+            continue
+        readable_processes += 1
+        if argv and Path(argv[0].decode("utf-8", "ignore")).name == "tcf-agent":
+            tcf_pids.append(int(proc.name))
+    if proc_dirs and readable_processes == 0:
+        failures.append("FAIL_TCF_PROCESS_EVIDENCE")
+    for table in ("tcp", "tcp6"):
+        path = proc_root / "net" / table
+        try:
+            lines = path.read_text(encoding="ascii", errors="strict").splitlines()
+        except (OSError, UnicodeError):
+            failures.append(f"FAIL_TCF_PROC_{table.upper()}_EVIDENCE")
+            continue
+        if not lines:
+            failures.append(f"FAIL_TCF_PROC_{table.upper()}_EVIDENCE")
+            continue
+        for line in lines[1:]:
+            fields = line.split()
+            if len(fields) < 4 or fields[3] != "0A" or ":" not in fields[1]:
+                continue
+            address, port_text = fields[1].rsplit(":", 1)
+            try:
+                port = int(port_text, 16)
+            except ValueError:
+                continue
+            if port == 1534:
+                listeners.append((table, address))
+    return tcf_pids, listeners, failures
+
+def audit_tcf_retirement() -> int:
+    root = Path(TCF_ROOT)
+    failures = []
+    for relative in TCF_ABSENCE_PATHS:
+        if (root / relative).exists():
+            failures.append(f"FAIL_TCF_RUNTIME_FILE:{relative}")
+    init_root = root / "etc"
+    for entry in (init_root / "init.d").glob("*tcf-agent*"):
+        failures.append(f"FAIL_TCF_INIT_ENTRY:{entry.relative_to(root)}")
+    for rc_dir in init_root.glob("rc*.d"):
+        for entry in rc_dir.glob("*tcf-agent*"):
+            failures.append(f"FAIL_TCF_RC_LINK:{entry.relative_to(root)}")
+    token = re.compile(r"(?<![A-Za-z0-9_-])tcf-agent(?![A-Za-z0-9_-])")
+    readable_manifests = 0
+    for relative in TCF_ROOTFS_MANIFEST_PATHS:
+        path = root / relative
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError as exc:
+            failures.append(f"FAIL_TCF_ROOTFS_MANIFEST_READ:{relative}:{exc}")
+            continue
+        readable_manifests += 1
+        if token.search(text):
+            failures.append(f"FAIL_TCF_ROOTFS_MANIFEST:{relative}")
+    if readable_manifests == 0:
+        failures.append("FAIL_TCF_ROOTFS_MANIFEST_EVIDENCE")
+    pids, listeners, proc_failures = collect_tcf_proc_evidence(Path(PROC_ROOT))
+    failures.extend(proc_failures)
+    if pids:
+        failures.append(f"FAIL_TCF_PROCESS:{pids}")
+    if listeners:
+        failures.append(f"FAIL_TCF_LISTENER_1534:{listeners}")
+    for failure in failures:
+        print(failure, file=sys.stderr)
+    if not failures:
+        print("OK_TCF_PRODUCTION_RETIRED")
+    return int(bool(failures))
 
 def read_remote_diagnostics():
     with urllib.request.urlopen("http://127.0.0.1:18080/remote/diagnostics", timeout=2.0) as response:
@@ -593,13 +941,17 @@ def audit_network_cpu_isolation() -> int:
 
 rc = 0
 for name, pidfile in PIDFILES.items():
-    pid = read_pid(pidfile)
-    if pid is None:
-        print(f"SKIP {name}: no live pid")
-        continue
-    service_rc = 0
     if name == "v5_position_status_publisher":
-        service_rc |= position_identity_audit(pid, pidfile)
+        pid, service_rc = position_service_audit(pidfile)
+        if pid is None:
+            rc |= service_rc
+            continue
+    else:
+        pid = read_pid(pidfile)
+        if pid is None:
+            print(f"SKIP {name}: no live pid")
+            continue
+        service_rc = 0
     cpus = read_status_field(pid, "Cpus_allowed_list")
     policy = read_sched_policy(pid)
     task_records = read_task_records(pid)
@@ -653,6 +1005,10 @@ rc |= audit_linuxcnc_privileged_helpers()
 rc |= audit_linuxcnc_rtapi_affinity()
 rc |= audit_linuxcnc_non_realtime_scheduling()
 rc |= audit_network_cpu_isolation()
+rc |= audit_linuxcnc_control_listeners()
+rc |= audit_tcf_retirement()
+rc |= audit_uio_devices()
+rc |= audit_ethercat_devices()
 audit_sandbox_paths()
 sys.exit(rc)
 '''

@@ -59,7 +59,7 @@ for token in (
         "pa[7:21]+pb[7:21]", "wa[11:56]+wb[11:56]",
         "<=1000000000", "len(wfields)==2", "proc_start_ticks(wpid)==wstart",
         "proc_start_ticks(ppid)==pstart", "wmatches==[wpid]",
-        "len(raw)==808", "payload==776", "valid_mask&3==3", "not(typed_flags&4)",
+        "ver==2", "len(raw)==840", "payload==808", "valid_mask&3==3", "not(typed_flags&4)",
         "sseq2>sseq", "stat.S_ISCHR(os.stat(touch_real).st_mode)",
         'ui_argv==[b"/usr/libexec/8ax/v5_lvgl_shell",b"--serve"]',
         "taskset -c 1", "power_stdout.log"):

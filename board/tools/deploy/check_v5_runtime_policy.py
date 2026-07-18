@@ -168,6 +168,7 @@ def check_remote_relay_access_control() -> int:
         ROOT / "services" / "ui" / "v5_remote_ui_dirty_geometry.py",
         ROOT / "services" / "ui" / "v5_remote_ui_shared_payload.py",
         ROOT / "services" / "ui" / "v5_remote_ui_support.py",
+        ROOT / "services" / "ui" / "v5_status_shm_reader.py",
         ROOT / "services" / "ui" / "v5_remote_ui_protocol.py",
         ROOT / "services" / "ui" / "v5_remote_ui_contract.py",
     )
@@ -223,6 +224,9 @@ def check_remote_relay_access_control() -> int:
         "remote_input",
         "metrics_snapshot",
         "cpu_samples_snapshot",
+        "V5StatusShmReader",
+        "cpu_sample_generation",
+        "cpu_sample_monotonic_ns",
         "process_diagnostics",
         "full_frame_requests",
         "stream_active_sessions",
@@ -255,6 +259,13 @@ def check_remote_relay_access_control() -> int:
         if token in relay_text:
             print(
                 f"REMOTE_RELAY_RUNTIME_FULL_REPAIR_SURVIVOR: {token}",
+                file=sys.stderr,
+            )
+            rc = 1
+    for token in ("class CpuUsageSampler", 'cpu_percent("cpu0")'):
+        if token in relay_text:
+            print(
+                f"REMOTE_RELAY_DUPLICATE_CPU_SAMPLER_SURVIVOR: {token}",
                 file=sys.stderr,
             )
             rc = 1
@@ -358,10 +369,10 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         print("LINUXCNC_RTAPI_AFFINITY_INIT_MISSING: services/command_gate/init.d/v5-linuxcnc-command-gate", file=sys.stderr)
         return 1
     if not probe.exists():
-        print("LINUXCNC_MACHINE_ON_PROBE_MISSING: services/command_gate/v5_linuxcncrsh_probe.c", file=sys.stderr)
+        print("LINUXCNC_READ_ONLY_PROBE_MISSING: services/command_gate/v5_linuxcncrsh_probe.c", file=sys.stderr)
         return 1
     if not ui_init.exists():
-        print("LINUXCNC_MACHINE_ON_UI_INIT_MISSING: services/ui/init.d/v5-ui-relay", file=sys.stderr)
+        print("LINUXCNC_READ_ONLY_UI_INIT_MISSING: services/ui/init.d/v5-ui-relay", file=sys.stderr)
         return 1
     if (
         not backend_lifecycle.exists()
@@ -555,6 +566,8 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         "LOCKFILE=/run/8ax/v5_position_status_publisher.lock",
         "owner_is_live()",
         'flock -n "$LOCKFILE" true',
+        "tr '\\000' '\\n'",
+        'grep -Fqx "$DAEMON"',
         '/proc/$OWNER_PID/stat',
         '/proc/$OWNER_PID/cmdline',
         "position_block_matches_owner()",
@@ -567,6 +580,16 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
             print(
                 "POSITION_DISPLAY_PUBLISHER_CPU_POLICY_MISSING: "
                 f"{position_publisher_init.relative_to(ROOT)} lacks {token}",
+                file=sys.stderr,
+            )
+            rc = 1
+    for retired in (
+        "tr '\\000' ' '",
+        'grep -F "$DAEMON"',
+    ):
+        if retired in position_init_text:
+            print(
+                f"POSITION_EXACT_ARGV_POLICY_RESURRECTED: {retired}",
                 file=sys.stderr,
             )
             rc = 1
@@ -587,6 +610,35 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         if forbidden in position_text:
             print(
                 f"POSITION_DISPLAY_FAST_PATH_BLOCKING_SOURCE_PRESENT: {forbidden}",
+                file=sys.stderr,
+            )
+            rc = 1
+    board_runtime_policy_text = board_runtime_policy.read_text(
+        encoding="utf-8", errors="ignore")
+    for token in (
+        'PROC_ROOT = "/proc"',
+        'PROC_LOCKS_PATH = "/proc/locks"',
+        'POSITION_LOCK_PATH = "/run/8ax/v5_position_status_publisher.lock"',
+        'POSITION_BLOCK_PATH = "/dev/shm/v5_native_position_status.bin"',
+        "read_position_owner_record(pidfile)",
+        "POSITION_DAEMON_PATH in argv",
+        'lock_kind != "FLOCK" or lock_mode != "WRITE"',
+        "position_lock_owner_pid() != owner_pid",
+        "position_service_audit(pidfile)",
+    ):
+        if token not in board_runtime_policy_text:
+            print(
+                f"POSITION_LIVE_OWNER_POLICY_MISSING: {token}",
+                file=sys.stderr,
+            )
+            rc = 1
+    for retired in (
+        '["flock", "-n", lock_path, "true"]',
+        'cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().replace',
+    ):
+        if retired in board_runtime_policy_text:
+            print(
+                f"POSITION_LIVE_OWNER_POLICY_RESURRECTED: {retired}",
                 file=sys.stderr,
             )
             rc = 1
@@ -626,6 +678,7 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         "services/state_publisher/init.d/v5-position-status-publisher\t/etc/init.d/v5-position-status-publisher\t0755",
         "services/ui/v5_remote_ui_shared_payload.py\t/usr/libexec/8ax/v5_remote_ui_shared_payload.py\t0644",
         "services/ui/v5_remote_ui_dirty_geometry.py\t/usr/libexec/8ax/v5_remote_ui_dirty_geometry.py\t0644",
+        "services/ui/v5_status_shm_reader.py\t/usr/libexec/8ax/v5_status_shm_reader.py\t0644",
         "petalinux/project-spec/meta-user/recipes-apps/v5-base-overlay/files/network/v5_net_core.sh\t/usr/local/sbin/v5_net_core.sh\t0644",
         "petalinux/project-spec/meta-user/recipes-apps/v5-base-overlay/files/network/v5_usb_wifi_apply.sh\t/usr/local/sbin/v5_usb_wifi_apply.sh\t0755",
     )
@@ -648,11 +701,15 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         "stop_position_publisher_before_backend",
         "restart_position_publisher_after_backend",
         "manifest_wcs_publisher=0",
+        "manifest_state_publisher=0",
+        "manifest_state_publisher=1",
         "stop_writer_before_upgrade()",
         "stop_affected_writers_before_install",
         'PROC_ROOT=/proc',
         '"$PROC_ROOT"/[0-9]*/cmdline',
         'grep -Fqx "$writer_path"',
+        "/usr/libexec/8ax/v5_state_publisher",
+        "v5-state-publisher",
         "writer did not stop before upgrade",
     )
     for token in required_cpu_policy_installer:
@@ -719,24 +776,351 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
             rc = 1
     probe_text = probe.read_text(encoding="utf-8", errors="ignore")
     required_probe = (
-        "--machine-on",
-        "ensure_machine_on",
-        "v5_linuxcncrsh_send_machine_on_sequence",
-        "machine on confirmed",
+        "v5_linuxcncrsh_probe_machine",
+        "linuxcncrsh machine probe ok",
     )
     for token in required_probe:
         if token not in probe_text:
-            print(f"LINUXCNC_MACHINE_ON_PROBE_CONTRACT_MISSING: {probe.relative_to(ROOT)} lacks {token}", file=sys.stderr)
+            print(f"LINUXCNC_READ_ONLY_PROBE_CONTRACT_MISSING: {probe.relative_to(ROOT)} lacks {token}", file=sys.stderr)
             rc = 1
+    for token in (
+        "ensure_machine_on",
+        "poll_sleep_ms",
+        "--machine-on",
+        "v5_linuxcncrsh_send_machine_on_sequence",
+    ):
+        if token in probe_text:
+            print(f"LINUXCNC_PROBE_CONTROL_SURFACE_RESURRECTED: {probe.relative_to(ROOT)} contains {token}", file=sys.stderr)
+            rc = 1
+    for token in ("LINUXCNCRSH_PORT", "LINUXCNCRSH_CONNECTPW"):
+        if token in ui_text:
+            print(f"LINUXCNC_UI_DEAD_PROBE_VARIABLE_RESURRECTED: {ui_init.relative_to(ROOT)} contains {token}", file=sys.stderr)
+            rc = 1
+    if "LINUXCNCRSH_ENABLEPW" in text:
+        print(f"LINUXCNC_GATE_DEAD_PROBE_VARIABLE_RESURRECTED: {init.relative_to(ROOT)} contains LINUXCNCRSH_ENABLEPW", file=sys.stderr)
+        rc = 1
     verify = ROOT / "tools" / "deploy" / "verify_v5_board_runtime.sh"
     if not verify.exists():
-        print("LINUXCNC_MACHINE_ON_VERIFY_MISSING: tools/deploy/verify_v5_board_runtime.sh", file=sys.stderr)
+        print("LINUXCNC_READ_ONLY_VERIFY_MISSING: tools/deploy/verify_v5_board_runtime.sh", file=sys.stderr)
         rc = 1
     else:
         verify_text = verify.read_text(encoding="utf-8", errors="ignore")
-        for token in ("MACHINE ON", "machine auto-on confirmed"):
+        for token in ("MACHINE ON", "linuxcncrsh read-only machine-state confirmed"):
             if token not in verify_text:
-                print(f"LINUXCNC_MACHINE_ON_VERIFY_CONTRACT_MISSING: {verify.relative_to(ROOT)} lacks {token}", file=sys.stderr)
+                print(f"LINUXCNC_READ_ONLY_VERIFY_CONTRACT_MISSING: {verify.relative_to(ROOT)} lacks {token}", file=sys.stderr)
+                rc = 1
+        if "linuxcncrsh machine auto-on confirmed" in verify_text:
+            print(f"LINUXCNC_AUTO_ON_VERIFY_TEXT_RESURRECTED: {verify.relative_to(ROOT)}", file=sys.stderr)
+            rc = 1
+    return rc
+
+
+def check_linuxcnc_control_transport_policy() -> int:
+    rc = 0
+    linuxcnc_root = ROOT.parent / "linuxcnc"
+    emcrsh_path = linuxcnc_root / "src" / "emc" / "usr_intf" / "emcrsh.cc"
+    common_nml_path = linuxcnc_root / "configs" / "common" / "linuxcnc.nml"
+    local_nml_path = ROOT / "linuxcnc" / "ini" / "v5_local_shmem.nml"
+    manifest_path = ROOT / "config" / "deploy" / "v5_runtime_deploy_manifest.tsv"
+    required_source_tokens = (
+        "#include <arpa/inet.h>",
+        '{"bind", 1, NULL, \'b\'}',
+        'getopt_long(argc, argv, "hb:e:n:p:s:w:d:"',
+        "inet_pton(AF_INET, optarg, &bind_address) != 1",
+        'fprintf(stderr, "invalid bind address: %s\\n", optarg)',
+        "server_address.sin_addr = bind_address",
+    )
+    try:
+        emcrsh_text = emcrsh_path.read_text(encoding="utf-8", errors="strict")
+    except OSError as exc:
+        print(f"LINUXCNCRSH_BIND_SOURCE_MISSING: {exc}", file=sys.stderr)
+        return 1
+    for token in required_source_tokens:
+        if token not in emcrsh_text:
+            print(f"LINUXCNCRSH_BIND_OPTION_MISSING: {token}", file=sys.stderr)
+            rc = 1
+    if "server_address.sin_addr.s_addr = htonl(INADDR_ANY)" in emcrsh_text:
+        print("LINUXCNCRSH_WILDCARD_BIND_RESURRECTED", file=sys.stderr)
+        rc = 1
+
+    expected_nml = common_nml_path.read_text(encoding="utf-8", errors="strict").replace(
+        " TCP=5005", "")
+    local_nml = local_nml_path.read_text(encoding="utf-8", errors="strict")
+    nml_rows = lambda text: [" ".join(line.split()) for line in text.splitlines()
+                             if line.startswith("B ") or line.startswith("P ")]
+    if nml_rows(local_nml) != nml_rows(expected_nml):
+        print("LINUXCNC_LOCAL_NML_BASELINE_MISMATCH", file=sys.stderr)
+        rc = 1
+    if "TCP=" in local_nml or re.search(r"\bREMOTE\b", local_nml):
+        print("LINUXCNC_LOCAL_NML_REMOTE_TRANSPORT_RESURRECTED", file=sys.stderr)
+        rc = 1
+
+    expected_path = "/opt/8ax/v5/linuxcnc/ini/v5_local_shmem.nml"
+    for name in ("v5_bus.ini", "v5_pulse.ini"):
+        ini_path = ROOT / "linuxcnc" / "ini" / name
+        parser = configparser.ConfigParser(strict=False, interpolation=None)
+        parser.read(ini_path, encoding="utf-8")
+        if parser.get("EMC", "NML_FILE", fallback="") != expected_path:
+            print(f"LINUXCNC_LOCAL_NML_INI_MISSING: {name}", file=sys.stderr)
+            rc = 1
+        display = parser.get("DISPLAY", "DISPLAY", fallback="").split()
+        if display.count("--bind") != 1 or "--bind" not in display or display[display.index("--bind") + 1:display.index("--bind") + 2] != ["127.0.0.1"]:
+            print(f"LINUXCNCRSH_LOOPBACK_BIND_MISSING: {name}", file=sys.stderr)
+            rc = 1
+
+    rows = [line.split("\t") for line in manifest_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    matches = [row for row in rows if len(row) == 4 and row[2] == expected_path]
+    if matches != [["linuxcnc", "linuxcnc/ini/v5_local_shmem.nml", expected_path, "0644"]]:
+        print("LINUXCNC_LOCAL_NML_MANIFEST_INVALID", file=sys.stderr)
+        rc = 1
+    return rc
+
+
+def audit_uio_device_permission_sources(sources) -> list[str]:
+    failures = []
+    product_sources = {name: sources[name] for name in ("init", "stepgen", "dna")}
+    for name, text in product_sources.items():
+        fixed = re.search(r"/dev/uio[0-9]+\b", text)
+        if fixed:
+            failures.append(f"UIO_FIXED_DEVICE_PATH_RESURRECTED:{name}:{fixed.group(0)}")
+        chmod = re.search(r"\bchmod\s+0?666\b", text, re.IGNORECASE)
+        if chmod:
+            failures.append(f"UIO_WORLD_CHMOD_RESURRECTED:{name}")
+    expected_rules = {
+        'SUBSYSTEM=="uio", KERNEL=="uio*", ATTR{name}=="*stepgen*", SYMLINK+="v5-stepgen-uio", OWNER="root", GROUP="petalinux", MODE="0660"',
+        'SUBSYSTEM=="uio", KERNEL=="uio*", ATTR{name}=="*dna*", SYMLINK+="v5-dna-uio", OWNER="root", GROUP="root", MODE="0600"',
+    }
+    rules = [line.strip() for line in sources["rules"].splitlines()
+             if line.strip() and not line.lstrip().startswith("#")]
+    if len(rules) != 2 or set(rules) != expected_rules or any(rules.count(rule) != 1 for rule in expected_rules):
+        failures.append("UIO_UDEV_RULESET_INVALID")
+    for token in ("dialout", 'MODE="666"', 'MODE="0666"'):
+        if token in "\n".join(rules):
+            failures.append(f"UIO_UDEV_BROAD_PERMISSION_RESURRECTED:{token}")
+    stepgen = sources["stepgen"]
+    stepgen_required = (
+        'V5_STEPGEN_UIO_PATH "/dev/v5-stepgen-uio"',
+        "validate_stepgen_uio_device",
+        "lstat(V5_STEPGEN_UIO_PATH",
+        "S_ISLNK(link_info.st_mode)",
+        "S_ISCHR(target_info.st_mode)",
+        'getgrnam("petalinux")',
+        "(target_info.st_mode & 07777) != 0660",
+        "realpath(V5_STEPGEN_UIO_PATH, resolved)",
+        'strncmp(resolved, "/dev", 4)',
+        "identity->st_dev = target_info.st_dev",
+        "identity->st_ino = target_info.st_ino",
+        "identity->st_rdev = target_info.st_rdev",
+        "validate_stepgen_uio_fd(fd, &uio_identity)",
+        "fstat(device_fd",
+        "target_info.st_dev != identity->st_dev",
+        "target_info.st_ino != identity->st_ino",
+        "target_info.st_rdev != identity->st_rdev",
+        "close(fd);",
+    )
+    stepgen_start = stepgen.index("int rtapi_app_main(void)")
+    stepgen_flow = stepgen[stepgen_start:]
+    if (any(token not in stepgen for token in stepgen_required) or not (
+            stepgen_flow.index("validate_stepgen_uio_device(uio_node") <
+            stepgen_flow.index("open(uio_path") <
+            stepgen_flow.index("validate_stepgen_uio_fd(fd, &uio_identity)") <
+            stepgen_flow.index("mmap("))):
+        failures.append("UIO_STEPGEN_STABLE_CONSUMER_MISSING")
+    for token in ("V5_STEPGEN_UIO_DEVICE", "stepgen_uio_device_path"):
+        if token in stepgen:
+            failures.append(f"UIO_STEPGEN_PATH_OVERRIDE_RESURRECTED:{token}")
+    if re.search(r"\bgetenv\s*\(", stepgen):
+        failures.append("UIO_STEPGEN_PATH_OVERRIDE_RESURRECTED:getenv")
+    dna = sources["dna"]
+    dna_required = (
+        'DEFAULT_UIO_DEVICE = "/dev/v5-dna-uio"',
+        "def read_live_dna()",
+        "identity = _validate_dna_uio_path()",
+        "os.lstat(DEFAULT_UIO_DEVICE)",
+        "stat.S_ISLNK(link_info.st_mode)",
+        "stat.S_ISCHR(target_info.st_mode)",
+        'os.path.dirname(resolved) != "/dev"',
+        're.fullmatch(r"uio[0-9]+"',
+        "target_info.st_mode & 0o7777",
+        "return target_info.st_dev, target_info.st_ino, target_info.st_rdev",
+        "_validate_dna_uio_fd(fd, identity)",
+        "os.fstat(fd)",
+        "(target_info.st_dev, target_info.st_ino, target_info.st_rdev) != identity",
+        "finally:",
+        "os.close(fd)",
+    )
+    dna_start = dna.find("def read_live_dna()")
+    dna_flow = dna[dna_start:] if dna_start >= 0 else ""
+    dna_order_tokens = (
+        "identity = _validate_dna_uio_path()", "os.open(",
+        "_validate_dna_uio_fd(fd, identity)", "_read_live_dna_fd(fd)",
+    )
+    if (any(token not in dna for token in dna_required) or
+            any(token not in dna_flow for token in dna_order_tokens) or not (
+            dna_flow.index("identity = _validate_dna_uio_path()") <
+            dna_flow.index("os.open(") <
+            dna_flow.index("_validate_dna_uio_fd(fd, identity)") <
+            dna_flow.index("_read_live_dna_fd(fd)"))):
+        failures.append("UIO_DNA_STABLE_CONSUMER_MISSING")
+    if (re.search(r"def\s+read_live_dna\s*\([^)]*(?:path|device)", dna) or
+            re.search(r"\bos\.getenv\s*\(|\bos\.environ\b", dna)):
+        failures.append("UIO_DNA_PATH_OVERRIDE_RESURRECTED")
+    board_policy = sources["board_policy"]
+    match = re.search(r"^def audit_uio_devices\(\) -> int:\n(.*?)(?=^def )", board_policy,
+                      re.MULTILINE | re.DOTALL)
+    audit_body = match.group(1) if match else ""
+    for token in (
+        "validate_uio_records(records, petalinux_gid)",
+        'rtapi_pids = pids_by_executable_name("rtapi_app")',
+        'actiond_pids = pids_by_exact_argv_element(SETTINGS_ACTIOND_DAEMON_PATH)',
+        'actiond_pidfile_pid = read_pid(PIDFILES["v5_settings_actiond"])',
+        'consumer_ids["stepgen"] = read_fs_ids(rtapi_pids[0])',
+        'consumer_ids["dna"] = read_fs_ids(actiond_pids[0])',
+        "FAIL_UIO_STEPGEN_CONSUMER_MISSING",
+        "FAIL_UIO_DNA_CONSUMER_MISSING",
+        "FAIL_UIO_DNA_CONSUMER_COUNT",
+        "FAIL_UIO_DNA_CONSUMER_PIDFILE_MISMATCH",
+        "FAIL_UIO_UNEXPECTED_WRITABLE",
+    ):
+        if token not in board_policy:
+            failures.append(f"UIO_LIVE_POLICY_MISSING:{token}")
+    if not re.search(
+            r"failures\.extend\(validate_uio_consumer_fsids\(\s*consumer_ids,\s*petalinux\.pw_uid,\s*petalinux_gid\)\)",
+            audit_body,
+            re.DOTALL):
+        failures.append("UIO_LIVE_POLICY_MISSING:combined_consumer_validator_call")
+    if not re.search(r"(?m)^\s*rc\s*\|=\s*audit_uio_devices\(\)\s*$", board_policy):
+        failures.append("UIO_LIVE_POLICY_MISSING:rc |= audit_uio_devices()")
+    return failures
+
+
+def check_uio_device_permission_policy() -> int:
+    paths = {
+        "init": ROOT / "services" / "command_gate" / "init.d" / "v5-linuxcnc-command-gate",
+        "rules": ROOT / "petalinux" / "project-spec" / "meta-user" / "recipes-apps" / "v5-base-overlay" / "files" / "udev" / "99-uio.rules",
+        "stepgen": ROOT / "petalinux" / "project-spec" / "meta-user" / "recipes-apps" / "v5-stepgen-module" / "files" / "zynq_stepgen_hw.c",
+        "dna": ROOT / "services" / "auth_download" / "device_dna_register_hardware.py",
+        "board_policy": ROOT / "tools" / "deploy" / "check_v5_board_runtime_policy.py",
+    }
+    sources = {name: path.read_text(encoding="utf-8", errors="strict")
+               for name, path in paths.items()}
+    failures = audit_uio_device_permission_sources(sources)
+    for failure in failures:
+        print(failure, file=sys.stderr)
+    return int(bool(failures))
+
+
+def audit_ethercat_device_permission_sources(sources) -> list[str]:
+    failures = []
+    recipe = sources["recipe"]
+    for token in (
+        "v5_ethercat_count_exact()",
+        'awk -v v5_line="$1"',
+        '[ -f "$v5_ethercat_init" ] || bbfatal',
+        "v5_ethercat_permission_fail()",
+        "$ETHERCATCTL stop",
+        "exit 1",
+        "v5_ethercat_apply_permissions()",
+        "v5_ethercat_gid=$(id -g petalinux) || v5_ethercat_permission_fail",
+        'chown root:petalinux "$v5_ethercat_node" || v5_ethercat_permission_fail',
+        'chmod 0660 "$v5_ethercat_node" || v5_ethercat_permission_fail',
+        'stat -c "%u:%g:%a" "$v5_ethercat_node"',
+        '"0:${v5_ethercat_gid}:660"',
+        '[ "$v5_ethercat_found" = 1 ] || v5_ethercat_permission_fail',
+        "v5_ethercat_start_count=$(v5_ethercat_count_exact",
+        '[ "$v5_ethercat_start_count" -eq 1 ] || bbfatal',
+        "sed -i '/^    if \\$ETHERCATCTL start; then$/a\\        v5_ethercat_apply_permissions'",
+        "v5_ethercat_call_count=$(v5_ethercat_count_exact",
+        '[ "$v5_ethercat_call_count" -eq 1 ] || bbfatal',
+        "v5_ethercat_call_number=$(awk",
+        '$((v5_ethercat_start_number + 1)) ] || bbfatal',
+    ):
+        if token not in recipe:
+            failures.append(f"ETHERCAT_PERMISSION_HOOK_MISSING:{token}")
+    transform_start = recipe.find("    v5_ethercat_count_exact()")
+    transform_anchor = recipe.find("    v5_ethercat_call_number=$(awk", transform_start)
+    transform = recipe[transform_start:recipe.find("\n}", transform_anchor)]
+    if "|| true" in transform:
+        failures.append("ETHERCAT_PERMISSION_TRANSFORM_LENIENT_FALLBACK")
+    for name, text in sources.items():
+        if re.search(r"\bchmod\s+0?666\b[^\n]*/dev/EtherCAT(?:\*|[0-9]+)", text):
+            failures.append(f"ETHERCAT_WORLD_WRITABLE_RESURRECTED:{name}")
+        fixed = re.search(r"/dev/EtherCAT[0-9]+\b", text)
+        if fixed:
+            failures.append(f"ETHERCAT_FIXED_DEVICE_PATH_RESURRECTED:{name}:{fixed.group(0)}")
+        if name != "recipe" and any(
+                re.search(r"(?:/dev/)?EtherCAT", line) and
+                re.search(r"(?:\bchmod\b|\bchown\b|MODE\s*=)", line)
+                for line in text.splitlines()):
+            failures.append(f"ETHERCAT_SECOND_PERMISSION_OWNER:{name}")
+    board_policy = sources["board_policy"]
+    for token in (
+        "validate_ethercat_records(records, petalinux_gid)",
+        "FAIL_ETHERCAT_DEVICE_MISSING",
+        "FAIL_ETHERCAT_DEVICE_MODE",
+        "rc |= audit_ethercat_devices()",
+    ):
+        if token not in board_policy:
+            failures.append(f"ETHERCAT_LIVE_POLICY_MISSING:{token}")
+    return failures
+
+
+def check_ethercat_device_permission_policy() -> int:
+    paths = {
+        "recipe": ROOT / "petalinux" / "project-spec" / "meta-user" / "recipes-kernel" / "ethercat-master" / "ethercat-master_git.bb",
+        "rules": ROOT / "petalinux" / "project-spec" / "meta-user" / "recipes-apps" / "v5-base-overlay" / "files" / "udev" / "99-uio.rules",
+        "init": ROOT / "services" / "command_gate" / "init.d" / "v5-linuxcnc-command-gate",
+        "board_policy": ROOT / "tools" / "deploy" / "check_v5_board_runtime_policy.py",
+    }
+    failures = audit_ethercat_device_permission_sources({
+        name: path.read_text(encoding="utf-8", errors="strict") for name, path in paths.items()
+    })
+    for failure in failures:
+        print(failure, file=sys.stderr)
+    return int(bool(failures))
+
+
+def check_tcf_retirement_policy() -> int:
+    rc = 0
+    verifier_path = ROOT / "tools" / "petalinux" / "verify_v5_petalinux_source.py"
+    spec = importlib.util.spec_from_file_location("v5_tcf_production_closure_policy", verifier_path)
+    if spec is None or spec.loader is None:
+        print("TCF_PRODUCTION_CLOSURE_IMPORT_FAILED", file=sys.stderr)
+        return 1
+    verifier = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(verifier)
+    project_root = ROOT.parent
+    failures = verifier.audit_tcf_production_closure(
+        ROOT / "petalinux" / "project-spec" / "configs" / "rootfs_config",
+        ROOT / "petalinux" / "v5_bitbake_source_inventory.json",
+        ROOT / "third_party" / "petalinux-source-packages" / "v5_source_packages.json",
+        ROOT / "third_party" / "petalinux-source-packages" / verifier.TCF_ARCHIVE_NAME,
+    )
+    for failure in failures:
+        print(f"TCF_PRODUCTION_CLOSURE_FAIL:{failure}", file=sys.stderr)
+        rc = 1
+    requirements = {
+        verifier_path: (
+            "def audit_tcf_production_closure(",
+            "def validate_tcf_production_closure(project_root, source_root):",
+            "validate_tcf_production_closure(project_root, source_root)",
+        ),
+        ROOT / "tools" / "deploy" / "check_v5_board_runtime_policy.py": (
+            "def audit_tcf_retirement() -> int:",
+            'pids_by_executable_name("tcf-agent")',
+            "parse_proc_tcp_listeners(1534)",
+            "FAIL_TCF_ROOTFS_MANIFEST",
+        ),
+        ROOT / "tools" / "deploy" / "verify_v5_board_runtime.sh": (
+            "production TCF files, services, processes, and port 1534 absent",
+            "tcf_absence_check=",
+        ),
+    }
+    for path, tokens in requirements.items():
+        text = path.read_text(encoding="utf-8", errors="strict")
+        for token in tokens:
+            if token not in text:
+                print(f"TCF_RETIREMENT_GATE_MISSING:{path}:{token}", file=sys.stderr)
                 rc = 1
     return rc
 
@@ -1073,7 +1457,9 @@ def check_linuxcnc_source_rebuild_policy() -> int:
         "${datadir}": "/usr/share",
     }
     for raw in files_match.group(1).splitlines():
-        entry = raw.strip().removesuffix("\\").strip()
+        entry = raw.strip()
+        if entry.endswith("\\"):
+            entry = entry[:-1].strip()
         for token, value in substitutions.items():
             entry = entry.replace(token, value)
         if entry:
@@ -1930,6 +2316,10 @@ def main() -> int:
         check_shm_abi() |
         check_cpu_policy() |
         check_linuxcnc_rtapi_affinity_owner() |
+        check_linuxcnc_control_transport_policy() |
+        check_uio_device_permission_policy() |
+        check_ethercat_device_permission_policy() |
+        check_tcf_retirement_policy() |
         check_settings_runtime_schema_guard() |
         check_settings_actiond_socket_policy() |
         check_remote_relay_access_control() |

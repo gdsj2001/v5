@@ -226,8 +226,8 @@ def block_validation_smoke(boot) -> None:
             valid_modal = list(boot.MODAL_FMT.unpack(boot.MODAL_PATH.read_bytes()))
             assert valid_modal[3] == 1 and valid_modal[4:7] == [1, 1, 1]
 
-            state = bytearray(808)
-            struct.pack_into("<8I", state, 0, 0x56355348, 1, 808, 808, 776, 0, 2, 0)
+            state = bytearray(840)
+            struct.pack_into("<8I", state, 0, 0x56355348, 2, 840, 840, 808, 0, 2, 0)
             struct.pack_into("<QII10d", state, 32, time.monotonic_ns(), 3, 0,
                              *([float(i) for i in range(10)]))
             crc = binascii.crc32(state[:24]); crc = binascii.crc32(state[32:], crc) & 0xFFFFFFFF
@@ -282,7 +282,7 @@ def block_validation_smoke(boot) -> None:
             assert boot.current_pre_ui_inputs()[0]["state"] is None
             boot.STATE_PATH.write_bytes(state)
 
-            zero = bytes(808); boot.STATE_PATH.write_bytes(zero)
+            zero = bytes(840); boot.STATE_PATH.write_bytes(zero)
             assert boot.current_pre_ui_inputs()[0]["state"] is None
             boot.STATE_PATH.write_bytes(state)
 
@@ -396,8 +396,8 @@ def posix_inotify_smoke(boot) -> None:
         try:
             path = Path(directory) / "state.bin"
             with path.open("w+b") as stream:
-                stream.truncate(808)
-                page = mmap.mmap(stream.fileno(), 808)
+                stream.truncate(840)
+                page = mmap.mmap(stream.fileno(), 840)
                 page[:4] = b"V5SH"
                 page.flush(); page.close()
             watcher.wait(1000)

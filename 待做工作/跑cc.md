@@ -2,17 +2,17 @@
 
 ## 目标
 
-用真实板端 UI/operator 路径验证 fresh active model 对应的原始 `cc-ac.ngc` 或 `cc-bc.ngc`。上板后先通过设置页执行一次 `设置驱动 -> 保存并重启` 并完成 fresh 轴—从站/驱动/比例链回读；随后通过 Codex 内嵌浏览器至少连续三轮执行 `取消急停 -> 机械全轴回零 -> 打开程序 -> 选择并打开模型匹配程序 -> 启动 -> 1 秒后急停 -> 取消急停 -> 机械全轴回零 -> 急停`。全过程监测编码器反馈，证明程序目标和两次 Home 都走当前模型旋转轴的最近 `k*360` 等效角，而不是落回 raw 机器 0、坐标清零或只写 homed 标记。
+用真实板端 UI/operator 路径验证 fresh active model 对应的原始 `cc-ac.ngc` 或 `cc-bc.ngc`。上板后先通过设置页执行一次 `设置驱动 -> 保存并重启` 并完成 fresh 轴—从站/驱动/比例链回读；随后通过 MCP 板端抓屏与 pointer/mouse 至少连续三轮执行 `取消急停 -> 机械全轴回零 -> 打开程序 -> 选择并打开模型匹配程序 -> 启动 -> 1 秒后急停 -> 取消急停 -> 机械全轴回零 -> 急停`。全过程监测编码器反馈，证明程序目标和两次 Home 都走当前模型旋转轴的最近 `k*360` 等效角，而不是落回 raw 机器 0、坐标清零或只写 homed 标记。
 
 ## 硬要求
 
-- AI 只能按 [`功能/自动闭环测试方式.md`](../功能/自动闭环测试方式.md) 第 5 节启动 AI 专用 bridge，并使用 Codex 内嵌浏览器 `http://127.0.0.1:18777/` 查看和模拟输入；每一次点击、双击或键盘确认前必须确认非零 `frame`、`stream=live`、`input=ready`，并在当前 live frame 核对页面、目标按钮/列表项、位置和高亮状态。
-- 每一次输入后必须观察并按需保存新的内嵌浏览器 live frame，确认页面状态变化，再进入下一步。
-- 不允许脱离内嵌浏览器裸坐标连点，不允许跳过 live frame 确认，不允许用逐次抓屏脚本、direct UDS 或 linuxcncrsh 直接命令替代 UI/operator 路径。
+- AI 只能按 [`功能/自动闭环测试方式.md`](../功能/自动闭环测试方式.md) 第 5 节使用 MCP 板端抓屏与 pointer/mouse 查看和模拟输入；每一次点击、双击或键盘确认前必须抓取 fresh frame，并核对页面、目标按钮/列表项、位置和高亮状态。
+- 每一次输入后必须重新抓屏并按需保存 fresh frame，确认页面状态变化，再进入下一步。
+- 不允许裸坐标连点，不允许跳过 fresh frame 确认，不允许用 direct UDS 或 linuxcncrsh 直接命令替代 UI/operator 路径。
 - 编码器反馈必须从板端运行态采样，优先记录 `/dev/shm/v3_status_shm` 中的编码器反馈机械坐标 `mcs[0..4]`、`cmd_mcs[0..4]`、速度、frame seq/epoch 和 valid mask。
 - 编码器反馈采样必须特别保留 A/C raw 反馈、A/C 等效相位、目标段前后差值和最短角差判断；若只能拿到 `mcs[3]/mcs[4]`，采样记录中也必须计算并标注 `phase = angle mod 360`、`nearest_zero_error = shortest_angle(phase, 0)`，用于判断 `A0 C0` 和回零是否走等效零。
 - `Set Run`、按钮事件或弹窗成功只算操作提交证据，不算运动证明；必须有编码器反馈位移和最终状态 readback。
-- 内嵌浏览器截图证据放 `D:\v5\截图\跑cc\`；采样 CSV/JSONL、临时脚本和中间日志放 `D:\v5\repo_ignored\temp\跑cc\`。
+- MCP 板端抓屏证据放 `D:\v5\截图\跑cc\`；采样 CSV/JSONL、临时脚本和中间日志放 `D:\v5\repo_ignored\temp\跑cc\`。
 
 ## 前置条件
 
@@ -23,9 +23,9 @@
 
 ## 执行步骤
 
-1. 部署完成后在内嵌浏览器进入设置页，只点击一次 `设置驱动`；等待同一 `run_id` 的 `DRIVE_SET_OK + write_verified_readback`，按本次 fresh scan/轴—从站绑定核对全部目标的 mode/egear/statusword/error_code、全过程无报警且按钮松手退出黄色。
+1. 部署完成后用 MCP 抓屏/鼠标进入设置页，只点击一次 `设置驱动`；等待同一 `run_id` 的 `DRIVE_SET_OK + write_verified_readback`，按本次 fresh scan/轴—从站绑定核对全部目标的 mode/egear/statusword/error_code、全过程无报警且按钮松手退出黄色。
 2. 点击右上角 `保存并重启`，等待 canonical clean restart；回读全部当前目标轴—从站绑定、mode/egear/statusword/error_code、LinuxCNC/HAL/EtherCAT 比例链和 PDO/axis binding。缺项时停止，设置驱动不在后续每轮重复执行。
-3. 确认内嵌浏览器 `frame>0 / stream=live / input=ready`，板端为 fresh `estop_active=true / machine_enabled=false`；启动编码器反馈采样并记录 active model、`mcs/cmd_mcs/velocity/seq/valid_mask` 和当前模型旋转轴的 raw/count-domain 基线。
+3. 确认 MCP 抓屏/鼠标能力可用且当前页面正确，板端为 fresh `estop_active=true / machine_enabled=false`；启动编码器反馈采样并记录 active model、`mcs/cmd_mcs/velocity/seq/valid_mask` 和当前模型旋转轴的 raw/count-domain 基线。
 4. 连续执行至少三轮；每轮开始前确认仍是同一部署 identity，并严格执行以下步骤，每次只做一个动作、动作后先看 fresh frame/readback：
    1. 点击 `取消急停`，只在 fresh native `estop_active=false && machine_enabled=true` 后继续。
    2. 选择 `机械全轴` 并点击 `回零`；确认新的 native Home transaction、真实编码器位移、RTCP force-off actual、各轴到位和 fresh `all_homed`。Home 未成功不得打开程序。
@@ -37,7 +37,7 @@
 
 ## 通过标准
 
-- 所有 AI UI 输入均有内嵌浏览器点击前/后的 live frame 截图。
+- 所有 AI UI 输入均有 MCP 板端抓屏取得的点击前/后 fresh frame。
 - 模型匹配的 `cc-ac.ngc` / `cc-bc.ngc` 是通过真实程序页面先选中、再第二次点击同一行打开，不是直接写入路径或 direct command。
 - clean restart 后保持 ESTOP / Machine Off；每次 UI `取消急停` 都由 fresh native latch 与 machine-enable actual 证明恢复，按钮显示与 actual 一致。
 - 设置驱动和 clean restart 后的全部轴—从站/驱动/比例链 readback 合格；连续三轮中的第一次 Home、程序启动后的 1 秒运动、急停停止、取消急停后的第二次 Home 均有独立 fresh transaction 和编码器证据。
@@ -48,7 +48,7 @@
 
 ## 阻塞条件
 
-- 内嵌浏览器不是 live/ready、无法确认目标位置或页面不正确。
+- MCP 抓屏/鼠标不可用、无法确认目标位置或页面不正确。
 - 继电器断电重启失败，或板端无法恢复 UI/LinuxCNC。
 - UI `取消急停` 后 1 秒内未取得 `estop_active=false && machine_enabled=true`，或 machine enable actual 与 UI 右下按钮状态不一致。
 - 编码器反馈 `mcs` 无效、stale、seq 不变化，或采样链路中断。

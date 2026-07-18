@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import mmap
 import os
+import re
+import stat
 import struct
 from typing import Any, Dict, Tuple
 
@@ -24,15 +26,10 @@ def _read_register_snapshot(registers: mmap.mmap) -> Tuple[int, int, int, int, i
     return magic, version, status, bits, lo, hi
 
 
-def read_live_dna(device_path: str = DEFAULT_UIO_DEVICE) -> Dict[str, Any]:
+def _read_live_dna_fd(fd: int) -> Dict[str, Any]:
     try:
-        fd = os.open(device_path, os.O_RDWR | getattr(os, "O_CLOEXEC", 0))
-        try:
-            with mmap.mmap(fd, DNA_MAP_SIZE, access=mmap.ACCESS_READ) as registers:
-                snapshots = [_read_register_snapshot(registers) for _ in range(3)]
-        finally:
-            os.close(fd)
-
+        with mmap.mmap(fd, DNA_MAP_SIZE, access=mmap.ACCESS_READ) as registers:
+            snapshots = [_read_register_snapshot(registers) for _ in range(3)]
         if len(set(snapshots)) != 1:
             raise ValueError("live DNA register snapshots were inconsistent")
         magic, version, status, bits, lo, hi = snapshots[0]
@@ -57,6 +54,49 @@ def read_live_dna(device_path: str = DEFAULT_UIO_DEVICE) -> Dict[str, Any]:
             "bits": bits,
             "status_hex": "0x%08X" % status,
         }
+    except DnaRegisterError:
+        raise
+    except Exception as exc:
+        raise DnaRegisterError(
+            "DNA_READ_FAILED",
+            "本机 PL Device DNA live UIO 读取失败: %s" % type(exc).__name__,
+        ) from exc
+
+
+def _validate_dna_uio_path() -> Tuple[int, int, int]:
+    link_info = os.lstat(DEFAULT_UIO_DEVICE)
+    if not stat.S_ISLNK(link_info.st_mode):
+        raise ValueError("DNA UIO path is not a symlink")
+    target_info = os.stat(DEFAULT_UIO_DEVICE)
+    if not stat.S_ISCHR(target_info.st_mode):
+        raise ValueError("DNA UIO target is not a character device")
+    resolved = os.path.realpath(DEFAULT_UIO_DEVICE)
+    if os.path.dirname(resolved) != "/dev" or re.fullmatch(r"uio[0-9]+", os.path.basename(resolved)) is None:
+        raise ValueError("DNA UIO target is outside /dev/uioN")
+    if (target_info.st_uid, target_info.st_gid, target_info.st_mode & 0o7777) != (0, 0, 0o600):
+        raise ValueError("DNA UIO target ownership or mode is invalid")
+    return target_info.st_dev, target_info.st_ino, target_info.st_rdev
+
+
+def _validate_dna_uio_fd(fd: int, identity: Tuple[int, int, int]) -> None:
+    target_info = os.fstat(fd)
+    if not stat.S_ISCHR(target_info.st_mode):
+        raise ValueError("opened DNA UIO target is not a character device")
+    if (target_info.st_uid, target_info.st_gid, target_info.st_mode & 0o7777) != (0, 0, 0o600):
+        raise ValueError("opened DNA UIO target ownership or mode is invalid")
+    if (target_info.st_dev, target_info.st_ino, target_info.st_rdev) != identity:
+        raise ValueError("opened DNA UIO target identity changed")
+
+
+def read_live_dna() -> Dict[str, Any]:
+    try:
+        identity = _validate_dna_uio_path()
+        fd = os.open(DEFAULT_UIO_DEVICE, os.O_RDWR | getattr(os, "O_CLOEXEC", 0))
+        try:
+            _validate_dna_uio_fd(fd, identity)
+            return _read_live_dna_fd(fd)
+        finally:
+            os.close(fd)
     except DnaRegisterError:
         raise
     except Exception as exc:

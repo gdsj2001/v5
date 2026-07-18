@@ -68,7 +68,7 @@ int main(void)
     if (!v5_command_gate_prepare(&request, &prepared)) {
         return 1;
     }
-    if (!v5_linuxcncrsh_format_line(&prepared, &request, line, sizeof(line))) {
+    if (v5_linuxcncrsh_format_line(&prepared, &request, line, sizeof(line))) {
         return 2;
     }
 
@@ -79,9 +79,6 @@ int main(void)
     config.timeout_ms = 50U;
     send_status = v5_linuxcncrsh_send_prepared(&config, &prepared, &request);
 
-    if (strcmp(line, "Set Task_Plan_Init\nSet Mode Auto\nSet Open /opt/8ax/v5/gcode/golden/cc-ac.ngc\nSet Run 0") != 0) {
-        return 4;
-    }
     if (!v5_linuxcncrsh_format_start_transaction(
             &prepared,
             &request,

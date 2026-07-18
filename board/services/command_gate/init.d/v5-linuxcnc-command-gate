@@ -20,7 +20,6 @@ COMMAND_GATE_PID=$RUN_DIR/v5_command_gate.pid
 COMMAND_GATE_SOCKET=/run/8ax_v5_product_ui/v5_command_gate.sock
 LINUXCNCRSH_PORT=${V5_LINUXCNCRSH_PORT:-5007}
 LINUXCNCRSH_CONNECTPW=${V5_LINUXCNCRSH_CONNECTPW:-EMC}
-LINUXCNCRSH_ENABLEPW=${V5_LINUXCNCRSH_ENABLEPW:-EMCTOO}
 NC_PATH=/opt/8ax/v5/linuxcnc/nc
 MICROKERNEL_NON_RT_NICE=-5
 MANAGEMENT_NICE=15
@@ -33,7 +32,6 @@ runtime_prepare() {
   mkdir -p "$RUN_DIR" /run/8ax_v5_product_ui /opt/8ax/v5/linuxcnc/var "$NC_PATH" /opt/8ax/v5/linuxcnc/remap_subs
   chown petalinux:petalinux "$RUN_DIR" /run/8ax_v5_product_ui 2>/dev/null || true
   chown -R petalinux:petalinux /opt/8ax/v5/linuxcnc/var "$NC_PATH" /opt/8ax/v5/linuxcnc/remap_subs 2>/dev/null || true
-  chmod 666 /dev/uio0 2>/dev/null || true
 }
 
 backend_running() {
@@ -351,9 +349,9 @@ command_gate_pids() {
     pid=${cmdline#/proc/}
     pid=${pid%/cmdline}
     [ "$pid" != "$$" ] || continue
-    cmd=$(tr '\000' ' ' <"$cmdline" 2>/dev/null || true)
-    case "$cmd" in
-      *"/usr/libexec/8ax/v5_command_gate_server"*|*"v5_command_gate_server"*)
+    argv0=$(tr '\000' '\n' <"$cmdline" 2>/dev/null | sed -n '1p')
+    case "$argv0" in
+      /usr/libexec/8ax/v5_command_gate_server|v5_command_gate_server)
         echo "$pid"
         ;;
     esac

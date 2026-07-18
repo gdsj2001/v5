@@ -76,6 +76,9 @@ class FrameState:
             "dirty_payload_bounded_merge_source_rects": 0,
             "dirty_payload_bounded_merge_output_rects": 0,
             "dirty_payload_bounded_merge_added_pixels": 0,
+            "dirty_payload_shared_build_ms": 0,
+            "dirty_payload_shared_backpressure_sleeps": 0,
+            "dirty_payload_shared_backpressure_ms": 0,
             "dirty_large_frames": 0,
             "dirty_large_pixels": 0,
             "dirty_large_throttle_sleeps": 0,
@@ -272,10 +275,9 @@ class FrameState:
             return None
         total_bytes = sum(int(rect["w"]) * int(rect["h"]) * 4 for rect in rects)
         total_rows = sum(int(rect["h"]) for rect in rects)
-        payload = bytearray(total_bytes)
-        payload_view = memoryview(payload)
+        spans: list[tuple[int, int]] = []
         mapped_view = memoryview(mapped)
-        captured_bytes = 0
+        payload = b""
         locked = False
         try:
             flock(fd, LOCK_SH)
@@ -291,9 +293,7 @@ class FrameState:
                     end = start + (row_bytes * h)
                     if end > self.frame_size:
                         return None
-                    length = end - start
-                    payload_view[captured_bytes:captured_bytes + length] = mapped_view[start:end]
-                    captured_bytes += length
+                    spans.append((start, end))
                     self.mark_metric("dirty_payload_contiguous_frames")
                     continue
                 for row in range(h):
@@ -301,8 +301,8 @@ class FrameState:
                     src_end = src_start + row_bytes
                     if src_end > self.frame_size:
                         return None
-                    payload_view[captured_bytes:captured_bytes + row_bytes] = mapped_view[src_start:src_end]
-                    captured_bytes += row_bytes
+                    spans.append((src_start, src_end))
+            payload = b"".join(mapped_view[start:end] for start, end in spans)
         except OSError:
             return None
         finally:
@@ -312,13 +312,12 @@ class FrameState:
                 except OSError:
                     pass
             mapped_view.release()
-            payload_view.release()
-        if captured_bytes != total_bytes:
+        if len(payload) != total_bytes:
             return None
         self.mark_metric("dirty_payload_bytes", total_bytes)
         self.mark_metric("dirty_payload_rows", total_rows)
         self.mark_metric("dirty_payload_rects", len(rects))
-        return bytes(payload), rects
+        return payload, rects
 
     def publish_dirty(self, event: dict) -> None:
         with self.condition:

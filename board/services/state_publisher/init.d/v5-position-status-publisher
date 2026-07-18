@@ -29,7 +29,7 @@ owner_is_live() {
   read_lock_owner || return 1
   [ -r "/proc/$OWNER_PID/stat" ] || return 1
   [ "$(awk '{print $22}' "/proc/$OWNER_PID/stat" 2>/dev/null || true)" = "$OWNER_START" ] || return 1
-  tr '\000' ' ' <"/proc/$OWNER_PID/cmdline" 2>/dev/null | grep -F "$DAEMON" >/dev/null || return 1
+  tr '\000' '\n' <"/proc/$OWNER_PID/cmdline" 2>/dev/null | grep -Fqx "$DAEMON" || return 1
   ! flock -n "$LOCKFILE" true 2>/dev/null
 }
 

@@ -20,6 +20,18 @@ loadrt [EMCMOT]EMCMOT \
     v5_wcheckpoint_drive_periodic=[AXIS_A]WCHECKPOINT_DRIVE_PERIODIC,[AXIS_B]WCHECKPOINT_DRIVE_PERIODIC,[AXIS_C]WCHECKPOINT_DRIVE_PERIODIC
 loadrt cia402 count=5
 loadrt v5_bus_axis_router
+setp v5-bus-axis-router.wcp-crev-00 [AXIS_A]WCHECKPOINT_COUNTS_PER_REV
+setp v5-bus-axis-router.wcp-crev-01 [AXIS_B]WCHECKPOINT_COUNTS_PER_REV
+setp v5-bus-axis-router.wcp-crev-02 [AXIS_C]WCHECKPOINT_COUNTS_PER_REV
+setp v5-bus-axis-router.wcp-red-num-00 [AXIS_A]MOTOR_REV
+setp v5-bus-axis-router.wcp-red-num-01 [AXIS_B]MOTOR_REV
+setp v5-bus-axis-router.wcp-red-num-02 [AXIS_C]MOTOR_REV
+setp v5-bus-axis-router.wcp-red-den-00 [AXIS_A]LOAD_REV
+setp v5-bus-axis-router.wcp-red-den-01 [AXIS_B]LOAD_REV
+setp v5-bus-axis-router.wcp-red-den-02 [AXIS_C]LOAD_REV
+setp v5-bus-axis-router.wcp-raw-bits-00 [AXIS_A]WCHECKPOINT_COMMAND_RAW_BITS
+setp v5-bus-axis-router.wcp-raw-bits-01 [AXIS_B]WCHECKPOINT_COMMAND_RAW_BITS
+setp v5-bus-axis-router.wcp-raw-bits-02 [AXIS_C]WCHECKPOINT_COMMAND_RAW_BITS
 loadrt bitslice names=j0-din,j1-din,j2-din,j3-din,j4-din personality=31,31,31,31,31
 loadrt mux2 count=1
 loadrt or2 count=2
@@ -99,16 +111,25 @@ net re-switchkins-select mux2.0.out => motion.switchkins-type v5-native-hal-owne
 net v5-rtcp-actual-valid v5-native-hal-owner.rtcp-actual-valid => motion.v5-bus-home-rtcp-actual-valid
 
 net v5-wcheckpoint-a-logical motion.v5-wcheckpoint-a-logical-counts => v5-native-hal-owner.wcp-a-logical-counts
+net v5-wcheckpoint-a-router-base v5-bus-axis-router.wcp-base-00 => motion.v5-wcheckpoint-a-router-base-counts
+net v5-wcheckpoint-a-router-generation v5-bus-axis-router.wcp-gen-00 => motion.v5-wcheckpoint-a-router-generation
+net v5-wcheckpoint-a-router-valid v5-bus-axis-router.wcp-valid-00 => motion.v5-wcheckpoint-a-router-valid
 net v5-wcheckpoint-a-base motion.v5-wcheckpoint-a-base-counts => v5-native-hal-owner.wcp-a-base-counts motion.v5-bus-home-wcp-a-base-counts
 net v5-wcheckpoint-a-runtime motion.v5-wcheckpoint-a-runtime-counts => v5-native-hal-owner.wcp-a-runtime-counts
 net v5-wcheckpoint-a-generation motion.v5-wcheckpoint-a-generation => v5-native-hal-owner.wcp-a-generation motion.v5-bus-home-wcp-a-generation
 net v5-wcheckpoint-a-valid motion.v5-wcheckpoint-a-valid => v5-native-hal-owner.wcp-a-valid motion.v5-bus-home-wcp-a-valid
 net v5-wcheckpoint-b-logical motion.v5-wcheckpoint-b-logical-counts => v5-native-hal-owner.wcp-b-logical-counts
+net v5-wcheckpoint-b-router-base v5-bus-axis-router.wcp-base-01 => motion.v5-wcheckpoint-b-router-base-counts
+net v5-wcheckpoint-b-router-generation v5-bus-axis-router.wcp-gen-01 => motion.v5-wcheckpoint-b-router-generation
+net v5-wcheckpoint-b-router-valid v5-bus-axis-router.wcp-valid-01 => motion.v5-wcheckpoint-b-router-valid
 net v5-wcheckpoint-b-base motion.v5-wcheckpoint-b-base-counts => v5-native-hal-owner.wcp-b-base-counts motion.v5-bus-home-wcp-b-base-counts
 net v5-wcheckpoint-b-runtime motion.v5-wcheckpoint-b-runtime-counts => v5-native-hal-owner.wcp-b-runtime-counts
 net v5-wcheckpoint-b-generation motion.v5-wcheckpoint-b-generation => v5-native-hal-owner.wcp-b-generation motion.v5-bus-home-wcp-b-generation
 net v5-wcheckpoint-b-valid motion.v5-wcheckpoint-b-valid => v5-native-hal-owner.wcp-b-valid motion.v5-bus-home-wcp-b-valid
 net v5-wcheckpoint-c-logical motion.v5-wcheckpoint-c-logical-counts => v5-native-hal-owner.wcp-c-logical-counts
+net v5-wcheckpoint-c-router-base v5-bus-axis-router.wcp-base-02 => motion.v5-wcheckpoint-c-router-base-counts
+net v5-wcheckpoint-c-router-generation v5-bus-axis-router.wcp-gen-02 => motion.v5-wcheckpoint-c-router-generation
+net v5-wcheckpoint-c-router-valid v5-bus-axis-router.wcp-valid-02 => motion.v5-wcheckpoint-c-router-valid
 net v5-wcheckpoint-c-base motion.v5-wcheckpoint-c-base-counts => v5-native-hal-owner.wcp-c-base-counts motion.v5-bus-home-wcp-c-base-counts
 net v5-wcheckpoint-c-runtime motion.v5-wcheckpoint-c-runtime-counts => v5-native-hal-owner.wcp-c-runtime-counts
 net v5-wcheckpoint-c-generation motion.v5-wcheckpoint-c-generation => v5-native-hal-owner.wcp-c-generation motion.v5-bus-home-wcp-c-generation
@@ -128,35 +149,35 @@ net v5-router-rejected-commit v5-bus-axis-router.rejected-commit-seq => v5-nativ
 
 net v5-home-j0-config-valid v5-native-hal-owner.home-config-valid-00 => v5-bus-axis-router.joint-config-valid-00 joint.0.v5-bus-home-config-valid
 net v5-home-j0-status-slot v5-native-hal-owner.home-status-slot-00 => joint.0.v5-bus-home-status-slot
-net v5-home-j0-axis-code v5-native-hal-owner.home-axis-code-00 => joint.0.v5-bus-home-axis-code
+net v5-home-j0-axis-code v5-native-hal-owner.home-axis-code-00 => v5-bus-axis-router.joint-axis-code-00 joint.0.v5-bus-home-axis-code
 net v5-home-j0-slave v5-native-hal-owner.home-slave-position-00 => v5-bus-axis-router.joint-slave-position-00 joint.0.v5-bus-home-slave-position
 net v5-home-j0-generation v5-native-hal-owner.home-mapping-generation-00 => v5-bus-axis-router.joint-mapping-generation-00 joint.0.v5-bus-home-mapping-generation
 net v5-home-j0-zero v5-native-hal-owner.home-zero-counts-00 => v5-bus-axis-router.joint-zero-counts-00
 net v5-home-j0-scale v5-native-hal-owner.home-counts-per-unit-00 => joint.0.v5-bus-home-counts-per-unit
 net v5-home-j1-config-valid v5-native-hal-owner.home-config-valid-01 => v5-bus-axis-router.joint-config-valid-01 joint.1.v5-bus-home-config-valid
 net v5-home-j1-status-slot v5-native-hal-owner.home-status-slot-01 => joint.1.v5-bus-home-status-slot
-net v5-home-j1-axis-code v5-native-hal-owner.home-axis-code-01 => joint.1.v5-bus-home-axis-code
+net v5-home-j1-axis-code v5-native-hal-owner.home-axis-code-01 => v5-bus-axis-router.joint-axis-code-01 joint.1.v5-bus-home-axis-code
 net v5-home-j1-slave v5-native-hal-owner.home-slave-position-01 => v5-bus-axis-router.joint-slave-position-01 joint.1.v5-bus-home-slave-position
 net v5-home-j1-generation v5-native-hal-owner.home-mapping-generation-01 => v5-bus-axis-router.joint-mapping-generation-01 joint.1.v5-bus-home-mapping-generation
 net v5-home-j1-zero v5-native-hal-owner.home-zero-counts-01 => v5-bus-axis-router.joint-zero-counts-01
 net v5-home-j1-scale v5-native-hal-owner.home-counts-per-unit-01 => joint.1.v5-bus-home-counts-per-unit
 net v5-home-j2-config-valid v5-native-hal-owner.home-config-valid-02 => v5-bus-axis-router.joint-config-valid-02 joint.2.v5-bus-home-config-valid
 net v5-home-j2-status-slot v5-native-hal-owner.home-status-slot-02 => joint.2.v5-bus-home-status-slot
-net v5-home-j2-axis-code v5-native-hal-owner.home-axis-code-02 => joint.2.v5-bus-home-axis-code
+net v5-home-j2-axis-code v5-native-hal-owner.home-axis-code-02 => v5-bus-axis-router.joint-axis-code-02 joint.2.v5-bus-home-axis-code
 net v5-home-j2-slave v5-native-hal-owner.home-slave-position-02 => v5-bus-axis-router.joint-slave-position-02 joint.2.v5-bus-home-slave-position
 net v5-home-j2-generation v5-native-hal-owner.home-mapping-generation-02 => v5-bus-axis-router.joint-mapping-generation-02 joint.2.v5-bus-home-mapping-generation
 net v5-home-j2-zero v5-native-hal-owner.home-zero-counts-02 => v5-bus-axis-router.joint-zero-counts-02
 net v5-home-j2-scale v5-native-hal-owner.home-counts-per-unit-02 => joint.2.v5-bus-home-counts-per-unit
 net v5-home-j3-config-valid v5-native-hal-owner.home-config-valid-03 => v5-bus-axis-router.joint-config-valid-03 joint.3.v5-bus-home-config-valid
 net v5-home-j3-status-slot v5-native-hal-owner.home-status-slot-03 => joint.3.v5-bus-home-status-slot
-net v5-home-j3-axis-code v5-native-hal-owner.home-axis-code-03 => joint.3.v5-bus-home-axis-code
+net v5-home-j3-axis-code v5-native-hal-owner.home-axis-code-03 => v5-bus-axis-router.joint-axis-code-03 joint.3.v5-bus-home-axis-code
 net v5-home-j3-slave v5-native-hal-owner.home-slave-position-03 => v5-bus-axis-router.joint-slave-position-03 joint.3.v5-bus-home-slave-position
 net v5-home-j3-generation v5-native-hal-owner.home-mapping-generation-03 => v5-bus-axis-router.joint-mapping-generation-03 joint.3.v5-bus-home-mapping-generation
 net v5-home-j3-zero v5-native-hal-owner.home-zero-counts-03 => v5-bus-axis-router.joint-zero-counts-03
 net v5-home-j3-scale v5-native-hal-owner.home-counts-per-unit-03 => joint.3.v5-bus-home-counts-per-unit
 net v5-home-j4-config-valid v5-native-hal-owner.home-config-valid-04 => v5-bus-axis-router.joint-config-valid-04 joint.4.v5-bus-home-config-valid
 net v5-home-j4-status-slot v5-native-hal-owner.home-status-slot-04 => joint.4.v5-bus-home-status-slot
-net v5-home-j4-axis-code v5-native-hal-owner.home-axis-code-04 => joint.4.v5-bus-home-axis-code
+net v5-home-j4-axis-code v5-native-hal-owner.home-axis-code-04 => v5-bus-axis-router.joint-axis-code-04 joint.4.v5-bus-home-axis-code
 net v5-home-j4-slave v5-native-hal-owner.home-slave-position-04 => v5-bus-axis-router.joint-slave-position-04 joint.4.v5-bus-home-slave-position
 net v5-home-j4-generation v5-native-hal-owner.home-mapping-generation-04 => v5-bus-axis-router.joint-mapping-generation-04 joint.4.v5-bus-home-mapping-generation
 net v5-home-j4-zero v5-native-hal-owner.home-zero-counts-04 => v5-bus-axis-router.joint-zero-counts-04

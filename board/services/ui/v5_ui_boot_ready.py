@@ -153,8 +153,8 @@ def read_state_seqlock(path):
         return data
     try:
         for _ in range(3):
-            before, raw, after = pread(4, 24), pread(808, 0), pread(4, 24)
-            if len(before) != 4 or len(after) != 4 or len(raw) != 808:
+            before, raw, after = pread(4, 24), pread(840, 0), pread(4, 24)
+            if len(before) != 4 or len(after) != 4 or len(raw) != 840:
                 continue
             before, after = struct.unpack("<I", before)[0], struct.unpack("<I", after)[0]
             local = struct.unpack_from("<I", raw, 24)[0]
@@ -186,7 +186,7 @@ def current_pre_ui_inputs(cache=None, unique=False, expected_ini=""):
         calc = binascii.crc32(raw[:24]); calc = binascii.crc32(raw[32:], calc) & 0xFFFFFFFF
         epoch, valid, typed = struct.unpack_from("<QII", raw, 32)
         values, trajectory_count = struct.unpack_from("<10d", raw, 48), struct.unpack_from("<I", raw, 768)[0]
-        if header[:5] != (0x56355348, 1, 808, 808, 776) or header[7] != calc:
+        if header[:5] != (0x56355348, 2, 840, 840, 808) or header[7] != calc:
             raise ReadyError("State ABI/SeqLock/CRC mismatch")
         if not all(math.isfinite(value) for value in values) or trajectory_count > 16:
             raise ReadyError("State coordinate/trajectory values invalid")

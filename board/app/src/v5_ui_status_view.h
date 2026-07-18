@@ -20,6 +20,10 @@ typedef struct V5UiStatusView {
     double linear_velocity_mm_per_min;
     double feedrate_override;
     double spindle_override;
+    double cpu0_percent;
+    double cpu1_percent;
+    uint64_t cpu_sample_generation;
+    uint64_t cpu_sample_monotonic_ns;
 } V5UiStatusView;
 
 void v5_ui_status_view_init(V5UiStatusView *view);

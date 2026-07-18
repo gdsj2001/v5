@@ -101,8 +101,42 @@ def _active_rotary_axes_from_runtime_ini() -> tuple[str, str]:
     return primary, "C"
 
 
+def _runtime_ini_axis_scale(original: str, axis: str) -> tuple[float, str]:
+    sections: Dict[str, Dict[str, str]] = {}
+    section = ""
+    for raw in original.splitlines():
+        line = raw.split("#", 1)[0].split(";", 1)[0].strip()
+        if not line:
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            section = line[1:-1].strip().upper()
+            sections.setdefault(section, {})
+            continue
+        if section and "=" in line:
+            key, value = line.split("=", 1)
+            sections[section][key.strip().upper()] = value.strip()
+    coordinates = re.findall(
+        r"[XYZABCUVW]", sections.get("TRAJ", {}).get("COORDINATES", "").upper())
+    matches = [index for index, letter in enumerate(coordinates) if letter == axis]
+    if len(matches) != 1:
+        raise DriveActionError(
+            "SETTINGS_ROTARY_PROFILE_JOINT_MAPPING_INVALID",
+            "Active runtime INI cannot map the rotary axis to one joint.",
+            {"axis": axis, "coordinates": coordinates, "matches": matches})
+    joint = "JOINT_%d" % matches[0]
+    scale = finite_float(sections.get(joint, {}).get("SCALE"))
+    if scale is None or scale <= 0.0:
+        raise DriveActionError(
+            "SETTINGS_ROTARY_PROFILE_INI_SCALE_MISSING",
+            "Active runtime INI does not contain a valid rotary joint SCALE.",
+            {"axis": axis, "joint": joint, "scale": scale})
+    return scale, joint
+
+
 def sync_active_rotary_wcheckpoint_profiles_for_restart() -> Dict[str, Any]:
     active_axes = _active_rotary_axes_from_runtime_ini()
+    original = drive_contract.RUNTIME_SETTINGS_INI.read_text(
+        encoding="utf-8", errors="ignore")
     try:
         runtime = json.loads(
             drive_contract.SETTINGS_RUNTIME_JSON.read_text(encoding="utf-8"))
@@ -125,6 +159,15 @@ def sync_active_rotary_wcheckpoint_profiles_for_restart() -> Dict[str, Any]:
                 "SETTINGS_ROTARY_PROFILE_SCALE_MISSING",
                 "Rotary zero owner does not contain a valid counts_per_unit.",
                 {"axis": axis, "counts_per_unit": counts_per_unit})
+        runtime_scale, joint = _runtime_ini_axis_scale(original, axis)
+        if abs(counts_per_unit - runtime_scale) > max(
+                1.0e-6, abs(runtime_scale) * 1.0e-9):
+            raise DriveActionError(
+                "SETTINGS_ROTARY_PROFILE_SCALE_CHAIN_MISMATCH",
+                "Rotary zero owner does not match active runtime INI SCALE.",
+                {"axis": axis, "joint": joint,
+                 "runtime_ini_scale": runtime_scale,
+                 "zero_counts_per_unit": counts_per_unit})
         counts_per_rev_float = counts_per_unit * 360.0
         counts_per_rev = int(round(counts_per_rev_float))
         if (counts_per_rev <= 0 or
@@ -139,8 +182,6 @@ def sync_active_rotary_wcheckpoint_profiles_for_restart() -> Dict[str, Any]:
                  "runtime_counts_per_rev": runtime_counts_per_rev})
         expected[axis] = counts_per_rev
 
-    original = drive_contract.RUNTIME_SETTINGS_INI.read_text(
-        encoding="utf-8", errors="ignore")
     section = ""
     writes = {axis: 0 for axis in active_axes}
     out = []

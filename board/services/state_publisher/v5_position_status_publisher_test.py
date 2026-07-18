@@ -26,10 +26,23 @@ import v5_position_status_publisher as publisher
 from v5_polling_cadence import StartToStartPollingCadence
 
 
+class FakeHalPin:
+    def __init__(self, component, name):
+        self.component = component
+        self.name = name
+
+    def get(self):
+        self.component.pin_get_count += 1
+        return self.component.values[self.name]
+
+
 class FakeHalComponent:
     def __init__(self):
         self.is_ready = False
         self.values = {}
+        self.getitem_calls = []
+        self.pin_get_count = 0
+        self.direct_value_reads = 0
 
     def newpin(self, name, _pin_type, _direction):
         assert not self.is_ready
@@ -40,7 +53,14 @@ class FakeHalComponent:
 
     def __getitem__(self, name):
         assert self.is_ready
+        self.direct_value_reads += 1
         return self.values[name]
+
+    def getitem(self, name):
+        assert self.is_ready
+        assert name in self.values
+        self.getitem_calls.append(name)
+        return FakeHalPin(self, name)
 
 
 class FakeHalModule:
@@ -95,10 +115,18 @@ def check_hal_position_binding_and_units() -> None:
     component.values[access._scalar_names['linear_velocity_per_second']] = 3.0
     component.values[access._scalar_names['feed_override_ratio']] = 1.25
     component.values[access._scalar_names['spindle_override_ratio']] = 0.8
+    cached_pin_count = len(component.getitem_calls)
+    assert cached_pin_count == len(component.values)
+    assert set(component.getitem_calls) == set(component.values)
     assert access.read_joint_positions() == (
         [0.25, 1.25, 2.25, 3.25, 4.25],
         [0.75, 1.75, 2.75, 3.75, 4.75])
     assert access.read_display_scalars() == (120.0, 180.0, 125.0, 80.0)
+    assert access.get_value(
+        'v5-native-hal-owner.home-table-mapping-valid') == 0
+    assert len(component.getitem_calls) == cached_pin_count
+    assert component.direct_value_reads == 0
+    assert component.pin_get_count == 15
     assert module.signals['v5-position-spindle-speed-rps']['DRIVER'] == (
         'spindle.0.speed-cmd-rps')
     assert module.signals['v5-position-current-vel']['DRIVER'] == (
@@ -190,6 +218,91 @@ def check_start_to_start_polling_cadence() -> None:
         (1.0 / 30.0 + 0.004)) <= 1.0e-9
 
 
+def check_display_stabilizer_generation_rules() -> None:
+    def point(y, c):
+        return [0.0, y, 0.0, 0.0, c]
+
+    stabilizer = publisher.PositionDisplayStabilizer()
+    mcs, cmd = stabilizer.stabilize(
+        point(29.990, 359.217), point(29.990, 359.217), 1)
+    assert mcs == point(29.990, 359.217)
+    assert cmd == point(29.990, 359.217)
+
+    mcs, _ = stabilizer.stabilize(
+        point(29.991, 359.218), point(29.991, 359.218), 2,
+        point(29.9910, 359.2180), point(29.9910, 359.2180))
+    assert mcs == point(29.990, 359.217)
+    mcs, _ = stabilizer.stabilize(
+        point(29.991, 359.218), point(29.991, 359.218), 2,
+        point(29.9910, 359.2180), point(29.9910, 359.2180))
+    assert mcs == point(29.990, 359.217)
+    stabilizer.stabilize(
+        point(29.990, 359.217), point(29.990, 359.217), 3)
+    stabilizer.stabilize(
+        point(29.991, 359.218), point(29.991, 359.218), 4,
+        point(29.9911, 359.2181), point(29.9911, 359.2181))
+    mcs, _ = stabilizer.stabilize(
+        point(29.991, 359.218), point(29.991, 359.218), 5,
+        point(29.9912, 359.2182), point(29.9912, 359.2182))
+    assert mcs == point(29.991, 359.218)
+
+    mcs, _ = stabilizer.stabilize(
+        point(29.994, 0.0), point(29.994, 0.0), 6)
+    assert mcs == point(29.994, 0.0)
+    stabilizer.stabilize(None, None, 7)
+    mcs, _ = stabilizer.stabilize(
+        point(-1.001, -0.001), point(-1.001, -0.001), 8)
+    assert mcs == point(-1.001, -0.001)
+    mcs, _ = stabilizer.stabilize(
+        point(-1.002, -0.002), point(-1.002, -0.002), 1)
+    assert mcs == point(-1.002, -0.002)
+    mcs, _ = stabilizer.stabilize(
+        point(-1.003, -0.003), point(-1.003, -0.003), 2,
+        point(-1.0030, -0.0030), point(-1.0030, -0.0030))
+    assert mcs == point(-1.002, -0.002)
+    stabilizer.stabilize(
+        point(-1.003, -0.003), point(-1.003, -0.003), 3,
+        point(-1.0031, -0.0031), point(-1.0031, -0.0031))
+    mcs, _ = stabilizer.stabilize(
+        point(-1.003, -0.003), point(-1.003, -0.003), 4,
+        point(-1.0032, -0.0032), point(-1.0032, -0.0032))
+    assert mcs == point(-1.003, -0.003)
+
+
+def check_display_stabilizer_suppresses_boundary_writes() -> None:
+    cadence = publisher.PositionPublishCadence()
+    stabilizer = publisher.PositionDisplayStabilizer()
+    payloads = []
+    original_atomic_write = projection.atomic_write
+    projection.atomic_write = lambda _path, payload: payloads.append(payload)
+    samples = (
+        (29.9904, 359.2174),
+        (29.9910, 359.2180),
+        (29.9904, 359.2174),
+        (29.9911, 359.2181),
+        (29.9912, 359.2182),
+        (29.9941, 0.0001),
+    )
+    try:
+        for generation, (y, c) in enumerate(samples, 1):
+            values = [0.0, y, 0.0, 0.0, c]
+            projection.write_position_status(
+                '/dev/null/position', None,
+                publish_cadence=cadence,
+                now_monotonic=(generation - 1) * 0.01,
+                native_positions=(values, values),
+                native_scalars=(0.0, 0.0, 100.0, 100.0),
+                display_stabilizer=stabilizer,
+                source_generation=generation)
+    finally:
+        projection.atomic_write = original_atomic_write
+    assert len(payloads) == 3
+    unpacked = [codec.POSITION_BLOCK_STRUCT.unpack(payload) for payload in payloads]
+    assert (unpacked[0][8], unpacked[0][11]) == (29.990, 359.217)
+    assert (unpacked[1][8], unpacked[1][11]) == (29.991, 359.218)
+    assert (unpacked[2][8], unpacked[2][11]) == (29.994, 0.0)
+
+
 def check_native_position_and_scalars_are_packed() -> None:
     payloads = []
     original_atomic_write = projection.atomic_write
@@ -235,6 +348,7 @@ def check_native_position_and_scalars_are_packed() -> None:
 
 def check_moving_sample_publishes_at_each_30hz_generation() -> None:
     cadence = publisher.PositionPublishCadence()
+    stabilizer = publisher.PositionDisplayStabilizer()
     writes = []
     original_atomic_write = projection.atomic_write
     projection.atomic_write = lambda _path, _payload: writes.append(1)
@@ -248,7 +362,9 @@ def check_moving_sample_publishes_at_each_30hz_generation() -> None:
                 native_positions=(
                     [float(index), 0.0, 0.0, 0.0, 0.0],
                     [float(index), 0.0, 0.0, 0.0, 0.0]),
-                native_scalars=(0.0, 0.0, 100.0, 100.0))
+                native_scalars=(0.0, 0.0, 100.0, 100.0),
+                display_stabilizer=stabilizer,
+                source_generation=index + 1)
     finally:
         projection.atomic_write = original_atomic_write
     assert len(writes) == 31
@@ -483,6 +599,8 @@ def main() -> int:
     check_hal_position_binding_and_units()
     check_hal_position_reuses_only_source_owned_signal()
     check_start_to_start_polling_cadence()
+    check_display_stabilizer_generation_rules()
+    check_display_stabilizer_suppresses_boundary_writes()
     check_native_position_and_scalars_are_packed()
     check_moving_sample_publishes_at_each_30hz_generation()
     check_fast_owner_has_no_linuxcnc_or_error_channel()

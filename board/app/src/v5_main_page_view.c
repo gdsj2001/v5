@@ -98,16 +98,9 @@ int v5_main_page_create(V5MainPage *page, lv_obj_t *parent)
                 1);
         }
     }
-    page->trajectory_line = v5_main_page_internal_make_toolpath_v3_line(page->toolpath_clip_layer, 255, 214, 64, V5_TOOLPATH_PROGRAM_LINE_WIDTH);
-    page->toolpath_line_segments[0] = page->trajectory_line;
-    for (i = 1U; i < V5_MAIN_PAGE_TOOLPATH_DRAW_SEGMENTS; ++i) {
-        page->toolpath_line_segments[i] = v5_main_page_internal_make_toolpath_v3_line(
-            page->toolpath_clip_layer,
-            255,
-            214,
-            64,
-            V5_TOOLPATH_PROGRAM_LINE_WIDTH);
-    }
+    page->trajectory_line = v5_main_page_internal_create_toolpath_program_scene(
+        page,
+        page->toolpath_clip_layer);
     page->toolpath_holder_line = v5_main_page_internal_make_toolpath_v3_line(page->toolpath_clip_layer, 96, 176, 255, 5);
     page->toolpath_summary_label = v5_main_page_internal_make_label_ex(page->root, 12, 401, 374, 18, "", 68, 221, 144, LV_TEXT_ALIGN_LEFT);
     page->toolpath_detail_label = v5_main_page_internal_make_label_ex(page->root, 12, 420, 374, 18, "", 86, 204, 252, LV_TEXT_ALIGN_LEFT);
@@ -236,7 +229,9 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
     int program_model_changed = 0;
     int static_pose_changed = 0;
     int program_refresh_due = 0;
+    int program_pose_refresh_ready = 1;
     int model_projection_fresh = 0;
+    int program_projection_ready = 0;
     int model_scene_stale = 0;
     int pose_refresh_due = 0;
     int structure_refresh_due = 0;
@@ -271,6 +266,9 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
     }
     model_projection_fresh =
         page->toolpath_model_scene_valid && page->toolpath_model_scene_fresh;
+    program_projection_ready =
+        v5_native_readback_rtcp_known(&page->native_readback) &&
+        (!page->native_readback.rtcp_enabled || model_projection_fresh);
     model_scene_stale =
         page->toolpath_model_scene_valid && !page->toolpath_model_scene_fresh;
 
@@ -321,7 +319,7 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
         if (page->cpu0_label && page->cpu1_label) {
             char cpu0_text[24];
             char cpu1_text[24];
-            v5_remote_metrics_display_text(cpu0_text, sizeof(cpu0_text), cpu1_text, sizeof(cpu1_text));
+            v5_remote_metrics_display_text(status, cpu0_text, sizeof(cpu0_text), cpu1_text, sizeof(cpu1_text));
             v5_main_page_internal_set_label_text_if_changed(page->cpu0_label, cpu0_text);
             v5_main_page_internal_set_label_text_if_changed(page->cpu1_label, cpu1_text);
         }
@@ -350,9 +348,18 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
             page->toolpath_program_wcs_epoch != page->native_readback.wcs_offsets_epoch) {
             program_wcs_changed = 1;
         }
+        if (!structure_refresh_due &&
+            status &&
+            fabs(status->linear_velocity_mm_per_min) > 0.001 &&
+            page->toolpath_scene_last_pose_render_tick != 0U &&
+            lv_tick_elaps(page->toolpath_scene_last_pose_render_tick) <
+                V5_TOOLPATH_SCENE_POSE_REFRESH_MS) {
+            program_pose_refresh_ready = 0;
+        }
         program_refresh_due =
-            (static_toolpath_due || program_model_changed || program_wcs_changed) &&
-            model_projection_fresh;
+            (static_toolpath_due || program_wcs_changed ||
+             (program_model_changed && program_pose_refresh_ready)) &&
+            program_projection_ready;
 
         if (structure_refresh_due && !runtime_has_program && status && !model_scene_stale &&
             (!page->toolpath_fit.valid ||
@@ -424,7 +431,9 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
                         v5_main_page_internal_main_page_expand_visible_toolpath_fit(page, status, &page->toolpath_fit);
                     }
                     page->toolpath_program_point_count = preview_count;
-                    v5_main_page_internal_main_page_project_program_with_current_fit(page);
+                    if (v5_main_page_internal_main_page_project_program_with_current_fit(page)) {
+                        page->toolpath_scene_last_pose_render_tick = lv_tick_get();
+                    }
                     page->toolpath_program_generation = runtime_generation;
                     page->toolpath_program_view_generation = page->toolpath_view_generation;
                     page->toolpath_program_plane = page->view_plane;
@@ -447,8 +456,8 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
             }
     } else if (static_toolpath_due &&
                (!runtime_has_program ||
-                !page->toolpath_model_scene_valid ||
-                v5_program_runtime_loaded_epoch(runtime) != page->toolpath_program_generation)) {
+                 !program_projection_ready ||
+                 v5_program_runtime_loaded_epoch(runtime) != page->toolpath_program_generation)) {
         v5_main_page_internal_hide_toolpath_program_line(page);
         page->toolpath_program_generation = 0U;
         page->toolpath_program_view_generation = page->toolpath_view_generation;
@@ -467,10 +476,13 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
 
     v5_main_page_internal_coalesce_toolpath_invalidations(page);
 
-    if (static_toolpath_due || program_model_changed || static_pose_changed ||
-        (refresh_flags & V5_MAIN_PAGE_REFRESH_SLOW) != 0U) {
+    if (static_toolpath_due || program_wcs_changed ||
+        ((program_model_changed || static_pose_changed ||
+          (refresh_flags & V5_MAIN_PAGE_REFRESH_SLOW) != 0U) &&
+         program_pose_refresh_ready)) {
         v5_main_page_internal_update_toolpath_state_lines(page, status);
         v5_main_page_internal_main_page_store_static_pose(page);
+        page->toolpath_scene_last_pose_render_tick = lv_tick_get();
     }
 
         if ((refresh_flags & V5_MAIN_PAGE_REFRESH_DYNAMIC) != 0U) {

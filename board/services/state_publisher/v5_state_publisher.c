@@ -55,9 +55,17 @@ int main(int argc, char **argv)
     if (!v5_status_shm_read_from_path(path, &readback)) {
         return 3;
     }
-    if (!report.sample_available && readback.typed_valid_mask != 0U) {
-        fprintf(stderr, "unavailable native sample must not publish valid default values: mask=0x%08x\n", readback.typed_valid_mask);
+    if (!report.sample_available &&
+        (readback.typed_valid_mask & V5_STATUS_NATIVE_DISPLAY_VALID_MASK) != 0U) {
+        fprintf(stderr, "unavailable native sample must not publish valid native defaults: mask=0x%08x\n", readback.typed_valid_mask);
         return 4;
+    }
+    if (readback.version != V5_STATUS_SHM_VERSION ||
+        readback.total_size != V5_STATUS_SHM_FRAME_SIZE ||
+        readback.payload_size != V5_STATUS_SHM_FRAME_SIZE - 32U) {
+        fprintf(stderr, "unexpected status ABI: version=%u total=%u payload=%u\n",
+                readback.version, readback.total_size, readback.payload_size);
+        return 5;
     }
     printf(
         "v5 state publisher shm: version=%u valid_mask=0x%08x flags=0x%08x sample_available=%d frames=%u interval_ms=%u bytes=%u path=%s\n",

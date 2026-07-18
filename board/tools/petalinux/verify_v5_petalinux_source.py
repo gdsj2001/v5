@@ -9,6 +9,8 @@ from pathlib import Path
 
 
 IDENTITY_NAME = "v5_petalinux_source_identity.json"
+TCF_ARCHIVE_NAME = "git2_git.eclipse.org.gitroot.tcf.org.eclipse.tcf.agent.tar.gz"
+TCF_ARCHIVE_SIZE = 9318428
 REQUIRED_PATHS = (
     "config.project",
     ".petalinux/metadata",
@@ -214,6 +216,70 @@ def validate_source_inventory(source_root):
         fail("BitBake source inventory package paths are missing or duplicated")
 
 
+def audit_tcf_production_closure(rootfs_path, inventory_path, manifest_path, archive_path):
+    failures = []
+    try:
+        text = rootfs_path.read_text(encoding="utf-8", errors="strict")
+    except (OSError, UnicodeError) as exc:
+        return ["TCF_ROOTFS_CONFIG_UNREADABLE:%s" % type(exc).__name__]
+    for option in ("CONFIG_tcf-agent", "CONFIG_tcf-agent-dbg", "CONFIG_tcf-agent-dev"):
+        disabled = re.findall(r"^# %s is not set$" % re.escape(option), text, re.MULTILINE)
+        if len(disabled) != 1:
+            failures.append("TCF_ROOTFS_DISABLED_COUNT:%s:%d" % (option, len(disabled)))
+        if re.search(r"^%s=.*$" % re.escape(option), text, re.MULTILINE):
+            failures.append("TCF_ROOTFS_ACTIVE_ASSIGNMENT:%s" % option)
+
+    try:
+        inventory = json.loads(inventory_path.read_text(encoding="utf-8", errors="strict"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        failures.append("TCF_INVENTORY_UNREADABLE:%s" % type(exc).__name__)
+        inventory = {}
+    recipes = inventory.get("recipes", []) if isinstance(inventory, dict) else []
+    packages = inventory.get("source_packages", []) if isinstance(inventory, dict) else []
+    if any(isinstance(item, dict) and item.get("pn") == "tcf-agent" for item in recipes):
+        failures.append("TCF_INVENTORY_RECIPE_PRESENT")
+    if any(
+            isinstance(item, dict) and TCF_ARCHIVE_NAME in (item.get("source_packages") or [])
+            for item in recipes):
+        failures.append("TCF_INVENTORY_RECIPE_PACKAGE_PRESENT")
+    if any(isinstance(item, dict) and item.get("path") == TCF_ARCHIVE_NAME for item in packages):
+        failures.append("TCF_INVENTORY_PACKAGE_PRESENT")
+    if any(
+            isinstance(item, dict) and "git.eclipse.org/gitroot/tcf/org.eclipse.tcf.agent" in str(item.get("url", ""))
+            for item in packages):
+        failures.append("TCF_INVENTORY_URL_PRESENT")
+
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8", errors="strict"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        failures.append("TCF_SOURCE_MANIFEST_UNREADABLE:%s" % type(exc).__name__)
+        manifest = {}
+    files = manifest.get("files", []) if isinstance(manifest, dict) else []
+    if any(isinstance(item, dict) and item.get("path") == TCF_ARCHIVE_NAME for item in files):
+        failures.append("TCF_SOURCE_MANIFEST_ENTRY_PRESENT")
+    if archive_path.exists():
+        try:
+            size = archive_path.stat().st_size
+        except OSError as exc:
+            failures.append("TCF_SOURCE_ARCHIVE_UNREADABLE:%s" % type(exc).__name__)
+        else:
+            failures.append("TCF_SOURCE_ARCHIVE_PRESENT:%d" % size)
+            if size != TCF_ARCHIVE_SIZE:
+                failures.append("TCF_SOURCE_ARCHIVE_SIZE_UNEXPECTED:%d" % size)
+    return failures
+
+
+def validate_tcf_production_closure(project_root, source_root):
+    failures = audit_tcf_production_closure(
+        source_root / "project-spec/configs/rootfs_config",
+        source_root / "v5_bitbake_source_inventory.json",
+        project_root / "board/third_party/petalinux-source-packages/v5_source_packages.json",
+        project_root / "board/third_party/petalinux-source-packages" / TCF_ARCHIVE_NAME,
+    )
+    if failures:
+        fail("production TCF closure is not retired: %s" % ",".join(failures))
+
+
 def require_tokens(source_root, relative, required, forbidden=()):
     text = (source_root / relative).read_text(encoding="utf-8", errors="strict")
     for token in required:
@@ -224,7 +290,22 @@ def require_tokens(source_root, relative, required, forbidden=()):
             fail("PetaLinux source contains retired token %r: %s" % (token, relative))
 
 
+def validate_ethercat_permission_contract(recipe_path):
+    text = recipe_path.read_text(encoding="utf-8", errors="strict")
+    start = text.find("    v5_ethercat_count_exact()")
+    anchor = text.find("    v5_ethercat_call_number=$(awk", start)
+    end = text.find("\n}", anchor)
+    if start < 0 or anchor < 0 or end < 0:
+        fail("EtherCAT permission transform boundary is missing")
+    if "|| true" in text[start:end]:
+        fail("EtherCAT permission transform contains retired || true fallback")
+    for line in text.splitlines():
+        if re.search(r"\bchmod\s+0?666\b[^\n]*/dev/EtherCAT(?:\*|[0-9]+)", line):
+            fail("EtherCAT world-writable permission survived: %s" % line.strip())
+
+
 def validate_contract(project_root, source_root):
+    validate_tcf_production_closure(project_root, source_root)
     require_tokens(
         source_root,
         "project-spec/configs/config",
@@ -252,8 +333,32 @@ def validate_contract(project_root, source_root):
     require_tokens(
         source_root,
         "project-spec/meta-user/recipes-apps/v5-stepgen-module/files/zynq_stepgen_hw.c",
-        ("V5_STEPGEN_BUILD_TAG", "V5_STEPGEN_UIO_DEVICE", "/dev/v5-stepgen-uio"),
-        ("Z20_STEPGEN", "/dev/z20-stepgen-uio"),
+        (
+            "V5_STEPGEN_BUILD_TAG",
+            'V5_STEPGEN_UIO_PATH "/dev/v5-stepgen-uio"',
+            "validate_stepgen_uio_device",
+            "validate_stepgen_uio_fd",
+            "lstat(V5_STEPGEN_UIO_PATH",
+            "fstat(device_fd",
+            "S_ISLNK(link_info.st_mode)",
+            "S_ISCHR(target_info.st_mode)",
+            'getgrnam("petalinux")',
+            "(target_info.st_mode & 07777) != 0660",
+            "realpath(V5_STEPGEN_UIO_PATH, resolved)",
+            "identity->st_dev = target_info.st_dev",
+            "identity->st_ino = target_info.st_ino",
+            "identity->st_rdev = target_info.st_rdev",
+            "target_info.st_dev != identity->st_dev",
+            "target_info.st_ino != identity->st_ino",
+            "target_info.st_rdev != identity->st_rdev",
+        ),
+        (
+            "Z20_STEPGEN",
+            "/dev/z20-stepgen-uio",
+            "V5_STEPGEN_UIO_DEVICE",
+            "stepgen_uio_device_path",
+            "getenv(",
+        ),
     )
     require_tokens(
         source_root,
@@ -384,8 +489,22 @@ def validate_contract(project_root, source_root):
             "inherit autotools pkgconfig update-rc.d module",
             "rm -f ${D}${sysconfdir}/ethercat.conf",
             'MASTER0_DEVICE="eth1"',
+            "v5_ethercat_permission_fail()",
+            "$ETHERCATCTL stop",
+            "v5_ethercat_apply_permissions()",
+            "v5_ethercat_count_exact()",
+            'awk -v v5_line="$1"',
+            '[ -f "$v5_ethercat_init" ] || bbfatal',
+            "v5_ethercat_start_count=$(v5_ethercat_count_exact",
+            '[ "$v5_ethercat_start_count" -eq 1 ] || bbfatal',
+            "v5_ethercat_call_count=$(v5_ethercat_count_exact",
+            '[ "$v5_ethercat_call_count" -eq 1 ] || bbfatal',
+            '$((v5_ethercat_start_number + 1)) ] || bbfatal',
         ),
         ('MASTER0_DEVICE="eth0"', "/lib/modules"),
+    )
+    validate_ethercat_permission_contract(
+        source_root / "project-spec/meta-user/recipes-kernel/ethercat-master/ethercat-master_git.bb"
     )
     for relative in (
         "project-spec/meta-user/recipes-apps/v5-base-overlay/files/network/v5_net_core.sh",

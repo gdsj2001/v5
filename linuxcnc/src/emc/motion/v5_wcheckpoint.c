@@ -36,6 +36,7 @@ typedef struct {
     unsigned int generation;
     unsigned int sample_sequence;
     unsigned int raw_bits;
+    unsigned int router_synced;
     unsigned int valid;
     enum v5_wcheckpoint_reason reason;
 } v5_wcheckpoint_axis_state_t;
@@ -265,6 +266,15 @@ int v5_wcheckpoint_export_hal(int component_id)
 
     for (index = 0U; index < V5_WCHECKPOINT_ROTARY_AXES; ++index) {
         v5_wcheckpoint_hal_t *hal_axis = &emcmot_hal_data->v5_wcheckpoint[index];
+        result = hal_pin_float_newf(HAL_IN, &hal_axis->router_base_counts,
+                                    component_id, "motion.v5-wcheckpoint-%c-router-base-counts", axis_name[index]);
+        if (result != 0) return result;
+        result = hal_pin_u32_newf(HAL_IN, &hal_axis->router_generation,
+                                  component_id, "motion.v5-wcheckpoint-%c-router-generation", axis_name[index]);
+        if (result != 0) return result;
+        result = hal_pin_bit_newf(HAL_IN, &hal_axis->router_valid,
+                                  component_id, "motion.v5-wcheckpoint-%c-router-valid", axis_name[index]);
+        if (result != 0) return result;
         result = hal_pin_float_newf(HAL_OUT, &hal_axis->logical_abs_counts,
                                     component_id, "motion.v5-wcheckpoint-%c-logical-counts", axis_name[index]);
         if (result != 0) return result;
@@ -299,6 +309,7 @@ void v5_wcheckpoint_reset(void)
     for (index = 0U; index < V5_WCHECKPOINT_ROTARY_AXES; ++index) {
         axis_state[index].base_turns = 0.0;
         axis_state[index].generation++;
+        axis_state[index].router_synced = 0U;
         axis_state[index].valid = 0U;
         axis_state[index].reason = V5_WCHECKPOINT_DISABLED;
     }
@@ -316,9 +327,32 @@ void v5_wcheckpoint_update_before_inputs(void)
         double runtime_deg;
         double runtime_counts;
         enum v5_wcheckpoint_reason reason;
+        v5_wcheckpoint_hal_t *hal_axis = &emcmot_hal_data->v5_wcheckpoint[index];
         new_base_turns[index] = axis_state[index].base_turns;
         reason = profile_reason(index, &axis_state[index].safe_half_counts,
                                 &turn_quantum[index]);
+        if (*hal_axis->router_valid && *hal_axis->router_generation != 0U &&
+            (reason == V5_WCHECKPOINT_OK ||
+             reason == V5_WCHECKPOINT_DRIVE_WINDOW_UNPROVEN)) {
+            double router_base_counts = *hal_axis->router_base_counts;
+            double quantum_counts =
+                (double)v5_wcheckpoint_counts_per_rev[index] *
+                (double)turn_quantum[index];
+            if (isfinite(router_base_counts) &&
+                fabs(router_base_counts) < ldexp(1.0, DBL_MANT_DIG) &&
+                floor(fabs(router_base_counts)) == fabs(router_base_counts) &&
+                quantum_counts > 0.0 &&
+                fmod(fabs(router_base_counts), quantum_counts) == 0.0) {
+                axis_state[index].base_turns = router_base_counts /
+                    (double)v5_wcheckpoint_counts_per_rev[index];
+                axis_state[index].generation = *hal_axis->router_generation;
+                axis_state[index].reason = V5_WCHECKPOINT_OK;
+                axis_state[index].router_synced = 1U;
+                axis_state[index].valid = 1U;
+                continue;
+            }
+        }
+        axis_state[index].router_synced = 0U;
         axis_state[index].reason = reason;
         /* A drive without proven periodic command/feedback support cannot
          * rebase, but its current logical/base/runtime window is still valid
@@ -466,9 +500,6 @@ int v5_wcheckpoint_target_allowed(unsigned int index, double target_deg)
         axis_state[index].reason = V5_WCHECKPOINT_LOGICAL_STORAGE_INSUFFICIENT;
         return 0;
     }
-    if (reason == V5_WCHECKPOINT_OK) {
-        return 1;
-    }
     runtime_counts = (target_deg -
         (axis_state[index].base_turns * V5_FULL_TURN_DEG)) *
         ((double)v5_wcheckpoint_counts_per_rev[index] / V5_FULL_TURN_DEG);
@@ -476,6 +507,9 @@ int v5_wcheckpoint_target_allowed(unsigned int index, double target_deg)
         axis_state[index].valid = 0U;
         axis_state[index].reason = V5_WCHECKPOINT_RUNTIME_WINDOW_FAILED;
         return 0;
+    }
+    if (axis_state[index].router_synced || reason == V5_WCHECKPOINT_OK) {
+        return 1;
     }
     return 1;
 }

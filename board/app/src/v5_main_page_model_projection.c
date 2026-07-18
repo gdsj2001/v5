@@ -132,6 +132,12 @@ int v5_main_page_internal_main_page_program_model_projection_changed(const V5Mai
         page->toolpath_program_point_count == 0U) {
         return 0;
     }
+    if (!v5_native_readback_rtcp_known(&page->native_readback)) {
+        return 0;
+    }
+    if (!page->native_readback.rtcp_enabled) {
+        return page->toolpath_program_model_scene_valid != 0;
+    }
     if (page->toolpath_model_scene_valid != page->toolpath_program_model_scene_valid) {
         return 1;
     }
@@ -204,28 +210,51 @@ int v5_main_page_internal_main_page_rtcp_wcs_follow_model_scene_available(
     return 1;
 }
 
-int v5_main_page_internal_main_page_update_program_project_points(
-    V5MainPage *page,
-    unsigned int count)
+int v5_main_page_internal_main_page_capture_program_model_scene(
+    V5MainPage *page)
 {
-    unsigned int i;
-
-    if (!page) {
+    if (!page || !v5_native_readback_rtcp_known(&page->native_readback)) {
         return 0;
+    }
+    if (!page->native_readback.rtcp_enabled) {
+        page->toolpath_program_model_scene_valid = 0;
+        memset(
+            &page->toolpath_program_model_scene,
+            0,
+            sizeof(page->toolpath_program_model_scene));
+        return 1;
     }
     if (!page->toolpath_model_scene_valid ||
         !page->toolpath_model_scene_fresh) {
         return 0;
     }
+    page->toolpath_program_model_scene_valid = 1;
+    page->toolpath_program_model_scene = page->toolpath_model_scene;
+    return 1;
+}
+
+int v5_main_page_internal_main_page_prepare_program_fit_points(
+    V5MainPage *page,
+    unsigned int count)
+{
+    unsigned int i;
+
+    if (!page ||
+        !v5_main_page_internal_main_page_capture_program_model_scene(page)) {
+        return 0;
+    }
     if (count > V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT) {
         count = V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT;
     }
-    page->toolpath_program_model_scene_valid = 1;
-    page->toolpath_program_model_scene = page->toolpath_model_scene;
     for (i = 0U; i < count; ++i) {
         page->toolpath_program_project_points[i] = page->toolpath_program_points[i];
+    }
+    if (!page->native_readback.rtcp_enabled) {
+        return 1;
+    }
+    for (i = 0U; i < count; ++i) {
         if (!v5_main_page_model_scene_transform_world_point(
-                &page->toolpath_model_scene,
+                &page->toolpath_program_model_scene,
                 page->toolpath_program_project_points[i].axis)) {
             page->toolpath_program_model_scene_valid = 0;
             memset(
@@ -235,5 +264,6 @@ int v5_main_page_internal_main_page_update_program_project_points(
             return 0;
         }
     }
+    page->toolpath_program_rtcp_transform_count += 1U;
     return 1;
 }

@@ -26,6 +26,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
+#include <arpa/inet.h>
 #include <netinet/in.h>
 #include <pthread.h>
 #include <errno.h>
@@ -462,6 +463,7 @@ typedef struct {
 int port = 5007;
 int server_sockfd;
 socklen_t server_len, client_len;
+static struct in_addr bind_address = { INADDR_ANY };
 struct sockaddr_in server_address;
 struct sockaddr_in client_address;
 bool useSockets = true;
@@ -493,6 +495,7 @@ const char *commands[] = {"HELLO", "SET", "GET", "QUIT", "SHUTDOWN", "HELP", ""}
 
 struct option longopts[] = {
   {"help", 0, NULL, 'h'},
+  {"bind", 1, NULL, 'b'},
   {"port", 1, NULL, 'p'},
   {"name", 1, NULL, 'n'},
   {"sessions", 1, NULL, 's'},
@@ -547,7 +550,7 @@ static int initSockets()
   server_sockfd = socket(AF_INET, SOCK_STREAM, 0);
   setsockopt(server_sockfd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
   server_address.sin_family = AF_INET;
-  server_address.sin_addr.s_addr = htonl(INADDR_ANY);
+  server_address.sin_addr = bind_address;
   server_address.sin_port = htons(port);
   server_len = sizeof(server_address);
   err = bind(server_sockfd, (struct sockaddr *)&server_address, server_len);
@@ -2959,6 +2962,7 @@ static void usage(char* pname) {
     printf("         %s [Options] [-- LinuxCNC_Options]\n"
            "Options:\n"
            "         --help       this help\n"
+           "         --bind       <IPv4 address> (default=0.0.0.0)\n"
            "         --port       <port number>  (default=%d)\n"
            "         --name       <server name>  (default=%s)\n"
            "         --connectpw  <password>     (default=%s)\n"
@@ -2977,9 +2981,15 @@ int main(int argc, char *argv[])
 
     initMain();
     // process local command line args
-    while((opt = getopt_long(argc, argv, "he:n:p:s:w:d:", longopts, NULL)) != - 1) {
+    while((opt = getopt_long(argc, argv, "hb:e:n:p:s:w:d:", longopts, NULL)) != - 1) {
       switch(opt) {
         case 'h': usage(argv[0]); exit(1);
+        case 'b':
+          if (inet_pton(AF_INET, optarg, &bind_address) != 1) {
+              fprintf(stderr, "invalid bind address: %s\n", optarg);
+              return 2;
+          }
+          break;
         case 'e': snprintf(enablePWD, sizeof(enablePWD), "%s", optarg); break;
         case 'n': snprintf(serverName, sizeof(serverName), "%s", optarg); break;
         case 'p': sscanf(optarg, "%d", &port); break;

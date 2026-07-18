@@ -22,8 +22,18 @@ pin in u32 joint-slave-position-##[5]
     "Physical slave position (0..4) selected for this logical joint";
 pin in u32 joint-mapping-generation-##[5]
     "Staged clean-restart mapping generation for this logical joint";
+pin in u32 joint-axis-code-##[5]
+    "ASCII X/Y/Z/A/B/C axis code owned by the committed logical-joint table";
 pin in float joint-zero-counts-##[5]
     "Exact signed-32 physical count that represents LinuxCNC count zero";
+pin in s32 wcp-crev-##[3]
+    "Exact output-axis counts per 360 degrees for A/B/C";
+pin in s32 wcp-red-num-##[3]
+    "Motor revolutions numerator for A/B/C";
+pin in s32 wcp-red-den-##[3]
+    "Load revolutions denominator for A/B/C";
+pin in s32 wcp-raw-bits-##[3]
+    "Mapped signed command/feedback raw width for A/B/C";
 pin in u32 expected-active-mask
     "Staged logical-joint active mask; only bits 0..4 are legal";
 pin in u32 staged-mapping-generation
@@ -54,6 +64,12 @@ pin out u32 slave-controlword-##[5]
     "Controlword routed to physical slave position ##";
 pin out s32 slave-target-position-##[5]
     "Target position count routed to physical slave position ##";
+pin out float wcp-base-##[3]
+    "Resident software window base in exact integer counts for A/B/C";
+pin out u32 wcp-gen-##[3]
+    "Generation advanced after boot initialization or an integer-period shift";
+pin out bit wcp-valid-##[3]
+    "True when the router owns a valid integer-period software window";
 
 pin out bit mapping-valid
     "True only while an atomically committed mapping is active";
@@ -67,7 +83,11 @@ pin out u32 rejected-commit-seq
     "Most recent commit sequence rejected as an incomplete or invalid table";
 
 variable hal_u32_t slave_for_joint_state[5] = 0;
+variable hal_u32_t axis_for_joint_state[5] = 0;
 variable hal_s32_t zero_for_joint_state[5] = 0;
+variable double wcheckpoint_base_state[3] = 0;
+variable hal_u32_t wcheckpoint_generation_state[3] = 0;
+variable hal_bit_t wcheckpoint_valid_state[3] = 0;
 variable hal_u32_t active_mask_state = 0;
 variable hal_u32_t generation_state = 0;
 variable hal_u32_t commit_seq_state = 0;
@@ -84,6 +104,7 @@ author "V5 project";
 #include <stdint.h>
 
 #define V5_BUS_AXIS_ROUTER_JOINTS 5
+#define V5_BUS_AXIS_ROUTER_ROTARY_AXES 3
 #define V5_BUS_AXIS_ROUTER_LEGAL_MASK 0x1fu
 
 static int v5_bus_router_exact_s32(hal_float_t value, hal_s32_t *result)
@@ -113,9 +134,73 @@ static hal_s32_t v5_bus_router_sub_offset(hal_s32_t value, hal_s32_t offset)
     return v5_bus_router_from_u32((hal_u32_t)value - (hal_u32_t)offset);
 }
 
+static int v5_bus_router_rotary_index(hal_u32_t axis_code)
+{
+    if (axis_code == (hal_u32_t)'A') return 0;
+    if (axis_code == (hal_u32_t)'B') return 1;
+    if (axis_code == (hal_u32_t)'C') return 2;
+    return -1;
+}
+
+static uint64_t v5_bus_router_abs_i64(int64_t value)
+{
+    return value < 0 ? (uint64_t)(-(value + 1)) + 1U : (uint64_t)value;
+}
+
+static int64_t v5_bus_router_gcd_i64(int64_t lhs, int64_t rhs)
+{
+    while (rhs != 0) {
+        int64_t remainder = lhs % rhs;
+        lhs = rhs;
+        rhs = remainder;
+    }
+    return lhs;
+}
+
+static int v5_bus_router_wcheckpoint_quantum(
+    int64_t counts_per_rev,
+    int64_t reducer_num,
+    int64_t reducer_den,
+    int raw_bits,
+    int64_t *quantum_counts,
+    int64_t *shift_trigger)
+{
+    int64_t divisor;
+    int64_t turn_quantum;
+
+    if (!quantum_counts || !shift_trigger) return 0;
+    if (counts_per_rev <= 0 || reducer_num <= 0 || reducer_den <= 0 ||
+        raw_bits < 4 || raw_bits > 32) return 0;
+    divisor = v5_bus_router_gcd_i64(reducer_num, reducer_den);
+    turn_quantum = reducer_den / divisor;
+    if (turn_quantum <= 0 || counts_per_rev > INT64_MAX / turn_quantum) return 0;
+    *quantum_counts = counts_per_rev * turn_quantum;
+    *shift_trigger = INT64_C(1) << (raw_bits - 3);
+    return *quantum_counts > 0 && *shift_trigger > 0;
+}
+
+static int64_t v5_bus_router_nearest_quantized(int64_t value, int64_t quantum)
+{
+    int64_t quotient = value / quantum;
+    int64_t remainder = value % quantum;
+    uint64_t twice_remainder = v5_bus_router_abs_i64(remainder) * 2U;
+    if (twice_remainder > (uint64_t)quantum ||
+        (twice_remainder == (uint64_t)quantum && value < 0)) {
+        quotient += value < 0 ? -1 : 1;
+    }
+    return quotient * quantum;
+}
+
+static hal_s32_t v5_bus_router_base_low(double base_value)
+{
+    int64_t base = (int64_t)base_value;
+    return v5_bus_router_from_u32((hal_u32_t)(uint64_t)base);
+}
+
 FUNCTION(read) {
     int joint;
     int slave;
+    int axis;
 
     /*
      * The read phase runs after lcec.read and before cia402.read.  It owns the
@@ -135,6 +220,16 @@ FUNCTION(read) {
         commit_seq_state = 0;
         last_seen_commit_seq = 0;
         rejected_commit_seq = 0;
+        for (axis = 0; axis < V5_BUS_AXIS_ROUTER_ROTARY_AXES; axis++) {
+            wcheckpoint_base_state[axis] = 0.0;
+            wcheckpoint_generation_state[axis] = 0;
+            wcheckpoint_valid_state[axis] = 0;
+        }
+        for (axis = 0; axis < V5_BUS_AXIS_ROUTER_ROTARY_AXES; axis++) {
+            wcp_base(axis) = wcheckpoint_base_state[axis];
+            wcp_gen(axis) = wcheckpoint_generation_state[axis];
+            wcp_valid(axis) = wcheckpoint_valid_state[axis];
+        }
         mapping_valid = 0;
         latched_mapping_generation = 0;
         latched_active_mask = 0;
@@ -149,10 +244,12 @@ FUNCTION(read) {
     if (mapping_commit_seq != 0 &&
         (hal_s32_t)(mapping_commit_seq - last_seen_commit_seq) > 0) {
         hal_u32_t candidate_slave_for_joint[V5_BUS_AXIS_ROUTER_JOINTS];
+        hal_u32_t candidate_axis_for_joint[V5_BUS_AXIS_ROUTER_JOINTS];
         hal_s32_t candidate_zero_for_joint[V5_BUS_AXIS_ROUTER_JOINTS];
         hal_u32_t candidate_mask = expected_active_mask;
         hal_u32_t candidate_generation = staged_mapping_generation;
         hal_u32_t seen_slaves = 0;
+        hal_u32_t seen_axes = 0;
         int candidate_valid = 1;
 
         if (mapping_commit_seq == 0 || candidate_mask == 0 ||
@@ -183,6 +280,25 @@ FUNCTION(read) {
                 break;
             }
 
+            if (joint_axis_code(joint) != (hal_u32_t)'X' &&
+                joint_axis_code(joint) != (hal_u32_t)'Y' &&
+                joint_axis_code(joint) != (hal_u32_t)'Z' &&
+                joint_axis_code(joint) != (hal_u32_t)'A' &&
+                joint_axis_code(joint) != (hal_u32_t)'B' &&
+                joint_axis_code(joint) != (hal_u32_t)'C') {
+                candidate_valid = 0;
+                break;
+            }
+            {
+                hal_u32_t axis_bit = 1u << (joint_axis_code(joint) - (hal_u32_t)'A');
+                if (seen_axes & axis_bit) {
+                    candidate_valid = 0;
+                    break;
+                }
+                seen_axes |= axis_bit;
+                candidate_axis_for_joint[joint] = joint_axis_code(joint);
+            }
+
             {
                 hal_u32_t slave_position = joint_slave_position(joint);
                 hal_u32_t slave_bit = 1u << slave_position;
@@ -201,6 +317,8 @@ FUNCTION(read) {
                 if (candidate_mask & (1u << joint)) {
                     slave_for_joint_state[joint] =
                         candidate_slave_for_joint[joint];
+                    axis_for_joint_state[joint] =
+                        candidate_axis_for_joint[joint];
                     zero_for_joint_state[joint] =
                         candidate_zero_for_joint[joint];
                 }
@@ -210,6 +328,11 @@ FUNCTION(read) {
             commit_seq_state = mapping_commit_seq;
             mapping_latched = 1;
             rejected_commit_seq = 0;
+            for (axis = 0; axis < V5_BUS_AXIS_ROUTER_ROTARY_AXES; axis++) {
+                wcheckpoint_base_state[axis] = 0.0;
+                wcheckpoint_generation_state[axis] = 0;
+                wcheckpoint_valid_state[axis] = 0;
+            }
         } else {
             rejected_commit_seq = mapping_commit_seq;
         }
@@ -235,7 +358,60 @@ FUNCTION(read) {
         joint_statusword(joint) = slave_statusword(slave);
         joint_actual_position(joint) = v5_bus_router_sub_offset(
             slave_actual_position(slave), zero_for_joint_state[joint]);
+        axis = v5_bus_router_rotary_index(axis_for_joint_state[joint]);
+        if (axis >= 0) {
+            int64_t quantum_counts;
+            int64_t shift_trigger;
+            int64_t runtime_counts;
+            int64_t shift_counts;
+            int64_t base_counts;
+
+            if (!v5_bus_router_wcheckpoint_quantum(
+                    (int64_t)wcp_crev(axis),
+                    (int64_t)wcp_red_num(axis),
+                    (int64_t)wcp_red_den(axis),
+                    (int)wcp_raw_bits(axis),
+                    &quantum_counts,
+                    &shift_trigger)) {
+                wcheckpoint_valid_state[axis] = 0;
+            } else {
+                base_counts = (int64_t)wcheckpoint_base_state[axis];
+                runtime_counts = (int64_t)v5_bus_router_sub_offset(
+                    joint_actual_position(joint),
+                    v5_bus_router_base_low(wcheckpoint_base_state[axis]));
+                if (!wcheckpoint_valid_state[axis] ||
+                    v5_bus_router_abs_i64(runtime_counts) >=
+                        (uint64_t)shift_trigger) {
+                    shift_counts = v5_bus_router_nearest_quantized(
+                        runtime_counts, quantum_counts);
+                    if ((shift_counts > 0 &&
+                         base_counts > INT64_MAX - shift_counts) ||
+                        (shift_counts < 0 &&
+                         base_counts < INT64_MIN - shift_counts)) {
+                        wcheckpoint_valid_state[axis] = 0;
+                    } else {
+                        base_counts += shift_counts;
+                        wcheckpoint_base_state[axis] = (double)base_counts;
+                        wcheckpoint_generation_state[axis]++;
+                        if (wcheckpoint_generation_state[axis] == 0)
+                            wcheckpoint_generation_state[axis] = 1;
+                        wcheckpoint_valid_state[axis] = 1;
+                    }
+                }
+            }
+            if (wcheckpoint_valid_state[axis]) {
+                joint_actual_position(joint) = v5_bus_router_sub_offset(
+                    joint_actual_position(joint),
+                    v5_bus_router_base_low(wcheckpoint_base_state[axis]));
+            }
+        }
         joint_digital_inputs(joint) = slave_digital_inputs(slave);
+    }
+
+    for (axis = 0; axis < V5_BUS_AXIS_ROUTER_ROTARY_AXES; axis++) {
+        wcp_base(axis) = wcheckpoint_base_state[axis];
+        wcp_gen(axis) = wcheckpoint_generation_state[axis];
+        wcp_valid(axis) = wcheckpoint_valid_state[axis];
     }
 
     latched_mapping_generation = generation_state;
@@ -247,6 +423,8 @@ FUNCTION(read) {
 FUNCTION(write) {
     int joint;
     int slave;
+    int axis;
+    hal_s32_t physical_target;
 
     /*
      * The write phase runs after cia402.write.  Establish safe physical
@@ -268,7 +446,14 @@ FUNCTION(write) {
 
         slave = (int)slave_for_joint_state[joint];
         slave_controlword(slave) = joint_controlword(joint);
+        physical_target = joint_target_position(joint);
+        axis = v5_bus_router_rotary_index(axis_for_joint_state[joint]);
+        if (axis >= 0 && wcheckpoint_valid_state[axis]) {
+            physical_target = v5_bus_router_add_offset(
+                physical_target,
+                v5_bus_router_base_low(wcheckpoint_base_state[axis]));
+        }
         slave_target_position(slave) = v5_bus_router_add_offset(
-            joint_target_position(joint), zero_for_joint_state[joint]);
+            physical_target, zero_for_joint_state[joint]);
     }
 }

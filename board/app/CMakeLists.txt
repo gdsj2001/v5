@@ -323,6 +323,7 @@ target_include_directories(v5_ui_page_cache_registry_smoke PRIVATE
 
 add_library(v5_status_shm_projection STATIC
     src/v5_status_shm_reader.c
+    ../services/state_publisher/v5_cpu_usage_snapshot.c
     ../services/state_publisher/v5_native_sample.c
     ../services/state_publisher/v5_state_publisher_service.c
     ../services/state_publisher/v5_status_shm_mmap.c
@@ -341,6 +342,19 @@ target_include_directories(v5_status_shm_projection PUBLIC
     "${V5_ROOT_DIR}/services/state_publisher"
     "${V5_ROOT_DIR}/services/command_gate"
 )
+
+add_executable(v5_cpu_usage_snapshot_smoke
+    ../services/state_publisher/v5_cpu_usage_snapshot.c
+    ../services/state_publisher/v5_cpu_usage_snapshot_smoke.c
+)
+
+target_include_directories(v5_cpu_usage_snapshot_smoke PRIVATE
+    "${V5_ROOT_DIR}/services/state_publisher"
+)
+
+if(NOT WIN32)
+    target_link_libraries(v5_cpu_usage_snapshot_smoke PRIVATE m)
+endif()
 
 add_executable(v5_state_publisher_smoke
     ../services/state_publisher/v5_state_publisher.c
@@ -631,6 +645,7 @@ target_link_libraries(v5_main_page_smoke PRIVATE lvgl v5_button_visuals v5_lvgl_
 add_executable(v5_ui_display_models_smoke
     src/v5_ui_display_models_smoke.c
     src/v5_coordinate_panel.c
+    src/v5_remote_metrics.c
     src/v5_toolpath_display.c
     src/v5_ui_status_view.c
     src/v5_status_shm_reader.c

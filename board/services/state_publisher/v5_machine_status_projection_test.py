@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import math
 
-from v5_machine_status_projection import NativeRotaryDisplayProjection
+from v5_machine_status_projection import (
+    NativeRotaryDisplayProjection,
+    display_position_projection,
+)
 
 
 class FakeHal:
@@ -44,8 +47,8 @@ def projection_values():
         'v5-native-hal-owner.home-table-commit-seq': 1,
     }
     axes = ((0, 'X', 0, 26, 10000), (1, 'Y', 1, 4, 10000),
-            (2, 'Z', 2, 36, 10000), (3, 'A', 3, 5, 1000),
-            (4, 'C', 4, 24, 1000))
+            (2, 'Z', 2, 36, 10000), (3, 'A', 3, 5, 10000),
+            (4, 'C', 4, 24, 10000))
     for joint, axis, slot, zero, scale in axes:
         suffix = f'{joint:02d}'
         values[f'v5-native-hal-owner.home-config-valid-{suffix}'] = True
@@ -80,15 +83,26 @@ def check_router_zero_relative_counts_are_not_offset_twice() -> None:
     assert raw_mcs[3] == 0.0 and raw_mcs[4] == -18000.0
 
 
+def check_display_projection_truncates_one_count_jitter_once() -> None:
+    low = display_position_projection([0.0, 29.9824, 0.0, 0.0, 0.0])
+    high = display_position_projection([0.0, 29.9825, 0.0, 0.0, 0.0])
+    edge = display_position_projection([0.0, 29.9830, 0.0, 0.0, 0.0])
+    negative = display_position_projection([0.0, -29.9829, 0.0, 0.0, 0.0])
+    assert low[1] == 29.982
+    assert high[1] == 29.982
+    assert edge[1] == 29.983
+    assert negative[1] == -29.982
+
+
 def check_one_count_displays_one_count_not_clamped() -> None:
     values = projection_values()
     values['v5-native-hal-owner.wcp-a-logical-counts'] = 1.0
     values['v5-native-hal-owner.wcp-a-runtime-counts'] = 1.0
     projection = NativeRotaryDisplayProjection(FakeHal(values))
     mcs, _ = projection.project(
-        [0.0, 0.0, 0.0, 0.001, -18000.0],
-        [0.0, 0.0, 0.0, 0.001, -18000.0])
-    assert math.isclose(mcs[3], 0.001, abs_tol=1.0e-12)
+        [0.0, 0.0, 0.0, 0.0001, -18000.0],
+        [0.0, 0.0, 0.0, 0.0001, -18000.0])
+    assert math.isclose(mcs[3], 0.0001, abs_tol=1.0e-12)
 
 
 def check_fractional_actual_count_is_preserved() -> None:
@@ -97,8 +111,8 @@ def check_fractional_actual_count_is_preserved() -> None:
     values['v5-native-hal-owner.wcp-a-runtime-counts'] = 251835.5
     projection = NativeRotaryDisplayProjection(FakeHal(values))
     mcs, _ = projection.project(
-        [0.0, 0.0, 0.0, 251.8355, -18000.0], None)
-    assert math.isclose(mcs[3], 251.8355, abs_tol=1.0e-12)
+        [0.0, 0.0, 0.0, 25.18355, -18000.0], None)
+    assert math.isclose(mcs[3], 25.18355, abs_tol=1.0e-12)
 
 
 def check_fractional_command_phase_is_not_truncated() -> None:
@@ -226,7 +240,7 @@ def check_generation_change_reloads_all_metadata_immediately() -> None:
     _, cmd = projection.project(
         [0.0] * 5, [0.0, 0.0, 0.0, 0.006, 0.0])
     assert hal.read_count('v5-native-hal-owner.wcp-a-base-counts') == 4
-    assert math.isclose(cmd[3], 0.01, abs_tol=1.0e-12)
+    assert math.isclose(cmd[3], 0.0064, abs_tol=1.0e-12)
 
 
 def check_new_projection_instance_rebuilds_resident_cache() -> None:
@@ -264,7 +278,7 @@ def check_invalid_sample_drops_cache_before_same_generation_recovers() -> None:
     _, cmd = projection.project(
         [0.0] * 5, [0.0, 0.0, 0.0, 0.003, 0.0])
     assert hal.read_count('v5-native-hal-owner.wcp-a-base-counts') == 2
-    assert math.isclose(cmd[3], 0.008, abs_tol=1.0e-12)
+    assert math.isclose(cmd[3], 0.0035, abs_tol=1.0e-12)
 
     hal.values['v5-native-hal-owner.home-table-mapping-valid'] = False
     try:
@@ -280,6 +294,7 @@ def check_invalid_sample_drops_cache_before_same_generation_recovers() -> None:
 
 def main() -> int:
     check_router_zero_relative_counts_are_not_offset_twice()
+    check_display_projection_truncates_one_count_jitter_once()
     check_one_count_displays_one_count_not_clamped()
     check_fractional_actual_count_is_preserved()
     check_fractional_command_phase_is_not_truncated()

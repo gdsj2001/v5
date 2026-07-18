@@ -240,6 +240,7 @@ if [ -d "$linuxcnc_package_root" ] || [ -e "$linuxcnc_bundle_allowlist" ] || [ -
 fi
 
 manifest_ui_only=1
+manifest_state_only=1
 manifest_actiond_only=1
 manifest_settings_only=1
 manifest_command_gate_only=1
@@ -257,6 +258,7 @@ manifest_cpu_policy_wcs=0
 manifest_cpu_policy_position=0
 manifest_position_publisher=0
 manifest_wcs_publisher=0
+manifest_state_publisher=0
 manifest_drive_profiles=0
 manifest_row_count=0
 while IFS="$tab" read -r scope_kind scope_source scope_destination scope_mode scope_extra; do
@@ -332,6 +334,15 @@ while IFS="$tab" read -r scope_kind scope_source scope_destination scope_mode sc
       ;;
   esac
   case "$scope_destination" in
+    /usr/libexec/8ax/v5_state_publisher|\
+    /etc/init.d/v5-state-publisher)
+      manifest_state_publisher=1
+      ;;
+    *)
+      manifest_state_only=0
+      ;;
+  esac
+  case "$scope_destination" in
     /usr/libexec/8ax/v5_position_status_publisher.py|\
     /usr/libexec/8ax/v5_wcs_status_publisher.py|\
     /usr/libexec/8ax/v5_polling_cadence.py|\
@@ -351,6 +362,7 @@ while IFS="$tab" read -r scope_kind scope_source scope_destination scope_mode sc
   esac
   case "$scope_destination" in
     /usr/libexec/8ax/v5_lvgl_shell|\
+    /usr/libexec/8ax/v5_status_shm_reader.py|\
     /usr/libexec/8ax/v5_remote_ui_*|\
     /usr/libexec/8ax/v5_ui_*|\
     /etc/init.d/v5-ui-relay)
@@ -381,6 +393,13 @@ while IFS="$tab" read -r scope_kind scope_source scope_destination scope_mode sc
       manifest_ui_only=0
       manifest_actiond_only=0
       ;;
+    /opt/8ax/v5/linuxcnc/ini/v5_bus.ini|\
+    /opt/8ax/v5/linuxcnc/ini/v5_pulse.ini|\
+    /opt/8ax/v5/linuxcnc/ini/v5_local_shmem.nml)
+      manifest_ui_only=0
+      manifest_actiond_only=0
+      manifest_command_gate_only=0
+      ;;
     *)
       manifest_ui_only=0
       manifest_actiond_only=0
@@ -400,6 +419,10 @@ case "$restart_scope_requested" in
        [ "$manifest_row_count" -gt 0 ] &&
        [ "$manifest_ui_only" -eq 1 ]; then
       restart_scope=ui
+    elif [ "$linuxcnc_bundle_enabled" -eq 0 ] &&
+         [ "$manifest_row_count" -gt 0 ] &&
+         [ "$manifest_state_only" -eq 1 ]; then
+      restart_scope=state
     elif [ "$linuxcnc_bundle_enabled" -eq 0 ] &&
          [ "$manifest_row_count" -gt 0 ] &&
          [ "$manifest_actiond_only" -eq 1 ]; then
@@ -451,6 +474,15 @@ case "$restart_scope_requested" in
       exit 8
     fi
     restart_scope=ui
+    ;;
+  state)
+    if [ "$linuxcnc_bundle_enabled" -ne 0 ] ||
+       [ "$manifest_row_count" -eq 0 ] ||
+       [ "$manifest_state_only" -ne 1 ]; then
+      echo "State-publisher restart scope requires a non-empty State-publisher-only manifest and no LinuxCNC bundle" >&2
+      exit 8
+    fi
+    restart_scope=state
     ;;
   actiond)
     if [ "$linuxcnc_bundle_enabled" -ne 0 ] ||
@@ -518,11 +550,11 @@ case "$restart_scope_requested" in
     restart_scope=all
     ;;
   *)
-    echo "unsupported V5_RUNTIME_RESTART_SCOPE: $restart_scope_requested (expected auto, gcode, ui, actiond, command_gate, backend, wcs, cpu_policy, settings, or all)" >&2
+    echo "unsupported V5_RUNTIME_RESTART_SCOPE: $restart_scope_requested (expected auto, gcode, ui, state, actiond, command_gate, backend, wcs, cpu_policy, settings, or all)" >&2
     exit 8
     ;;
 esac
-echo "V5_RUNTIME_RESTART_SCOPE scope=$restart_scope rows=$manifest_row_count gcode_only=$manifest_gcode_only ui_only=$manifest_ui_only actiond_only=$manifest_actiond_only command_gate_only=$manifest_command_gate_only backend_only=$manifest_backend_only wcs_only=$manifest_wcs_only cpu_policy_only=$manifest_cpu_policy_only settings_only=$manifest_settings_only"
+echo "V5_RUNTIME_RESTART_SCOPE scope=$restart_scope rows=$manifest_row_count gcode_only=$manifest_gcode_only ui_only=$manifest_ui_only state_only=$manifest_state_only actiond_only=$manifest_actiond_only command_gate_only=$manifest_command_gate_only backend_only=$manifest_backend_only wcs_only=$manifest_wcs_only cpu_policy_only=$manifest_cpu_policy_only settings_only=$manifest_settings_only"
 
 stop_position_publisher_before_backend() {
   if [ -x /etc/init.d/v5-position-status-publisher ]; then
@@ -622,6 +654,11 @@ stop_affected_writers_before_install() {
     stop_writer_before_upgrade \
       v5-wcs-status-publisher \
       /usr/libexec/8ax/v5_wcs_status_publisher.py
+  fi
+  if [ "$manifest_state_publisher" -eq 1 ]; then
+    stop_writer_before_upgrade \
+      v5-state-publisher \
+      /usr/libexec/8ax/v5_state_publisher
   fi
 }
 
@@ -841,6 +878,9 @@ if [ "$apply" -eq 1 ]; then
   elif [ "$restart_scope" = "ui" ]; then
     enable_boot_service v5-ui-relay 95 15
     /etc/init.d/v5-ui-relay restart
+  elif [ "$restart_scope" = "state" ]; then
+    enable_boot_service v5-state-publisher 94 16
+    /etc/init.d/v5-state-publisher restart
   elif [ "$restart_scope" = "actiond" ]; then
     enable_boot_service v5-settings-actiond 96 14
     [ "$manifest_drive_profiles" -eq 0 ] || install_runtime_drive_profiles

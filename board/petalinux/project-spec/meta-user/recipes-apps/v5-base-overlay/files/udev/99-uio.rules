@@ -1,3 +1,2 @@
-KERNEL=="uio*", MODE="0660", GROUP="dialout"
-SUBSYSTEM=="uio", KERNEL=="uio*", ATTR{name}=="*stepgen*", SYMLINK+="v5-stepgen-uio"
-SUBSYSTEM=="uio", KERNEL=="uio*", ATTR{name}=="*dna*", SYMLINK+="v5-dna-uio"
+SUBSYSTEM=="uio", KERNEL=="uio*", ATTR{name}=="*stepgen*", SYMLINK+="v5-stepgen-uio", OWNER="root", GROUP="petalinux", MODE="0660"
+SUBSYSTEM=="uio", KERNEL=="uio*", ATTR{name}=="*dna*", SYMLINK+="v5-dna-uio", OWNER="root", GROUP="root", MODE="0600"

@@ -21,6 +21,7 @@ HOME_MATH = ROOT / "linuxcnc/src/hal/components/v5_bus_home_math.h"
 HOME_API = ROOT / "linuxcnc/src/hal/components/v5_bus_home_api.h"
 HOME_PINS = ROOT / "linuxcnc/src/hal/components/v5_bus_home_pins.h"
 MOTION_CONTROL = ROOT / "linuxcnc/src/emc/motion/control.c"
+MOTION_WCHECKPOINT = ROOT / "linuxcnc/src/emc/motion/v5_wcheckpoint.c"
 DEFAULT_HOMING = ROOT / "linuxcnc/src/emc/motion/homing.c"
 SAFETY = ROOT / "linuxcnc/src/hal/components/v5_safety_latch.comp"
 UI_ERROR = ROOT / "board/app/src/v5_ui_shell_operator_error.c"
@@ -102,6 +103,17 @@ def require(source: str, token: str) -> None:
         raise AssertionError(f"missing contract token: {token}")
 
 
+def nearest_quantized(value: int, quantum: int) -> int:
+    quotient = abs(value) // quantum
+    if value < 0:
+        quotient = -quotient
+    remainder = value - quotient * quantum
+    twice = abs(remainder) * 2
+    if twice > quantum or (twice == quantum and value < 0):
+        quotient += -1 if value < 0 else 1
+    return quotient * quantum
+
+
 def generated_halcompile_names(source: str, component: str) -> list[str]:
     names = []
     for declared in PIN_DECLARATION.findall(source):
@@ -145,6 +157,7 @@ def main() -> int:
     home_api = HOME_API.read_text(encoding="utf-8")
     home_pins = HOME_PINS.read_text(encoding="utf-8")
     motion_control = MOTION_CONTROL.read_text(encoding="utf-8")
+    motion_wcheckpoint = MOTION_WCHECKPOINT.read_text(encoding="utf-8")
     default_homing = DEFAULT_HOMING.read_text(encoding="utf-8")
     safety = SAFETY.read_text(encoding="utf-8")
     ui_error = UI_ERROR.read_text(encoding="utf-8")
@@ -155,6 +168,42 @@ def main() -> int:
     settings_axis_runtime = SETTINGS_AXIS_RUNTIME.read_text(encoding="utf-8")
 
     require_hal_name_lengths(owner, router, safety, home_pins)
+
+    for token in (
+        "pin in u32 joint-axis-code-##[5]",
+        "pin out float wcp-base-##[3]",
+        "pin out u32 wcp-gen-##[3]",
+        "v5_bus_router_wcheckpoint_quantum",
+        "v5_bus_router_nearest_quantized",
+        "physical_target = v5_bus_router_add_offset",
+    ):
+        require(router, token)
+    for token in (
+        "v5-bus-axis-router.wcp-base-00 => motion.v5-wcheckpoint-a-router-base-counts",
+        "v5-bus-axis-router.wcp-base-02 => motion.v5-wcheckpoint-c-router-base-counts",
+        "v5-native-hal-owner.home-axis-code-04 => v5-bus-axis-router.joint-axis-code-04",
+    ):
+        require(hal, token)
+    for token in (
+        "motion.v5-wcheckpoint-%c-router-base-counts",
+        "motion.v5-wcheckpoint-%c-router-generation",
+        "motion.v5-wcheckpoint-%c-router-valid",
+        "fmod(fabs(router_base_counts), quantum_counts) == 0.0",
+    ):
+        require(motion_wcheckpoint, token)
+
+    current_counts = -1072799791
+    output_crev = 3600000
+    reducer_num, reducer_den = 20, 1
+    turn_quantum = reducer_den
+    base_counts = nearest_quantized(current_counts, output_crev * turn_quantum)
+    if base_counts != -1072800000 or current_counts - base_counts != 209:
+        raise AssertionError("boot wcheckpoint did not center the observed C-axis count")
+    five_turn_target = current_counts - 5 * output_crev
+    if five_turn_target - base_counts != -17999791:
+        raise AssertionError("cc-ac five-turn target did not consume the boot base")
+    if nearest_quantized(3500000, output_crev * 2) != 0:
+        raise AssertionError("fractional reducer must use an integer motor-turn quantum")
 
     for dead in (
         "slave-fault-##", "slave-positive-limit-##", "slave-negative-limit-##",

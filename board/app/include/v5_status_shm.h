@@ -10,7 +10,8 @@ extern "C" {
 
 #define V5_STATUS_SHM_PATH "/dev/shm/v3_status_shm"
 #define V5_STATUS_SHM_MAGIC 0x56355348u
-#define V5_STATUS_SHM_VERSION 1u
+#define V5_STATUS_SHM_VERSION 2u
+#define V5_STATUS_SHM_FRAME_SIZE 840u
 #define V5_STATUS_AXIS_COUNT 5u
 #define V5_STATUS_TRAJECTORY_POINT_COUNT 16u
 
@@ -22,7 +23,14 @@ enum {
     V5_STATUS_VALID_LINEAR_VELOCITY = 1u << 5,
     V5_STATUS_VALID_FEED_OVERRIDE = 1u << 6,
     V5_STATUS_VALID_SPINDLE_OVERRIDE = 1u << 7,
+    V5_STATUS_VALID_CPU_USAGE = 1u << 8,
 };
+
+#define V5_STATUS_NATIVE_DISPLAY_VALID_MASK \
+    (V5_STATUS_VALID_MCS | V5_STATUS_VALID_CMD_MCS | \
+     V5_STATUS_VALID_TRAJECTORY | V5_STATUS_VALID_SPINDLE_SPEED | \
+     V5_STATUS_VALID_LINEAR_VELOCITY | V5_STATUS_VALID_FEED_OVERRIDE | \
+     V5_STATUS_VALID_SPINDLE_OVERRIDE)
 
 enum {
     V5_STATUS_FRAME_FLAG_DEGRADED = 1u << 0,
@@ -54,7 +62,22 @@ typedef struct V5StatusShmFrame {
     double linear_velocity_mm_per_min;
     double feedrate_override;
     double spindle_override;
+    double cpu0_percent;
+    double cpu1_percent;
+    uint64_t cpu_sample_generation;
+    uint64_t cpu_sample_monotonic_ns;
 } V5StatusShmFrame;
+
+typedef char V5StatusShmFrameSizeMustMatchAbi[
+    sizeof(V5StatusShmFrame) == V5_STATUS_SHM_FRAME_SIZE ? 1 : -1];
+typedef char V5StatusShmCpu0OffsetMustMatchAbi[
+    offsetof(V5StatusShmFrame, cpu0_percent) == 808U ? 1 : -1];
+typedef char V5StatusShmCpu1OffsetMustMatchAbi[
+    offsetof(V5StatusShmFrame, cpu1_percent) == 816U ? 1 : -1];
+typedef char V5StatusShmCpuGenerationOffsetMustMatchAbi[
+    offsetof(V5StatusShmFrame, cpu_sample_generation) == 824U ? 1 : -1];
+typedef char V5StatusShmCpuTimeOffsetMustMatchAbi[
+    offsetof(V5StatusShmFrame, cpu_sample_monotonic_ns) == 832U ? 1 : -1];
 
 void v5_status_shm_frame_init(V5StatusShmFrame *frame);
 int v5_status_shm_frame_copy(V5StatusShmFrame *dst, const V5StatusShmFrame *src);

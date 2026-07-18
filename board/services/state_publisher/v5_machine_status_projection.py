@@ -28,6 +28,7 @@ from v5_wcs_status_codec import (
 V5_HOME_JOINT_COUNT = 5
 V5_ROTARY_AXIS_CODES = {ord('A'): 'a', ord('B'): 'b', ord('C'): 'c'}
 POSITION_STATUS_HEARTBEAT_SECONDS = 0.1
+DISPLAY_COORDINATE_SCALE = 1000.0
 
 
 def exact_native_count(value):
@@ -233,7 +234,15 @@ def normalized_axis_with_presence(values: Iterable[float]):
 
 
 def display_position_projection(values):
-    projected = list(values)
+    projected = []
+    for value in values:
+        scaled = float(value) * DISPLAY_COORDINATE_SCALE
+        if not math.isfinite(scaled):
+            projected.append(float(value))
+            continue
+        bucket = math.floor(scaled + 1.0e-9) if scaled >= 0.0 else math.ceil(scaled - 1.0e-9)
+        display_value = bucket / DISPLAY_COORDINATE_SCALE
+        projected.append(0.0 if display_value == 0.0 else display_value)
     if len(projected) < POSITION_AXIS_COUNT:
         projected += [0.0] * (POSITION_AXIS_COUNT - len(projected))
     return projected[:POSITION_AXIS_COUNT]
@@ -479,7 +488,9 @@ def write_position_status(
         now_monotonic=None,
         native_positions=None,
         native_scalars=None,
-        writer_identity=0) -> bool:
+        writer_identity=0,
+        display_stabilizer=None,
+        source_generation=None) -> bool:
     writer_identity = int(writer_identity)
     if writer_identity < 0 or writer_identity > 0xffffffff:
         raise RuntimeError('native_position_writer_identity_invalid')
@@ -499,9 +510,9 @@ def write_position_status(
                         for value in actual_values + command_values)):
             raise RuntimeError('native_joint_position_sample_invalid')
     raw_mcs, mcs_present = normalized_axis_with_presence(actual_values)
-    mcs = display_position_projection(raw_mcs)
+    mcs = list(raw_mcs)
     raw_cmd, cmd_present = normalized_axis_with_presence(command_values)
-    cmd = display_position_projection(raw_cmd)
+    cmd = list(raw_cmd)
     if rotary_projection is not None:
         try:
             projected_mcs, projected_cmd = rotary_projection.project(
@@ -516,6 +527,12 @@ def write_position_status(
             cmd = [0.0] * POSITION_AXIS_COUNT
             mcs_present = False
             cmd_present = False
+    source_mcs = list(mcs) if mcs_present else None
+    source_cmd = list(cmd) if cmd_present else None
+    if mcs_present:
+        mcs = display_position_projection(mcs)
+    if cmd_present:
+        cmd = display_position_projection(cmd)
     if native_scalars is None:
         spindle = first_spindle(stat)
         spindle_speed = (
@@ -537,6 +554,17 @@ def write_position_status(
                 spindle_speed, linear_velocity,
                 feed_override, spindle_override)):
             raise RuntimeError('native_position_scalar_sample_invalid')
+    if display_stabilizer is not None:
+        stabilized_mcs, stabilized_cmd = display_stabilizer.stabilize(
+            mcs if mcs_present else None,
+            cmd if cmd_present else None,
+            source_generation,
+            source_mcs,
+            source_cmd)
+        if mcs_present:
+            mcs = stabilized_mcs
+        if cmd_present:
+            cmd = stabilized_cmd
     valid_mask = (
         V5_STATUS_VALID_SPINDLE_SPEED |
         V5_STATUS_VALID_LINEAR_VELOCITY |

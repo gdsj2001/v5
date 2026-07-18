@@ -155,7 +155,9 @@ void v5_main_page_internal_format_main_page_wcs_coordinate(char *out, size_t out
     if (axis >= 3U) {
         value = v5_ui_status_view_rotary_phase_deg(value);
     }
-    if (value > -0.0005 && value < 0.0005) {
+    value = (value >= 0.0 ? floor(value * 1000.0 + 1.0e-9) :
+            ceil(value * 1000.0 - 1.0e-9)) / 1000.0;
+    if (value == 0.0) {
         value = 0.0;
     }
     snprintf(out, out_size, "%+010.3f", value);

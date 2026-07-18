@@ -63,6 +63,16 @@ static long long shell_quantized_display_value(double value, double scale)
     return (long long)(scaled >= 0.0 ? scaled + 0.5 : scaled - 0.5);
 }
 
+static long long shell_truncated_coordinate_value(double value)
+{
+    double scaled;
+    if (!isfinite(value)) {
+        return 0LL;
+    }
+    scaled = value * 1000.0;
+    return (long long)(scaled >= 0.0 ? floor(scaled + 1.0e-9) : ceil(scaled - 1.0e-9));
+}
+
 static int shell_quantized_values_equal(double left, double right, double scale)
 {
     return shell_quantized_display_value(left, scale) == shell_quantized_display_value(right, scale);
@@ -74,7 +84,9 @@ static int shell_axis_values_equal(const double left[V5_STATUS_AXIS_COUNT],
 {
     unsigned int i;
     for (i = 0U; i < V5_STATUS_AXIS_COUNT; ++i) {
-        if (!shell_quantized_values_equal(left[i], right[i], scale)) {
+        if (scale == 1000.0 ?
+                shell_truncated_coordinate_value(left[i]) != shell_truncated_coordinate_value(right[i]) :
+                !shell_quantized_values_equal(left[i], right[i], scale)) {
             return 0;
         }
     }
@@ -141,27 +153,6 @@ static int shell_status_display_equal(const V5UiStatusView *before, const V5UiSt
         return 0;
     }
     return 1;
-}
-
-static int shell_status_pose_equal(const V5UiStatusView *before, const V5UiStatusView *after)
-{
-    uint32_t pose_mask = V5_STATUS_VALID_MCS |
-        V5_STATUS_VALID_CMD_MCS | V5_STATUS_VALID_TRAJECTORY;
-    if (((before->valid_mask ^ after->valid_mask) & pose_mask) != 0U) {
-        return 0;
-    }
-    if ((before->valid_mask & V5_STATUS_VALID_MCS) != 0U &&
-        (!shell_axis_values_equal(before->mcs, after->mcs, 1000.0) ||
-         !shell_axis_values_equal(before->raw_mcs, after->raw_mcs, 1000.0))) {
-        return 0;
-    }
-    if ((before->valid_mask & V5_STATUS_VALID_CMD_MCS) != 0U &&
-        (!shell_axis_values_equal(before->cmd_mcs, after->cmd_mcs, 1000.0) ||
-         !shell_axis_values_equal(before->raw_cmd_mcs, after->raw_cmd_mcs, 1000.0))) {
-        return 0;
-    }
-    return (before->valid_mask & V5_STATUS_VALID_TRAJECTORY) == 0U ||
-        shell_trajectory_equal(before, after);
 }
 
 static int shell_native_pose_equal(
@@ -264,7 +255,9 @@ int v5_ui_shell_refresh_once(void)
             flags |= V5_MAIN_PAGE_REFRESH_DYNAMIC;
         }
         display_changed = !shell_status_display_equal(&before, &g_v5_shell_model.status_view);
-        pose_changed = !shell_status_pose_equal(&before, &g_v5_shell_model.status_view);
+        pose_changed = !shell_refresh_model_pose_equal(
+            &before,
+            &g_v5_shell_model.status_view);
         if (display_changed) {
             main_cache_changed = 1;
         }
@@ -367,7 +360,7 @@ int v5_ui_shell_test_click_program_name(unsigned int idx)
     }
     lv_event_send(g_v5_shell_program_row_name_labels[idx], LV_EVENT_CLICKED, 0);
     lv_timer_handler();
-    return 1;
+    return shell_process_pending_navigation();
 }
 
 int v5_ui_shell_test_click_program_edit(void)
@@ -377,7 +370,7 @@ int v5_ui_shell_test_click_program_edit(void)
     }
     lv_event_send(g_v5_shell_program_edit_button, LV_EVENT_CLICKED, 0);
     lv_timer_handler();
-    return 1;
+    return shell_process_pending_navigation();
 }
 
 int v5_ui_shell_test_double_click_main_program_area(void)
@@ -390,7 +383,7 @@ int v5_ui_shell_test_double_click_main_program_area(void)
     lv_tick_inc(100);
     lv_event_send(g_v5_shell_main_page.program_edit_hit_area, LV_EVENT_CLICKED, 0);
     lv_timer_handler();
-    return 1;
+    return shell_process_pending_navigation();
 }
 
 int v5_ui_shell_test_current_page_is_mdi(void)

@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import ipaddress
 import os
-import threading
 import time
 from pathlib import Path
+
+from v5_status_shm_reader import V5StatusShmReader
+
+
+_STATUS_CPU_USAGE = V5StatusShmReader()
 
 def now_ms() -> int:
     return int(time.time() * 1000)
@@ -33,11 +37,18 @@ def peer_allowed(peer: str, networks) -> bool:
 
 
 def system_metrics() -> dict:
+    cpu_usage = _STATUS_CPU_USAGE.read()
     memory_used, memory_total = memory_used_total()
     disk_used, disk_total = disk_used_total()
     return {
-        "cpu0_percent": cpu_percent("cpu0"),
-        "cpu1_percent": cpu_percent("cpu1"),
+        "cpu0_percent": cpu_usage.cpu0_percent if cpu_usage is not None else None,
+        "cpu1_percent": cpu_usage.cpu1_percent if cpu_usage is not None else None,
+        "cpu_sample_generation": (
+            cpu_usage.cpu_sample_generation if cpu_usage is not None else None
+        ),
+        "cpu_sample_monotonic_ns": (
+            cpu_usage.cpu_sample_monotonic_ns if cpu_usage is not None else None
+        ),
         "memory_percent": percent_used(memory_used, memory_total),
         "disk_percent": percent_used(disk_used, disk_total),
         "memory_used_bytes": memory_used,
@@ -131,38 +142,6 @@ def process_diagnostics() -> dict:
         "cpus_allowed_list": read_status_field(Path(f"/proc/{pid}/status"), "Cpus_allowed_list"),
         "threads": threads,
     }
-
-
-class CpuUsageSampler:
-    def __init__(self, sample_reader=read_cpu_sample):
-        self._sample_reader = sample_reader
-        self._previous: dict[str, tuple[int, int]] = {}
-        self._lock = threading.Lock()
-
-    def percent(self, name: str):
-        sample = self._sample_reader(name)
-        if sample is None:
-            return None
-        total, idle = sample
-        with self._lock:
-            previous = self._previous.get(name)
-            self._previous[name] = sample
-        if previous is None:
-            return None
-        previous_total, previous_idle = previous
-        total_delta = total - previous_total
-        idle_delta = idle - previous_idle
-        if total_delta <= 0 or idle_delta < 0:
-            return None
-        busy = (1.0 - (idle_delta / total_delta)) * 100.0
-        return round(max(0.0, min(100.0, busy)), 1)
-
-
-_CPU_USAGE = CpuUsageSampler()
-
-
-def cpu_percent(name: str):
-    return _CPU_USAGE.percent(name)
 
 
 def memory_used_total() -> tuple[int | None, int | None]:

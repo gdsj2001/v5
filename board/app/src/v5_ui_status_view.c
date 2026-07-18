@@ -3,6 +3,8 @@
 #include <math.h>
 #include <string.h>
 
+#define V5_CPU_USAGE_MAX_AGE_NS 5000000000ULL
+
 static int finite_axis(const double axis[V5_STATUS_AXIS_COUNT])
 {
     unsigned int i;
@@ -137,6 +139,19 @@ int v5_ui_status_view_from_frame(V5UiStatusView *view, const V5StatusShmFrame *f
         view->spindle_override = frame->spindle_override;
     } else {
         view->valid_mask &= ~V5_STATUS_VALID_SPINDLE_OVERRIDE;
+    }
+    if ((frame->typed_valid_mask & V5_STATUS_VALID_CPU_USAGE) &&
+        finite_value(frame->cpu0_percent) && frame->cpu0_percent >= 0.0 && frame->cpu0_percent <= 100.0 &&
+        finite_value(frame->cpu1_percent) && frame->cpu1_percent >= 0.0 && frame->cpu1_percent <= 100.0 &&
+        frame->cpu_sample_generation != 0ULL && frame->cpu_sample_monotonic_ns != 0ULL &&
+        frame->status_epoch >= frame->cpu_sample_monotonic_ns &&
+        frame->status_epoch - frame->cpu_sample_monotonic_ns <= V5_CPU_USAGE_MAX_AGE_NS) {
+        view->cpu0_percent = frame->cpu0_percent;
+        view->cpu1_percent = frame->cpu1_percent;
+        view->cpu_sample_generation = frame->cpu_sample_generation;
+        view->cpu_sample_monotonic_ns = frame->cpu_sample_monotonic_ns;
+    } else {
+        view->valid_mask &= ~V5_STATUS_VALID_CPU_USAGE;
     }
 
     return 1;

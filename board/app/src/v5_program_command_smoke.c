@@ -71,11 +71,12 @@ int main(void)
         v5_program_controller_destroy(&controller);
         return 5;
     }
-    if (!v5_linuxcncrsh_format_line(&start_prepared, &start_request, line, sizeof(line))) {
+    if (!v5_linuxcncrsh_format_start_transaction(
+            &start_prepared, &start_request, line, sizeof(line))) {
         v5_program_controller_destroy(&controller);
         return 6;
     }
-    if (strcmp(line, "Set Open v5_program_command_smoke.ngc\nSet Mode Auto\nSet Run 0") != 0) {
+    if (strcmp(line, "Set Task_Plan_Init\nSet Mode Auto\nSet Open v5_program_command_smoke.ngc\nSet Run 0") != 0) {
         v5_program_controller_destroy(&controller);
         return 13;
     }

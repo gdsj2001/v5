@@ -44,7 +44,11 @@ if [ -z "$board_ssh" ]; then
 fi
 
 ssh_base="ssh -o BatchMode=yes -o LogLevel=ERROR -o ConnectTimeout=5 -p $board_ssh_port"
-scp_base="scp -O -q -o BatchMode=yes -o LogLevel=ERROR -o ConnectTimeout=5 -P $board_ssh_port"
+scp_legacy_protocol_opt=""
+if ! scp -O 2>&1 | grep -q "unknown option -- O"; then
+  scp_legacy_protocol_opt="-O"
+fi
+scp_base="scp $scp_legacy_protocol_opt -q -o BatchMode=yes -o LogLevel=ERROR -o ConnectTimeout=5 -P $board_ssh_port"
 
 if ! $ssh_base "$board_ssh" 'true' >/dev/null 2>&1; then
   echo "cannot connect to board via ssh: $board_ssh port=$board_ssh_port" >&2

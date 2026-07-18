@@ -22,6 +22,7 @@ module	services/ui/v5_remote_ui_shared_payload.py	/usr/libexec/8ax/v5_remote_ui_
 module	services/ui/v5_remote_ui_dirty_geometry.py	/usr/libexec/8ax/v5_remote_ui_dirty_geometry.py	0644
 module	services/ui/v5_remote_ui_state.py	/usr/libexec/8ax/v5_remote_ui_state.py	0644
 module	services/ui/v5_remote_ui_support.py	/usr/libexec/8ax/v5_remote_ui_support.py	0644
+module	services/ui/v5_status_shm_reader.py	/usr/libexec/8ax/v5_status_shm_reader.py	0644
 module	petalinux/project-spec/meta-user/recipes-apps/v5-base-overlay/files/network/v5_net_core.sh	/usr/local/sbin/v5_net_core.sh	0644
 script	petalinux/project-spec/meta-user/recipes-apps/v5-base-overlay/files/network/v5_usb_wifi_apply.sh	/usr/local/sbin/v5_usb_wifi_apply.sh	0755
 init	services/state_publisher/init.d/v5-wcs-status-publisher	/etc/init.d/v5-wcs-status-publisher	0755
@@ -35,6 +36,7 @@ linuxcnc	linuxcnc/ini/v5_pulse.ini	/opt/8ax/v5/linuxcnc/ini/v5_pulse.ini	0644
 linuxcnc	linuxcnc/hal/v5_pulse.hal	/opt/8ax/v5/linuxcnc/hal/v5_pulse.hal	0644
 linuxcnc	linuxcnc/components/step_ip_v1_5.contract.json	/opt/8ax/v5/linuxcnc/components/step_ip_v1_5.contract.json	0644
 linuxcnc	linuxcnc/ini/v5_bus.ini	/opt/8ax/v5/linuxcnc/ini/v5_bus.ini	0644
+linuxcnc	linuxcnc/ini/v5_local_shmem.nml	/opt/8ax/v5/linuxcnc/ini/v5_local_shmem.nml	0644
 linuxcnc	linuxcnc/hal/v5_bus_2ms.hal	/opt/8ax/v5/linuxcnc/hal/v5_bus_2ms.hal	0644
 linuxcnc	linuxcnc/hal/ethercat-conf-2ms.xml	/opt/8ax/v5/linuxcnc/hal/ethercat-conf-2ms.xml	0644
 runtime_seed	linuxcnc/runtime/var/position.txt	/opt/8ax/v5/linuxcnc/var/position.txt	0644

@@ -6,6 +6,7 @@ from pathlib import Path
 
 
 INSTALLER = Path(__file__).with_name('install_v5_runtime.sh')
+MANIFEST = Path(__file__).resolve().parents[2] / 'config/deploy/v5_runtime_deploy_manifest.tsv'
 
 
 def section(text: str, start: str, end: str) -> str:
@@ -13,8 +14,54 @@ def section(text: str, start: str, end: str) -> str:
     return text[begin:text.index(end, begin)]
 
 
+STATE_SCANNER_EDGES = (
+    'manifest_state_publisher=0',
+    '/usr/libexec/8ax/v5_state_publisher|\\\n'
+    '    /etc/init.d/v5-state-publisher)\n'
+    '      manifest_state_publisher=1',
+)
+STATE_DISPATCH_EDGES = (
+    'if [ "$manifest_state_publisher" -eq 1 ]; then',
+    'v5-state-publisher \\',
+    '/usr/libexec/8ax/v5_state_publisher',
+)
+
+
+def audit_state_upgrade(text: str) -> None:
+    scanner = section(text, 'manifest_position_publisher=0',
+                      '\ncase "$restart_scope_requested" in')
+    dispatch = section(text, 'stop_affected_writers_before_install() {',
+                       '\nif [ "$apply" -eq 1 ] &&')
+    for token in STATE_SCANNER_EDGES:
+        assert token in scanner, 'STATE_WRITER_SELECTOR_MISSING:' + token
+    for token in STATE_DISPATCH_EDGES:
+        assert token in dispatch, 'STATE_WRITER_DISPATCH_MISSING:' + token
+
+
 def main() -> int:
     text = INSTALLER.read_text(encoding='utf-8')
+    manifest = MANIFEST.read_text(encoding='utf-8')
+    audit_state_upgrade(text)
+    assert 'manifest_state_only=1' in text
+    assert 'restart_scope=state' in text
+    assert 'State-publisher restart scope requires a non-empty State-publisher-only manifest' in text
+    state_scope = section(
+        text, 'elif [ "$restart_scope" = "state" ]',
+        'elif [ "$restart_scope" = "actiond" ]')
+    assert '/etc/init.d/v5-state-publisher restart' in state_scope
+    assert 'v5-ui-relay' not in state_scope
+    assert 'v5-linuxcnc-command-gate' not in state_scope
+    for runtime_ini in (
+        '/opt/8ax/v5/linuxcnc/ini/v5_bus.ini',
+        '/opt/8ax/v5/linuxcnc/ini/v5_pulse.ini',
+        '/opt/8ax/v5/linuxcnc/ini/v5_local_shmem.nml',
+    ):
+        assert runtime_ini in text
+    for row in (
+        'binary\tbuild/board/app/v5_state_publisher\t/usr/libexec/8ax/v5_state_publisher\t0755',
+        'init\tservices/state_publisher/init.d/v5-state-publisher\t/etc/init.d/v5-state-publisher\t0755',
+    ):
+        assert manifest.splitlines().count(row) == 1, 'STATE_WRITER_MANIFEST_EDGE_INVALID:' + row
     stop = section(
         text, 'stop_writer_before_upgrade() {',
         '\nstop_affected_writers_before_install() {')
@@ -44,13 +91,16 @@ def main() -> int:
     first_start = text.index('/etc/init.d/v5-position-status-publisher restart', install_loop)
     assert preinstall < install_loop < first_start
 
-    # Both current writers and their shared modules select the stop barrier;
+    # All three current writers and their shared modules select the stop barrier;
     # repeating an install is safe because an absent process is success.
     for token in (
         'manifest_position_publisher=1',
         'manifest_wcs_publisher=1',
+        'manifest_state_publisher=1',
         'v5-position-status-publisher',
         'v5-wcs-status-publisher',
+        'v5-state-publisher',
+        '/usr/libexec/8ax/v5_state_publisher',
         '/usr/libexec/8ax/v5_machine_status_projection.py',
         '/usr/libexec/8ax/v5_wcs_status_codec.py',
     ):
@@ -142,7 +192,8 @@ wait_publisher_actual_barrier
         proc_root = Path(directory) / 'proc'
         cmdline = proc_root / '123' / 'cmdline'
         cmdline.parent.mkdir(parents=True)
-        writer = '/usr/libexec/8ax/v5_position_status_publisher.py'
+        writer = '/usr/libexec/8ax/v5_state_publisher'
+        legacy_pidfile = Path(directory) / 'v5_state_publisher.pid'
 
         def run(mode: str) -> subprocess.CompletedProcess:
             script = f'''PROC_ROOT="{proc_root.as_posix()}"
@@ -159,23 +210,47 @@ stop_writer_before_upgrade v5-test-writer {writer}
                 ['sh', '-c', script], check=False,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-        # Active orphan: no PIDFILE exists, but exact cmdline is stopped.
-        cmdline.write_bytes(b'python3\0' + writer.encode() + b'\0')
+        # Active orphan: no PIDFILE exists, but the exact argv owner is stopped.
+        cmdline.write_bytes(writer.encode() + b'\0--path\0/dev/shm/v3_status_shm\0')
+        assert run('stop').returncode == 0
+        assert not cmdline.exists()
+
+        # A legacy one-field diagnostic record cannot hide the same orphan.
+        legacy_pidfile.write_text('123\n', encoding='ascii')
+        cmdline.write_bytes(writer.encode() + b'\0--path\0/dev/shm/v3_status_shm\0')
         assert run('stop').returncode == 0
         assert not cmdline.exists()
 
         # PID reuse text does not match the canonical writer and is untouched.
-        cmdline.write_bytes(b'python3\0/usr/libexec/8ax/other.py\0')
+        cmdline.write_bytes(b'/usr/libexec/8ax/other_state_publisher\0')
         assert run('stop').returncode == 0
         assert cmdline.exists()
 
         # Matching writer that ignores TERM makes the pre-install barrier fail.
-        cmdline.write_bytes(b'python3\0' + writer.encode() + b'\0')
+        cmdline.write_bytes(writer.encode() + b'\0--path\0/dev/shm/v3_status_shm\0')
         assert run('timeout').returncode != 0
 
         # Retry after the old process is gone is idempotent.
         cmdline.unlink()
         assert run('stop').returncode == 0
+
+    # The same detector must fail if any State selector/dispatch edge is
+    # removed; broad process killers and KILL fallback remain forbidden.
+    for token in STATE_SCANNER_EDGES + STATE_DISPATCH_EDGES:
+        start_token, end_token = (
+            ('manifest_position_publisher=0', '\ncase "$restart_scope_requested" in')
+            if token in STATE_SCANNER_EDGES else
+            ('stop_affected_writers_before_install() {', '\nif [ "$apply" -eq 1 ] &&'))
+        begin = text.index(start_token); end = text.index(end_token, begin)
+        body = text[begin:end].replace(token, 'STATE_UPGRADE_EDGE_REMOVED', 1)
+        mutated = text[:begin] + body + text[end:]
+        try:
+            audit_state_upgrade(mutated)
+        except AssertionError as exc:
+            assert 'STATE_WRITER_' in str(exc)
+        else:
+            raise AssertionError('STATE_WRITER_UPGRADE_MUTATION_SURVIVED:' + token)
+    assert 'pkill' not in functions and 'killall' not in functions
 
     # Retired init scripts are never executed; only exact process cleanup and
     # one-way rm-f tombstones remain.
