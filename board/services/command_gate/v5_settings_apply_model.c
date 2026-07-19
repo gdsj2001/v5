@@ -71,11 +71,81 @@ typedef struct V5ModelAxisMigration {
     char axis_section[32];
     char current_joint_section[32];
     char target_joint_section[32];
-    char original_slave[64];
-    char final_slave[64];
     char current_joint[V5_MODEL_JOINT_KEY_COUNT][64];
     char target_joint[V5_MODEL_JOINT_KEY_COUNT][64];
 } V5ModelAxisMigration;
+
+typedef struct V5ModelAxisSlaveDefault {
+    char axis[2];
+    char value[16];
+} V5ModelAxisSlaveDefault;
+
+static int settings_apply_build_default_axis_slave_mapping(
+    const V5ModelAxisMigration *migrations,
+    size_t migration_count,
+    V5ModelAxisSlaveDefault *defaults,
+    V5SettingsParameterAxisValue *values)
+{
+    size_t i;
+    if (!migrations || migration_count == 0U || !defaults || !values) {
+        return 0;
+    }
+    for (i = 0U; i < migration_count; ++i) {
+        defaults[i].axis[0] = migrations[i].transition.axis;
+        defaults[i].axis[1] = '\0';
+        if (migrations[i].transition.target_active) {
+            snprintf(
+                defaults[i].value,
+                sizeof(defaults[i].value),
+                "%u",
+                migrations[i].transition.target_status_slot);
+        } else {
+            snprintf(defaults[i].value, sizeof(defaults[i].value), "NAT");
+        }
+        values[i].axis = defaults[i].axis;
+        values[i].value = defaults[i].value;
+    }
+    return 1;
+}
+
+static int settings_apply_default_axis_slave_readback_matches(
+    const char *project_root,
+    const V5ModelAxisSlaveDefault *defaults,
+    size_t default_count)
+{
+    size_t i;
+    char readback[64];
+    if (!defaults || default_count == 0U) {
+        return 0;
+    }
+    for (i = 0U; i < default_count; ++i) {
+        if (!v5_settings_parameter_store_read_axis(
+                project_root,
+                V5_SETTINGS_PARAMETER_DISK_SELF,
+                defaults[i].axis,
+                "slave",
+                readback,
+                sizeof(readback)) ||
+            strcmp(readback, defaults[i].value) != 0) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int settings_apply_self_parameter_table_path(
+    char *out,
+    size_t out_cap,
+    const char *project_root)
+{
+    const char *root = project_root && project_root[0] ? project_root : ".";
+    return out && out_cap > 0U &&
+        snprintf(
+            out,
+            out_cap,
+            "%s/config/settings/self_parameter_table.tsv",
+            root) < (int)out_cap;
+}
 
 static int ini_update_add(
     V5IniTextUpdate *updates,
@@ -94,24 +164,6 @@ static int ini_update_add(
     updates[*count].section_seen = 0;
     updates[*count].written = 0;
     ++*count;
-    return 1;
-}
-
-static int settings_apply_read_axis_binding(
-    const char *project_root,
-    char axis,
-    char *out,
-    size_t out_cap)
-{
-    char axis_name[2];
-    axis_name[0] = axis;
-    axis_name[1] = '\0';
-    if (!v5_settings_parameter_store_read_axis(
-            project_root, V5_SETTINGS_PARAMETER_DISK_SELF,
-            axis_name, "slave", out, out_cap) ||
-        !out[0]) {
-        return 0;
-    }
     return 1;
 }
 
@@ -151,7 +203,6 @@ static int settings_apply_read_current_model(
 }
 
 static int settings_apply_prepare_axis_migrations(
-    const V5SettingsApplyAxisCommitRequest *request,
     const char *ini_path,
     const V5MotionModelDescriptor *current,
     const V5MotionModelDescriptor *target,
@@ -165,7 +216,7 @@ static int settings_apply_prepare_axis_migrations(
     if (migration_count_out) {
         *migration_count_out = 0U;
     }
-    if (!request || !ini_path || !migrations || !migration_count_out ||
+    if (!ini_path || !migrations || !migration_count_out ||
         !v5_motion_model_build_axis_transition(
             current, target, transitions,
             sizeof(transitions) / sizeof(transitions[0]), &migration_count)) {
@@ -180,15 +231,7 @@ static int settings_apply_prepare_axis_migrations(
         migration->axis[1] = '\0';
         snprintf(migration->axis_section, sizeof(migration->axis_section),
                  "AXIS_%c", migration->transition.axis);
-        if (!settings_apply_read_axis_binding(
-                request->project_root, migration->transition.axis,
-                migration->original_slave, sizeof(migration->original_slave))) {
-            return 0;
-        }
         if (migration->transition.current_active) {
-            if (strcmp(migration->original_slave, "NAT") == 0) {
-                return 0;
-            }
             snprintf(
                 migration->current_joint_section,
                 sizeof(migration->current_joint_section),
@@ -202,9 +245,6 @@ static int settings_apply_prepare_axis_migrations(
                 }
             }
         }
-        snprintf(migration->final_slave, sizeof(migration->final_slave),
-                 "%s", migration->transition.target_active
-                     ? migration->original_slave : "NAT");
     }
     for (migration_i = 0U; migration_i < migration_count; ++migration_i) {
         V5ModelAxisMigration *migration = &migrations[migration_i];
@@ -232,36 +272,6 @@ static int settings_apply_prepare_axis_migrations(
                 }
             }
         }
-        if (strcmp(migration->final_slave, "NAT") == 0) {
-            size_t donor_i;
-            for (donor_i = 0U; donor_i < migration_count; ++donor_i) {
-                const V5ModelAxisMigration *donor = &migrations[donor_i];
-                if (donor->transition.current_active &&
-                    !donor->transition.target_active &&
-                    donor->transition.current_status_slot ==
-                        migration->transition.target_status_slot) {
-                    snprintf(migration->final_slave, sizeof(migration->final_slave),
-                             "%s", donor->original_slave);
-                    break;
-                }
-            }
-        }
-        if (strcmp(migration->final_slave, "NAT") == 0) {
-            return 0;
-        }
-    }
-    for (migration_i = 0U; migration_i < migration_count; ++migration_i) {
-        size_t other_i;
-        if (!migrations[migration_i].transition.target_active) {
-            continue;
-        }
-        for (other_i = 0U; other_i < migration_i; ++other_i) {
-            if (migrations[other_i].transition.target_active &&
-                strcmp(migrations[migration_i].final_slave,
-                       migrations[other_i].final_slave) == 0) {
-                return 0;
-            }
-        }
     }
     *migration_count_out = migration_count;
     return 1;
@@ -274,8 +284,8 @@ int v5_settings_apply_commit_motion_model(
     const V5MotionModelDescriptor *target_model;
     const V5MotionModelDescriptor *current_model = 0;
     V5ModelAxisMigration migrations[V5_MODEL_MIGRATION_MAX];
-    V5SettingsParameterAxisValue final_bindings[V5_MODEL_MIGRATION_MAX];
-    V5SettingsParameterAxisValue original_bindings[V5_MODEL_MIGRATION_MAX];
+    V5ModelAxisSlaveDefault mapping_defaults[V5_MODEL_MIGRATION_MAX];
+    V5SettingsParameterAxisValue mapping_values[V5_MODEL_MIGRATION_MAX];
     size_t migration_count = 0U;
     V5IniTextUpdate updates[V5_MODEL_INI_UPDATE_MAX];
     size_t update_count = 0U;
@@ -296,11 +306,14 @@ int v5_settings_apply_commit_motion_model(
     char kinematics[96];
     char wrapped_mask[16];
     char joint_count[16];
+    char mapping_path[512];
     char *original_ini;
+    char *original_mapping = 0;
     unsigned int wrapped_rotary_mask = 0U;
     unsigned int i;
     size_t migration_i;
-    int bindings_written = 0;
+    int model_changed;
+    int mapping_written = 0;
     int ok = 0;
     if (!request || !request->value_text ||
         !settings_apply_motion_model_values(
@@ -326,8 +339,21 @@ int v5_settings_apply_commit_motion_model(
     }
     if (!settings_apply_read_current_model(ini_path, &current_model) ||
         !settings_apply_prepare_axis_migrations(
-            request, ini_path, current_model, target_model,
+            ini_path, current_model, target_model,
             migrations, &migration_count)) {
+        return 0;
+    }
+    model_changed = strcmp(current_model->canonical, target_model->canonical) != 0;
+    if (model_changed &&
+        (!settings_apply_build_default_axis_slave_mapping(
+             migrations,
+             migration_count,
+             mapping_defaults,
+             mapping_values) ||
+         !settings_apply_self_parameter_table_path(
+             mapping_path,
+             sizeof(mapping_path),
+             request->project_root))) {
         return 0;
     }
     snprintf(kins_prefix, sizeof(kins_prefix), "%s", kins_module);
@@ -361,10 +387,6 @@ int v5_settings_apply_commit_motion_model(
     }
     for (migration_i = 0U; migration_i < migration_count; ++migration_i) {
         V5ModelAxisMigration *migration = &migrations[migration_i];
-        final_bindings[migration_i].axis = migration->axis;
-        final_bindings[migration_i].value = migration->final_slave;
-        original_bindings[migration_i].axis = migration->axis;
-        original_bindings[migration_i].value = migration->original_slave;
         if (migration->transition.current_active) {
             for (i = 0U; i < V5_MODEL_JOINT_KEY_COUNT; ++i) {
                 if (!ini_update_add(
@@ -387,36 +409,58 @@ int v5_settings_apply_commit_motion_model(
         }
     }
     original_ini = v5_settings_apply_read_text_file_limited(ini_path);
-    if (!original_ini || !v5_settings_apply_ini_write_text_updates(ini_path, updates, update_count)) {
+    if (model_changed) {
+        original_mapping = v5_settings_apply_read_text_file_limited(mapping_path);
+    }
+    if (!original_ini || (model_changed && !original_mapping)) {
         free(original_ini);
+        free(original_mapping);
         return 0;
     }
-    bindings_written = v5_settings_parameter_store_write_axis_values(
-        request->project_root, V5_SETTINGS_PARAMETER_DISK_SELF, "slave",
-        final_bindings, migration_count);
-    if (!bindings_written) {
-        (void)v5_settings_apply_write_text_file_atomic(ini_path, original_ini);
+    if (model_changed) {
+        mapping_written = v5_settings_parameter_store_write_axis_values(
+            request->project_root,
+            V5_SETTINGS_PARAMETER_DISK_SELF,
+            "slave",
+            mapping_values,
+            migration_count);
+        if (!mapping_written) {
+            free(original_ini);
+            free(original_mapping);
+            return 0;
+        }
+    }
+    if (!v5_settings_apply_ini_write_text_updates(ini_path, updates, update_count)) {
+        if (mapping_written) {
+            (void)v5_settings_apply_write_text_file_atomic(
+                mapping_path,
+                original_mapping);
+        }
         free(original_ini);
+        free(original_mapping);
         return 0;
     }
-    ok = v5_settings_apply_ini_updates_readback_match(ini_path, updates, update_count);
-    for (migration_i = 0U; ok && migration_i < migration_count; ++migration_i) {
-        V5ModelAxisMigration *migration = &migrations[migration_i];
-        char readback[64];
-        ok = settings_apply_read_axis_binding(
-                 request->project_root, migration->transition.axis,
-                 readback, sizeof(readback)) &&
-             strcmp(readback, migration->final_slave) == 0;
-    }
+    ok = v5_settings_apply_ini_updates_readback_match(
+        ini_path,
+        updates,
+        update_count) &&
+        (!model_changed || settings_apply_default_axis_slave_readback_matches(
+            request->project_root,
+            mapping_defaults,
+            migration_count));
     if (!ok) {
         (void)v5_settings_apply_write_text_file_atomic(ini_path, original_ini);
-        (void)v5_settings_parameter_store_write_axis_values(
-            request->project_root, V5_SETTINGS_PARAMETER_DISK_SELF, "slave",
-            original_bindings, migration_count);
+        if (mapping_written) {
+            (void)v5_settings_apply_write_text_file_atomic(
+                mapping_path,
+                original_mapping);
+        }
         free(original_ini);
+        free(original_mapping);
         return 0;
     }
     free(original_ini);
+    free(original_mapping);
     if (result) {
         snprintf(result->readback_value, sizeof(result->readback_value), "%s", display);
     }

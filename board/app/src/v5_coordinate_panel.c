@@ -14,20 +14,16 @@ static void text_unavailable(char *out, size_t cap)
     snprintf(out, cap, "--.---");
 }
 
-static void text_value(char *out, size_t cap, double value)
+static void text_value(char *out, size_t cap, double value, unsigned int digits)
 {
-    double scaled;
     if (!out || cap == 0u) {
         return;
-    }
-    scaled = value * 1000.0;
-    if (isfinite(scaled)) {
-        value = (scaled >= 0.0 ? floor(scaled + 1.0e-9) : ceil(scaled - 1.0e-9)) / 1000.0;
     }
     if (value == 0.0) {
         value = 0.0;
     }
-    snprintf(out, cap, "%+010.3f", value);
+    if (digits > 6U) digits = 6U;
+    snprintf(out, cap, "%+010.*f", (int)digits, value);
 }
 
 static void text_speed(char *out, size_t cap, int valid, double value, const char *suffix)
@@ -76,17 +72,21 @@ void v5_coordinate_panel_from_status(const V5UiStatusView *status, V5CoordinateP
         panel->lines[i].cmd_valid = cmd_valid;
         panel->lines[i].following_error_valid = mcs_valid && cmd_valid;
         if (mcs_valid) {
-            text_value(panel->lines[i].mcs_text, sizeof(panel->lines[i].mcs_text), status->mcs[i]);
+            text_value(panel->lines[i].mcs_text, sizeof(panel->lines[i].mcs_text),
+                status->mcs[i], status->display_digits[i]);
         } else {
             text_unavailable(panel->lines[i].mcs_text, sizeof(panel->lines[i].mcs_text));
         }
         if (cmd_valid) {
-            text_value(panel->lines[i].cmd_text, sizeof(panel->lines[i].cmd_text), status->cmd_mcs[i]);
+            text_value(panel->lines[i].cmd_text, sizeof(panel->lines[i].cmd_text),
+                status->cmd_mcs[i], status->display_digits[i]);
         } else {
             text_unavailable(panel->lines[i].cmd_text, sizeof(panel->lines[i].cmd_text));
         }
         if (mcs_valid && cmd_valid) {
-            text_value(panel->lines[i].following_error_text, sizeof(panel->lines[i].following_error_text), status->raw_mcs[i] - status->raw_cmd_mcs[i]);
+            text_value(panel->lines[i].following_error_text,
+                sizeof(panel->lines[i].following_error_text),
+                status->following_error[i], status->display_digits[i]);
         } else {
             text_unavailable(panel->lines[i].following_error_text, sizeof(panel->lines[i].following_error_text));
         }

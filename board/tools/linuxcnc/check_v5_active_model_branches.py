@@ -175,9 +175,9 @@ def main():
     native_dispatch = read("linuxcnc/src/hal/user_comps/v5_native_g53_model.h")
     native_ac = read("linuxcnc/src/hal/user_comps/v5_native_g53_model_ac.h")
     native_bc = read("linuxcnc/src/hal/user_comps/v5_native_g53_model_bc.h")
-    ui_dispatch = read("board/app/src/v5_main_page_model_projector.c")
-    ui_ac = read("board/app/src/v5_main_page_model_projector_ac.c")
-    ui_bc = read("board/app/src/v5_main_page_model_projector_bc.c")
+    scene_dispatch = read("board/services/state_publisher/v5_program_scene_model.c")
+    scene_ac = read("board/services/state_publisher/v5_program_scene_model_ac.c")
+    scene_bc = read("board/services/state_publisher/v5_program_scene_model_bc.c")
 
     ac_objects = make_block(makefile, "xyzac-trt-kins")
     bc_objects = make_block(makefile, "xyzbc-trt-kins")
@@ -250,24 +250,24 @@ def main():
     require(native_bc, "input->b_x - input->c_x", "native G53 BC branch")
     forbid(native_bc, "input->a_", "native G53 BC branch")
 
-    require(ui_dispatch, "v5_main_page_model_projector_ac_ops", "UI model dispatcher")
-    require(ui_dispatch, "v5_main_page_model_projector_bc_ops", "UI model dispatcher")
-    forbid(ui_dispatch, "V5_MOTION_MODEL_ID_XYZAC_TRT", "UI shared dispatcher")
-    forbid(ui_dispatch, "V5_MOTION_MODEL_ID_XYZBC_TRT", "UI shared dispatcher")
-    require(ui_ac, "V5_MOTION_MODEL_ID_XYZAC_TRT", "UI AC branch")
-    require(ui_ac, "model->first_rotary_axis == 'A'", "UI AC branch")
-    require(ui_ac, "model->second_rotary_axis == 'C'", "UI AC branch")
-    forbid(ui_ac, "V5_MOTION_MODEL_ID_XYZBC_TRT", "UI AC branch")
-    forbid(ui_ac, "model->first_rotary_axis == 'B'", "UI AC branch")
-    require(ui_bc, "V5_MOTION_MODEL_ID_XYZBC_TRT", "UI BC branch")
-    require(ui_bc, "model->first_rotary_axis == 'B'", "UI BC branch")
-    require(ui_bc, "model->second_rotary_axis == 'C'", "UI BC branch")
-    forbid(ui_bc, "V5_MOTION_MODEL_ID_XYZAC_TRT", "UI BC branch")
-    forbid(ui_bc, "model->first_rotary_axis == 'A'", "UI BC branch")
+    require(scene_dispatch, "v5_program_scene_model_ac_ops", "scene model dispatcher")
+    require(scene_dispatch, "v5_program_scene_model_bc_ops", "scene model dispatcher")
+    forbid(scene_dispatch, "V5_MOTION_MODEL_ID_XYZAC_TRT", "scene shared dispatcher")
+    forbid(scene_dispatch, "V5_MOTION_MODEL_ID_XYZBC_TRT", "scene shared dispatcher")
+    require(scene_ac, "V5_MOTION_MODEL_ID_XYZAC_TRT", "scene AC branch")
+    require(scene_ac, "model->primary_axis = 'A'", "scene AC branch")
+    require(scene_ac, "model->child_axis = 'C'", "scene AC branch")
+    forbid(scene_ac, "V5_MOTION_MODEL_ID_XYZBC_TRT", "scene AC branch")
+    forbid(scene_ac, "model->primary_axis = 'B'", "scene AC branch")
+    require(scene_bc, "V5_MOTION_MODEL_ID_XYZBC_TRT", "scene BC branch")
+    require(scene_bc, "model->primary_axis = 'B'", "scene BC branch")
+    require(scene_bc, "model->child_axis = 'C'", "scene BC branch")
+    forbid(scene_bc, "V5_MOTION_MODEL_ID_XYZAC_TRT", "scene BC branch")
+    forbid(scene_bc, "model->primary_axis = 'A'", "scene BC branch")
 
     print(
         "V5_ACTIVE_MODEL_BRANCHES_OK "
-        f"kinematics=2 native_g53=2 ui=2 runtime_descriptors={len(runtime_descriptors)}"
+        f"kinematics=2 native_g53=2 scene=2 runtime_descriptors={len(runtime_descriptors)}"
     )
 
 

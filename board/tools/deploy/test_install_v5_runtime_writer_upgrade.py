@@ -31,7 +31,7 @@ def audit_state_upgrade(text: str) -> None:
     scanner = section(text, 'manifest_position_publisher=0',
                       '\ncase "$restart_scope_requested" in')
     dispatch = section(text, 'stop_affected_writers_before_install() {',
-                       '\nif [ "$apply" -eq 1 ] &&')
+                       '\nstop_shm_abi_domain_before_install() {')
     for token in STATE_SCANNER_EDGES:
         assert token in scanner, 'STATE_WRITER_SELECTOR_MISSING:' + token
     for token in STATE_DISPATCH_EDGES:
@@ -42,6 +42,16 @@ def main() -> int:
     text = INSTALLER.read_text(encoding='utf-8')
     manifest = MANIFEST.read_text(encoding='utf-8')
     audit_state_upgrade(text)
+    for token in (
+        'disable_unconditional_ethercat_autostart',
+        'rm -f "$dir"/S??ethercat',
+        'enable_boot_service v5-linuxcnc-command-gate 05 19',
+        'enable_boot_service v5-position-status-publisher 06 18',
+        'enable_boot_service v5-wcs-status-publisher 06 17',
+        'enable_boot_service v5-state-publisher 07 16',
+        'enable_boot_service v5-ui-relay 08 15',
+    ):
+        assert token in text, 'MODE_SELECTED_BOOT_ORDER_MISSING:' + token
     assert 'manifest_state_only=1' in text
     assert 'restart_scope=state' in text
     assert 'State-publisher restart scope requires a non-empty State-publisher-only manifest' in text
@@ -57,6 +67,16 @@ def main() -> int:
         '/opt/8ax/v5/linuxcnc/ini/v5_local_shmem.nml',
     ):
         assert runtime_ini in text
+    runtime_model_seed = (
+        'runtime_seed\tlinuxcnc/ini/v5_bus.ini\t'
+        '/opt/8ax/v5/linuxcnc/ini/v5_bus.ini\t0644')
+    assert manifest.splitlines().count(runtime_model_seed) == 1
+    install_loop_text = section(
+        text,
+        'while IFS="$tab" read -r kind source destination mode extra; do',
+        '\nenable_boot_service() {')
+    assert 'if [ "$kind" = "runtime_seed" ] && [ -e "$destination" ]; then' in install_loop_text
+    assert 'preserve runtime seed %s -> %s (exists)' in install_loop_text
     for row in (
         'binary\tbuild/board/app/v5_state_publisher\t/usr/libexec/8ax/v5_state_publisher\t0755',
         'init\tservices/state_publisher/init.d/v5-state-publisher\t/etc/init.d/v5-state-publisher\t0755',
@@ -67,7 +87,7 @@ def main() -> int:
         '\nstop_affected_writers_before_install() {')
     dispatch = section(
         text, 'stop_affected_writers_before_install() {',
-        '\nif [ "$apply" -eq 1 ] &&')
+        '\nstop_shm_abi_domain_before_install() {')
     actual_barrier = section(
         text, 'wait_publisher_actual_barrier() {',
         '\nwriter_pid_matches_path() {')
@@ -86,9 +106,9 @@ def main() -> int:
     assert 'kill -KILL' not in stop
     assert 'trap' not in dispatch
 
-    preinstall = text.index('stop_affected_writers_before_install\nfi')
+    preinstall = text.index('    stop_shm_abi_domain_before_install\n  else')
     install_loop = text.index('while IFS="$tab" read -r kind source destination mode extra; do')
-    first_start = text.index('/etc/init.d/v5-position-status-publisher restart', install_loop)
+    first_start = text.index('start_shm_abi_domain_after_install() {', install_loop)
     assert preinstall < install_loop < first_start
 
     # All three current writers and their shared modules select the stop barrier;
@@ -110,9 +130,12 @@ def main() -> int:
     # Spawn-only publisher services are joined once per non-UI install batch.
     # The UI/cpu-policy/all scopes reuse the UI-owned barrier and must not add
     # a second wait after each individual restart.
-    assert text.count('\n    wait_publisher_actual_barrier\n') == 3
+    assert text.count('\n    wait_publisher_actual_barrier\n') == 4
+    assert text.count('\n  wait_publisher_actual_barrier\n') == 1
     scopes = {
         'backend': section(text, 'elif [ "$restart_scope" = "backend" ]',
+                           'elif [ "$restart_scope" = "ethercat" ]'),
+        'ethercat': section(text, 'elif [ "$restart_scope" = "ethercat" ]',
                            'elif [ "$restart_scope" = "wcs" ]'),
         'wcs': section(text, 'elif [ "$restart_scope" = "wcs" ]',
                        'elif [ "$restart_scope" = "cpu_policy" ]'),
@@ -122,16 +145,113 @@ def main() -> int:
                             '\n  else\n'),
         'all': section(text, '\n  else\n    enable_boot_services', '\n  fi\nelse\n'),
     }
-    for name in ('backend', 'wcs', 'settings'):
+    for name in ('backend', 'ethercat', 'wcs', 'settings'):
         assert scopes[name].count('wait_publisher_actual_barrier') == 1, name
     for name in ('cpu_policy', 'all'):
         assert 'wait_publisher_actual_barrier' not in scopes[name], name
-    assert scopes['backend'].index('restart_position_publisher_after_backend') < scopes['backend'].index('wait_publisher_actual_barrier')
+    assert scopes['backend'].index('ensure_position_publisher_after_backend') < scopes['backend'].index('wait_publisher_actual_barrier')
+    assert scopes['ethercat'].index('ensure_position_publisher_after_backend') < scopes['ethercat'].index('wait_publisher_actual_barrier')
     assert scopes['wcs'].index('/etc/init.d/v5-wcs-status-publisher restart') < scopes['wcs'].index('wait_publisher_actual_barrier')
     assert scopes['settings'].index('/etc/init.d/v5-state-publisher restart') < scopes['settings'].index('wait_publisher_actual_barrier') < scopes['settings'].index('/etc/init.d/v5-settings-actiond restart')
     for token in ('active_ini=conflict', '--pre-ui-inputs',
                   '--expected-ini "$expected_ini"', '--timeout 120'):
         assert token in actual_barrier
+    ensure_position = section(
+        text, 'ensure_position_publisher_after_backend() {',
+        '\n}\n\nwait_publisher_actual_barrier() {')
+    assert '/etc/init.d/v5-position-status-publisher status' in ensure_position
+    assert '/etc/init.d/v5-position-status-publisher start' in ensure_position
+    assert '/etc/init.d/v5-position-status-publisher restart' not in ensure_position
+
+    # SHM ABI participants are one atomic deployment domain. An incomplete
+    # UI-only or State-only manifest is rejected before any installation.
+    scanner = section(
+        text, 'manifest_ui_only=1',
+        '\ncase "$restart_scope_requested" in')
+    required_destinations = (
+        '/usr/libexec/8ax/v5_lvgl_shell',
+        '/usr/libexec/8ax/v5_state_publisher',
+        '/usr/libexec/8ax/v5_position_status_publisher.py',
+        '/usr/libexec/8ax/v5_wcs_status_publisher.py',
+        '/usr/libexec/8ax/v5_polling_cadence.py',
+        '/usr/libexec/8ax/v5_machine_status_projection.py',
+        '/usr/libexec/8ax/v5_wcs_status_codec.py',
+        '/usr/libexec/8ax/v5_remote_ui_relay.py',
+        '/usr/libexec/8ax/v5_ui_boot_ready.py',
+        '/usr/libexec/8ax/v5_status_shm_reader.py',
+        '/etc/init.d/v5-position-status-publisher',
+        '/etc/init.d/v5-wcs-status-publisher',
+        '/etc/init.d/v5-state-publisher',
+        '/etc/init.d/v5-ui-relay',
+    )
+    manifest_rows = [
+        line for line in manifest.splitlines()
+        if line and not line.startswith('#') and
+        line.split('\t')[2] in required_destinations
+    ]
+    assert len(manifest_rows) == len(required_destinations)
+    assert {line.split('\t')[2] for line in manifest_rows} == set(required_destinations)
+
+    def run_manifest_scan(rows) -> subprocess.CompletedProcess:
+        with tempfile.TemporaryDirectory() as directory:
+            manifest_path = Path(directory) / 'manifest.tsv'
+            manifest_path.write_text('\n'.join(rows) + '\n', encoding='utf-8')
+            script = (
+                'tab=$(printf "\\t")\n'
+                f'manifest="{manifest_path.as_posix()}"\n'
+                f'{scanner}\n'
+                'echo "ABI_COMPLETE=$manifest_shm_abi_complete '
+                'ABI_TOUCHED=$manifest_shm_abi_touched"\n'
+            )
+            script_path = Path(directory) / 'manifest-scan.sh'
+            script_path.write_text(script, encoding='utf-8')
+            return subprocess.run(
+                ['sh', script_path.as_posix()], check=False,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    complete = run_manifest_scan(manifest_rows)
+    assert complete.returncode == 0, complete.stderr
+    assert b'ABI_COMPLETE=1 ABI_TOUCHED=1' in complete.stdout
+    for destination in (
+        '/usr/libexec/8ax/v5_lvgl_shell',
+        '/usr/libexec/8ax/v5_state_publisher',
+        '/usr/libexec/8ax/v5_position_status_publisher.py',
+        '/usr/libexec/8ax/v5_status_shm_reader.py',
+    ):
+        incomplete_rows = [
+            row for row in manifest_rows if row.split('\t')[2] != destination]
+        incomplete = run_manifest_scan(incomplete_rows)
+        assert incomplete.returncode == 8, (destination, incomplete.stderr)
+        assert b'complete Position/State/UI atomic bundle' in incomplete.stderr
+
+    atomic_stop = section(
+        text, 'stop_shm_abi_domain_before_install() {',
+        '\nwait_position_shm_abi_readback() {')
+    atomic_start = section(
+        text, 'start_shm_abi_domain_after_install() {',
+        '\nretired_pid_matches_path() {')
+    assert atomic_stop.index('/etc/init.d/v5-ui-relay stop') < atomic_stop.index(
+        'v5-state-publisher') < atomic_stop.index(
+        'v5-wcs-status-publisher') < atomic_stop.index(
+        'v5-position-status-publisher')
+    assert atomic_start.index('/etc/init.d/v5-position-status-publisher start') < atomic_start.index(
+        'wait_position_shm_abi_readback') < atomic_start.index(
+        '/etc/init.d/v5-state-publisher start') < atomic_start.index(
+        'wait_state_shm_abi_readback') < atomic_start.index(
+        '/etc/init.d/v5-ui-relay start')
+    for token in (
+        'V5_POSITION_ABI_READBACK_OK',
+        '(0x56504F53, 3, 256)',
+        'writer_identity == 0',
+        'fnv1a(payload[:248])',
+        'V5_STATE_ABI_READBACK_OK',
+        '0x56355348, 3, 7128, 7128, 7096',
+        'required_mask = (1 << 0) | (1 << 1) | (1 << 8)',
+        'scene_generation == 0',
+        'zlib.crc32(payload[32:], actual_crc)',
+        'V5_SHM_ABI_ATOMIC_RESTART_OK scope=position,state,ui-relay',
+    ):
+        assert token in text, token
 
     # Execute the production mode detector against a synthetic /proc. Only a
     # single BUS owner reaches the canonical barrier. Pulse is cold-staged,
@@ -240,7 +360,8 @@ stop_writer_before_upgrade v5-test-writer {writer}
         start_token, end_token = (
             ('manifest_position_publisher=0', '\ncase "$restart_scope_requested" in')
             if token in STATE_SCANNER_EDGES else
-            ('stop_affected_writers_before_install() {', '\nif [ "$apply" -eq 1 ] &&'))
+            ('stop_affected_writers_before_install() {',
+             '\nstop_shm_abi_domain_before_install() {'))
         begin = text.index(start_token); end = text.index(end_token, begin)
         body = text[begin:end].replace(token, 'STATE_UPGRADE_EDGE_REMOVED', 1)
         mutated = text[:begin] + body + text[end:]
@@ -257,6 +378,7 @@ stop_writer_before_upgrade v5-test-writer {writer}
     assert '"$retired_init" stop' not in text
     assert 'rm -f /etc/init.d/v5-rtcp-status-publisher' in text
     assert 'rm -f /etc/init.d/v5-g53-geometry-memory-owner' in text
+    assert 'rm -f /usr/libexec/8ax/drive_profile/v5_bus_zero_resident_gate.py' in text
 
     print('V5_RUNTIME_WRITER_UPGRADE_ORDER_OK')
     return 0

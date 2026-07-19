@@ -9,6 +9,7 @@
 #include "v5_native_axis_zero_position.h"
 #include "v5_native_first_point.h"
 #include "v5_native_home.h"
+#include "v5_native_home_mapping.h"
 #include "v5_native_home_runtime_owner.h"
 #include "v5_native_hal_owner_client.h"
 #include "v5_native_motion_parameters.h"
@@ -51,6 +52,51 @@ static char g_pulse_contract_path[256] = "/opt/8ax/v5/linuxcnc/components/step_i
 static char g_socket_path[sizeof(((struct sockaddr_un *)0)->sun_path)] = V5_COMMAND_GATE_SOCKET_PATH;
 static V5NativeMotionParameters g_motion_parameters;
 static V5JogWatchdog g_jog_watchdog;
+static int g_axis_slave_mapping_status_available;
+static int g_axis_slave_mapping_applicable;
+static int g_axis_slave_mapping_valid;
+static unsigned int g_axis_slave_mapping_generation;
+static char g_axis_slave_mapping_code[64];
+
+static void load_axis_slave_mapping_status(void)
+{
+    V5NativeMotionParameters mapping_parameters;
+    char code[sizeof(g_axis_slave_mapping_code)];
+    g_axis_slave_mapping_status_available = 1;
+    g_axis_slave_mapping_applicable =
+        g_motion_parameters.driver_mode == V5_NATIVE_DRIVER_MODE_BUS;
+    g_axis_slave_mapping_valid = 1;
+    g_axis_slave_mapping_generation = 0U;
+    snprintf(
+        g_axis_slave_mapping_code,
+        sizeof(g_axis_slave_mapping_code),
+        "%s",
+        g_axis_slave_mapping_applicable
+            ? "BUS_AXIS_SLAVE_MAPPING_NOT_CHECKED"
+            : "AXIS_SLAVE_MAPPING_NOT_APPLICABLE");
+    if (!g_axis_slave_mapping_applicable) {
+        return;
+    }
+    mapping_parameters = g_motion_parameters;
+    code[0] = '\0';
+    g_axis_slave_mapping_valid = v5_native_home_mapping_load(
+        g_settings_project_root,
+        &mapping_parameters,
+        code,
+        sizeof(code));
+    g_axis_slave_mapping_generation = g_axis_slave_mapping_valid
+        ? mapping_parameters.mapping_generation
+        : 0U;
+    snprintf(
+        g_axis_slave_mapping_code,
+        sizeof(g_axis_slave_mapping_code),
+        "%s",
+        code[0]
+            ? code
+            : (g_axis_slave_mapping_valid
+                ? "BUS_HOME_MAPPING_VALID"
+                : "BUS_HOME_MAPPING_INVALID"));
+}
 
 static int project_native_home_config(
     const V5NativeMotionParameters *parameters,
@@ -456,6 +502,19 @@ static void execute_request(const V5CommandGateIpcRequestFrame *frame, V5Command
                 response->readback_code, sizeof(response->readback_code), "DRIVE_WRITE_WINDOW_ACTIVE");
             return;
         }
+        if (g_axis_slave_mapping_applicable &&
+            (!g_axis_slave_mapping_status_available ||
+             !g_axis_slave_mapping_valid)) {
+            linuxcncrsh_unlock();
+            v5_command_gate_response_fill_safety(response);
+            response->send_status = V5_COMMAND_GATE_SEND_INVALID;
+            response->executed = 0;
+            v5_command_gate_response_copy_text(
+                response->readback_code,
+                sizeof(response->readback_code),
+                "ALL_HOME_AXIS_SLAVE_MAPPING_INVALID");
+            return;
+        }
         status = v5_native_safety_estop_reset_latch(&native_result);
         if (status == V5_NATIVE_SAFETY_SEND_SENT) {
             status = restore_machine_on_after_estop_reset_locked(&native_result);
@@ -742,6 +801,43 @@ static void handle_frame(const V5CommandGateIpcRequestFrame *request, V5CommandG
         v5_command_gate_response_copy_text(response->readback_code, sizeof(response->readback_code), "ESTOP_CLEAN_STATUS_OK");
         return;
     }
+    if (request->op == V5_COMMAND_GATE_IPC_OP_PROBE_AXIS_SLAVE_MAPPING) {
+        if (!v5_command_gate_validate_envelope(
+                request,
+                V5_COMMAND_GATE_IPC_OP_PROBE_AXIS_SLAVE_MAPPING,
+                reject_reason,
+                sizeof(reject_reason))) {
+            response->send_status = V5_COMMAND_GATE_SEND_INVALID;
+            v5_command_gate_response_copy_text(
+                response->readback_code,
+                sizeof(response->readback_code),
+                reject_reason);
+            return;
+        }
+        response->axis_slave_mapping_status_available =
+            g_axis_slave_mapping_status_available ? 1 : 0;
+        response->axis_slave_mapping_applicable =
+            g_axis_slave_mapping_applicable ? 1 : 0;
+        response->axis_slave_mapping_valid =
+            g_axis_slave_mapping_valid ? 1 : 0;
+        response->axis_slave_mapping_generation =
+            g_axis_slave_mapping_generation;
+        v5_command_gate_response_copy_text(
+            response->axis_slave_mapping_code,
+            sizeof(response->axis_slave_mapping_code),
+            g_axis_slave_mapping_code);
+        response->send_status = g_axis_slave_mapping_status_available
+            ? V5_COMMAND_GATE_SEND_SENT
+            : V5_COMMAND_GATE_SEND_UNAVAILABLE;
+        response->executed = 0;
+        v5_command_gate_response_copy_text(
+            response->readback_code,
+            sizeof(response->readback_code),
+            g_axis_slave_mapping_status_available
+                ? "AXIS_SLAVE_MAPPING_STATUS_OK"
+                : "AXIS_SLAVE_MAPPING_STATUS_UNAVAILABLE");
+        return;
+    }
     if (request->op == V5_COMMAND_GATE_IPC_OP_EXECUTE) {
         execute_request(request, response);
         return;
@@ -855,6 +951,7 @@ int main(int argc, char **argv)
                 motion_code, g_ini_path);
         return 5;
     }
+    load_axis_slave_mapping_status();
     if (!v5_native_motion_parameters_load_runtime_owner(
             g_settings_project_root,
             g_settings_runtime_path,

@@ -4,11 +4,11 @@
   "petalinux_version": "2020.2",
   "generated_from": "petalinux-image-minimal --runall=fetch",
   "inventory_path": "board/petalinux/v5_bitbake_source_inventory.json",
-  "inventory_sha256": "7364bc489535bfa6581b0cfcfdbf4164c5a66455f313e3be6dba438e4c4259b7",
-  "recipe_count": 305,
-  "package_count": 222,
-  "total_size": 4197516870,
-  "tree_sha256": "c4c9dc6f384423d0e64a5259b05daef271ac5db5de9f065eca6d923b3e31fef8",
+  "inventory_sha256": "2b8dd0c2c8486ade4efc493ff020dc6453f334d7d95a53c271213a4cf340e6e9",
+  "recipe_count": 304,
+  "package_count": 221,
+  "total_size": 4188198442,
+  "tree_sha256": "8bd1345ce352bd2eb288cbf05b34cfc0c216bb673f317b598ba33a140b45b1f5",
   "files": [
     {
       "path": "Cython-0.29.13.tar.gz",
@@ -309,11 +309,6 @@
       "path": "git2_git.denx.de.u-boot.git.tar.gz",
       "size": 292113440,
       "sha256": "35ae0299a41ec817e382ef0b3b564879f59194dc21fc3f5bf06f35119516cd87"
-    },
-    {
-      "path": "git2_git.eclipse.org.gitroot.tcf.org.eclipse.tcf.agent.tar.gz",
-      "size": 9318428,
-      "sha256": "c400540d4a11187c19af2a0870dcdf0c81fb03638d8d27311a0cd9630d4a5798"
     },
     {
       "path": "git2_git.infradead.org.mtd-utils.git.tar.gz",

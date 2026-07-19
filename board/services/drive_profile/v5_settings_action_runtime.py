@@ -52,6 +52,7 @@ last_status: Dict[str, Any] = {
     "owner": "",
     "code": "",
     "message_cn": "待命",
+    "vpsDistributionId": "",
     "result_path": "",
     "axis": "",
     "restart_required": False,
@@ -124,6 +125,9 @@ def set_last_status(
     payload = result or {}
     message = str(payload.get("display_message_cn") or payload.get("message_cn") or ("执行中" if busy else ""))
     axis = str(payload.get("axis") or axis_hint or "")
+    vps_distribution_id = str(payload.get("vpsDistributionId") or "")
+    if action != "device_dna_register" or len(vps_distribution_id) != 6 or not vps_distribution_id.isdigit():
+        vps_distribution_id = ""
     with status_lock:
         last_status.update({
             "schema": "v5.settings_actiond_status.v1",
@@ -135,6 +139,7 @@ def set_last_status(
             "owner": spec.get("owner", ""),
             "code": str(payload.get("code") or ("RUNNING" if busy else "")),
             "message_cn": message,
+            "vpsDistributionId": vps_distribution_id,
             "result_path": str(spec.get("result_path", "")),
             "axis": axis,
             "restart_required": bool(payload.get("restart_required")),

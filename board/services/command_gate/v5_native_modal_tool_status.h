@@ -3,6 +3,8 @@
 
 #include "v5_native_readback.h"
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -12,6 +14,12 @@ extern "C" {
 #define V5_NATIVE_MODAL_TOOL_STATUS_TEXT_CAP 128U
 
 int v5_native_modal_tool_status_read(const char *path, unsigned int max_age_ms, V5NativeReadback *readback);
+size_t v5_native_modal_tool_status_block_size(void);
+int v5_native_modal_tool_status_read_from_memory(
+    const void *memory,
+    size_t size,
+    unsigned int max_age_ms,
+    V5NativeReadback *readback);
 int v5_native_modal_tool_status_write(
     const char *path,
     int valid,

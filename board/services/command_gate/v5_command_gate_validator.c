@@ -231,13 +231,6 @@ int v5_command_gate_validate_execute_frame(
         return 0;
     }
     switch (kind) {
-    case V5_COMMAND_PROGRAM_OPEN:
-        if (!axis_mask_must_be_zero(frame, reason, reason_cap) ||
-            !command_text_ok(frame->text_value, 1, 1, reason, reason_cap) ||
-            !command_text_ok(frame->secondary_text_value, 0, 0, reason, reason_cap)) {
-            return 0;
-        }
-        break;
     case V5_COMMAND_MDI_RUN:
         if (!axis_mask_must_be_zero(frame, reason, reason_cap) ||
             !command_text_ok(frame->text_value, 1, 1, reason, reason_cap) ||

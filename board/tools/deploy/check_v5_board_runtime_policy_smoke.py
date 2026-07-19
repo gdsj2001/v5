@@ -15,28 +15,35 @@ import tempfile
 HERE = Path(__file__).resolve().parent
 POLICY_PATH = HERE / "check_v5_board_runtime_policy.py"
 INIT_PATH = HERE.parents[1] / "services" / "state_publisher" / "init.d" / "v5-position-status-publisher"
-POSITION_STRUCT = struct.Struct("<IIIIIIQ14dII")
+POSITION_STRUCT = struct.Struct("<IIIIIIIIQQ20d5B3x4dII")
 
 
 def load_remote_namespace():
-    spec = importlib.util.spec_from_file_location("v5_board_policy", POLICY_PATH)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    prefix, separator, _tail = module.REMOTE_CHECK.partition("\nrc = 0\n")
-    assert separator, "remote definition boundary missing"
     sentinel = object()
     saved_pwd = sys.modules.get("pwd", sentinel)
-    if saved_pwd is sentinel:
+    saved_grp = sys.modules.get("grp", sentinel)
+    if os.name == "nt":
         sys.modules["pwd"] = SimpleNamespace(getpwuid=lambda uid: SimpleNamespace(pw_name=str(uid)))
-    namespace = {"__name__": "v5_board_policy_remote_smoke"}
+        sys.modules["grp"] = SimpleNamespace(getgrgid=lambda gid: SimpleNamespace(gr_name=str(gid)))
     try:
+        spec = importlib.util.spec_from_file_location("v5_board_policy", POLICY_PATH)
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        prefix, separator, _tail = module.REMOTE_CHECK.partition("\nrc = 0\n")
+        assert separator, "remote definition boundary missing"
+        namespace = {"__name__": "v5_board_policy_remote_smoke"}
         exec(prefix, namespace)
     finally:
-        if saved_pwd is sentinel:
-            sys.modules.pop("pwd", None)
-        else:
-            sys.modules["pwd"] = saved_pwd
+        if os.name == "nt":
+            if saved_pwd is sentinel:
+                sys.modules.pop("pwd", None)
+            else:
+                sys.modules["pwd"] = saved_pwd
+            if saved_grp is sentinel:
+                sys.modules.pop("grp", None)
+            else:
+                sys.modules["grp"] = saved_grp
     return namespace, module.REMOTE_CHECK
 
 
@@ -105,8 +112,14 @@ class PositionFixture:
         )
 
     def write_block(self, writer_identity: int):
-        values = [0x56504F53, 2, POSITION_STRUCT.size, 3, 5, writer_identity, 123456]
-        values.extend([0.0] * 14)
+        values = [
+            0x56504F53, 3, POSITION_STRUCT.size, 3, 5, writer_identity,
+            2, 0, 123456, 1]
+        values.extend([0.0] * 10)
+        values.extend([0.0001] * 5)
+        values.extend([0.0] * 5)
+        values.extend([3] * 5)
+        values.extend([0.0] * 4)
         values.extend([0, 0])
         payload = POSITION_STRUCT.pack(*values)
         values[-2] = fnv1a(payload[:-8])

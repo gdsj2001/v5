@@ -1,0 +1,240 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: V5 Project <v5@example.invalid>
+Date: Sun, 19 Jul 2026 15:54:00 +0800
+Subject: [PATCH] v5: activate EtherCAT master in first resident read
+
+The board LinuxCNC release has no initf command. Falling back to activation
+from rtapi_app_main lets the master and slaves reach OP before the 2 ms HAL
+thread starts process-data exchange, which creates a cold-start WKC=0 window.
+
+Keep only one activation path: the first lcec.read-all call activates every
+master in realtime context and immediately continues with receive/process.
+Activation failure is latched instead of retried from the cyclic path, and the
+old module-load, initf and write-side fallback paths are removed.
+---
+ src/lcec.h      |   4 +-
+ src/lcec_main.c | 136 +++++++------------------------------------------
+ 2 files changed, 20 insertions(+), 120 deletions(-)
+
+diff --git a/src/lcec.h b/src/lcec.h
+index 409034ceb..1817cbbbf 100644
+--- a/src/lcec.h
++++ b/src/lcec.h
+@@ -246,8 +246,8 @@ typedef struct lcec_master {
+   ec_master_state_t ms;
+   ec_domain_state_t ds;
+   int activated;                    // Flag: master has been activated (0=not yet, 1=activated)
+-  int initf_activated;              // Flag: activation happened via initf path (clean RT-context); when set, BANG-BANG PLL trim is skipped because app_phase was born stable
+-  int forgot_warned;                // One-shot guard for the "user forgot initf lcec.activate" warning in lcec_write_master
++  int rt_activated;                 // Activation happened in the first resident read cycle
++  int activation_failed;            // Activation failed once; cyclic code must not retry it
+ #ifdef RTAPI_TASK_PLL_SUPPORT
+   uint64_t dc_ref;
+   uint64_t dc_ref_time;          // DC reference time (epoch) - set on first app_time call
+diff --git a/src/lcec_main.c b/src/lcec_main.c
+index e950cb74a..7c8c9867e 100644
+--- a/src/lcec_main.c
++++ b/src/lcec_main.c
+@@ -34,17 +34,6 @@ MODULE_LICENSE("GPL")
+ MODULE_AUTHOR("Sascha Ittner <sascha.ittner@modusoft.de>")
+ MODULE_DESCRIPTION("Driver for EtherCAT devices")
+ 
+-/* Weak ref to HAL's initf API: present when linked against linuxcnc that
+-   ships hal_init_funct_to_thread, NULL otherwise. Lets a single lcec binary
+-   work against both old and new linuxcnc, with automatic fallback to legacy
+-   inline activation when the new API is missing. */
+-#pragma weak hal_init_funct_to_thread
+-extern int hal_init_funct_to_thread(const char *funct_name,
+-    const char *thread_name, int position);
+-
+-/* Set in rtapi_app_main from the weak-symbol probe. */
+-static int initf_supported = 0;
+-
+ /// @brief Global HAL Pins
+ static const lcec_pindesc_t master_global_pins[] = {
+     {HAL_U32, HAL_OUT, offsetof(lcec_master_data_t, slaves_responding), "%s.slaves-responding"},
+@@ -126,7 +115,6 @@ void lcec_write_all(void *arg, long period);
+ void lcec_read_master(void *arg, long period);
+ void lcec_write_master(void *arg, long period);
+ static int lcec_activate_master(lcec_master_t *master);
+-static void lcec_activate(void *arg, long period);
+ 
+ static void sigsegv_handler(int sig);
+ 
+@@ -158,17 +146,6 @@ int rtapi_app_main(void) {
+     goto fail0;
+   }
+ 
+-  /* Probe HAL initf support. New linuxcnc => deferred RT-context activation
+-     via lcec.activate funct (clean DC phasing). Old linuxcnc => fall back to
+-     legacy inline activation here in rtapi_app_main, with PLL trim covering
+-     the dirty start. */
+-  initf_supported = (&hal_init_funct_to_thread != NULL);
+-  if (!initf_supported) {
+-    rtapi_print_msg(RTAPI_MSG_WARN, LCEC_MSG_PFX
+-        "linuxcnc lacks initf support; using legacy inline activation. "
+-        "DC phasing will trim via PLL. Upgrade linuxcnc for clean activation.\n");
+-  }
+-
+   // parse configuration
+   if ((slave_count = lcec_parse_config()) < 0) {
+     goto fail1;
+@@ -319,14 +296,6 @@ int rtapi_app_main(void) {
+     master->hal_data->auto_drift_delay = 100;
+ #endif
+ 
+-    // Activate master (only when initf is unavailable; otherwise lcec.activate
+-    // funct does it from RT context after the user's `initf lcec.activate <thread>`).
+-    if (!initf_supported) {
+-      if (lcec_activate_master(master) != 0) {
+-        goto fail2;
+-      }
+-    }
+-
+     // export read function
+     rtapi_snprintf(name, HAL_NAME_LEN, "%s.%s.read", LCEC_MODULE_NAME, master->name);
+     if (hal_export_funct(name, lcec_read_master, master, 0, 0, lcec_comp_id) != 0) {
+@@ -341,16 +310,6 @@ int rtapi_app_main(void) {
+     }
+   }
+ 
+-  // export activate funct (initf path only): user is expected to register it
+-  // with `initf <module>.activate <thread>` in their .hal file before `start`.
+-  if (initf_supported) {
+-    rtapi_snprintf(name, HAL_NAME_LEN, "%s.activate", LCEC_MODULE_NAME);
+-    if (hal_export_funct(name, lcec_activate, NULL, 0, 0, lcec_comp_id) != 0) {
+-      rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX "activate funct export failed\n");
+-      goto fail2;
+-    }
+-  }
+-
+   // export read-all function
+   rtapi_snprintf(name, HAL_NAME_LEN, "%s.read-all", LCEC_MODULE_NAME);
+   if (hal_export_funct(name, lcec_read_all, NULL, 0, 0, lcec_comp_id) != 0) {
+@@ -1090,27 +1049,6 @@ void lcec_write_all(void *arg, long period) {
+   }
+ }
+ 
+-/// @brief HAL init funct (registered via halcmd `initf`) that activates every
+-/// master in RT context, before the cyclic funct list runs for the first time.
+-/// Sets master->initf_activated so write_master knows app_phase was born stable
+-/// and the BANG-BANG PLL trim can be safely skipped.
+-static void lcec_activate(void *arg, long period) {
+-  lcec_master_t *master;
+-  (void)arg;
+-  (void)period;
+-
+-  for (master = first_master; master != NULL; master = master->next) {
+-    if (!master->activated) {
+-      if (lcec_activate_master(master) == 0) {
+-        master->initf_activated = 1;
+-      }
+-      // on activation failure, lcec_activate_master already logged; leaving
+-      // initf_activated unset means the BANG-BANG safety net will run if a
+-      // later retry inline-activates the master.
+-    }
+-  }
+-}
+-
+ /// @brief Activate master on first call (delayed activation)
+ /// This ensures activation happens inside the real-time thread,
+ /// minimizing the delay between activation and cyclic communication.
+@@ -1206,6 +1144,20 @@ void lcec_read_master(void *arg, long period) {
+     }
+   }
+ 
++  // V5 has one activation path.  The first resident read executes in the
++  // servo thread and immediately continues into receive/process below, so
++  // the master cannot sit in OP while process-data exchange is not running.
++  if (!master->activated) {
++    if (master->activation_failed) {
++      return;
++    }
++    if (lcec_activate_master(master) != 0) {
++      master->activation_failed = 1;
++      return;
++    }
++    master->rt_activated = 1;
++  }
++
+   // get state check flag
+   if (master->state_update_timer > 0) {
+     check_states = 0;
+@@ -1275,24 +1227,10 @@ void lcec_write_master(void *arg, long period) {
+   lcec_master_data_t *hal_data;
+ #endif
+ 
+-  // First cyclic tick observed master not yet activated. This means the user
+-  // did not register `lcec.activate` via initf (forgot the line in their .hal).
+-  // Fall back to inline activation so the machine still runs; warn loudly so
+-  // the user fixes their config. initf_activated stays 0, so the BANG-BANG
+-  // safety net below will trim the dirty app_phase over the next few hundred
+-  // cycles, just like the legacy path.
++  // Activation is owned only by the first resident read.  Never create a
++  // second write-side path or retry a failed activation from the hot cycle.
+   if (!master->activated) {
+-    if (!master->forgot_warned) {
+-      master->forgot_warned = 1;
+-      rtapi_print_msg(RTAPI_MSG_ERR, LCEC_MSG_PFX
+-          "master '%s' not activated via initf. "
+-          "Add `initf %s.activate <thread>` to your .hal file before `start`. "
+-          "Falling back to inline activation; DC phasing will trim via PLL.\n",
+-          master->name, LCEC_MODULE_NAME);
+-    }
+-    if (lcec_activate_master(master) != 0) {
+-      return;  // activation failed, can't proceed this cycle
+-    }
++    return;
+   }
+ 
+   // process slaves
+@@ -1438,46 +1376,8 @@ void lcec_write_master(void *arg, long period) {
+         rtapi_print_msg(RTAPI_MSG_INFO, LCEC_MSG_PFX "Phase calibration complete: jitter=%d target=%d\n",
+             hal_data->phase_jitter, hal_data->phase_target);
+       }
+-    } else if (!master->initf_activated) {
+-      // Phase 3: Use PLL to move app_phase towards target.
+-      // Only runs when activation was dirty (legacy load-time path or inline
+-      // fallback after forgot-to-initf). With initf_activated=1 the master was
+-      // activated cleanly in RT context, app_phase is born stable, and the
+-      // BANG-BANG would only add noise -- skip it entirely.
+-      // Calculate error: how far are we from target?
+-      // Positive error (app_phase > target) means we need to speed up to reduce app_phase
+-      // Negative error (app_phase < target) means we need to slow down to increase app_phase
+-      int32_t phase_error = current_app_phase - hal_data->phase_target;
+-      
+-      // Set pll_err for monitoring
+-      //*(hal_data->pll_err) = raw_offset + drift;
+-      
+-      // Check if locked (within 10% of jitter or 1% of app_period, whichever is larger)
+-      int32_t lock_threshold = 0;//hal_data->phase_jitter;
+-      if (lock_threshold < app_period / 100) {
+-        lock_threshold = app_period / 100;
+-      }
+-      if (abs(phase_error) < abs(hal_data->pll_step) * 3 ) {
+-        *(hal_data->dc_phased) = 1;
+-      } else if (abs(phase_error) > abs(hal_data->pll_step) * 20 ) {
+-        *(hal_data->dc_phased) = 0;
+-      }
+-      
+-      // BANG-BANG control: small steps to move towards target
+-      // Positive pll_out = slow down = app_phase increases
+-      // Negative pll_out = speed up = app_phase decreases
+-      if (*(hal_data->dc_phased)) {
+-        *(hal_data->pll_out) = 0;
+-      } else {
+-        if (phase_error > 0) {
+-          *(hal_data->pll_out) = -(hal_data->pll_step);  // Speed up to reduce app_phase
+-        } else if (phase_error < 0) {
+-          *(hal_data->pll_out) = hal_data->pll_step;  // Slow down to increase app_phase
+-        }
+-      }
+-
+     } else {
+-      // initf_activated: clean RT-context activation, app_phase is born stable.
++      // The only supported path activates in RT context, so app_phase is born stable.
+       // Force PLL outputs to safe values so rtapi_task_pll_get_reference does
+       // not see stale BANG-BANG state. Manual pll_drift pin still applies via
+       // pll_correction = pll_out + pll_drift further down.
+-- 
+2.39.2

@@ -265,12 +265,15 @@ enable_service() {
     done
 }
 
-enable_service v5-linuxcnc-command-gate 91 19
-enable_service v5-position-status-publisher 92 18
-enable_service v5-wcs-status-publisher 92 18
-enable_service v5-state-publisher 93 17
-enable_service v5-ui-relay 94 16
-enable_service v5-settings-actiond 95 15
+for level in 2 3 4 5; do
+    rm -f "$rootfs_stage/etc/rc${level}.d"/S??ethercat
+done
+enable_service v5-linuxcnc-command-gate 05 19
+enable_service v5-position-status-publisher 06 18
+enable_service v5-wcs-status-publisher 06 17
+enable_service v5-state-publisher 07 16
+enable_service v5-ui-relay 08 15
+enable_service v5-settings-actiond 07 14
 enable_service v5-touch-diagnostics 96 14
 
 rm -f \

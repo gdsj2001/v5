@@ -4,6 +4,7 @@
 #include "v5_settings_axis_table.h"
 #include "v5_lvgl_remote_display.h"
 #include "v5_motion_model_registry.h"
+#include "v5_native_operator_error_status.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -35,11 +36,46 @@ static void settings_motion_model_refresh_dropdown(V5SettingsPage *page)
     lv_dropdown_set_selected(page->motion_model_dropdown, model_index + 1U);
 }
 
+static void settings_motion_model_close_dropdown_async(void *object)
+{
+    if (object) {
+        lv_dropdown_close((lv_obj_t *)object);
+    }
+}
+
+static void settings_motion_model_show_mapping_review(V5SettingsPage *page)
+{
+    V5NativeOperatorErrorStatus prompt;
+    char body[1024];
+    if (!page ||
+        !v5_native_operator_error_status_from_alias(
+            "MOTION_MODEL_MAPPING_REVIEW_REQUIRED",
+            &prompt)) {
+        return;
+    }
+    snprintf(
+        body,
+        sizeof(body),
+        "提示: %s\n\n原因: %s\n\n下一步: %s",
+        prompt.title_cn,
+        prompt.reason_cn,
+        prompt.next_cn);
+    v5_settings_page_popup_show(
+        page,
+        "motion_model_mapping_review",
+        "运动模型",
+        body,
+        1,
+        0);
+}
+
 static void settings_motion_model_changed_cb(lv_event_t *event)
 {
     V5SettingsPage *page = (V5SettingsPage *)lv_event_get_user_data(event);
     char selected[64];
+    const V5MotionModelDescriptor *current_model;
     const V5MotionModelDescriptor *model;
+    int actual_change;
     int ok;
     if (!page || lv_event_get_code(event) != LV_EVENT_VALUE_CHANGED || !page->motion_model_dropdown) {
         return;
@@ -52,10 +88,27 @@ static void settings_motion_model_changed_cb(lv_event_t *event)
         v5_settings_page_set_status_text(page, 245, 214, 82, "运动模型: 未登记模型");
         return;
     }
+    current_model = v5_motion_model_find(
+        v5_settings_axis_table_motion_model_value());
+    actual_change =
+        !current_model ||
+        strcmp(current_model->canonical, model->canonical) != 0;
     ok = v5_settings_axis_table_commit_motion_model(model->canonical);
     settings_motion_model_refresh_dropdown(page);
+    lv_async_call(
+        settings_motion_model_close_dropdown_async,
+        page->motion_model_dropdown);
     if (ok) {
-        v5_settings_page_set_status_text(page, 42, 221, 128, "运动模型: %s", v5_settings_axis_table_motion_model_value());
+        v5_settings_page_set_status_text(
+            page,
+            42,
+            221,
+            128,
+            "运动模型: %s",
+            v5_settings_axis_table_motion_model_value());
+        if (actual_change) {
+            settings_motion_model_show_mapping_review(page);
+        }
     } else {
         v5_settings_page_set_status_text(page, 245, 214, 82, "运动模型: owner readback 未确认");
     }
@@ -126,7 +179,6 @@ void v5_settings_page_format_mcs_value(double value, int valid, char *out, size_
     double abs_value;
     long whole;
     long frac;
-    int visible_whole_digits = 3;
     if (!out || out_size == 0U) {
         return;
     }
@@ -144,15 +196,10 @@ void v5_settings_page_format_mcs_value(double value, int valid, char *out, size_
         frac -= 1000;
         ++whole;
     }
-    if (whole >= 10000) {
-        visible_whole_digits = 5;
-    } else if (whole >= 1000) {
-        visible_whole_digits = 4;
-    }
-    if (whole > 99999) {
-        snprintf(out, out_size, "%c99999.999", value < 0.0 ? '<' : '>');
+    if (whole > 999) {
+        snprintf(out, out_size, "%c999.999", value < 0.0 ? '<' : '>');
     } else {
-        snprintf(out, out_size, "%s%0*ld.%03ld", value < 0.0 ? "-" : "", visible_whole_digits, whole, frac);
+        snprintf(out, out_size, "%s%03ld.%03ld", value < 0.0 ? "-" : "", whole, frac);
     }
 }
 

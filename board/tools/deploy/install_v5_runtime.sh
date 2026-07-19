@@ -246,6 +246,7 @@ manifest_settings_only=1
 manifest_command_gate_only=1
 manifest_wcs_only=1
 manifest_backend_only=1
+manifest_ethercat_only=1
 manifest_gcode_only=1
 manifest_cpu_policy_only=1
 manifest_cpu_policy_net_core=0
@@ -260,12 +261,125 @@ manifest_position_publisher=0
 manifest_wcs_publisher=0
 manifest_state_publisher=0
 manifest_drive_profiles=0
+manifest_shm_abi_touched=0
+manifest_shm_abi_complete=0
+manifest_shm_abi_ui_binary=0
+manifest_shm_abi_state_binary=0
+manifest_shm_abi_position_script=0
+manifest_shm_abi_wcs_script=0
+manifest_shm_abi_cadence=0
+manifest_shm_abi_projection=0
+manifest_shm_abi_codec=0
+manifest_shm_abi_relay=0
+manifest_shm_abi_boot_ready=0
+manifest_shm_abi_python_reader=0
+manifest_shm_abi_position_init=0
+manifest_shm_abi_wcs_init=0
+manifest_shm_abi_state_init=0
+manifest_shm_abi_ui_init=0
+manifest_shm_abi_required_rows=14
+manifest_ethercat_master=0
+manifest_ethercat_generic=0
+manifest_ethercat_lcec=0
+manifest_ethercat_lifecycle=0
+manifest_ethercat_complete=0
+manifest_ethercat_required_rows=4
+ethercat_master_destination="/lib/modules/$(uname -r)/ethercat/master/ec_master.ko"
+ethercat_generic_destination="/lib/modules/$(uname -r)/ethercat/devices/ec_generic.ko"
 manifest_row_count=0
 while IFS="$tab" read -r scope_kind scope_source scope_destination scope_mode scope_extra; do
   case "$scope_kind" in
     ''|'#'*) continue ;;
   esac
   manifest_row_count=$((manifest_row_count + 1))
+  case "$scope_destination" in
+    "$ethercat_master_destination")
+      [ "$scope_kind:$scope_source:$scope_mode" = \
+        "kernel_module:build/ethercat/ec_master.ko:0644" ] || {
+        echo "EtherCAT master module requires the registered ARM artifact and mode 0644" >&2
+        exit 6
+      }
+      manifest_ethercat_master=1
+      ;;
+    "$ethercat_generic_destination")
+      [ "$scope_kind:$scope_source:$scope_mode" = \
+        "kernel_module:build/ethercat/ec_generic.ko:0644" ] || {
+        echo "EtherCAT generic module requires the registered ARM artifact and mode 0644" >&2
+        exit 6
+      }
+      manifest_ethercat_generic=1
+      ;;
+    /usr/lib/linuxcnc/modules/lcec.so)
+      [ "$scope_kind:$scope_source:$scope_mode" = \
+        "binary:build/ethercat/lcec.so:0644" ] || {
+        echo "EtherCAT lcec module requires the registered ARM artifact and mode 0644" >&2
+        exit 6
+      }
+      manifest_ethercat_lcec=1
+      ;;
+    /usr/libexec/8ax/v5_ethercat_backend_lifecycle.sh)
+      [ "$scope_kind:$scope_source:$scope_mode" = \
+        "module:services/command_gate/v5_ethercat_backend_lifecycle.sh:0644" ] || {
+        echo "EtherCAT lifecycle requires the registered source and mode 0644" >&2
+        exit 6
+      }
+      manifest_ethercat_lifecycle=1
+      ;;
+    *)
+      manifest_ethercat_only=0
+      ;;
+  esac
+  case "$scope_destination" in
+    /usr/libexec/8ax/v5_lvgl_shell)
+      manifest_shm_abi_touched=1
+      manifest_shm_abi_ui_binary=1
+      ;;
+    /usr/libexec/8ax/v5_state_publisher)
+      manifest_shm_abi_touched=1
+      manifest_shm_abi_state_binary=1
+      ;;
+    /usr/libexec/8ax/v5_position_status_publisher.py)
+      manifest_shm_abi_touched=1
+      manifest_shm_abi_position_script=1
+      ;;
+    /usr/libexec/8ax/v5_wcs_status_publisher.py)
+      manifest_shm_abi_wcs_script=1
+      ;;
+    /usr/libexec/8ax/v5_polling_cadence.py)
+      manifest_shm_abi_cadence=1
+      ;;
+    /usr/libexec/8ax/v5_machine_status_projection.py)
+      manifest_shm_abi_touched=1
+      manifest_shm_abi_projection=1
+      ;;
+    /usr/libexec/8ax/v5_wcs_status_codec.py)
+      manifest_shm_abi_touched=1
+      manifest_shm_abi_codec=1
+      ;;
+    /usr/libexec/8ax/v5_remote_ui_relay.py)
+      manifest_shm_abi_relay=1
+      ;;
+    /usr/libexec/8ax/v5_ui_boot_ready.py)
+      manifest_shm_abi_touched=1
+      manifest_shm_abi_boot_ready=1
+      ;;
+    /usr/libexec/8ax/v5_status_shm_reader.py)
+      manifest_shm_abi_touched=1
+      manifest_shm_abi_python_reader=1
+      ;;
+    /etc/init.d/v5-position-status-publisher)
+      manifest_shm_abi_position_init=1
+      ;;
+    /etc/init.d/v5-wcs-status-publisher)
+      manifest_shm_abi_wcs_init=1
+      ;;
+    /etc/init.d/v5-state-publisher)
+      manifest_shm_abi_state_init=1
+      ;;
+    /etc/init.d/v5-ui-relay)
+      manifest_shm_abi_ui_init=1
+      ;;
+  esac
   case "$scope_destination" in
     /usr/local/sbin/v5_net_core.sh)
       manifest_cpu_policy_net_core=1
@@ -409,9 +523,44 @@ while IFS="$tab" read -r scope_kind scope_source scope_destination scope_mode sc
   esac
 done < "$manifest"
 
+if [ "$manifest_row_count" -eq "$manifest_ethercat_required_rows" ] &&
+   [ "$manifest_ethercat_only" -eq 1 ] &&
+   [ "$manifest_ethercat_master" -eq 1 ] &&
+   [ "$manifest_ethercat_generic" -eq 1 ] &&
+   [ "$manifest_ethercat_lcec" -eq 1 ] &&
+   [ "$manifest_ethercat_lifecycle" -eq 1 ]; then
+  manifest_ethercat_complete=1
+fi
+
+if [ "$manifest_shm_abi_ui_binary" -eq 1 ] &&
+   [ "$manifest_shm_abi_state_binary" -eq 1 ] &&
+   [ "$manifest_shm_abi_position_script" -eq 1 ] &&
+   [ "$manifest_shm_abi_wcs_script" -eq 1 ] &&
+   [ "$manifest_shm_abi_cadence" -eq 1 ] &&
+   [ "$manifest_shm_abi_projection" -eq 1 ] &&
+   [ "$manifest_shm_abi_codec" -eq 1 ] &&
+   [ "$manifest_shm_abi_relay" -eq 1 ] &&
+   [ "$manifest_shm_abi_boot_ready" -eq 1 ] &&
+   [ "$manifest_shm_abi_python_reader" -eq 1 ] &&
+   [ "$manifest_shm_abi_position_init" -eq 1 ] &&
+   [ "$manifest_shm_abi_wcs_init" -eq 1 ] &&
+   [ "$manifest_shm_abi_state_init" -eq 1 ] &&
+   [ "$manifest_shm_abi_ui_init" -eq 1 ]; then
+  manifest_shm_abi_complete=1
+fi
+if [ "$manifest_shm_abi_touched" -eq 1 ] &&
+   [ "$manifest_shm_abi_complete" -ne 1 ]; then
+  echo "SHM ABI deploy requires the complete Position/State/UI atomic bundle" >&2
+  exit 8
+fi
+
 case "$restart_scope_requested" in
   auto)
     if [ "$linuxcnc_bundle_enabled" -eq 0 ] &&
+       [ "$manifest_shm_abi_complete" -eq 1 ] &&
+       [ "$manifest_row_count" -eq "$manifest_shm_abi_required_rows" ]; then
+      restart_scope=shm_abi
+    elif [ "$linuxcnc_bundle_enabled" -eq 0 ] &&
        [ "$manifest_row_count" -gt 0 ] &&
        [ "$manifest_gcode_only" -eq 1 ]; then
       restart_scope=gcode
@@ -435,6 +584,9 @@ case "$restart_scope_requested" in
          [ "$manifest_row_count" -eq 1 ] &&
          [ "$manifest_backend_only" -eq 1 ]; then
       restart_scope=backend
+    elif [ "$linuxcnc_bundle_enabled" -eq 0 ] &&
+         [ "$manifest_ethercat_complete" -eq 1 ]; then
+      restart_scope=ethercat
     elif [ "$linuxcnc_bundle_enabled" -eq 0 ] &&
          [ "$manifest_row_count" -gt 0 ] &&
          [ "$manifest_wcs_only" -eq 1 ]; then
@@ -475,6 +627,15 @@ case "$restart_scope_requested" in
     fi
     restart_scope=ui
     ;;
+  shm_abi)
+    if [ "$linuxcnc_bundle_enabled" -ne 0 ] ||
+       [ "$manifest_shm_abi_complete" -ne 1 ] ||
+       [ "$manifest_row_count" -ne "$manifest_shm_abi_required_rows" ]; then
+      echo "SHM-ABI restart scope requires exactly the complete Position/State/UI atomic bundle and no LinuxCNC bundle" >&2
+      exit 8
+    fi
+    restart_scope=shm_abi
+    ;;
   state)
     if [ "$linuxcnc_bundle_enabled" -ne 0 ] ||
        [ "$manifest_row_count" -eq 0 ] ||
@@ -510,6 +671,14 @@ case "$restart_scope_requested" in
       exit 8
     fi
     restart_scope=backend
+    ;;
+  ethercat)
+    if [ "$linuxcnc_bundle_enabled" -ne 0 ] ||
+       [ "$manifest_ethercat_complete" -ne 1 ]; then
+      echo "EtherCAT restart scope requires exactly the registered ec_master/ec_generic/lcec/lifecycle bundle" >&2
+      exit 8
+    fi
+    restart_scope=ethercat
     ;;
   wcs)
     if [ "$linuxcnc_bundle_enabled" -ne 0 ] ||
@@ -550,11 +719,11 @@ case "$restart_scope_requested" in
     restart_scope=all
     ;;
   *)
-    echo "unsupported V5_RUNTIME_RESTART_SCOPE: $restart_scope_requested (expected auto, gcode, ui, state, actiond, command_gate, backend, wcs, cpu_policy, settings, or all)" >&2
+    echo "unsupported V5_RUNTIME_RESTART_SCOPE: $restart_scope_requested (expected auto, gcode, ui, shm_abi, state, actiond, command_gate, backend, ethercat, wcs, cpu_policy, settings, or all)" >&2
     exit 8
     ;;
 esac
-echo "V5_RUNTIME_RESTART_SCOPE scope=$restart_scope rows=$manifest_row_count gcode_only=$manifest_gcode_only ui_only=$manifest_ui_only state_only=$manifest_state_only actiond_only=$manifest_actiond_only command_gate_only=$manifest_command_gate_only backend_only=$manifest_backend_only wcs_only=$manifest_wcs_only cpu_policy_only=$manifest_cpu_policy_only settings_only=$manifest_settings_only"
+echo "V5_RUNTIME_RESTART_SCOPE scope=$restart_scope rows=$manifest_row_count shm_abi_touched=$manifest_shm_abi_touched shm_abi_complete=$manifest_shm_abi_complete ethercat_complete=$manifest_ethercat_complete gcode_only=$manifest_gcode_only ui_only=$manifest_ui_only state_only=$manifest_state_only actiond_only=$manifest_actiond_only command_gate_only=$manifest_command_gate_only backend_only=$manifest_backend_only wcs_only=$manifest_wcs_only cpu_policy_only=$manifest_cpu_policy_only settings_only=$manifest_settings_only"
 
 stop_position_publisher_before_backend() {
   if [ -x /etc/init.d/v5-position-status-publisher ]; then
@@ -562,12 +731,35 @@ stop_position_publisher_before_backend() {
   fi
 }
 
-restart_position_publisher_after_backend() {
+stop_ethercat_modules_before_install() {
+  [ -x /etc/init.d/v5-linuxcnc-command-gate ] || {
+    echo "LinuxCNC command-gate init is missing before EtherCAT module deploy" >&2
+    return 1
+  }
+  [ -x /etc/init.d/ethercat ] || {
+    echo "EtherCAT init is missing before module deploy" >&2
+    return 1
+  }
+  stop_position_publisher_before_backend
+  /etc/init.d/v5-linuxcnc-command-gate stop
+  if pidof rtapi_app >/dev/null 2>&1; then
+    echo "LinuxCNC realtime owner remained active before lcec replacement" >&2
+    return 1
+  fi
+  /etc/init.d/ethercat stop
+  if grep -Eq '^(ec_master|ec_generic)[[:space:]]' /proc/modules; then
+    echo "EtherCAT kernel modules remained loaded before atomic replacement" >&2
+    return 1
+  fi
+}
+
+ensure_position_publisher_after_backend() {
   [ -x /etc/init.d/v5-position-status-publisher ] || {
     echo "position status publisher init is missing after backend restart" >&2
     return 1
   }
-  /etc/init.d/v5-position-status-publisher restart
+  /etc/init.d/v5-position-status-publisher status >/dev/null 2>&1 ||
+    /etc/init.d/v5-position-status-publisher start
 }
 
 wait_publisher_actual_barrier() {
@@ -662,6 +854,161 @@ stop_affected_writers_before_install() {
   fi
 }
 
+stop_shm_abi_domain_before_install() {
+  if [ -x /etc/init.d/v5-ui-relay ]; then
+    /etc/init.d/v5-ui-relay stop
+  fi
+  stop_writer_before_upgrade \
+    v5-state-publisher \
+    /usr/libexec/8ax/v5_state_publisher
+  stop_writer_before_upgrade \
+    v5-wcs-status-publisher \
+    /usr/libexec/8ax/v5_wcs_status_publisher.py
+  stop_writer_before_upgrade \
+    v5-position-status-publisher \
+    /usr/libexec/8ax/v5_position_status_publisher.py
+}
+
+wait_position_shm_abi_readback() {
+  /usr/bin/python3 - <<'PY'
+import mmap
+import struct
+import time
+from pathlib import Path
+
+path = Path("/dev/shm/v5_native_position_status.bin")
+deadline = time.monotonic() + 30.0
+last_error = "not_read"
+
+def fnv1a(payload):
+    value = 2166136261
+    for byte in payload:
+        value = ((value ^ byte) * 16777619) & 0xffffffff
+    return value
+
+while time.monotonic() < deadline:
+    try:
+        if path.stat().st_size != 256:
+            raise RuntimeError("size")
+        with path.open("rb") as handle:
+            with mmap.mmap(handle.fileno(), 256, access=mmap.ACCESS_READ) as page:
+                before = struct.unpack_from("<I", page, 24)[0]
+                payload = page[:256]
+                after = struct.unpack_from("<I", page, 24)[0]
+        (magic, version, size, valid_mask, _axes, writer_identity,
+         sequence, _reserved, source_time, source_generation) = (
+            struct.unpack_from("<8IQQ", payload, 0))
+        unit_per_count = struct.unpack_from("<5d", payload, 128)
+        following_error = struct.unpack_from("<5d", payload, 168)
+        display_digits = struct.unpack_from("<5B", payload, 208)
+        expected_crc = struct.unpack_from("<I", payload, 248)[0]
+        age_ns = time.monotonic_ns() - source_time
+        if before != after or sequence != before or sequence == 0 or sequence & 1:
+            raise RuntimeError("seqlock")
+        if (magic, version, size) != (0x56504F53, 3, 256):
+            raise RuntimeError("header")
+        if writer_identity == 0 or source_generation == 0 or source_time == 0:
+            raise RuntimeError("identity")
+        if valid_mask & 0x3 != 0x3:
+            raise RuntimeError("valid_mask")
+        if (not all(value > 0.0 for value in unit_per_count) or
+                display_digits != (3, 3, 3, 3, 3) or
+                not all(value == value for value in following_error)):
+            raise RuntimeError("display_metadata")
+        if fnv1a(payload[:248]) != expected_crc:
+            raise RuntimeError("crc")
+        if age_ns < 0 or age_ns > 2_000_000_000:
+            raise RuntimeError("freshness")
+        print(
+            "V5_POSITION_ABI_READBACK_OK "
+            f"magic=0x{magic:08x} version={version} size={size} "
+            f"writer_identity={writer_identity} seq={sequence} "
+            f"source_generation={source_generation} age_ns={age_ns} "
+            f"valid_mask=0x{valid_mask:x} crc=ok")
+        raise SystemExit(0)
+    except (OSError, RuntimeError, struct.error, ValueError) as exc:
+        last_error = str(exc)
+        time.sleep(0.05)
+raise SystemExit("V5_POSITION_ABI_READBACK_FAILED " + last_error)
+PY
+}
+
+wait_state_shm_abi_readback() {
+  /usr/bin/python3 - <<'PY'
+import mmap
+import struct
+import time
+import zlib
+from pathlib import Path
+
+path = Path("/dev/shm/v3_status_shm")
+deadline = time.monotonic() + 30.0
+last_error = "not_read"
+required_mask = (1 << 0) | (1 << 1) | (1 << 8) | (1 << 9)
+while time.monotonic() < deadline:
+    try:
+        if path.stat().st_size != 7128:
+            raise RuntimeError("size")
+        with path.open("rb") as handle:
+            with mmap.mmap(handle.fileno(), 7128, access=mmap.ACCESS_READ) as page:
+                before = struct.unpack_from("<I", page, 24)[0]
+                payload = page[:7128]
+                after = struct.unpack_from("<I", page, 24)[0]
+        (magic, version, header_size, total_size, payload_size, _flags,
+         sequence, expected_crc) = struct.unpack_from("<8I", payload, 0)
+        status_epoch = struct.unpack_from("<Q", payload, 32)[0]
+        valid_mask = struct.unpack_from("<I", payload, 40)[0]
+        writer_identity = struct.unpack_from("<I", payload, 48)[0]
+        source_time = struct.unpack_from("<Q", payload, 56)[0]
+        source_generation = struct.unpack_from("<Q", payload, 64)[0]
+        scene_generation = struct.unpack_from("<Q", payload, 72)[0]
+        unit_per_count = struct.unpack_from("<5d", payload, 160)
+        following_error = struct.unpack_from("<5d", payload, 200)
+        display_digits = struct.unpack_from("<5B", payload, 240)
+        cpu_generation = struct.unpack_from("<Q", payload, 944)[0]
+        cpu_time = struct.unpack_from("<Q", payload, 952)[0]
+        scene_build = struct.unpack_from("<Q", payload, 1024)[0]
+        scene_flags = struct.unpack_from("<I", payload, 1052)[0]
+        age_ns = time.monotonic_ns() - source_time
+        actual_crc = zlib.crc32(payload[:24])
+        actual_crc = zlib.crc32(payload[32:], actual_crc) & 0xffffffff
+        if before != after or sequence != before or sequence == 0 or sequence & 1:
+            raise RuntimeError("seqlock")
+        if (magic, version, header_size, total_size, payload_size) != (
+                0x56355348, 3, 7128, 7128, 7096):
+            raise RuntimeError("header")
+        if (valid_mask & required_mask) != required_mask:
+            raise RuntimeError("valid_mask")
+        if (writer_identity == 0 or status_epoch == 0 or source_time == 0 or
+                source_generation == 0 or scene_generation == 0 or
+                cpu_generation == 0 or cpu_time == 0 or
+                scene_build == 0 or not (scene_flags & 1)):
+            raise RuntimeError("identity")
+        if (not all(value > 0.0 for value in unit_per_count) or
+                display_digits != (3, 3, 3, 3, 3) or
+                not all(value == value for value in following_error)):
+            raise RuntimeError("display_metadata")
+        if actual_crc != expected_crc:
+            raise RuntimeError("crc")
+        if age_ns < 0 or age_ns > 2_000_000_000:
+            raise RuntimeError("freshness")
+        print(
+            "V5_STATE_ABI_READBACK_OK "
+            f"magic=0x{magic:08x} version={version} size={total_size} "
+            f"writer_identity={writer_identity} seq={sequence} "
+            f"source_generation={source_generation} "
+            f"scene_generation={scene_generation} "
+            f"scene_build={scene_build} "
+            f"cpu_generation={cpu_generation} age_ns={age_ns} "
+            f"valid_mask=0x{valid_mask:x} crc=ok")
+        raise SystemExit(0)
+    except (OSError, RuntimeError, struct.error, ValueError) as exc:
+        last_error = str(exc)
+        time.sleep(0.05)
+raise SystemExit("V5_STATE_ABI_READBACK_FAILED " + last_error)
+PY
+}
+
 if [ "$apply" -eq 1 ] &&
    [ "$restart_scope" = "wcs" ] &&
    [ "$manifest_position_publisher" -eq 1 ]; then
@@ -691,8 +1038,15 @@ if [ "$apply" -eq 1 ] && [ "$restart_scope" = "backend" ]; then
   stop_position_publisher_before_backend
   /etc/init.d/v5-linuxcnc-command-gate stop
 fi
+if [ "$apply" -eq 1 ] && [ "$restart_scope" = "ethercat" ]; then
+  stop_ethercat_modules_before_install
+fi
 if [ "$apply" -eq 1 ]; then
-  stop_affected_writers_before_install
+  if [ "$manifest_shm_abi_complete" -eq 1 ]; then
+    stop_shm_abi_domain_before_install
+  else
+    stop_affected_writers_before_install
+  fi
 fi
 while IFS="$tab" read -r kind source destination mode extra; do
   case "$kind" in
@@ -758,15 +1112,53 @@ enable_boot_service() {
   done
 }
 
+disable_unconditional_ethercat_autostart() {
+  for level in 2 3 4 5; do
+    dir="/etc/rc${level}.d"
+    [ -d "$dir" ] || continue
+    rm -f "$dir"/S??ethercat
+  done
+}
+
 enable_boot_services() {
-  enable_boot_service v5-linuxcnc-command-gate 91 19
-  enable_boot_service v5-position-status-publisher 92 18
-  enable_boot_service v5-wcs-status-publisher 93 17
-  enable_boot_service v5-state-publisher 94 16
-  enable_boot_service v5-ui-relay 95 15
-  enable_boot_service v5-settings-actiond 96 14
+  enable_boot_service v5-linuxcnc-command-gate 05 19
+  enable_boot_service v5-position-status-publisher 06 18
+  enable_boot_service v5-wcs-status-publisher 06 17
+  enable_boot_service v5-state-publisher 07 16
+  enable_boot_service v5-ui-relay 08 15
+  enable_boot_service v5-settings-actiond 07 14
   enable_boot_service v5-touch-diagnostics 97 13
   enable_boot_service v5-remote-ssh 98 12
+}
+
+if [ "$apply" -eq 1 ] && [ "$manifest_cpu_policy_command_gate" -eq 1 ]; then
+  disable_unconditional_ethercat_autostart
+fi
+
+start_shm_abi_domain_after_install() {
+  enable_boot_service v5-position-status-publisher 06 18
+  enable_boot_service v5-wcs-status-publisher 06 17
+  enable_boot_service v5-state-publisher 07 16
+  enable_boot_service v5-ui-relay 08 15
+  if ! pidof rtapi_app >/dev/null 2>&1; then
+    [ -x /etc/init.d/v5-linuxcnc-command-gate ] || {
+      echo "LinuxCNC command-gate init is missing before SHM domain recovery" >&2
+      return 1
+    }
+    /etc/init.d/v5-linuxcnc-command-gate start
+    pidof rtapi_app >/dev/null 2>&1 || {
+      echo "LinuxCNC realtime owner did not recover before SHM domain start" >&2
+      return 1
+    }
+  fi
+  /etc/init.d/v5-position-status-publisher start
+  wait_position_shm_abi_readback
+  /etc/init.d/v5-wcs-status-publisher start
+  /etc/init.d/v5-state-publisher start
+  wait_state_shm_abi_readback
+  wait_publisher_actual_barrier
+  /etc/init.d/v5-ui-relay start
+  echo "V5_SHM_ABI_ATOMIC_RESTART_OK scope=position,state,ui-relay"
 }
 
 retired_pid_matches_path() {
@@ -824,6 +1216,7 @@ cleanup_retired_runtime_files() {
   rm -f /usr/libexec/8ax/v5_rtcp_status_publisher.py
   rm -f /usr/libexec/8ax/v5_g53_geometry_memory_owner.py
   rm -f /usr/libexec/8ax/v5_native_safety_latch_owner.py
+  rm -f /usr/libexec/8ax/drive_profile/v5_bus_zero_resident_gate.py
   rm -f /etc/init.d/v5-rtcp-status-publisher
   rm -f /etc/init.d/v5-g53-geometry-memory-owner
   for level in 0 1 2 3 4 5 6; do
@@ -876,36 +1269,44 @@ if [ "$apply" -eq 1 ]; then
   if [ "$restart_scope" = "gcode" ]; then
     rm -f /opt/8ax/v5/gcode/golden/cc.ngc
   elif [ "$restart_scope" = "ui" ]; then
-    enable_boot_service v5-ui-relay 95 15
+    enable_boot_service v5-ui-relay 08 15
     /etc/init.d/v5-ui-relay restart
+  elif [ "$restart_scope" = "shm_abi" ]; then
+    start_shm_abi_domain_after_install
   elif [ "$restart_scope" = "state" ]; then
-    enable_boot_service v5-state-publisher 94 16
+    enable_boot_service v5-state-publisher 07 16
     /etc/init.d/v5-state-publisher restart
   elif [ "$restart_scope" = "actiond" ]; then
-    enable_boot_service v5-settings-actiond 96 14
+    enable_boot_service v5-settings-actiond 07 14
     [ "$manifest_drive_profiles" -eq 0 ] || install_runtime_drive_profiles
     /etc/init.d/v5-settings-actiond restart
   elif [ "$restart_scope" = "command_gate" ]; then
-    enable_boot_service v5-linuxcnc-command-gate 91 19
+    enable_boot_service v5-linuxcnc-command-gate 05 19
     /etc/init.d/v5-linuxcnc-command-gate restart-native
   elif [ "$restart_scope" = "backend" ]; then
-    enable_boot_service v5-linuxcnc-command-gate 91 19
-    enable_boot_service v5-position-status-publisher 92 18
+    enable_boot_service v5-linuxcnc-command-gate 05 19
+    enable_boot_service v5-position-status-publisher 06 18
     /etc/init.d/v5-linuxcnc-command-gate start
-    restart_position_publisher_after_backend
+    ensure_position_publisher_after_backend
+    wait_publisher_actual_barrier
+  elif [ "$restart_scope" = "ethercat" ]; then
+    enable_boot_service v5-linuxcnc-command-gate 05 19
+    enable_boot_service v5-position-status-publisher 06 18
+    /etc/init.d/v5-linuxcnc-command-gate start
+    ensure_position_publisher_after_backend
     wait_publisher_actual_barrier
   elif [ "$restart_scope" = "wcs" ]; then
-    enable_boot_service v5-position-status-publisher 92 18
-    enable_boot_service v5-wcs-status-publisher 93 17
+    enable_boot_service v5-position-status-publisher 06 18
+    enable_boot_service v5-wcs-status-publisher 06 17
     /etc/init.d/v5-position-status-publisher restart
     /etc/init.d/v5-wcs-status-publisher restart
     wait_publisher_actual_barrier
   elif [ "$restart_scope" = "cpu_policy" ]; then
-    enable_boot_service v5-linuxcnc-command-gate 91 19
-    enable_boot_service v5-position-status-publisher 92 18
-    enable_boot_service v5-wcs-status-publisher 93 17
-    enable_boot_service v5-state-publisher 94 16
-    enable_boot_service v5-ui-relay 95 15
+    enable_boot_service v5-linuxcnc-command-gate 05 19
+    enable_boot_service v5-position-status-publisher 06 18
+    enable_boot_service v5-wcs-status-publisher 06 17
+    enable_boot_service v5-state-publisher 07 16
+    enable_boot_service v5-ui-relay 08 15
     (
       LOG=/run/8ax/v5_cpu_policy.log
       . /usr/local/sbin/v5_net_core.sh
@@ -917,15 +1318,15 @@ if [ "$apply" -eq 1 ]; then
     /etc/init.d/v5-state-publisher restart
     /etc/init.d/v5-ui-relay restart
   elif [ "$restart_scope" = "settings" ]; then
-    enable_boot_service v5-linuxcnc-command-gate 91 19
-    enable_boot_service v5-position-status-publisher 92 18
-    enable_boot_service v5-wcs-status-publisher 93 17
-    enable_boot_service v5-state-publisher 94 16
-    enable_boot_service v5-settings-actiond 96 14
+    enable_boot_service v5-linuxcnc-command-gate 05 19
+    enable_boot_service v5-position-status-publisher 06 18
+    enable_boot_service v5-wcs-status-publisher 06 17
+    enable_boot_service v5-state-publisher 07 16
+    enable_boot_service v5-settings-actiond 07 14
     [ "$manifest_drive_profiles" -eq 0 ] || install_runtime_drive_profiles
     stop_position_publisher_before_backend
     /etc/init.d/v5-linuxcnc-command-gate restart
-    restart_position_publisher_after_backend
+    ensure_position_publisher_after_backend
     /etc/init.d/v5-wcs-status-publisher restart
     /etc/init.d/v5-state-publisher restart
     wait_publisher_actual_barrier
@@ -934,12 +1335,15 @@ if [ "$apply" -eq 1 ]; then
     enable_boot_services
     cleanup_retired_runtime_files
     install_runtime_drive_profiles
-    stop_position_publisher_before_backend
     /etc/init.d/v5-linuxcnc-command-gate restart
-    restart_position_publisher_after_backend
-    /etc/init.d/v5-wcs-status-publisher restart
-    /etc/init.d/v5-state-publisher restart
-    /etc/init.d/v5-ui-relay restart
+    if [ "$manifest_shm_abi_complete" -eq 1 ]; then
+      start_shm_abi_domain_after_install
+    else
+      ensure_position_publisher_after_backend
+      /etc/init.d/v5-wcs-status-publisher restart
+      /etc/init.d/v5-state-publisher restart
+      /etc/init.d/v5-ui-relay restart
+    fi
     /etc/init.d/v5-settings-actiond restart
     /etc/init.d/v5-touch-diagnostics restart
     /etc/init.d/v5-remote-ssh restart

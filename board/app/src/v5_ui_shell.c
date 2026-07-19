@@ -84,6 +84,58 @@ unsigned long long g_v5_shell_ui_button_last_refresh_ns;
 unsigned long long g_v5_shell_ui_estop_last_refresh_ns;
 unsigned long long g_v5_shell_ui_slow_last_refresh_ns;
 static int g_v5_shell_operator_error_projection_deferred;
+static int g_v5_shell_axis_slave_mapping_status_resolved;
+static unsigned long long g_v5_shell_axis_slave_mapping_status_last_probe_ns;
+
+void shell_reset_axis_slave_mapping_status_probe(void)
+{
+    g_v5_shell_axis_slave_mapping_status_resolved = 0;
+    g_v5_shell_axis_slave_mapping_status_last_probe_ns = 0ULL;
+}
+
+int shell_refresh_axis_slave_mapping_status(int force)
+{
+    V5CommandGateAxisSlaveMappingStatus mapping_status;
+    V5NativeOperatorErrorStatus prompt;
+    unsigned long long now = shell_monotonic_ns();
+    if (g_v5_shell_axis_slave_mapping_status_resolved) {
+        return 0;
+    }
+    if (!force &&
+        g_v5_shell_axis_slave_mapping_status_last_probe_ns != 0ULL &&
+        now - g_v5_shell_axis_slave_mapping_status_last_probe_ns <
+            V5_AXIS_SLAVE_MAPPING_READ_RETRY_NS) {
+        return 0;
+    }
+    g_v5_shell_axis_slave_mapping_status_last_probe_ns = now;
+    if (!v5_command_gate_probe_axis_slave_mapping(
+            &mapping_status,
+            force ? 1000U : 250U) ||
+        !mapping_status.available) {
+        return 0;
+    }
+    if (!mapping_status.applicable || mapping_status.valid) {
+        g_v5_shell_axis_slave_mapping_status_resolved = 1;
+        return 0;
+    }
+    if (v5_ui_first_frame_guard_overlay_active() ||
+        shell_operator_error_popup_visible()) {
+        return 0;
+    }
+    if (!v5_native_operator_error_status_from_alias(
+            "ALL_HOME_AXIS_SLAVE_MAPPING_INVALID",
+            &prompt)) {
+        return 0;
+    }
+    fprintf(
+        stderr,
+        "V5_UI_MAPPING_PROMPT code=%s generation=%u active_model_mapping_valid=0\n",
+        mapping_status.code,
+        mapping_status.generation);
+    shell_show_operator_error_popup(&prompt);
+    g_v5_shell_axis_slave_mapping_status_resolved = 1;
+    return 1;
+}
 
 static void shell_project_operator_error_status(unsigned long long now)
 {
@@ -109,8 +161,10 @@ int shell_refresh_operator_error(int force)
     unsigned long long now = shell_monotonic_ns();
     int changed = 0;
     int projected = 0;
-    int overlay_active = v5_ui_first_frame_guard_overlay_active();
+    int overlay_active;
 
+    (void)shell_refresh_axis_slave_mapping_status(force);
+    overlay_active = v5_ui_first_frame_guard_overlay_active();
     if (g_v5_shell_operator_error_projection_deferred && !overlay_active) {
         shell_project_operator_error_status(now);
         g_v5_shell_operator_error_projection_deferred = 0;

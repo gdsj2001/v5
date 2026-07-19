@@ -15,6 +15,13 @@ void v5_linuxcncrsh_gate_close(void);
 int v5_linuxcncrsh_gate_connect(const V5LinuxcncrshConfig *config);
 int v5_linuxcncrsh_send_request_text(
     int fd, const char *request, char *out, size_t out_size);
+typedef int (*V5LinuxcncrshCommandSender)(
+    int fd, const char *command, void *user_data);
+int v5_linuxcncrsh_send_fifo_commands_with_sender(
+    int fd,
+    const char *line,
+    V5LinuxcncrshCommandSender sender,
+    void *user_data);
 int v5_linuxcncrsh_send_fifo_commands(int fd, const char *line);
 int v5_linuxcncrsh_wait_machine_enabled_actual(
     const V5LinuxcncrshConfig *config,

@@ -32,6 +32,7 @@ int main(void)
     if (v5_native_g53_model_branch_count() != 2U ||
         !v5_native_g53_model_resolve("XYZAC_TRT", &input, &pins, &branch) ||
         !branch || strcmp(branch->kinematics_module, "xyzac-trt-kins") != 0 ||
+        strcmp(branch->logical_axes, "XYZAC") != 0 ||
         branch->active_field_mask != V5_NATIVE_G53_FIELD_MASK_AC ||
         !v5_native_g53_model_field_active(branch, V5_NATIVE_G53_FIELD_A_Y) ||
         v5_native_g53_model_field_active(branch, V5_NATIVE_G53_FIELD_B_X) ||
@@ -44,6 +45,7 @@ int main(void)
     branch = 0;
     if (!v5_native_g53_model_resolve("XYZBC_TRT", &input, &pins, &branch) ||
         !branch || strcmp(branch->kinematics_module, "xyzbc-trt-kins") != 0 ||
+        strcmp(branch->logical_axes, "XYZBC") != 0 ||
         branch->active_field_mask != V5_NATIVE_G53_FIELD_MASK_BC ||
         !v5_native_g53_model_field_active(branch, V5_NATIVE_G53_FIELD_B_X) ||
         v5_native_g53_model_field_active(branch, V5_NATIVE_G53_FIELD_A_Y) ||

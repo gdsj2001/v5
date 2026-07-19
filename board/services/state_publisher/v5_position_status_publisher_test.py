@@ -26,6 +26,35 @@ import v5_position_status_publisher as publisher
 from v5_polling_cadence import StartToStartPollingCadence
 
 
+class CaptureWriter:
+    def __init__(self, payloads):
+        self.payloads = payloads
+        self.sequence = 0
+
+    def next_sequence(self):
+        self.sequence += 2
+        return self.sequence
+
+    def publish(self, payload, sequence):
+        assert sequence == self.sequence and sequence > 0 and sequence & 1 == 0
+        self.payloads.append(payload)
+
+
+class IdentityDisplayProjection:
+    def __init__(self, unit_per_count=None):
+        self._unit_per_count = list(
+            unit_per_count or [0.001] * codec.POSITION_AXIS_COUNT)
+
+    @staticmethod
+    def project(mcs, cmd):
+        return (
+            list(mcs) if mcs is not None else None,
+            list(cmd) if cmd is not None else None)
+
+    def display_metadata(self):
+        return list(self._unit_per_count), [3] * codec.POSITION_AXIS_COUNT
+
+
 class FakeHalPin:
     def __init__(self, component, name):
         self.component = component
@@ -165,6 +194,86 @@ def check_hal_position_reuses_only_source_owned_signal() -> None:
         raise AssertionError('wrong HAL signal driver was accepted')
 
 
+def check_bus_status_uses_committed_axis_mapping_once() -> None:
+    module = FakeHalModule()
+    access = publisher.HalPositionReadAccess(module)
+    component = module.component_instance
+    local_names = access._bus_status._local_names
+    assert all(
+        len(f'{publisher.HAL_POSITION_COMPONENT}.{local_name}') <= 47
+        for local_name in local_names.values())
+
+    def set_value(key, value):
+        component.values[local_names[key]] = value
+
+    set_value('table_valid', 1)
+    set_value('table_generation', 23)
+    set_value('table_active_mask', 0x1f)
+    set_value('router_valid', 1)
+    set_value('router_generation', 23)
+    set_value('router_active_mask', 0x1f)
+    set_value('master_link_up', 1)
+    set_value('master_state_op', 1)
+    set_value('master_all_op', 1)
+    set_value('slaves_responding', 5)
+    for joint, axis in enumerate('XYZBC'):
+        set_value(f'joint_{joint}_valid', 1)
+        set_value(f'joint_{joint}_generation', 23)
+        set_value(f'joint_{joint}_axis_code', ord(axis))
+        set_value(f'joint_{joint}_slave_position', joint)
+        set_value(f'slave_{joint}_statusword', 0x16b7)
+
+    snapshot = access.read_bus_status()
+    assert snapshot['valid']
+    assert snapshot['mapping_generation'] == 23
+    assert snapshot['active_mask'] == 0x1f
+    assert snapshot['master_flags'] == (
+        codec.BUS_MASTER_LINK_UP |
+        codec.BUS_MASTER_STATE_OP |
+        codec.BUS_MASTER_ALL_OP)
+    assert snapshot['slaves_responding'] == 5
+    assert ''.join(chr(entry['axis_code']) for entry in snapshot['entries']) == (
+        'XYZBC')
+    assert [entry['slave_position'] for entry in snapshot['entries']] == (
+        [0, 1, 2, 3, 4])
+    assert [entry['statusword'] for entry in snapshot['entries']] == (
+        [0x16b7] * 5)
+    assert all(
+        entry['flags'] == codec.BUS_JOINT_SLAVE_OP
+        for entry in snapshot['entries'])
+
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / 'bus.bin'
+        writer = codec.BusStatusMmapWriter(str(path)).open()
+        try:
+            writer.publish(snapshot, 17, 9, time.monotonic_ns())
+            first_inode = path.stat().st_ino
+            payload = path.read_bytes()
+            values = codec.BUS_STATUS_STRUCT.unpack(payload)
+            assert values[0] == codec.BUS_STATUS_MAGIC
+            assert values[1] == codec.BUS_STATUS_VERSION
+            assert values[4] == 2
+            assert values[5] == 17
+            assert values[6] == 23
+            assert values[11] == 9
+            assert values[-2] == codec.crc32_like(
+                payload[:codec.BUS_STATUS_CRC_OFFSET])
+            writer.publish(snapshot, 17, 10, time.monotonic_ns())
+            assert path.stat().st_ino == first_inode
+            assert codec.BUS_STATUS_STRUCT.unpack(
+                path.read_bytes())[4] == 4
+        finally:
+            writer.close()
+
+    set_value('router_generation', 24)
+    try:
+        access.read_bus_status()
+    except RuntimeError as exc:
+        assert str(exc) == 'native_bus_status_mapping_not_committed'
+    else:
+        raise AssertionError('mismatched bus mapping generation was accepted')
+
+
 def check_start_to_start_polling_cadence() -> None:
     class FakeClock:
         def __init__(self, overshoot=0.0):
@@ -230,24 +339,24 @@ def check_display_stabilizer_generation_rules() -> None:
 
     mcs, _ = stabilizer.stabilize(
         point(29.991, 359.218), point(29.991, 359.218), 2,
-        point(29.9910, 359.2180), point(29.9910, 359.2180))
+        point(29.9905, 359.2175), point(29.9905, 359.2175))
     assert mcs == point(29.990, 359.217)
     mcs, _ = stabilizer.stabilize(
         point(29.991, 359.218), point(29.991, 359.218), 2,
-        point(29.9910, 359.2180), point(29.9910, 359.2180))
+        point(29.9905, 359.2175), point(29.9905, 359.2175))
     assert mcs == point(29.990, 359.217)
     stabilizer.stabilize(
         point(29.990, 359.217), point(29.990, 359.217), 3)
     stabilizer.stabilize(
         point(29.991, 359.218), point(29.991, 359.218), 4,
-        point(29.9911, 359.2181), point(29.9911, 359.2181))
+        point(29.9906, 359.2176), point(29.9906, 359.2176))
     mcs, _ = stabilizer.stabilize(
         point(29.991, 359.218), point(29.991, 359.218), 5,
-        point(29.9912, 359.2182), point(29.9912, 359.2182))
+        point(29.9907, 359.2177), point(29.9907, 359.2177))
     assert mcs == point(29.990, 359.217)
     mcs, _ = stabilizer.stabilize(
         point(29.991, 359.218), point(29.991, 359.218), 6,
-        point(29.9912, 359.2182), point(29.9912, 359.2182))
+        point(29.9907, 359.2177), point(29.9907, 359.2177))
     assert mcs == point(29.991, 359.218)
 
     mcs, _ = stabilizer.stabilize(
@@ -255,34 +364,59 @@ def check_display_stabilizer_generation_rules() -> None:
     assert mcs == point(29.994, 0.0)
     stabilizer.stabilize(None, None, 7)
     mcs, _ = stabilizer.stabilize(
-        point(-1.001, -0.001), point(-1.001, -0.001), 8)
-    assert mcs == point(-1.001, -0.001)
+        point(-1.001, 359.999), point(-1.001, 359.999), 8)
+    assert mcs == point(-1.001, 359.999)
     mcs, _ = stabilizer.stabilize(
-        point(-1.002, -0.002), point(-1.002, -0.002), 1)
-    assert mcs == point(-1.002, -0.002)
+        point(-1.002, 359.998), point(-1.002, 359.998), 1)
+    assert mcs == point(-1.002, 359.998)
     mcs, _ = stabilizer.stabilize(
-        point(-1.003, -0.003), point(-1.003, -0.003), 2,
-        point(-1.0030, -0.0030), point(-1.0030, -0.0030))
-    assert mcs == point(-1.002, -0.002)
+        point(-1.003, 359.997), point(-1.003, 359.997), 2,
+        point(-1.0025, 359.9975), point(-1.0025, 359.9975))
+    assert mcs == point(-1.002, 359.998)
     stabilizer.stabilize(
-        point(-1.003, -0.003), point(-1.003, -0.003), 3,
-        point(-1.0031, -0.0031), point(-1.0031, -0.0031))
+        point(-1.003, 359.997), point(-1.003, 359.997), 3,
+        point(-1.0026, 359.9974), point(-1.0026, 359.9974))
     mcs, _ = stabilizer.stabilize(
-        point(-1.003, -0.003), point(-1.003, -0.003), 4,
-        point(-1.0032, -0.0032), point(-1.0032, -0.0032))
-    assert mcs == point(-1.002, -0.002)
+        point(-1.003, 359.997), point(-1.003, 359.997), 4,
+        point(-1.0027, 359.9973), point(-1.0027, 359.9973))
+    assert mcs == point(-1.002, 359.998)
     mcs, _ = stabilizer.stabilize(
-        point(-1.003, -0.003), point(-1.003, -0.003), 5,
-        point(-1.0032, -0.0032), point(-1.0032, -0.0032))
-    assert mcs == point(-1.003, -0.003)
+        point(-1.003, 359.997), point(-1.003, 359.997), 5,
+        point(-1.0027, 359.9973), point(-1.0027, 359.9973))
+    assert mcs == point(-1.003, 359.997)
+
+
+def check_display_stabilizer_uses_one_native_pulse() -> None:
+    def point(y):
+        return [0.0, y, 0.0, 0.0, 0.0]
+
+    unit_per_count = [0.001, 0.010, 0.001, 0.001, 0.001]
+    stabilizer = publisher.PositionDisplayStabilizer()
+    mcs, _ = stabilizer.stabilize(
+        point(29.990), point(29.990), 1,
+        point(29.990), point(29.990), unit_per_count)
+    assert mcs == point(29.990)
+
+    for generation in (2, 3, 4):
+        mcs, _ = stabilizer.stabilize(
+            point(29.991), point(29.991), generation,
+            point(29.995), point(29.995), unit_per_count)
+        assert mcs == point(29.990)
+
+    stabilizer.stabilize(
+        point(29.991), point(29.991), 5,
+        point(30.005), point(30.005), unit_per_count)
+    mcs, _ = stabilizer.stabilize(
+        point(29.991), point(29.991), 6,
+        point(30.005), point(30.005), unit_per_count)
+    assert mcs == point(29.991)
 
 
 def check_display_stabilizer_suppresses_boundary_writes() -> None:
     cadence = publisher.PositionPublishCadence()
     stabilizer = publisher.PositionDisplayStabilizer()
     payloads = []
-    original_atomic_write = projection.atomic_write
-    projection.atomic_write = lambda _path, payload: payloads.append(payload)
+    writer = CaptureWriter(payloads)
     samples = (
         (29.9904, 359.2174),
         (29.9910, 359.2180),
@@ -292,24 +426,21 @@ def check_display_stabilizer_suppresses_boundary_writes() -> None:
         (29.9912, 359.2182),
         (29.9941, 0.0001),
     )
-    try:
-        for generation, (y, c) in enumerate(samples, 1):
-            values = [0.0, y, 0.0, 0.0, c]
-            projection.write_position_status(
-                '/dev/null/position', None,
-                publish_cadence=cadence,
-                now_monotonic=(generation - 1) * 0.01,
-                native_positions=(values, values),
-                native_scalars=(0.0, 0.0, 100.0, 100.0),
-                display_stabilizer=stabilizer,
-                source_generation=generation)
-    finally:
-        projection.atomic_write = original_atomic_write
-    assert len(payloads) == 3
+    for generation, (y, c) in enumerate(samples, 1):
+        values = [0.0, y, 0.0, 0.0, c]
+        projection.write_position_status(
+            '/dev/null/position', None, writer,
+            rotary_projection=IdentityDisplayProjection(),
+            publish_cadence=cadence,
+            now_monotonic=(generation - 1) * 0.01,
+            native_positions=(values, values),
+            native_scalars=(0.0, 0.0, 100.0, 100.0),
+            display_stabilizer=stabilizer,
+            source_generation=generation)
+    assert len(payloads) == 2
     unpacked = [codec.POSITION_BLOCK_STRUCT.unpack(payload) for payload in payloads]
-    assert (unpacked[0][8], unpacked[0][11]) == (29.990, 359.217)
-    assert (unpacked[1][8], unpacked[1][11]) == (29.991, 359.218)
-    assert (unpacked[2][8], unpacked[2][11]) == (29.994, 0.0)
+    assert (unpacked[0][11], unpacked[0][14]) == (29.990, 359.217)
+    assert (unpacked[1][11], unpacked[1][14]) == (29.994, 0.0)
 
 
 def check_display_stabilizer_filters_rotary_wrap_one_count() -> None:
@@ -318,11 +449,38 @@ def check_display_stabilizer_filters_rotary_wrap_one_count() -> None:
 
     stabilizer = publisher.PositionDisplayStabilizer()
     mcs, cmd = stabilizer.stabilize(
+        point(360.0), point(360.0), 1,
+        point(359.9999), point(359.9999))
+    assert mcs == point(0.0) and cmd == point(0.0)
+
+
+def check_display_stabilizer_does_not_mask_multibucket_changes() -> None:
+    def point(b):
+        return [0.0, 0.0, 0.0, b, 0.0]
+
+    quanta = [0.0001] * codec.POSITION_AXIS_COUNT
+    stabilizer = publisher.PositionDisplayStabilizer()
+    mcs, cmd = stabilizer.stabilize(
+        point(36.578), point(36.578), 1,
+        point(36.5775), point(36.5775), quanta)
+    assert mcs == point(36.578) and cmd == point(36.578)
+
+    mcs, cmd = stabilizer.stabilize(
+        point(36.580), point(36.580), 2,
+        point(36.5803), point(36.5803), quanta)
+    assert mcs == point(36.580) and cmd == point(36.580)
+    mcs, cmd = stabilizer.stabilize(
+        point(36.578), point(36.578), 3,
+        point(36.5775), point(36.5775), quanta)
+    assert mcs == point(36.578) and cmd == point(36.578)
+
+    stabilizer.reset()
+    mcs, cmd = stabilizer.stabilize(
         point(0.0), point(0.0), 1, point(0.0), point(0.0))
     assert mcs == point(0.0) and cmd == point(0.0)
 
     mcs, cmd = stabilizer.stabilize(
-        point(359.999), point(359.999), 2,
+        point(360.0), point(360.0), 2,
         point(359.9999), point(359.9999))
     assert mcs == point(0.0) and cmd == point(0.0)
     mcs, cmd = stabilizer.stabilize(
@@ -330,7 +488,7 @@ def check_display_stabilizer_filters_rotary_wrap_one_count() -> None:
     assert mcs == point(0.0) and cmd == point(0.0)
 
     mcs, cmd = stabilizer.stabilize(
-        point(359.999), point(359.999), 4,
+        point(360.0), point(360.0), 4,
         point(359.9995), point(359.9995))
     assert mcs == point(0.0) and cmd == point(0.0)
     mcs, cmd = stabilizer.stabilize(
@@ -339,48 +497,41 @@ def check_display_stabilizer_filters_rotary_wrap_one_count() -> None:
 
     stabilizer.stabilize(
         point(359.999), point(359.999), 6,
-        point(359.9995), point(359.9995))
+        point(359.9993), point(359.9993))
     mcs, cmd = stabilizer.stabilize(
         point(359.999), point(359.999), 7,
-        point(359.9995), point(359.9995))
+        point(359.9993), point(359.9993))
     assert mcs == point(359.999) and cmd == point(359.999)
 
 
 def check_native_position_and_scalars_are_packed() -> None:
     payloads = []
-    original_atomic_write = projection.atomic_write
-    projection.atomic_write = lambda _path, payload: payloads.append(payload)
-    try:
-        projection.write_position_status(
-            '/dev/null/position',
-            None,
-            native_positions=(
-                [0.25, 1.25, 2.25, 3.25, 4.25],
-                [0.75, 1.75, 2.75, 3.75, 4.75]),
-            native_scalars=(120.0, 180.0, 125.0, 80.0))
-    finally:
-        projection.atomic_write = original_atomic_write
+    writer = CaptureWriter(payloads)
+    projection.write_position_status(
+        '/dev/null/position', None, writer,
+        native_positions=(
+            [0.25, 1.25, 2.25, 3.25, 4.25],
+            [0.75, 1.75, 2.75, 3.75, 4.75]),
+        native_scalars=(120.0, 180.0, 125.0, 80.0))
     unpacked = codec.POSITION_BLOCK_STRUCT.unpack(payloads[0])
-    assert unpacked[7:12] == (0.25, 1.25, 2.25, 3.25, 4.25)
-    assert unpacked[12:17] == (0.75, 1.75, 2.75, 3.75, 4.75)
-    assert unpacked[17:21] == (120.0, 180.0, 125.0, 80.0)
+    assert unpacked[10:15] == (0.25, 1.25, 2.25, 3.25, 4.25)
+    assert unpacked[15:20] == (0.75, 1.75, 2.75, 3.75, 4.75)
+    assert unpacked[20:25] == (0.001,) * 5
+    assert unpacked[25:30] == (-0.5,) * 5
+    assert unpacked[30:35] == (3,) * 5
+    assert unpacked[35:39] == (120.0, 180.0, 125.0, 80.0)
 
     payloads.clear()
-    projection.atomic_write = lambda _path, payload: payloads.append(payload)
-    try:
-        projection.write_position_status(
-            '/dev/null/position', None,
-            native_positions=([0.0] * 5, [0.0] * 5),
-            native_scalars=(0.0, 0.0, 100.0, 100.0),
-            writer_identity=0x1234abcd)
-    finally:
-        projection.atomic_write = original_atomic_write
+    projection.write_position_status(
+        '/dev/null/position', None, writer,
+        native_positions=([0.0] * 5, [0.0] * 5),
+        native_scalars=(0.0, 0.0, 100.0, 100.0),
+        writer_identity=0x1234abcd)
     assert codec.POSITION_BLOCK_STRUCT.unpack(payloads[0])[5] == 0x1234abcd
 
     try:
         projection.write_position_status(
-            '/dev/null/position',
-            None,
+            '/dev/null/position', None, writer,
             native_positions=([0.0] * 5, [0.0] * 5),
             native_scalars=(0.0, float('nan'), 100.0, 100.0))
     except RuntimeError as exc:
@@ -389,27 +540,49 @@ def check_native_position_and_scalars_are_packed() -> None:
         raise AssertionError('non-finite native scalar was accepted')
 
 
+def check_persistent_writer_keeps_inode_and_seqlock() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / 'position.bin'
+        writer = publisher.PositionStatusMmapWriter(str(path)).open()
+        try:
+            first_inode = path.stat().st_ino
+            for generation in (1, 2):
+                projection.write_position_status(
+                    str(path), None,
+                    native_positions=([float(generation)] * 5,) * 2,
+                    native_scalars=(0.0, 0.0, 100.0, 100.0),
+                    writer_identity=17,
+                    source_generation=generation,
+                    source_acquired_mono_ns=time.monotonic_ns(),
+                    position_writer=writer)
+                raw = path.read_bytes()
+                values = codec.POSITION_BLOCK_STRUCT.unpack(raw)
+                assert values[6] > 0 and values[6] & 1 == 0
+                assert values[9] == generation
+                assert values[-2] == codec.crc32_like(raw[:-8])
+            assert path.stat().st_ino == first_inode
+            assert writer.open_count == 1
+        finally:
+            writer.close()
+
+
 def check_moving_sample_publishes_at_each_30hz_generation() -> None:
     cadence = publisher.PositionPublishCadence()
     stabilizer = publisher.PositionDisplayStabilizer()
     writes = []
-    original_atomic_write = projection.atomic_write
-    projection.atomic_write = lambda _path, _payload: writes.append(1)
-    try:
-        for index in range(31):
-            projection.write_position_status(
-                '/dev/null/position',
-                None,
-                publish_cadence=cadence,
-                now_monotonic=index / 30.0,
-                native_positions=(
-                    [float(index), 0.0, 0.0, 0.0, 0.0],
-                    [float(index), 0.0, 0.0, 0.0, 0.0]),
-                native_scalars=(0.0, 0.0, 100.0, 100.0),
-                display_stabilizer=stabilizer,
-                source_generation=index + 1)
-    finally:
-        projection.atomic_write = original_atomic_write
+    writer = CaptureWriter(writes)
+    for index in range(31):
+        projection.write_position_status(
+            '/dev/null/position', None, writer,
+            rotary_projection=IdentityDisplayProjection(),
+            publish_cadence=cadence,
+            now_monotonic=index / 30.0,
+            native_positions=(
+                [float(index), 0.0, 0.0, 0.0, 0.0],
+                [float(index), 0.0, 0.0, 0.0, 0.0]),
+            native_scalars=(0.0, 0.0, 100.0, 100.0),
+            display_stabilizer=stabilizer,
+            source_generation=index + 1)
     assert len(writes) == 31
 
 
@@ -571,6 +744,9 @@ def check_init_uses_lock_identity_not_pidfile_authority() -> None:
     assert 'RUNTIME_MODULE_ROOT=/usr/libexec/8ax' in text
     assert 'PYTHONPATH=$RUNTIME_MODULE_ROOT:' in text
     assert 'command -v python3' in text
+    assert 'BUS_STATUS_PATH=${V5_BUS_STATUS_PATH:-/dev/shm/v5_native_bus_status.bin}' in text
+    assert '--bus-path "$BUS_STATUS_PATH"' in text
+    assert 'bus_block_matches_owner' in text
     assert 'flock -n "$LOCKFILE" true' in text
     assert '/proc/$OWNER_PID/stat' in text
     assert '/proc/$OWNER_PID/cmdline' in text
@@ -585,17 +761,23 @@ def check_init_requires_matching_canonical_writer_identity() -> None:
     start = text.index('position_block_matches_owner() {')
     end = text.index('\nstart_service() {', start)
     function = text[start:end]
+    bus_start = text.index('bus_block_matches_owner() {', start)
+    bus_function = text[bus_start:end]
     start_body = text[end:text.index('\nstop_service() {', end)]
     assert text.count('set_position_affinity') == 0
     assert 'position_block_matches_owner' not in start_body
     assert 'while ' not in start_body and 'sleep ' not in start_body
     with tempfile.TemporaryDirectory() as directory:
         status_path = Path(directory) / 'position.bin'
-        projection.write_position_status(
-            str(status_path), None,
-            native_positions=([0.0] * 5, [0.0] * 5),
-            native_scalars=(0.0, 0.0, 100.0, 100.0),
-            writer_identity=17)
+        writer = publisher.PositionStatusMmapWriter(str(status_path)).open()
+        try:
+            projection.write_position_status(
+                str(status_path), None, writer,
+                native_positions=([0.0] * 5, [0.0] * 5),
+                native_scalars=(0.0, 0.0, 100.0, 100.0),
+                writer_identity=17)
+        finally:
+            writer.close()
         environment = __import__('os').environ.copy()
         installed_modules = Path(directory) / 'usr' / 'libexec' / '8ax'
         installed_modules.mkdir(parents=True)
@@ -622,6 +804,41 @@ def check_init_requires_matching_canonical_writer_identity() -> None:
             ['sh', '-c', command], env=environment, check=False)
         assert match.returncode == 0
 
+        bus_path = Path(directory) / 'bus.bin'
+        bus_writer = codec.BusStatusMmapWriter(str(bus_path)).open()
+        try:
+            bus_writer.publish({
+                'valid': True,
+                'mapping_generation': 3,
+                'active_mask': 0x1f,
+                'master_flags': (
+                    codec.BUS_MASTER_LINK_UP |
+                    codec.BUS_MASTER_STATE_OP |
+                    codec.BUS_MASTER_ALL_OP),
+                'slaves_responding': 5,
+                'entries': [{
+                    'valid': True,
+                    'axis_code': ord(axis),
+                    'slave_position': index,
+                    'flags': codec.BUS_JOINT_SLAVE_OP,
+                    'statusword': 0x16b7,
+                } for index, axis in enumerate('XYZBC')],
+            }, 17, 1, time.monotonic_ns())
+        finally:
+            bus_writer.close()
+        command = (
+            f'BUS_STATUS_PATH="{bus_path.as_posix()}"; OWNER_WRITER=18; '
+            f'{bus_function}\nbus_block_matches_owner')
+        mismatch = subprocess.run(
+            ['sh', '-c', command], env=environment, check=False)
+        assert mismatch.returncode != 0
+        command = (
+            f'BUS_STATUS_PATH="{bus_path.as_posix()}"; OWNER_WRITER=17; '
+            f'{bus_function}\nbus_block_matches_owner')
+        match = subprocess.run(
+            ['sh', '-c', command], env=environment, check=False)
+        assert match.returncode == 0
+
 
 def check_runtime_policy_rejects_writer_identity_unbinding() -> None:
     board_root = Path(__file__).resolve().parents[2]
@@ -633,19 +850,32 @@ def check_runtime_policy_rejects_writer_identity_unbinding() -> None:
     init_text = (Path(__file__).parent / 'init.d' /
                  'v5-position-status-publisher').read_text(encoding='utf-8')
     assert policy.position_status_writer_identity_bound(init_text)
+    assert policy.bus_status_writer_identity_bound(init_text)
     mutated = init_text.replace('values[5] != int(sys.argv[2])',
                                 'values[5] == int(sys.argv[2])', 1)
     assert not policy.position_status_writer_identity_bound(mutated)
+    bus_start = init_text.index('bus_block_matches_owner() {')
+    bus_mutated = (
+        init_text[:bus_start] +
+        init_text[bus_start:].replace(
+            'values[5] != int(sys.argv[2])',
+            'values[5] == int(sys.argv[2])',
+            1))
+    assert not policy.bus_status_writer_identity_bound(bus_mutated)
 
 
 def main() -> int:
     check_hal_position_binding_and_units()
     check_hal_position_reuses_only_source_owned_signal()
+    check_bus_status_uses_committed_axis_mapping_once()
     check_start_to_start_polling_cadence()
     check_display_stabilizer_generation_rules()
+    check_display_stabilizer_uses_one_native_pulse()
     check_display_stabilizer_suppresses_boundary_writes()
     check_display_stabilizer_filters_rotary_wrap_one_count()
+    check_display_stabilizer_does_not_mask_multibucket_changes()
     check_native_position_and_scalars_are_packed()
+    check_persistent_writer_keeps_inode_and_seqlock()
     check_moving_sample_publishes_at_each_30hz_generation()
     check_fast_owner_has_no_linuxcnc_or_error_channel()
     check_lifecycle_lock_owns_singleton_not_pidfile()

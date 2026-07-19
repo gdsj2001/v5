@@ -31,12 +31,13 @@ def main() -> int:
         write_sd,
         flags=re.MULTILINE,
     )
-    assert calls == [("92", "18")], "fresh-SD must enable Position exactly once as S92/K18"
+    assert calls == [("06", "18")], "fresh-SD must enable Position exactly once as S06/K18"
     function_start = write_sd.index("enable_service() {")
-    function_end = write_sd.index("\n}\n\nenable_service v5-linuxcnc-command-gate", function_start) + 3
+    function_end = write_sd.index("\n}\n", function_start) + 3
     enable_service_function = write_sd[function_start:function_end]
     assert 'ln -s "../init.d/$name" "$dir/S${start_prio}${name}"' in enable_service_function
     assert 'ln -s "../init.d/$name" "$dir/K${stop_prio}${name}"' in enable_service_function
+    assert 'rm -f "$rootfs_stage/etc/rc${level}.d"/S??ethercat' in write_sd
     position_call = f"enable_service {SERVICE} {calls[0][0]} {calls[0][1]}"
 
     with tempfile.TemporaryDirectory() as temporary:
@@ -61,11 +62,11 @@ def main() -> int:
         links = sorted(rootfs.glob(f"etc/rc*.d/*{SERVICE}"))
         assert len(links) == 7, "fresh rootfs must contain four start and three stop links"
         expected_names = {
-            *(f"S92{SERVICE}" for _level in (2, 3, 4, 5)),
+            *(f"S06{SERVICE}" for _level in (2, 3, 4, 5)),
             *(f"K18{SERVICE}" for _level in (0, 1, 6)),
         }
         assert {link.name for link in links} == expected_names
-        assert sum(link.name.startswith("S92") for link in links) == 4
+        assert sum(link.name.startswith("S06") for link in links) == 4
         assert sum(link.name.startswith("K18") for link in links) == 3
         assert not list(rootfs.glob(f"etc/rc*.d/[SK]01{SERVICE}"))
         assert not list(rootfs.glob(f"etc/rc*.d/[SK]99{SERVICE}"))

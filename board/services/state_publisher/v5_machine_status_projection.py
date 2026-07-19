@@ -63,6 +63,9 @@ class NativeRotaryDisplayProjection:
 
     def __init__(self, hal_module):
         self._hal = hal_module
+        self._display_key = None
+        self._display_axis_codes = None
+        self._unit_per_count = None
         self._mapping_generation = None
         self._mapping_key = None
         self._records = {}
@@ -77,13 +80,73 @@ class NativeRotaryDisplayProjection:
         self._records = {}
         self._wcheckpoint_metadata = {}
 
+    def _invalidate_display_cache(self):
+        self._display_key = None
+        self._display_axis_codes = None
+        self._unit_per_count = None
+
     def _invalidate_wcheckpoint_cache(self, axis):
         self._wcheckpoint_metadata.pop(axis, None)
+
+    def _load_display_metadata(self):
+        valid = bool(
+            self._get('v5-native-hal-owner.display-metadata-valid'))
+        generation = int(
+            self._get('v5-native-hal-owner.display-metadata-generation'))
+        active_mask = int(
+            self._get('v5-native-hal-owner.display-active-mask'))
+        commit_seq = int(
+            self._get('v5-native-hal-owner.display-commit-seq'))
+        expected_mask = (1 << POSITION_AXIS_COUNT) - 1
+        display_key = (generation, active_mask, commit_seq)
+        if (not valid or not generation or active_mask != expected_mask or
+                not commit_seq):
+            self._invalidate_display_cache()
+            raise RuntimeError('native_display_projection_metadata_unavailable')
+        if self._display_key == display_key:
+            return list(self._display_axis_codes), list(self._unit_per_count)
+
+        self._invalidate_display_cache()
+        axis_codes = []
+        unit_per_count = []
+        for status_slot in range(POSITION_AXIS_COUNT):
+            suffix = f'{status_slot:02d}'
+            axis_code = int(self._get(
+                f'v5-native-hal-owner.display-axis-code-{suffix}'))
+            unit = finite_float(self._get(
+                f'v5-native-hal-owner.display-unit-per-count-{suffix}'))
+            if (axis_code not in tuple(map(ord, 'XYZABC')) or
+                    axis_code in axis_codes or unit is None or unit <= 0.0):
+                raise RuntimeError(
+                    'native_display_projection_metadata_invalid')
+            axis_codes.append(axis_code)
+            unit_per_count.append(float(unit))
+        display_key_after = (
+            int(self._get(
+                'v5-native-hal-owner.display-metadata-generation')),
+            int(self._get('v5-native-hal-owner.display-active-mask')),
+            int(self._get('v5-native-hal-owner.display-commit-seq')))
+        if (not bool(self._get(
+                'v5-native-hal-owner.display-metadata-valid')) or
+                display_key_after != display_key):
+            self._invalidate_display_cache()
+            raise RuntimeError('native_display_projection_metadata_changed')
+        self._display_key = display_key
+        self._display_axis_codes = axis_codes
+        self._unit_per_count = unit_per_count
+        return list(axis_codes), list(unit_per_count)
 
     def _load_mapping(self):
         valid = bool(self._get('v5-native-hal-owner.home-table-mapping-valid'))
         generation = int(self._get('v5-native-hal-owner.home-table-map-gen'))
         if not valid or not generation:
+            active_mask = int(
+                self._get('v5-native-hal-owner.home-table-active-mask'))
+            commit_seq = int(
+                self._get('v5-native-hal-owner.home-table-commit-seq'))
+            if not any((valid, generation, active_mask, commit_seq)):
+                self._invalidate_mapping_cache()
+                return False
             self._invalidate_mapping_cache()
             raise RuntimeError('native_rotary_projection_mapping_invalid')
         commit_seq = int(self._get('v5-native-hal-owner.home-table-commit-seq'))
@@ -93,7 +156,7 @@ class NativeRotaryDisplayProjection:
         if (self._mapping_key is not None and
                 generation == self._mapping_key[0] and
                 commit_seq == self._mapping_key[2]):
-            return
+            return True
 
         # A new generation is an atomic cache boundary.  Drop the old records
         # before reading any of the new metadata so an incomplete native commit
@@ -115,16 +178,19 @@ class NativeRotaryDisplayProjection:
                 raise RuntimeError('native_rotary_projection_generation_mismatch')
             axis_code = int(self._get(f'v5-native-hal-owner.home-axis-code-{suffix}'))
             axis_name = V5_ROTARY_AXIS_CODES.get(axis_code)
-            if axis_name is None:
-                continue
             status_slot = int(self._get(f'v5-native-hal-owner.home-status-slot-{suffix}'))
             counts_per_unit = finite_float(
                 self._get(f'v5-native-hal-owner.home-counts-per-unit-{suffix}'))
+            if (status_slot < 0 or status_slot >= POSITION_AXIS_COUNT or
+                    counts_per_unit is None or counts_per_unit <= 0.0):
+                raise RuntimeError(
+                    'native_rotary_projection_joint_mapping_invalid')
+            if axis_name is None:
+                continue
             counts_per_rev = exact_native_count(
                 abs(float(counts_per_unit or 0.0)) * 360.0)
-            if (status_slot < 0 or status_slot >= POSITION_AXIS_COUNT or
-                    counts_per_unit is None or counts_per_unit <= 0.0 or
-                    counts_per_rev is None or counts_per_rev <= 0 or status_slot in records):
+            if (counts_per_rev is None or counts_per_rev <= 0 or
+                    status_slot in records):
                 raise RuntimeError('native_rotary_projection_joint_mapping_invalid')
             records[status_slot] = {
                 'axis': axis_name,
@@ -143,6 +209,11 @@ class NativeRotaryDisplayProjection:
         self._records = records
         self._mapping_generation = generation
         self._mapping_key = mapping_key
+        return True
+
+    def display_metadata(self):
+        _axis_codes, unit_per_count = self._load_display_metadata()
+        return unit_per_count, [3] * POSITION_AXIS_COUNT
 
     def _read_wcheckpoint(self, axis):
         for _attempt in range(3):
@@ -191,11 +262,30 @@ class NativeRotaryDisplayProjection:
         raise RuntimeError('native_rotary_projection_readback_invalid')
 
     def project(self, raw_mcs=None, raw_cmd=None):
-        self._load_mapping()
+        display_axis_codes, _unit_per_count = self._load_display_metadata()
+        mapping_loaded = self._load_mapping()
         mcs = list(raw_mcs) if raw_mcs is not None else None
         cmd = list(raw_cmd) if raw_cmd is not None else None
+        if not mapping_loaded:
+            # No saved BUS zero table is a valid initial machine state.  The
+            # router then uses a zero anchor/base, so finite rotary joint
+            # degrees are already the native zero-relative display source.
+            # Home remains fail-closed; position display and UI boot do not.
+            for status_slot, axis_code in enumerate(display_axis_codes):
+                if axis_code not in V5_ROTARY_AXIS_CODES:
+                    continue
+                if mcs is not None:
+                    mcs[status_slot] = rotary_phase_degrees(
+                        mcs[status_slot], 360, 1.0)
+                if cmd is not None:
+                    cmd[status_slot] = rotary_phase_degrees(
+                        cmd[status_slot], 360, 1.0)
+            return mcs, cmd
         for status_slot, record in self._records.items():
             axis = record['axis']
+            if display_axis_codes[status_slot] != ord(axis.upper()):
+                raise RuntimeError(
+                    'native_rotary_projection_model_mapping_mismatch')
             logical_counts, base_counts = self._read_wcheckpoint(axis)
             if mcs is not None:
                 mcs[status_slot] = rotary_phase_degrees(
@@ -240,7 +330,10 @@ def display_position_projection(values):
         if not math.isfinite(scaled):
             projected.append(float(value))
             continue
-        bucket = math.floor(scaled + 1.0e-9) if scaled >= 0.0 else math.ceil(scaled - 1.0e-9)
+        bucket = (
+            math.floor(scaled + 0.5 + 1.0e-9)
+            if scaled >= 0.0
+            else math.ceil(scaled - 0.5 - 1.0e-9))
         display_value = bucket / DISPLAY_COORDINATE_SCALE
         projected.append(0.0 if display_value == 0.0 else display_value)
     if len(projected) < POSITION_AXIS_COUNT:
@@ -483,6 +576,7 @@ def first_spindle(stat):
 def write_position_status(
         path: str,
         stat,
+        position_writer,
         rotary_projection=None,
         publish_cadence=None,
         now_monotonic=None,
@@ -490,7 +584,10 @@ def write_position_status(
         native_scalars=None,
         writer_identity=0,
         display_stabilizer=None,
-        source_generation=None) -> bool:
+        source_generation=None,
+        source_acquired_mono_ns=None) -> bool:
+    if position_writer is None:
+        raise RuntimeError('native_position_writer_required')
     writer_identity = int(writer_identity)
     if writer_identity < 0 or writer_identity > 0xffffffff:
         raise RuntimeError('native_position_writer_identity_invalid')
@@ -529,6 +626,8 @@ def write_position_status(
             cmd_present = False
     source_mcs = list(mcs) if mcs_present else None
     source_cmd = list(cmd) if cmd_present else None
+    unit_per_count = None
+    display_digits = [3] * POSITION_AXIS_COUNT
     if mcs_present:
         mcs = display_position_projection(mcs)
     if cmd_present:
@@ -555,16 +654,29 @@ def write_position_status(
                 feed_override, spindle_override)):
             raise RuntimeError('native_position_scalar_sample_invalid')
     if display_stabilizer is not None:
+        if rotary_projection is None:
+            raise RuntimeError('native_display_projection_metadata_unavailable')
+        unit_per_count, display_digits = rotary_projection.display_metadata()
         stabilized_mcs, stabilized_cmd = display_stabilizer.stabilize(
             mcs if mcs_present else None,
             cmd if cmd_present else None,
             source_generation,
-            source_mcs,
-            source_cmd)
+            source_mcs=source_mcs,
+            source_cmd=source_cmd,
+            unit_per_count=unit_per_count)
         if mcs_present:
             mcs = stabilized_mcs
         if cmd_present:
             cmd = stabilized_cmd
+    if unit_per_count is None:
+        if rotary_projection is None:
+            unit_per_count = [1.0 / DISPLAY_COORDINATE_SCALE] * POSITION_AXIS_COUNT
+        else:
+            unit_per_count, display_digits = rotary_projection.display_metadata()
+    following_error = [
+        (0.0 if mcs[index] - cmd[index] == 0.0
+         else mcs[index] - cmd[index])
+        for index in range(POSITION_AXIS_COUNT)]
     valid_mask = (
         V5_STATUS_VALID_SPINDLE_SPEED |
         V5_STATUS_VALID_LINEAR_VELOCITY |
@@ -579,6 +691,9 @@ def write_position_status(
         valid_mask,
         tuple(mcs),
         tuple(cmd),
+        tuple(unit_per_count),
+        tuple(display_digits),
+        tuple(following_error),
         spindle_speed,
         linear_velocity,
         feed_override,
@@ -587,16 +702,34 @@ def write_position_status(
     if publish_cadence is not None and not publish_cadence.should_publish(
             'position', signature, now_monotonic, POSITION_STATUS_HEARTBEAT_SECONDS):
         return False
-    monotonic_ns = time.monotonic_ns()
+    monotonic_ns = (
+        int(source_acquired_mono_ns)
+        if source_acquired_mono_ns is not None
+        else time.monotonic_ns())
+    generation = int(source_generation) if source_generation is not None else 1
+    if monotonic_ns <= 0:
+        raise RuntimeError('native_position_source_time_invalid')
+    if generation <= 0:
+        raise RuntimeError('native_position_source_generation_invalid')
+    sequence = position_writer.next_sequence()
     prefix = struct.pack(
-        '<IIIIIIQ' + ('d' * (POSITION_AXIS_COUNT * 2)) + ('d' * 4),
-        POSITION_MAGIC, POSITION_STATUS_VERSION, POSITION_BLOCK_STRUCT.size, valid_mask, POSITION_AXIS_COUNT, writer_identity, monotonic_ns,
-        *(mcs + cmd), spindle_speed, linear_velocity, feed_override, spindle_override)
+        '<IIIIIIIIQQ' + ('d' * (POSITION_AXIS_COUNT * 4)) +
+        ('B' * POSITION_AXIS_COUNT) + '3x' + ('d' * 4),
+        POSITION_MAGIC, POSITION_STATUS_VERSION, POSITION_BLOCK_STRUCT.size,
+        valid_mask, POSITION_AXIS_COUNT, writer_identity, sequence, 0,
+        monotonic_ns, generation,
+        *(mcs + cmd + unit_per_count + following_error),
+        *display_digits,
+        spindle_speed, linear_velocity, feed_override, spindle_override)
     crc = crc32_like(prefix)
     payload = POSITION_BLOCK_STRUCT.pack(
-        POSITION_MAGIC, POSITION_STATUS_VERSION, POSITION_BLOCK_STRUCT.size, valid_mask, POSITION_AXIS_COUNT, writer_identity, monotonic_ns,
-        *(mcs + cmd), spindle_speed, linear_velocity, feed_override, spindle_override, crc, 0)
-    atomic_write(path, payload)
+        POSITION_MAGIC, POSITION_STATUS_VERSION, POSITION_BLOCK_STRUCT.size,
+        valid_mask, POSITION_AXIS_COUNT, writer_identity, sequence, 0,
+        monotonic_ns, generation,
+        *(mcs + cmd + unit_per_count + following_error),
+        *display_digits,
+        spindle_speed, linear_velocity, feed_override, spindle_override, crc, 0)
+    position_writer.publish(payload, sequence)
     if publish_cadence is not None:
         publish_cadence.mark_published('position', signature, now_monotonic)
     return True
@@ -604,7 +737,10 @@ def write_position_status(
 
 def write_mock_position_status(
         path: str, mcs_values, cmd_values, modal: str = 'G90 G17 G54',
-        writer_identity=0) -> None:
+        writer_identity=0,
+        position_writer=None) -> None:
+    if position_writer is None:
+        raise RuntimeError('native_position_writer_required')
     class MockStat:
         pass
     stat = MockStat()
@@ -616,4 +752,7 @@ def write_mock_position_status(
     stat.spindle = ({'speed': 0.0, 'override': 1.0},)
     stat.feedrate = 1.0
     stat.current_vel = 0.0
-    write_position_status(path, stat, writer_identity=writer_identity)
+    write_position_status(
+        path, stat, position_writer=position_writer,
+        writer_identity=writer_identity,
+    )

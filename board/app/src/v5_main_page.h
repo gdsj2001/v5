@@ -6,8 +6,9 @@
 #include "v5_coordinate_panel.h"
 #include "v5_command_program.h"
 #include "v5_main_page_actions.h"
-#include "v5_main_page_model_projector.h"
+#include "v5_motion_model_registry.h"
 #include "v5_native_readback.h"
+#include "v5_program_scene_ipc.h"
 #include "v5_toolpath_display.h"
 #include "v5_ui_first_frame_guard.h"
 #include "v5_ui_status_view.h"
@@ -21,8 +22,7 @@ extern "C" {
 #define V5_MAIN_PAGE_AXIS_COUNT V5_COORDINATE_AXIS_COUNT
 #define V5_MAIN_PAGE_TRAJECTORY_POINT_COUNT V5_STATUS_TRAJECTORY_POINT_COUNT
 #define V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT V5_PROGRAM_PREVIEW_POINT_COUNT
-#define V5_MAIN_PAGE_BUTTON_COUNT 35u
-#define V5_MAIN_PAGE_TOOLPATH_WCS_COUNT 9u
+#define V5_MAIN_PAGE_BUTTON_COUNT 29u
 
 enum {
     V5_MAIN_PAGE_REFRESH_DYNAMIC = 1u << 0,
@@ -62,16 +62,6 @@ typedef struct V5MainPageCoordinateTarget {
     char axis;
 } V5MainPageCoordinateTarget;
 
-typedef struct V5MainPageDynamicScene {
-    V5ToolpathScreenPoint mcs_point;
-    V5ToolpathScreenPoint cmd_tip_point;
-    V5ToolpathScreenPoint holder_end_point;
-    unsigned int generation;
-    int mcs_valid;
-    int cmd_tip_valid;
-    int holder_end_valid;
-} V5MainPageDynamicScene;
-
 typedef struct V5MainPage {
     lv_obj_t *root;
     lv_obj_t *axis_labels[V5_MAIN_PAGE_AXIS_COUNT];
@@ -96,28 +86,12 @@ typedef struct V5MainPage {
     lv_obj_t *cpu1_label;
     lv_obj_t *toolpath_clip_layer;
     lv_obj_t *trajectory_line;
-    lv_obj_t *toolpath_mcs_origin_line;
-    lv_obj_t *toolpath_wcs_origin_line;
-    lv_obj_t *toolpath_mcs_axis_lines[3];
-    lv_obj_t *toolpath_wcs_axis_lines[3];
-    lv_obj_t *toolpath_model_primary_axis_line;
-    lv_obj_t *toolpath_model_child_axis_line;
-    lv_obj_t *toolpath_program_wcs_origin_lines[V5_MAIN_PAGE_TOOLPATH_WCS_COUNT];
-    lv_obj_t *toolpath_program_wcs_axis_lines[V5_MAIN_PAGE_TOOLPATH_WCS_COUNT][3];
-    lv_obj_t *toolpath_holder_line;
-    lv_obj_t *toolpath_model_primary_center_line;
-    lv_obj_t *toolpath_model_child_center_line;
     lv_obj_t *toolpath_summary_label;
     lv_obj_t *toolpath_detail_label;
     lv_obj_t *toolpath_view_label;
     lv_obj_t *toolpath_model_primary_label;
     lv_obj_t *toolpath_model_child_label;
     lv_obj_t *toolpath_wcs_label;
-    lv_obj_t *toolpath_mcs_label;
-    lv_obj_t *toolpath_program_wcs_labels[V5_MAIN_PAGE_TOOLPATH_WCS_COUNT];
-    lv_obj_t *toolpath_mcs_axis_labels[3];
-    lv_obj_t *toolpath_microkernel_marker_dot;
-    lv_obj_t *toolpath_holder_marker_line;
     lv_obj_t *program_name_label;
     lv_obj_t *program_line_bg[4];
     lv_obj_t *program_line_labels[4];
@@ -142,12 +116,10 @@ typedef struct V5MainPage {
     uint32_t spindle_override_last_send_tick;
     int home_transaction_active;
     lv_timer_t *selection_idle_timer;
-    lv_timer_t *jog_hold_timer;
     lv_obj_t *jog_pressed_button;
     V5MainPageSelectionSpace jog_pressed_space;
     char jog_pressed_axis;
     int jog_pressed_positive;
-    int jog_long_press_elapsed;
     int jog_continuous_active;
     uint32_t jog_keepalive_last_tick;
     uint32_t program_edit_last_click_tick;
@@ -169,17 +141,9 @@ typedef struct V5MainPage {
     V5ToolpathDisplayPlane view_plane;
     double jog_step;
     V5MainPageSelection selection;
-    lv_point_t trajectory_points[V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT];
-    unsigned char trajectory_break_before[V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT];
     unsigned int trajectory_point_count;
-    lv_point_t toolpath_mcs_origin_points[5];
-    lv_point_t toolpath_wcs_origin_points[5];
-    lv_point_t toolpath_mcs_axis_points[3][2];
-    lv_point_t toolpath_wcs_axis_points[3][2];
-    lv_point_t toolpath_model_axis_points[2][2];
-    lv_point_t toolpath_holder_points[2];
-    lv_point_t toolpath_program_wcs_origin_points[V5_MAIN_PAGE_TOOLPATH_WCS_COUNT][5];
-    lv_point_t toolpath_program_wcs_axis_points[V5_MAIN_PAGE_TOOLPATH_WCS_COUNT][3][2];
+    const V5StatusDisplayScene *toolpath_display_scene;
+    int toolpath_display_scene_valid;
     lv_point_t toolpath_gesture_last_points[2];
     int toolpath_gesture_active_count;
     double toolpath_gesture_last_mid_x;
@@ -193,30 +157,23 @@ typedef struct V5MainPage {
     V5ToolpathDisplayFit toolpath_fit;
     unsigned int toolpath_program_generation;
     unsigned int toolpath_view_generation;
+    unsigned int toolpath_fit_generation;
     unsigned int toolpath_program_view_generation;
     V5ToolpathDisplayPlane toolpath_program_plane;
-    int toolpath_program_wcs_valid;
-    int toolpath_program_wcs_index;
-    unsigned int toolpath_program_wcs_epoch;
-    double toolpath_program_wcs_offset[3];
     int toolpath_program_visible;
     unsigned int toolpath_program_point_count;
-    int toolpath_model_scene_valid;
-    int toolpath_model_scene_fresh;
-    V5MainPageModelScene toolpath_model_scene;
-    int toolpath_program_model_scene_valid;
-    V5MainPageModelScene toolpath_program_model_scene;
-    int toolpath_static_model_scene_valid;
-    V5MainPageModelScene toolpath_static_model_scene;
-    V5StatusPoint toolpath_program_points[V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT];
-    V5StatusPoint toolpath_program_project_points[V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT];
-    unsigned char toolpath_program_break_before[V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT];
-    V5ToolpathScreenPoint toolpath_program_screen_points[V5_MAIN_PAGE_PROGRAM_TRAJECTORY_POINT_COUNT];
-    V5MainPageDynamicScene toolpath_dynamic_scene;
+    uint64_t toolpath_scene_generation;
+    uint64_t toolpath_last_request_program_source_identity;
+    uint64_t toolpath_last_request_program_generation;
+    uint64_t toolpath_last_request_view_generation;
+    uint64_t toolpath_last_request_fit_generation;
+    uint32_t toolpath_last_request_page_visible;
+    int page_visible;
+    uint32_t toolpath_request_last_send_tick;
+    unsigned int toolpath_request_retry_count;
     unsigned int toolpath_static_cache_hits;
     unsigned int toolpath_static_cache_misses;
     unsigned int toolpath_dynamic_refresh_count;
-    unsigned int toolpath_dynamic_scene_build_count;
     unsigned int toolpath_pose_refresh_count;
     unsigned int toolpath_structure_refresh_count;
     unsigned int toolpath_line_rewrite_count;

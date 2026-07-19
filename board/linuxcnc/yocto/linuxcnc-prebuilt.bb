@@ -15,6 +15,7 @@ EXTERNALSRC = "${V5_LINUXCNC_EXTERNAL_SOURCE}"
 EXTERNALSRC_BUILD = "${V5_LINUXCNC_EXTERNAL_BUILD}"
 EXTERNALSRC_SYMLINKS = ""
 PV = "2.9.7+v5"
+PARALLEL_MAKE = "-j 8"
 
 S = "${EXTERNALSRC}"
 B = "${EXTERNALSRC_BUILD}"
@@ -335,6 +336,8 @@ FILES_${PN} = " \
     ${libdir}/linuxcnc/modules/v5_safety_latch.so \
     ${libdir}/linuxcnc/modules/v5_bus_axis_router.so \
     ${libdir}/linuxcnc/modules/v5_bus_homecomp.so \
+    ${libdir}/python3/dist-packages/_hal.so \
+    ${libdir}/python3/dist-packages/hal.py \
     ${libdir}/python3/dist-packages/linuxcnc.so \
     ${datadir}/linuxcnc/linuxcnc.nml \
     ${datadir}/v5-native/linuxcnc-runtime-allowlist.tsv \

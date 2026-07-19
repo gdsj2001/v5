@@ -1,6 +1,8 @@
 #ifndef V5_STATE_PUBLISHER_SERVICE_H
 #define V5_STATE_PUBLISHER_SERVICE_H
 
+#include "v5_native_readback.h"
+#include "v5_program_scene_producer.h"
 #include "v5_status_shm.h"
 #include "v5_status_shm_mmap.h"
 
@@ -47,8 +49,17 @@ typedef struct V5StatePublisherReport {
 
 void v5_state_publisher_request_stop(void);
 void v5_state_publisher_reset_stop(void);
-int v5_state_publisher_build_frame(V5StatusShmFrame *frame, V5StatePublisherReport *report);
-int v5_state_publisher_publish_once(const char *path, V5StatePublisherReport *report);
+void v5_state_publisher_merge_scene_readbacks(
+    V5NativeReadback *merged,
+    const V5NativeReadback *rtcp,
+    const V5NativeReadback *wcs,
+    const V5NativeReadback *g53,
+    const V5NativeReadback *modal_tool);
+int v5_state_publisher_apply_scene(
+    V5StatusShmFrame *frame,
+    V5ProgramSceneProducer *producer,
+    const V5NativeDisplaySample *sample,
+    const V5NativeReadback *readback);
 int v5_state_publisher_run_loop(const char *path, unsigned int interval_ms, unsigned int max_frames, V5StatePublisherReport *report);
 
 #ifdef __cplusplus

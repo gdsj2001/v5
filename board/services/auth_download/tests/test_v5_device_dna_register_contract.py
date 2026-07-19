@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import subprocess
 import sys
+import tempfile
 import unittest
 from unittest import mock
+from types import SimpleNamespace
 
 
 AUTH_DOWNLOAD_DIR = Path(__file__).resolve().parents[1]
@@ -12,6 +15,7 @@ if str(AUTH_DOWNLOAD_DIR) not in sys.path:
     sys.path.insert(0, str(AUTH_DOWNLOAD_DIR))
 
 import v5_device_dna_register as register
+import device_dna_register_auth as register_auth
 
 
 DNA = "0123456789ABCDEF"
@@ -127,6 +131,71 @@ class DeviceDnaRegisterContractTest(unittest.TestCase):
                 self.assertFalse(result["ok"])
                 self.assertEqual(result["code"], "DNA_REGISTER_FAILED")
                 require_cached.assert_not_called()
+
+    def test_invalid_partial_key_is_replaced_only_after_valid_generation(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_root:
+            root = Path(raw_root)
+            private_key = root / "device_private_key.pem"
+            public_key = root / "device_public_key.pem"
+            private_key.write_bytes(b"partial-key")
+            args = SimpleNamespace(
+                device_private_key_file=str(private_key),
+                device_public_key_file=str(public_key),
+            )
+            calls: list[list[str]] = []
+
+            def run_openssl(command: list[str], **kwargs: object) -> SimpleNamespace:
+                calls.append(command)
+                if command[1] == "rsa" and command[-1] == str(private_key):
+                    return SimpleNamespace(returncode=1, stdout=b"", stderr=b"invalid")
+                if command[1] == "genpkey":
+                    Path(command[-1]).write_bytes(b"valid-private-key")
+                    self.assertEqual(
+                        kwargs["timeout"],
+                        register_auth.DEVICE_PRIVATE_KEY_GENERATION_TIMEOUT_S)
+                    return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=b"-----BEGIN PUBLIC KEY-----\nvalid\n-----END PUBLIC KEY-----\n",
+                    stderr=b"",
+                )
+
+            with mock.patch.object(
+                    register_auth.subprocess, "run", side_effect=run_openssl):
+                result = register_auth.prepare_device_keypair(args, create=True)
+
+            self.assertEqual(private_key.read_bytes(), b"valid-private-key")
+            self.assertIn("BEGIN PUBLIC KEY", result["public_key_pem"])
+            self.assertEqual(len(calls), 3)
+            self.assertEqual(list(root.glob("*.keygen.tmp")), [])
+
+    def test_key_generation_timeout_preserves_existing_partial_key(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_root:
+            root = Path(raw_root)
+            private_key = root / "device_private_key.pem"
+            public_key = root / "device_public_key.pem"
+            private_key.write_bytes(b"partial-key")
+            args = SimpleNamespace(
+                device_private_key_file=str(private_key),
+                device_public_key_file=str(public_key),
+            )
+
+            def run_openssl(command: list[str], **_kwargs: object) -> SimpleNamespace:
+                if command[1] == "rsa":
+                    return SimpleNamespace(returncode=1, stdout=b"", stderr=b"invalid")
+                raise subprocess.TimeoutExpired(command, 180.0)
+
+            with mock.patch.object(
+                    register_auth.subprocess, "run", side_effect=run_openssl):
+                with self.assertRaises(register_auth.DnaRegisterError) as raised:
+                    register_auth.prepare_device_keypair(args, create=True)
+
+            self.assertEqual(
+                raised.exception.code,
+                "DEVICE_PRIVATE_KEY_CREATE_TIMEOUT")
+            self.assertEqual(private_key.read_bytes(), b"partial-key")
+            self.assertFalse(public_key.exists())
+            self.assertEqual(list(root.glob("*.keygen.tmp")), [])
 
 
 if __name__ == "__main__":

@@ -28,6 +28,12 @@ extern "C" {
      V5_NATIVE_G53_GEOMETRY_FIELD_C_X | V5_NATIVE_G53_GEOMETRY_FIELD_C_Y)
 
 int v5_native_g53_geometry_status_read(const char *path, unsigned int max_age_ms, V5NativeReadback *readback);
+size_t v5_native_g53_geometry_status_block_size(void);
+int v5_native_g53_geometry_status_read_from_memory(
+    const void *memory,
+    size_t size,
+    unsigned int max_age_ms,
+    V5NativeReadback *readback);
 int v5_native_g53_geometry_status_write(
     const char *path,
     int valid,

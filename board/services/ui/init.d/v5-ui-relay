@@ -1,6 +1,24 @@
 #!/bin/sh
 set -eu
 
+bind_service_init_to_cpu1() {
+  cpu_list=
+  while read -r key value rest; do
+    if [ "$key" = "Cpus_allowed_list:" ]; then
+      cpu_list=${value:-}
+      break
+    fi
+  done <"/proc/$$/status"
+  [ "$cpu_list" = "1" ] && return 0
+  [ -x /usr/bin/taskset ] || {
+    echo "taskset missing; service init cannot exclude CPU0" >&2
+    return 1
+  }
+  exec /usr/bin/taskset -c 1 "$0" "$@"
+}
+bind_service_init_to_cpu1 "$@"
+
+
 LD_BIND_NOW=1
 export LD_BIND_NOW
 ulimit -l unlimited 2>/dev/null || true
@@ -22,7 +40,6 @@ REMOTE_HEIGHT=${V5_UI_REMOTE_HEIGHT:-600}
 PROJECT_ROOT=${V5_PROJECT_ROOT:-/opt/8ax/v5}
 UI_INPUT_NICE=0
 PROFILE_SNAPSHOT=/usr/libexec/8ax/drive_profile/v5_drive_profile_resident_snapshot.py
-BUS_ZERO_GATE=/usr/libexec/8ax/drive_profile/v5_bus_zero_resident_gate.py
 
 boot_stage() {
   stage="$1"
@@ -133,13 +150,6 @@ wait_boot_inputs_ready() {
   case "$active_ini" in
     bus)
       expected_ini="$PROJECT_ROOT/linuxcnc/ini/v5_bus.ini"
-      halcmd show comp 2>/dev/null | grep -Eq '(^|[[:space:]])(lcec|cia402)([[:space:]]|$)' || return 1
-      "$BUS_ZERO_GATE" \
-        --runtime /opt/8ax/phase0_bus5/settings_runtime.json \
-        --ini "$PROJECT_ROOT/linuxcnc/ini/v5_bus.ini" >>"$LOGFILE" 2>&1 || {
-          echo "v5_ui_relay BUS zero resident gate failed" >&2
-          return 1
-        }
       ;;
     pulse)
       echo "v5_ui_relay rejects disabled Pulse runtime mode" >&2

@@ -194,6 +194,37 @@ static int g53_geometry_block_valid(const V5NativeG53GeometryStatusBlock *block,
     return now - block->monotonic_ns <= max_age_ns;
 }
 
+size_t v5_native_g53_geometry_status_block_size(void)
+{
+    return sizeof(V5NativeG53GeometryStatusBlock);
+}
+
+int v5_native_g53_geometry_status_read_from_memory(
+    const void *memory,
+    size_t size,
+    unsigned int max_age_ms,
+    V5NativeReadback *readback)
+{
+    V5NativeG53GeometryStatusBlock block;
+    if (!memory || size != sizeof(block) || !readback) return 0;
+    memcpy(&block, memory, sizeof(block));
+    if (!g53_geometry_block_valid(&block, max_age_ms)) {
+        v5_native_readback_set_unavailable(
+            readback, "g53_geometry_status_block_invalid_or_stale");
+        return 0;
+    }
+    v5_native_readback_init(readback);
+    v5_native_readback_set_g53_geometry(
+        readback,
+        &block.centers[0][0],
+        block.center_count,
+        block.axis_count,
+        block.epoch);
+    v5_native_readback_set_motion_model(readback, block.motion_model);
+    return v5_native_readback_g53_geometry_known(readback) &&
+        v5_native_readback_motion_model_known(readback);
+}
+
 int v5_native_g53_geometry_status_read(const char *path, unsigned int max_age_ms, V5NativeReadback *readback)
 {
     FILE *fp;
@@ -214,20 +245,8 @@ int v5_native_g53_geometry_status_read(const char *path, unsigned int max_age_ms
         return 0;
     }
     fclose(fp);
-    if (!g53_geometry_block_valid(&block, max_age_ms)) {
-        v5_native_readback_set_unavailable(readback, "g53_geometry_status_block_invalid_or_stale");
-        return 0;
-    }
-    v5_native_readback_init(readback);
-    v5_native_readback_set_g53_geometry(
-        readback,
-        &block.centers[0][0],
-        block.center_count,
-        block.axis_count,
-        block.epoch);
-    v5_native_readback_set_motion_model(readback, block.motion_model);
-    return v5_native_readback_g53_geometry_known(readback) &&
-           v5_native_readback_motion_model_known(readback);
+    return v5_native_g53_geometry_status_read_from_memory(
+        &block, sizeof(block), max_age_ms, readback);
 }
 
 static int g53_geometry_copy_values(V5NativeG53GeometryStatusBlock *block, const double *centers, size_t center_count, size_t axis_count)

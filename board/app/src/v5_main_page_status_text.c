@@ -152,11 +152,6 @@ void v5_main_page_internal_format_main_page_wcs_coordinate(char *out, size_t out
     }
 
     value = status->mcs[axis] - active_offsets[axis];
-    if (axis >= 3U) {
-        value = v5_ui_status_view_rotary_phase_deg(value);
-    }
-    value = (value >= 0.0 ? floor(value * 1000.0 + 1.0e-9) :
-            ceil(value * 1000.0 - 1.0e-9)) / 1000.0;
     if (value == 0.0) {
         value = 0.0;
     }
@@ -168,23 +163,25 @@ static int format_toolpath_g53_active_model_text(
     size_t out_size,
     const V5MainPage *page)
 {
-    const V5MainPageModelScene *scene;
+    const V5StatusDisplayScene *scene;
 
     if (!out || out_size == 0U || !page ||
-        !page->toolpath_model_scene_valid ||
-        !page->toolpath_model_scene_fresh) {
+        !page->last_status_valid ||
+        (page->last_status.valid_mask & V5_STATUS_VALID_DISPLAY_SCENE) == 0U ||
+        !page->last_status.display_scene ||
+        (page->last_status.display_scene->flags & V5_STATUS_SCENE_FLAG_MODEL) == 0U) {
         return 0;
     }
-    scene = &page->toolpath_model_scene;
+    scene = page->last_status.display_scene;
     snprintf(
         out,
         out_size,
         "G53 %c %.2f,%.2f,%.2f  %c %.2f,%.2f,%.2f",
-        scene->primary_axis,
+        (char)scene->primary_axis,
         scene->primary_center[0],
         scene->primary_center[1],
         scene->primary_center[2],
-        scene->child_axis,
+        (char)scene->child_axis,
         scene->child_center[0],
         scene->child_center[1],
         scene->child_center[2]);
@@ -196,20 +193,19 @@ static int format_toolpath_wcs_offset_text(
     size_t out_size,
     const V5MainPage *page)
 {
-    const double *offsets;
+    const V5MotionModelDescriptor *model;
+    const double *active;
 
     if (!out || out_size == 0U || !page ||
-        !page->toolpath_model_scene_valid ||
-        !page->toolpath_model_scene_fresh) {
+        !v5_native_readback_motion_model_known(&page->native_readback)) {
         return 0;
     }
-    offsets = v5_native_readback_active_wcs_offsets(&page->native_readback);
-    if (!offsets ||
-        page->toolpath_model_scene.primary_status_slot >= V5_NATIVE_READBACK_WCS_OFFSET_COUNT ||
-        page->toolpath_model_scene.child_status_slot >= V5_NATIVE_READBACK_WCS_OFFSET_COUNT ||
-        !isfinite(offsets[0]) || !isfinite(offsets[1]) || !isfinite(offsets[2]) ||
-        !isfinite(offsets[page->toolpath_model_scene.primary_status_slot]) ||
-        !isfinite(offsets[page->toolpath_model_scene.child_status_slot])) {
+    model = v5_motion_model_find(page->native_readback.motion_model);
+    active = v5_native_readback_active_wcs_offsets(&page->native_readback);
+    if (!model || !active ||
+        !isfinite(active[0]) || !isfinite(active[1]) ||
+        !isfinite(active[2]) || !isfinite(active[3]) ||
+        !isfinite(active[4])) {
         return 0;
     }
     snprintf(
@@ -217,13 +213,13 @@ static int format_toolpath_wcs_offset_text(
         out_size,
         "%s偏置 X%.2f Y%.2f Z%.2f %c%.2f %c%.2f",
         v5_main_page_internal_main_page_wcs_code(&page->native_readback),
-        offsets[0],
-        offsets[1],
-        offsets[2],
-        page->toolpath_model_scene.primary_axis,
-        offsets[page->toolpath_model_scene.primary_status_slot],
-        page->toolpath_model_scene.child_axis,
-        offsets[page->toolpath_model_scene.child_status_slot]);
+        active[0],
+        active[1],
+        active[2],
+        model->first_rotary_axis,
+        active[3],
+        model->second_rotary_axis,
+        active[4]);
     return 1;
 }
 
@@ -236,13 +232,13 @@ void v5_main_page_internal_update_toolpath_status_text(V5MainPage *page)
     if (page->toolpath_summary_label &&
         format_toolpath_g53_active_model_text(text, sizeof(text), page)) {
         v5_main_page_internal_set_label_text_if_changed(page->toolpath_summary_label, text);
-    } else if (page->toolpath_summary_label && !page->toolpath_model_scene_valid) {
+    } else if (page->toolpath_summary_label) {
         v5_main_page_internal_set_label_text_if_changed(page->toolpath_summary_label, "");
     }
     if (page->toolpath_detail_label &&
         format_toolpath_wcs_offset_text(text, sizeof(text), page)) {
         v5_main_page_internal_set_label_text_if_changed(page->toolpath_detail_label, text);
-    } else if (page->toolpath_detail_label && !page->toolpath_model_scene_valid) {
+    } else if (page->toolpath_detail_label) {
         v5_main_page_internal_set_label_text_if_changed(page->toolpath_detail_label, "");
     }
 }

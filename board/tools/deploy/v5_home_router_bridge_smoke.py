@@ -14,6 +14,7 @@ OWNER = ROOT / "linuxcnc/src/hal/user_comps/v5_native_hal_owner.comp"
 PROTOCOL = ROOT / "linuxcnc/src/hal/user_comps/v5_native_hal_owner_protocol.h"
 HAL = ROOT / "board/linuxcnc/hal/v5_bus_2ms.hal"
 COMMAND_IPC = ROOT / "board/services/command_gate/v5_command_gate_ipc.h"
+COMMAND_SERVER = ROOT / "board/services/command_gate/v5_command_gate_server.c"
 HOME_ADAPTER = ROOT / "board/services/command_gate/v5_native_home.c"
 HOME_COMPONENT = ROOT / "linuxcnc/src/hal/components/v5_bus_homecomp.comp"
 HOME_MOTION = ROOT / "linuxcnc/src/hal/components/v5_bus_home_motion.h"
@@ -150,6 +151,7 @@ def main() -> int:
     protocol = PROTOCOL.read_text(encoding="utf-8")
     hal = HAL.read_text(encoding="utf-8")
     command_ipc = COMMAND_IPC.read_text(encoding="utf-8")
+    command_server = COMMAND_SERVER.read_text(encoding="utf-8")
     home_adapter = HOME_ADAPTER.read_text(encoding="utf-8")
     home_component = HOME_COMPONENT.read_text(encoding="utf-8")
     home_motion = HOME_MOTION.read_text(encoding="utf-8")
@@ -234,7 +236,11 @@ def main() -> int:
     require(owner, "selected = home_failed_joint;")
     require(owner, "response->home_current_mask = home_failure_current_mask")
     require(protocol, "#define V5_NATIVE_HAL_OWNER_VERSION 6u")
-    require(command_ipc, "#define V5_COMMAND_GATE_IPC_VERSION 4u")
+    require(command_ipc, "#define V5_COMMAND_GATE_IPC_VERSION 5u")
+    require(command_ipc, "V5_COMMAND_GATE_IPC_OP_PROBE_AXIS_SLAVE_MAPPING = 6")
+    require(command_server, "load_axis_slave_mapping_status();")
+    require(command_server, "g_axis_slave_mapping_applicable &&")
+    require(command_server, '"ALL_HOME_AXIS_SLAVE_MAPPING_INVALID"')
     require(protocol, "status_home_router_rejected_commit_seq")
     require(protocol, "rtcp_home_ack_transaction")
     require(hal, "v5-native-hal-owner.home-router-commit-seq")

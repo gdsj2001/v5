@@ -13,7 +13,7 @@ extern "C" {
 
 #define V5_COMMAND_GATE_SOCKET_PATH "/run/8ax_v5_product_ui/v5_command_gate.sock"
 #define V5_COMMAND_GATE_IPC_MAGIC 0x56354347u
-#define V5_COMMAND_GATE_IPC_VERSION 4u
+#define V5_COMMAND_GATE_IPC_VERSION 5u
 #define V5_COMMAND_GATE_TEXT_CAP 512u
 #define V5_COMMAND_GATE_SECONDARY_TEXT_CAP 128u
 #define V5_COMMAND_GATE_MODE_CAP 64u
@@ -35,6 +35,7 @@ typedef enum V5CommandGateIpcOp {
     V5_COMMAND_GATE_IPC_OP_SETTINGS_AXIS_COMMIT = 3,
     V5_COMMAND_GATE_IPC_OP_PROBE_HOME_STATUS = 4,
     V5_COMMAND_GATE_IPC_OP_PROBE_ESTOP_CLEAN = 5,
+    V5_COMMAND_GATE_IPC_OP_PROBE_AXIS_SLAVE_MAPPING = 6,
 } V5CommandGateIpcOp;
 
 typedef struct V5CommandGateIpcRequestFrame {
@@ -77,6 +78,11 @@ typedef struct V5CommandGateIpcResponseFrame {
     int32_t safety_estop_active;
     int32_t machine_enable_known;
     int32_t machine_enabled;
+    int32_t axis_slave_mapping_status_available;
+    int32_t axis_slave_mapping_applicable;
+    int32_t axis_slave_mapping_valid;
+    uint32_t axis_slave_mapping_generation;
+    char axis_slave_mapping_code[64];
     uint32_t estop_clean_generation;
     int32_t estop_clean_active;
     int32_t estop_clean_terminal;
@@ -137,6 +143,14 @@ typedef struct V5CommandGateEstopCleanStatus {
     char code[64];
 } V5CommandGateEstopCleanStatus;
 
+typedef struct V5CommandGateAxisSlaveMappingStatus {
+    int available;
+    int applicable;
+    int valid;
+    unsigned int generation;
+    char code[64];
+} V5CommandGateAxisSlaveMappingStatus;
+
 typedef struct V5CommandGateResult {
     int send_status;
     int executed;
@@ -179,6 +193,9 @@ int v5_command_gate_probe_home_status(
 int v5_command_gate_probe_estop_clean(
     unsigned int generation,
     V5CommandGateEstopCleanStatus *status,
+    unsigned int timeout_ms);
+int v5_command_gate_probe_axis_slave_mapping(
+    V5CommandGateAxisSlaveMappingStatus *status,
     unsigned int timeout_ms);
 int v5_command_gate_probe_safety(V5CommandGateResult *result, unsigned int timeout_ms);
 int v5_command_gate_settings_axis_commit(

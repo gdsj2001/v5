@@ -14,6 +14,8 @@ DEFAULT_DEVICE_AUTH_PUBLIC_KEY_FILE = '/etc/6x-cnc/device_auth_public.pem'
 DEVICE_AUTH_SCHEMA = '8ax-device-authorization-v1'
 DEVICE_AUTH_ENVELOPE_SCHEMA = '8ax-device-authorization-envelope-v1'
 DEVICE_AUTH_SIGNATURE_ALG = 'RSASSA-PKCS1-v1_5-SHA256'
+DEVICE_PRIVATE_KEY_GENERATION_TIMEOUT_S = 180.0
+DEVICE_PUBLIC_KEY_EXPORT_TIMEOUT_S = 30.0
 
 class DnaRegisterError(RuntimeError):
     def __init__(self, code: str, message: str):
@@ -104,35 +106,83 @@ def set_private_file_permissions(path: Path) -> None:
     except Exception:
         pass
 
+def export_device_public_key(private_key: Path) -> bytes:
+    try:
+        proc = subprocess.run(
+            [openssl_path(), "rsa", "-pubout", "-in", str(private_key)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=DEVICE_PUBLIC_KEY_EXPORT_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise DnaRegisterError(
+            "DEVICE_PUBLIC_KEY_EXPORT_TIMEOUT",
+            "设备公钥导出超时，请重新登记本机码") from exc
+    if proc.returncode != 0 or not proc.stdout:
+        raise DnaRegisterError(
+            "DEVICE_PUBLIC_KEY_EXPORT_FAILED",
+            "设备私钥无效或公钥导出失败，请重新登记本机码")
+    return normalize_public_key_pem(proc.stdout)
+
+def generate_device_keypair(private_key: Path) -> bytes:
+    fd, temporary_name = tempfile.mkstemp(
+        prefix=private_key.name + ".",
+        suffix=".keygen.tmp",
+        dir=str(private_key.parent))
+    os.close(fd)
+    temporary = Path(temporary_name)
+    old_umask = os.umask(0o177)
+    try:
+        try:
+            proc = subprocess.run(
+                [
+                    openssl_path(), "genpkey", "-algorithm", "RSA",
+                    "-pkeyopt", "rsa_keygen_bits:3072",
+                    "-out", str(temporary),
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=DEVICE_PRIVATE_KEY_GENERATION_TIMEOUT_S,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise DnaRegisterError(
+                "DEVICE_PRIVATE_KEY_CREATE_TIMEOUT",
+                "设备私钥生成超时，未覆盖原密钥，请稍后重新登记本机码") from exc
+        if proc.returncode != 0 or not temporary.is_file() or temporary.stat().st_size == 0:
+            raise DnaRegisterError(
+                "DEVICE_PRIVATE_KEY_CREATE_FAILED",
+                "设备私钥生成失败，未覆盖原密钥")
+        set_private_file_permissions(temporary)
+        public_pem = export_device_public_key(temporary)
+        os.replace(str(temporary), str(private_key))
+        set_private_file_permissions(private_key)
+        return public_pem
+    finally:
+        os.umask(old_umask)
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
 def prepare_device_keypair(args: argparse.Namespace, create: bool) -> Dict[str, str]:
     private_key = Path(args.device_private_key_file)
     public_key = Path(args.device_public_key_file)
     private_key.parent.mkdir(parents=True, exist_ok=True)
-    if not private_key.is_file():
-        if not create:
-            raise DnaRegisterError("DEVICE_PRIVATE_KEY_MISSING", "设备私钥缺失，请重新登记本机 DNA")
-        old_umask = os.umask(0o177)
+    public_pem: bytes
+    if private_key.is_file():
         try:
-            proc = subprocess.run(
-                [openssl_path(), "genpkey", "-algorithm", "RSA", "-pkeyopt", "rsa_keygen_bits:3072", "-out", str(private_key)],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=30.0,
-            )
-        finally:
-            os.umask(old_umask)
-        if proc.returncode != 0 or not private_key.is_file():
-            raise DnaRegisterError("DEVICE_PRIVATE_KEY_CREATE_FAILED", "设备私钥生成失败")
+            public_pem = export_device_public_key(private_key)
+        except DnaRegisterError:
+            if not create:
+                raise
+            public_pem = generate_device_keypair(private_key)
+    else:
+        if not create:
+            raise DnaRegisterError(
+                "DEVICE_PRIVATE_KEY_MISSING",
+                "设备私钥缺失，请重新登记本机码")
+        public_pem = generate_device_keypair(private_key)
     set_private_file_permissions(private_key)
-    proc = subprocess.run(
-        [openssl_path(), "rsa", "-pubout", "-in", str(private_key)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        timeout=10.0,
-    )
-    if proc.returncode != 0 or not proc.stdout:
-        raise DnaRegisterError("DEVICE_PUBLIC_KEY_EXPORT_FAILED", "设备公钥导出失败")
-    public_pem = normalize_public_key_pem(proc.stdout)
     atomic_write(public_key, public_pem)
     try:
         os.chmod(str(public_key), 0o644)

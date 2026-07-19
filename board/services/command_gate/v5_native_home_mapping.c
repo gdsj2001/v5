@@ -21,6 +21,65 @@ static uint32_t fnv1a_u32(uint32_t value, uint32_t hash)
     return hash;
 }
 
+typedef struct V5BusZeroEvidence {
+    double zero_counts;
+    double counts_per_unit;
+    double home_reference;
+} V5BusZeroEvidence;
+
+static int v5_native_home_zero_evidence_for_slave(
+    const char *json,
+    const V5NativeMotionParameters *parameters,
+    unsigned int expected_slave_position,
+    V5BusZeroEvidence *evidence)
+{
+    unsigned int i;
+    int found = 0;
+    if (!json || !parameters || !evidence) {
+        return 0;
+    }
+    memset(evidence, 0, sizeof(*evidence));
+    for (i = 0U; i < V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT; ++i) {
+        const V5NativeMotionAxisParameters *candidate = &parameters->axes[i];
+        const char *axis_start;
+        const char *axis_end;
+        const char *zero_start;
+        const char *zero_end;
+        char axis_name[2] = {candidate->axis, '\0'};
+        double zero_slave_position;
+        V5BusZeroEvidence candidate_evidence;
+        if (!v5_settings_apply_runtime_axis_object(
+                json, axis_name, &axis_start, &axis_end) ||
+            !v5_settings_apply_json_object_for_key(
+                axis_start, axis_end, "zero_model", &zero_start, &zero_end) ||
+            !v5_settings_apply_json_number_value(
+                zero_start, zero_end, "slave_position", &zero_slave_position) ||
+            !isfinite(zero_slave_position) ||
+            zero_slave_position < 0.0 ||
+            zero_slave_position > (double)UINT_MAX ||
+            zero_slave_position != floor(zero_slave_position) ||
+            (unsigned int)zero_slave_position != expected_slave_position) {
+            continue;
+        }
+        if (found ||
+            !v5_settings_apply_json_number_value(
+                zero_start, zero_end, "zero_counts", &candidate_evidence.zero_counts) ||
+            !v5_settings_apply_json_number_value(
+                zero_start, zero_end, "counts_per_unit", &candidate_evidence.counts_per_unit) ||
+            !v5_settings_apply_json_number_value(
+                zero_start, zero_end, "raw_zero_position", &candidate_evidence.home_reference) ||
+            !isfinite(candidate_evidence.zero_counts) ||
+            !isfinite(candidate_evidence.counts_per_unit) ||
+            candidate_evidence.counts_per_unit == 0.0 ||
+            !isfinite(candidate_evidence.home_reference)) {
+            return 0;
+        }
+        *evidence = candidate_evidence;
+        found = 1;
+    }
+    return found;
+}
+
 int v5_native_home_mapping_load(
     const char *settings_project_root,
     V5NativeMotionParameters *parameters,
@@ -120,43 +179,22 @@ int v5_native_home_runtime_owner_load_bus(
     }
     for (i = 0U; i < V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT; ++i) {
         V5NativeMotionAxisParameters *axis = &parameters->axes[i];
-        const char *axis_start;
-        const char *axis_end;
-        const char *zero_start;
-        const char *zero_end;
-        char axis_name[2] = {axis->axis, '\0'};
+        V5BusZeroEvidence evidence;
         double expected;
         double reference_scale_epsilon;
-        double zero_slave_position;
         if (!axis->active) {
             continue;
         }
         axis->bus_zero_evidence_known = 0;
-        if (!v5_settings_apply_runtime_axis_object(json, axis_name, &axis_start, &axis_end) ||
-            !v5_settings_apply_json_object_for_key(
-                axis_start, axis_end, "zero_model", &zero_start, &zero_end) ||
-            !v5_settings_apply_json_number_value(
-                zero_start, zero_end, "zero_counts", &axis->bus_zero_counts) ||
-            !v5_settings_apply_json_number_value(
-                zero_start, zero_end, "counts_per_unit", &axis->bus_counts_per_unit) ||
-            !v5_settings_apply_json_number_value(
-                zero_start, zero_end, "raw_zero_position", &axis->bus_home_reference) ||
-            !v5_settings_apply_json_number_value(
-                zero_start, zero_end, "slave_position", &zero_slave_position) ||
-            !isfinite(axis->bus_zero_counts) ||
-            !isfinite(axis->bus_counts_per_unit) || axis->bus_counts_per_unit == 0.0 ||
-            !isfinite(axis->bus_home_reference) || !isfinite(zero_slave_position)) {
+        if (!v5_native_home_zero_evidence_for_slave(
+                json, parameters, axis->slave_position, &evidence)) {
             free(json);
             snprintf(code, code_cap, "BUS_HOME_AXIS_%c_ZERO_EVIDENCE_MISSING", axis->axis);
             return 0;
         }
-        if (zero_slave_position < 0.0 || zero_slave_position > (double)UINT_MAX ||
-            zero_slave_position != floor(zero_slave_position) ||
-            (unsigned int)zero_slave_position != axis->slave_position) {
-            free(json);
-            snprintf(code, code_cap, "BUS_HOME_AXIS_%c_ZERO_SLAVE_MISMATCH", axis->axis);
-            return 0;
-        }
+        axis->bus_zero_counts = evidence.zero_counts;
+        axis->bus_counts_per_unit = evidence.counts_per_unit;
+        axis->bus_home_reference = evidence.home_reference;
         expected = axis->bus_zero_counts / axis->bus_counts_per_unit;
         reference_scale_epsilon = fmax(1.0, fabs(expected)) * 1.0e-9;
         if (fabs(expected - axis->bus_home_reference) > reference_scale_epsilon) {

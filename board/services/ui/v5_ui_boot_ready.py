@@ -3,6 +3,7 @@
 from __future__ import annotations
 import argparse, binascii, ctypes, errno, json, math, os, re, select, struct, tempfile, time, urllib.error, urllib.request, uuid
 from pathlib import Path
+from v5_status_shm_reader import status_shm_payload_valid
 from v5_ui_cache_queue_contract import validate_queue_trace
 EXPECTED_QUEUE = (
     "main",
@@ -30,8 +31,18 @@ CACHE_LINE_RE = re.compile(
 )
 class ReadyError(RuntimeError): pass
 BUS_INI = "/opt/8ax/v5/linuxcnc/ini/v5_bus.ini"; POSITION_PATH, WCS_PATH, MODAL_PATH, STATE_PATH = map(Path, ("/dev/shm/v5_native_position_status.bin", "/dev/shm/v5_native_wcs_status.bin", "/dev/shm/v5_native_modal_tool_status.bin", "/dev/shm/v3_status_shm"))
+BUS_STATUS_PATH = Path("/dev/shm/v5_native_bus_status.bin")
 POSITION_PID, POSITION_LOCK, WCS_PID, STATE_PID = map(Path, ("/run/8ax/v5_position_status_publisher.pid", "/run/8ax/v5_position_status_publisher.lock", "/run/8ax/v5_wcs_status_publisher.pid", "/run/8ax/v5_state_publisher.pid"))
-POSITION_FMT, WCS_FMT, MODAL_FMT = (struct.Struct("<IIIIIIQ" + "d" * 14 + "II"), struct.Struct("<IIIIiIIIIIQ" + "d" * 45 + "II"), struct.Struct("<IIIIIIIIIiIIQ128sdIIIiIiIIi128sIII"))
+POSITION_FMT, WCS_FMT, MODAL_FMT = (
+    struct.Struct("<IIIIIIIIQQ" + "d" * 20 + "5B3x" + "d" * 4 + "II"),
+    struct.Struct("<IIIIiIIIIIQ" + "d" * 45 + "II"),
+    struct.Struct("<IIIIIIIIIiIIQ128sdIIIiIiIIi128sIII"))
+POSITION_SEQ_OFFSET = 24
+STATE_FRAME_SIZE, STATE_PAYLOAD_SIZE, STATE_SEQ_OFFSET = 7128, 7096, 24
+STATE_TRAJECTORY_COUNT_OFFSET = 888
+STATE_SCENE_POINT_COUNT_OFFSET = 1056
+STATE_SCENE_SEGMENT_COUNT_OFFSET = 1060
+STATE_SCENE_MARKER_COUNT_OFFSET = 1064
 def fnv32(raw):
     value = 2166136261
     for byte in raw:
@@ -105,7 +116,8 @@ def publisher_identities(cache=None, unique=False, expected_ini=""):
             raise ReadyError("position owner record mismatch")
         pid = int(record[0])
         expected = ["/usr/libexec/8ax/v5_position_status_publisher.py", "--path",
-                    str(POSITION_PATH), "--interval-ms", "33"]
+                    str(POSITION_PATH), "--bus-path", str(BUS_STATUS_PATH),
+                    "--interval-ms", "33"]
         if accept_identity("position", pid, record[1], proc_argv(pid)[1:],
                            [expected], cache, unique, extra=(record[2],)):
             require_position_lock_held()
@@ -130,17 +142,24 @@ def publisher_identities(cache=None, unique=False, expected_ini=""):
                            [expected], cache, unique, True):
             owners["state"] = pid
     return owners
-def read_atomic(path, fmt, crc_index=-2):
+def read_atomic(path, fmt, crc_index=-2, seq_offset=None):
     raw = path.read_bytes()
     if len(raw) != fmt.size:
         raise ReadyError(f"block size mismatch path={path} actual={len(raw)} expected={fmt.size}")
     values = fmt.unpack(raw); tail = 12 if crc_index == -3 else 8
+    if seq_offset is not None:
+        sequence = struct.unpack_from("<I", raw, seq_offset)[0]
+        if not sequence or sequence & 1:
+            raise ReadyError(f"block sequence invalid path={path}")
     if values[crc_index] != fnv32(raw[:-tail]):
         raise ReadyError(f"block CRC mismatch path={path}")
     return values
 def read_state_seqlock(path):
     try:
-        fd = os.open(str(path), os.O_RDONLY | getattr(os, "O_CLOEXEC", 0))
+        fd = os.open(
+            str(path),
+            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) |
+            getattr(os, "O_BINARY", 0))
     except FileNotFoundError:
         return None
     def pread(size, offset):
@@ -153,8 +172,11 @@ def read_state_seqlock(path):
         return data
     try:
         for _ in range(3):
-            before, raw, after = pread(4, 24), pread(840, 0), pread(4, 24)
-            if len(before) != 4 or len(after) != 4 or len(raw) != 840:
+            before = pread(4, STATE_SEQ_OFFSET)
+            raw = pread(STATE_FRAME_SIZE, 0)
+            after = pread(4, STATE_SEQ_OFFSET)
+            if (len(before) != 4 or len(after) != 4 or
+                    len(raw) != STATE_FRAME_SIZE):
                 continue
             before, after = struct.unpack("<I", before)[0], struct.unpack("<I", after)[0]
             local = struct.unpack_from("<I", raw, 24)[0]
@@ -168,16 +190,19 @@ def current_pre_ui_inputs(cache=None, unique=False, expected_ini=""):
     markers = {"position": None, "state": None, "wcs": None, "modal": None}
     position_values = None
     try:
-        pos = read_atomic(POSITION_PATH, POSITION_FMT)
+        pos = read_atomic(POSITION_PATH, POSITION_FMT, seq_offset=POSITION_SEQ_OFFSET)
         writer = int(POSITION_PID.read_text(encoding="ascii").split()[2])
-        if pos[:3] != (0x56504F53, 2, 152) or pos[4] != 5 or pos[5] != writer:
+        if pos[:3] != (0x56504F53, 3, POSITION_FMT.size) or pos[4] != 5 or pos[5] != writer:
             raise ReadyError("Position block owner/header mismatch")
-        if not all(math.isfinite(value) for value in pos[7:21]):
+        if (pos[8] <= 0 or pos[9] <= 0 or
+                not all(math.isfinite(value) for value in pos[10:30]) or
+                not all(value > 0.0 for value in pos[20:25]) or
+                tuple(pos[30:35]) != (3, 3, 3, 3, 3)):
             raise ReadyError("Position block values are non-finite")
         if pos[3] & 3 == 3:
-            if not 0 <= time.monotonic_ns() - pos[6] <= 1_000_000_000:
+            if not 0 <= time.monotonic_ns() - pos[8] <= 1_000_000_000:
                 raise ReadyError("Position block stale")
-            markers["position"], position_values = pos[6], tuple(pos[7:17])
+            markers["position"], position_values = pos[9], tuple(pos[10:20])
     except FileNotFoundError:
         pass
     raw = read_state_seqlock(STATE_PATH)
@@ -185,16 +210,41 @@ def current_pre_ui_inputs(cache=None, unique=False, expected_ini=""):
         header = struct.unpack_from("<8I", raw)
         calc = binascii.crc32(raw[:24]); calc = binascii.crc32(raw[32:], calc) & 0xFFFFFFFF
         epoch, valid, typed = struct.unpack_from("<QII", raw, 32)
-        values, trajectory_count = struct.unpack_from("<10d", raw, 48), struct.unpack_from("<I", raw, 768)[0]
-        if header[:5] != (0x56355348, 2, 840, 840, 808) or header[7] != calc:
+        writer_identity = struct.unpack_from("<I", raw, 48)[0]
+        source_time, source_generation, scene_generation = struct.unpack_from("<QQQ", raw, 56)
+        scene_build = struct.unpack_from("<Q", raw, 1024)[0]
+        scene_flags = struct.unpack_from("<I", raw, 1052)[0]
+        values = struct.unpack_from("<10d", raw, 80)
+        unit_per_count = struct.unpack_from("<5d", raw, 160)
+        following_error = struct.unpack_from("<5d", raw, 200)
+        display_digits = struct.unpack_from("<5B", raw, 240)
+        trajectory_count = struct.unpack_from(
+            "<I", raw, STATE_TRAJECTORY_COUNT_OFFSET)[0]
+        scene_point_count = struct.unpack_from(
+            "<I", raw, STATE_SCENE_POINT_COUNT_OFFSET)[0]
+        scene_segment_count = struct.unpack_from(
+            "<I", raw, STATE_SCENE_SEGMENT_COUNT_OFFSET)[0]
+        scene_marker_count = struct.unpack_from(
+            "<I", raw, STATE_SCENE_MARKER_COUNT_OFFSET)[0]
+        if header[:5] != (0x56355348, 3, STATE_FRAME_SIZE, STATE_FRAME_SIZE, STATE_PAYLOAD_SIZE) or header[7] != calc:
             raise ReadyError("State ABI/SeqLock/CRC mismatch")
-        if not all(math.isfinite(value) for value in values) or trajectory_count > 16:
-            raise ReadyError("State coordinate/trajectory values invalid")
-        if (valid & 3 == 3 and not (typed & 7 or header[5] & 7) and
+        if not status_shm_payload_valid(raw):
+            raise ReadyError("State typed payload contract invalid")
+        if (trajectory_count > 16 or scene_point_count > 512 or
+                scene_segment_count > 48 or scene_marker_count > 16):
+            raise ReadyError("State trajectory/scene counts invalid")
+        if (not writer_identity or not source_time or not source_generation or
+                not scene_generation or not scene_build or not (scene_flags & 1) or
+                not all(math.isfinite(value) for value in values) or
+                not all(math.isfinite(value) and value > 0.0 for value in unit_per_count) or
+                not all(math.isfinite(value) for value in following_error) or
+                display_digits != (3, 3, 3, 3, 3)):
+            raise ReadyError("State coordinate/trajectory/scene values invalid")
+        if (valid & 0x203 == 0x203 and not (typed & 7 or header[5] & 7) and
                 position_values is not None and tuple(values) == position_values):
-            if not 0 <= time.monotonic_ns() - epoch <= 500_000_000:
+            if not 0 <= time.monotonic_ns() - source_time <= 500_000_000:
                 raise ReadyError("State block stale")
-            markers["state"] = header[6]
+            markers["state"] = source_generation
     try:
         wcs = read_atomic(WCS_PATH, WCS_FMT)
         if wcs[:3] != (0x56574353, 2, 416) or wcs[5:7] != (9, 5):
@@ -272,8 +322,28 @@ def wait_pre_ui_inputs(timeout, checker=current_pre_ui_inputs,
     watcher, deadline, baseline, identities = watcher_factory(), time.monotonic() + timeout, None, {}
     try:
         while True:
-            markers, owners = (checker(identities, False, expected_ini)
-                               if checker is current_pre_ui_inputs else checker())
+            try:
+                markers, owners = (checker(identities, False, expected_ini)
+                                   if checker is current_pre_ui_inputs else checker())
+            except ReadyError as exc:
+                transient = str(exc).startswith((
+                    "block size mismatch", "block sequence invalid", "block CRC mismatch",
+                    "Position block owner/header mismatch", "Position block values are non-finite",
+                    "Position block stale", "State ABI/SeqLock/CRC mismatch",
+                    "State typed payload contract invalid",
+                    "State coordinate/trajectory values invalid", "State block stale",
+                    "State coordinate/trajectory/scene values invalid",
+                    "WCS header/count mismatch", "WCS table/epoch/value mismatch", "WCS block stale",
+                    "modal/tool block header mismatch", "modal/tool actual invalid", "modal/tool block stale",
+                ))
+                if not transient:
+                    raise
+                baseline = None
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ReadyError(f"pre-UI actual barrier timeout last={exc}") from exc
+                watcher.wait(max(1, int(remaining * 1000)))
+                continue
             watcher.watch_pids(owners.values())
             all_valid = len(owners) == 3 and all(markers.values())
             if all_valid and baseline is None:

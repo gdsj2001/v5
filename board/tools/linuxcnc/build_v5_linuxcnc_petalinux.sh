@@ -29,6 +29,7 @@ recipe_target=""
 artifact_stage=""
 rootfs_gate_marker=""
 petalinux_overlay_active=0
+linuxcnc_install_reset=0
 build_mode=focused
 clean_kernel=0
 package_only=0
@@ -472,6 +473,31 @@ EOF
     echo "V5_PETALINUX_NETWORK_DISABLED"
 }
 
+prepare_linuxcnc_install_workdir() {
+    work_parent="$build_root/petalinux/output/tmp/work"
+    for work_dir in "$work_parent"/*/linuxcnc-prebuilt/*; do
+        [ -d "$work_dir" ] || continue
+        image_dir="$work_dir/image"
+        [ -e "$image_dir" ] || continue
+        work_dir=$(CDPATH= cd -- "$work_dir" && pwd)
+        image_dir="$work_dir/image"
+        case "$image_dir" in
+            "$work_parent"/*/linuxcnc-prebuilt/*/image) ;;
+            *)
+                echo "linuxcnc-prebuilt image cleanup escaped its recipe work directory: $image_dir" >&2
+                exit 12
+                ;;
+        esac
+        image_owner=$(stat -c %U "$image_dir")
+        if [ "$image_owner" != "$build_user" ]; then
+            rm -rf "$image_dir"
+            linuxcnc_install_reset=1
+            echo "V5_LINUXCNC_STALE_IMAGE_REMOVED owner=$image_owner path=$image_dir"
+        fi
+    done
+    echo "V5_LINUXCNC_INSTALL_WORKDIR_OK user=$build_user"
+}
+
 verify_windows_source_packages() {
     if python3 "$source_package_verifier" \
         --project-root "$project_root" \
@@ -527,6 +553,10 @@ if [ "$package_only" -eq 1 ]; then
     fi
     configure_download_cache
     configure_offline_bitbake
+    prepare_linuxcnc_install_workdir
+    if [ "$linuxcnc_install_reset" -eq 1 ]; then
+        run_bitbake_direct "linuxcnc-prebuilt -c install -f"
+    fi
     run_bitbake_direct "linuxcnc-prebuilt -c package -f"
     echo "V5_LINUXCNC_PACKAGE_ONLY_COMPILE_OK"
     echo "V5_LINUXCNC_PACKAGE_ONLY_INSTALL_OK"
@@ -552,7 +582,11 @@ verify_windows_source_packages
 run_petalinux_build "-c linuxcnc-prebuilt -x listtasks"
 configure_download_cache
 configure_offline_bitbake
+prepare_linuxcnc_install_workdir
 run_bitbake_direct "linuxcnc-prebuilt -c listtasks"
+if [ "$linuxcnc_install_reset" -eq 1 ]; then
+    run_bitbake_direct "linuxcnc-prebuilt -c install -f"
+fi
 
 audit_minimal_runtime() {
     work_root="$build_root/petalinux/output/tmp/work"

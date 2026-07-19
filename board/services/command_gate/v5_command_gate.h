@@ -14,8 +14,7 @@ extern "C" {
 
 typedef enum V5CommandKind {
     V5_COMMAND_UI_LOCAL = 0,
-    V5_COMMAND_PROGRAM_OPEN = 1,
-    V5_COMMAND_START,
+    V5_COMMAND_START = 2,
     V5_COMMAND_MDI_RUN,
     V5_COMMAND_PAUSE,
     V5_COMMAND_RESUME,

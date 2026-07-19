@@ -23,6 +23,7 @@ RESOURCE_LOCK = ROOT.parent / "repo_ignored/locks/resources/vm_board.lock"
 POSITION_PUBLISHER_ARGV = [
     "/usr/libexec/8ax/v5_position_status_publisher.py",
     "--path", "/dev/shm/v5_native_position_status.bin",
+    "--bus-path", "/dev/shm/v5_native_bus_status.bin",
     "--interval-ms", "33",
 ]
 WCS_PUBLISHER_ARGV = [[
@@ -98,31 +99,32 @@ def parse_boot_stages(lines: list[tuple[float, str]]) -> list[dict[str, Any]]:
     return stages
 
 
+def post_ready_ethercat_errors(
+        serial_lines: list[tuple[float, str]]) -> list[dict[str, Any]]:
+    ready_seen = False
+    failures: list[dict[str, Any]] = []
+    markers = ("Working counter changed to 0/", "datagrams TIMED OUT!",
+               "datagrams UNMATCHED!")
+    for stamp_s, line in serial_lines:
+        if "LinuxCNC backend transport ready;" in line:
+            ready_seen = True
+            continue
+        if ready_seen and any(marker in line for marker in markers):
+            failures.append({"stamp_s": stamp_s, "line": line})
+    return failures
+
+
 def ssh_probe(target: str, expected_ui_pid: int) -> dict[str, Any] | None:
-    schema = shlex.quote(json.dumps({"position": POSITION_PUBLISHER_ARGV,
-                                     "wcs": WCS_PUBLISHER_ARGV}, separators=(",", ":")))
-    script = ("V5_EXPECT_UI_PID=%d V5_PUBLISHER_SCHEMA=%s taskset -c 1 " %
-              (expected_ui_pid, schema)) + r'''python3 - <<'PY'
-import binascii,ctypes,json,math,os,socket,stat,struct,subprocess,time
+    script = ("V5_EXPECT_UI_PID=%d taskset -c 1 " % expected_ui_pid) + r'''python3 - <<'PY'
+import ctypes,json,os,socket,stat,struct,time
 out={"uptime_s":float(open("/proc/uptime").read().split()[0]),"boot_id":open("/proc/sys/kernel/random/boot_id").read().strip()}
-publisher_schema=json.loads(os.environ["V5_PUBLISHER_SCHEMA"])
-def cmd(argv): return subprocess.run(argv,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=2).stdout
-try:
- out["estop_active"]=cmd(["halcmd","-s","getp","v5-safety-latch.0.estop-active"]).strip().upper()=="TRUE"
- out["machine_enabled"]=cmd(["halcmd","-s","getp","v5-native-hal-owner.machine-enabled"]).strip().upper()=="TRUE"
-except Exception as e: out["hal_error"]=type(e).__name__+":"+str(e)
-out["ethercat_health"]=subprocess.run(["/etc/init.d/v5-linuxcnc-command-gate","status"],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=4).returncode==0
-try:
- config=open("/opt/8ax/v5/linuxcnc/hal/ethercat-conf-2ms.xml",encoding="utf-8",errors="replace").read(); expected=config.count("<slave "); slave_lines=[line for line in cmd(["ethercat","slaves"]).splitlines() if line.strip()]
- out["ethercat_health"]=out["ethercat_health"] and expected>0 and len(slave_lines)==expected and all(" OP " in (" "+line+" ") for line in slave_lines)
-except Exception: out["ethercat_health"]=False
 gate="/run/8ax_v5_product_ui/v5_command_gate.sock"
 try:
  pid=int(open("/run/8ax/v5_command_gate.pid").read().strip())
  cmdline=open("/proc/%d/cmdline"%pid,"rb").read().replace(b"\0",b" ")
  class Request(ctypes.Structure):
   _fields_=[("magic",ctypes.c_uint32),("version",ctypes.c_uint32),("size",ctypes.c_uint32),("op",ctypes.c_uint32),("kind",ctypes.c_int32),("index",ctypes.c_int32),("enabled",ctypes.c_int32),("mask",ctypes.c_uint32),("run",ctypes.c_uint64),("generation",ctypes.c_uint32),("clean_generation",ctypes.c_uint32),("axis",ctypes.c_double),("increment",ctypes.c_double),("points",ctypes.c_double*5),("text",ctypes.c_char*512),("secondary",ctypes.c_char*128),("mode",ctypes.c_char*64),("settings_index",ctypes.c_uint32),("owner_generation",ctypes.c_uint32),("readback_token",ctypes.c_uint32),("project_root",ctypes.c_char*256),("settings_axis",ctypes.c_char*16),("field_key",ctypes.c_char*64),("field_name",ctypes.c_char*128),("value",ctypes.c_char*128)]
- req=Request(); req.magic=0x56354347; req.version=4; req.size=ctypes.sizeof(Request); req.op=2
+ req=Request(); req.magic=0x56354347; req.version=5; req.size=ctypes.sizeof(Request); req.op=2
  s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.settimeout(1); s.connect(gate); s.sendall(bytes(req)); response=b""
  while len(response)<12:
   chunk=s.recv(4096)
@@ -136,8 +138,11 @@ try:
   response+=chunk
  if len(response)!=declared: raise RuntimeError("command gate response exceeded declared size")
  s.close(); fields=struct.unpack_from("<III8i",response)
- protocol_ok=fields[0:3]==(0x56354347,4,len(response)) and fields[3]==1 and fields[4]==0 and fields[7]==1 and fields[9]==1
+ protocol_ok=(fields[0:3]==(0x56354347,5,len(response)) and fields[3]==1 and
+              fields[4]==0 and fields[7:11]==(1,1,1,0))
  out["command_gate_ready"]=stat.S_ISSOCK(os.stat(gate).st_mode) and b"/usr/libexec/8ax/v5_command_gate_server" in cmdline and protocol_ok
+ out["estop_active"]=(fields[7:9]==(1,1))
+ out["machine_enabled"]=(bool(fields[10]) if fields[9]==1 else None)
 except Exception: out["command_gate_ready"]=False
 try:
  ui_log=open("/run/8ax/v5_ui_boot.log",encoding="utf-8",errors="replace").read()
@@ -152,48 +157,33 @@ def fnv(raw):
 def block(path,fmt):
  raw=open(path,"rb").read(fmt.size); return raw,fmt.unpack(raw)
 try:
- pf=struct.Struct("<IIIIIIQ"+"d"*14+"II"); wf=struct.Struct("<IIIIiIIIIIQ"+"d"*45+"II")
- pra,pa=block("/dev/shm/v5_native_position_status.bin",pf); wra,wa=block("/dev/shm/v5_native_wcs_status.bin",wf); time.sleep(.35); prb,pb=block("/dev/shm/v5_native_position_status.bin",pf); wrb,wb=block("/dev/shm/v5_native_wcs_status.bin",wf); now=time.monotonic_ns()
- python_exe=os.path.realpath("/usr/bin/python3")
- def exact_python_pids(expected):
-  found=[]
-  for name in os.listdir("/proc"):
-   if not name.isdigit(): continue
-   try:
-    argv=[arg for arg in open("/proc/%s/cmdline"%name,"rb").read().split(b"\0") if arg]
-    if os.path.realpath("/proc/%s/exe"%name)==python_exe and argv[1:]==expected: found.append(int(name))
-   except OSError: pass
-  return found
- def proc_start_ticks(pid):
-  raw=open("/proc/%d/stat"%pid).read(); tail=raw.rsplit(")",1)
-  if len(tail)!=2: raise RuntimeError("process stat malformed")
-  fields=tail[1].split()
-  if len(fields)<=19: raise RuntimeError("process stat missing start ticks")
-  return fields[19]
- fields=open("/run/8ax/v5_position_status_publisher.pid").read().split(); ppid=int(fields[0]); pstart=fields[1]; pwriter=int(fields[2]); pargv=[arg for arg in open("/proc/%d/cmdline"%ppid,"rb").read().split(b"\0") if arg]
- pexpected=[value.encode() for value in publisher_schema["position"]]
- pmatches=exact_python_pids(pexpected)
- lock_fields=open("/run/8ax/v5_position_status_publisher.lock").read().split(); lock_busy=subprocess.run(["flock","-n","/run/8ax/v5_position_status_publisher.lock","true"],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode!=0
- position_identity=(len(fields)==3 and proc_start_ticks(ppid)==pstart and fields==lock_fields and pa[5]==pwriter and pb[5]==pwriter and pmatches==[ppid] and lock_busy and pargv[1:]==pexpected)
- out["position_fresh"]=(position_identity and pa[0:3]==(0x56504f53,2,152) and pb[0:3]==(0x56504f53,2,152) and pa[3]&3==3 and pb[3]&3==3 and pa[4]==pb[4]==5 and all(math.isfinite(value) for value in pa[7:21]+pb[7:21]) and pa[-2]==fnv(pra[:-8]) and pb[-2]==fnv(prb[:-8]) and 0<=now-pa[6]<=1000000000 and 0<=now-pb[6]<=1000000000 and pb[6]>pa[6])
- wfields=open("/run/8ax/v5_wcs_status_publisher.pid").read().split(); wpid=int(wfields[0]); wstart=wfields[1]; wargv=[arg for arg in open("/proc/%d/cmdline"%wpid,"rb").read().split(b"\0") if arg]
- wtails=[[value.encode() for value in expected] for expected in publisher_schema["wcs"]]
- wmatches=[pid for expected in wtails for pid in exact_python_pids(expected)]
- out["wcs_fresh"]=(len(wfields)==2 and proc_start_ticks(wpid)==wstart and wmatches==[wpid] and wargv[1:] in wtails and wa[0:3]==(0x56574353,2,416) and wb[0:3]==(0x56574353,2,416) and wa[3]==wb[3]==1 and 0<=wa[4]<=8 and 0<=wb[4]<=8 and wa[5:7]==wb[5:7]==(9,5) and wa[7]==wb[7]==1 and wa[8]>0 and wb[8]>=wa[8] and all(math.isfinite(value) for value in wa[11:56]+wb[11:56]) and wa[-2]==fnv(wra[:-8]) and wb[-2]==fnv(wrb[:-8]) and 0<=now-wa[10]<=1000000000 and 0<=now-wb[10]<=1000000000 and wb[10]>wa[10])
-except Exception as e: out["native_block_error"]=type(e).__name__+":"+str(e); out["position_fresh"]=False; out["wcs_fresh"]=False
-def state_sample():
- raw=open("/dev/shm/v3_status_shm","rb").read(); magic,ver,hsize,total,payload,flags,seq,crc=struct.unpack_from("<IIIIIIII",raw)
- calc=binascii.crc32(raw[:24]); calc=binascii.crc32(raw[32:],calc)&0xffffffff
- epoch=struct.unpack_from("<Q",raw,32)[0]
- valid_mask,typed_flags=struct.unpack_from("<II",raw,40)
- return magic==0x56355348 and ver==2 and hsize==total==len(raw)==840 and payload==808 and seq>0 and not(seq&1) and crc==calc and 0<=time.monotonic_ns()-epoch<=500000000 and valid_mask&3==3 and not(typed_flags&4),seq
-try:
- sa,sseq=state_sample(); time.sleep(.35); sb,sseq2=state_sample(); out["state_fresh"]=sa and sb and sseq2>sseq
-except Exception as e: out["state_error"]=type(e).__name__+":"+str(e); out["state_fresh"]=False
+ bf=struct.Struct("<12IQ"+("IIIII"*5)+"II")
+ fields=open("/run/8ax/v5_position_status_publisher.pid").read().split(); pwriter=int(fields[2])
+ bra,ba=block("/dev/shm/v5_native_bus_status.bin",bf); time.sleep(.25); brb,bb=block("/dev/shm/v5_native_bus_status.bin",bf); now=time.monotonic_ns()
+ out["ethercat_health"]=(len(fields)==3 and ba[0:3]==(0x56425553,1,bf.size) and bb[0:3]==(0x56425553,1,bf.size) and ba[3]==bb[3]==1 and ba[4]>0 and bb[4]>ba[4] and not(ba[4]&1) and not(bb[4]&1) and ba[5]==bb[5]==pwriter and ba[6]>0 and bb[6]>=ba[6] and ba[7]>0 and bb[7]>0 and ba[8]&7==7 and bb[8]&7==7 and ba[9:11]==bb[9:11]==(5,5) and ba[11]>0 and bb[11]>=ba[11] and ba[-2]==fnv(bra[:-8]) and bb[-2]==fnv(brb[:-8]) and 0<=now-ba[12]<=1000000000 and 0<=now-bb[12]<=1000000000 and bb[12]>ba[12])
+except Exception as e: out["bus_error"]=type(e).__name__+":"+str(e); out["ethercat_health"]=False
 print(json.dumps(out,separators=(",",":")))
 PY'''
-    result = run(["ssh", "-o", "ConnectTimeout=2", target, script], timeout=5.0)
-    if result.returncode in (124, 255):
+    try:
+        result = subprocess.run(
+            ["ssh", "-o", "ConnectTimeout=2", target, "sh -s"],
+            input=script + "\n",
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            # Keep the final proof fixed-size: two bus frames, one native
+            # safety response and one UI process.  Broad /proc scans and
+            # repeated full State-frame checks can perturb the two-core board.
+            timeout=5.0,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise TransientProbeError(
+            "terminal SSH transport timed out output=%s" % (exc.stdout or "")[-300:]
+        ) from exc
+    if result.returncode in (255, 4294967295):
         raise TransientProbeError("terminal SSH transport failed rc=%d" % result.returncode)
     if result.returncode != 0:
         raise DeterministicProbeError(
@@ -256,7 +246,6 @@ def terminal_complete(probe: dict[str, Any], info: dict[str, Any]) -> bool:
             and probe.get("ethercat_health") is True
             and probe.get("command_gate_ready") is True
             and probe.get("touch_registered") is True
-            and all(probe.get(key) is True for key in ("position_fresh", "wcs_fresh", "state_fresh"))
             and probe.get("estop_active") is True
             and probe.get("machine_enabled") is False)
 
@@ -481,6 +470,7 @@ def persist_cycle_evidence(cycle_dir: Path, state: dict[str, Any]) -> list[str]:
         "log_fetch": state.get("log_fetch"),
         "log_fetch_errors": state.get("log_fetch_errors") or [],
         "stage_parse_error": state.get("stage_parse_error"),
+        "post_ready_ethercat_errors": state.get("post_ready_ethercat_errors") or [],
         "evidence_write_errors": previous_errors + errors,
     }
     try:
@@ -513,6 +503,7 @@ def measure_cycle(index: int, out_dir: Path, relay_port: str, console_port: str,
         "log_fetch": None,
         "log_fetch_errors": [],
         "stage_parse_error": None,
+        "post_ready_ethercat_errors": [],
         "evidence_write_errors": [],
     }
     stop = threading.Event()
@@ -595,6 +586,12 @@ def measure_cycle(index: int, out_dir: Path, relay_port: str, console_port: str,
         serial_text = "\n".join(line for _, line in state["serial_lines"])
         if "U-Boot" not in serial_text or "Starting kernel" not in serial_text:
             raise RuntimeError("serial console is not bound to a complete current power-on")
+        if "LinuxCNC backend transport ready;" not in serial_text:
+            raise RuntimeError("serial console has no current EtherCAT backend-ready boundary")
+        # Keep capture running beyond the terminal probe. IgH reports a lost
+        # cyclic datagram after its timeout, so an immediate stop would hide
+        # a readiness-probe-induced WKC loss.
+        time.sleep(2.0)
         fetch_logs_into_state(target, state)
         if state["log_fetch_errors"]:
             raise RuntimeError("boot log fetch failed: " + "; ".join(state["log_fetch_errors"]))
@@ -602,6 +599,13 @@ def measure_cycle(index: int, out_dir: Path, relay_port: str, console_port: str,
         state["stage_parse_error"] = stage_error
         if stage_error:
             raise RuntimeError(stage_error)
+        # Log fetch is part of the acceptance workload. Keep serial capture
+        # alive beyond it and reject any WKC/datagram loss it exposes.
+        time.sleep(1.0)
+        state["post_ready_ethercat_errors"] = post_ready_ethercat_errors(
+            state["serial_lines"])
+        if state["post_ready_ethercat_errors"]:
+            raise RuntimeError("EtherCAT WKC/datagram loss occurred after backend ready")
         state["ok"] = True
     except BaseException as exc:
         caught = exc

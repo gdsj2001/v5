@@ -130,11 +130,12 @@ else
 fi
 rm -f /tmp/v5_position_status_publisher_status.out
 
-position_fresh_check='import struct,time,sys; p="/dev/shm/v5_native_position_status.bin"; f=struct.Struct("<IIIIIIQ"+("d"*14)+"II"); a=f.unpack(open(p,"rb").read(f.size)); time.sleep(0.2); b=f.unpack(open(p,"rb").read(f.size)); sys.exit(0 if a[1]==2 and a[2]==f.size and (a[3]&3)==3 and b[6]>a[6] else 1)'
-if remote "/usr/bin/python3 -c '$position_fresh_check'" >/dev/null 2>&1; then
-  ok "position status publisher advances fresh native position block"
+position_fresh_check='import functools,math,struct,time,sys; p="/dev/shm/v5_native_position_status.bin"; f=struct.Struct("<8I2Q20d5B3x4d2I"); a=f.unpack(open(p,"rb").read(f.size)); time.sleep(0.2); raw=open(p,"rb").read(f.size); b=f.unpack(raw); crc=functools.reduce(lambda v,x:((v^x)*16777619)&0xffffffff,raw[:248],2166136261); age=time.monotonic_ns()-b[8]; valid=(b[0],b[1],b[2])==(0x56504f53,3,256) and (b[3]&3)==3 and b[5]!=0 and b[6]!=0 and not (b[6]&1) and b[8]!=0 and b[9]>a[9] and all(math.isfinite(v) and v>0 for v in b[20:25]) and all(math.isfinite(v) for v in b[25:30]) and b[30:35]==(3,3,3,3,3) and crc==b[39] and 0<=age<=2000000000; print("V5_POSITION_ABI_READBACK_OK version=%d size=%d writer_identity=%d seq=%d source_generation=%d age_ns=%d valid_mask=0x%x crc=%s"%(b[1],b[2],b[5],b[6],b[9],age,b[3],"ok" if crc==b[39] else "bad")); sys.exit(0 if valid else 1)'
+if position_readback=$(remote "/usr/bin/python3 -c '$position_fresh_check'" 2>/dev/null); then
+  ok "position status publisher advances fresh v3 native position block"
+  printf '%s\n' "$position_readback" | sed 's/^/INFO /'
 else
-  fail_msg "position status publisher advances fresh native position block"
+  fail_msg "position status publisher advances fresh v3 native position block"
 fi
 
 wcs_block_check='import struct,sys; p="/dev/shm/v5_native_wcs_status.bin"; fmt=struct.Struct("<IIIIiIIIIIQ"+("d"*45)+"II"); data=open(p,"rb").read(fmt.size); v=fmt.unpack(data); sys.exit(0 if v[1]==2 and v[3]==1 and v[5]==9 and v[6]==5 and v[7]==1 and v[8] else 1)'
@@ -175,6 +176,14 @@ if remote "test -s '$state_path'" >/dev/null 2>&1; then
   remote "stat -c 'shm_size=%s shm_mode=%a' '$state_path'" | sed 's/^/INFO /'
 else
   fail_msg "runtime shm exists: $state_path"
+fi
+
+state_v3_check='import math,struct,time,sys,zlib; p="/dev/shm/v3_status_shm"; a=open(p,"rb").read(); time.sleep(0.2); b=open(p,"rb").read(); seq=struct.unpack_from("<I",b,24)[0]; crc=struct.unpack_from("<I",b,28)[0]; mask=struct.unpack_from("<I",b,40)[0]; wid=struct.unpack_from("<I",b,48)[0]; st=struct.unpack_from("<Q",b,56)[0]; sg=struct.unpack_from("<Q",b,64)[0]; scene=struct.unpack_from("<Q",b,72)[0]; unit=struct.unpack_from("<5d",b,160); error=struct.unpack_from("<5d",b,200); digits=struct.unpack_from("<5B",b,240); cg=struct.unpack_from("<Q",b,944)[0]; ct=struct.unpack_from("<Q",b,952)[0]; sf=struct.unpack_from("<I",b,1052)[0]; sb=struct.unpack_from("<Q",b,1024)[0]; actual=zlib.crc32(b[32:],zlib.crc32(b[:24]))&0xffffffff; age=time.monotonic_ns()-st; valid=len(a)==7128 and len(b)==7128 and struct.unpack_from("<5I",b,0)==(0x56355348,3,7128,7128,7096) and seq!=0 and not(seq&1) and (mask&0x303)==0x303 and wid!=0 and st!=0 and sg!=0 and scene!=0 and all(math.isfinite(v) and v>0 for v in unit) and all(math.isfinite(v) for v in error) and digits==(3,3,3,3,3) and cg!=0 and ct!=0 and (sf&1)==1 and sb!=0 and actual==crc and 0<=age<=2000000000; print("V5_STATE_ABI_READBACK_OK version=%d size=%d writer_identity=%d seq=%d source_generation=%d scene_generation=%d scene_build=%d cpu_generation=%d age_ns=%d valid_mask=0x%x crc=%s"%(struct.unpack_from("<I",b,4)[0],len(b),wid,seq,sg,scene,sb,cg,age,mask,"ok" if actual==crc else "bad")); sys.exit(0 if valid else 1)'
+if state_readback=$(remote "/usr/bin/python3 -c '$state_v3_check'" 2>/dev/null); then
+  ok "runtime SHM is fresh v3 with coordinate and CPU projection"
+  printf '%s\n' "$state_readback" | sed 's/^/INFO /'
+else
+  fail_msg "runtime SHM is fresh v3 with coordinate and CPU projection"
 fi
 
 if remote '/usr/libexec/8ax/v5_lvgl_shell --once >/tmp/v5_lvgl_shell_verify.out 2>&1' >/dev/null 2>&1; then
@@ -248,7 +257,7 @@ else
 fi
 rm -f /tmp/v5_rtapi_affinity.out
 
-if remote "/etc/init.d/v5-linuxcnc-command-gate status && /usr/libexec/8ax/v5_linuxcncrsh_probe --host 127.0.0.1 --port '$linuxcncrsh_port' --password EMC --timeout-ms 1000 >/tmp/v5_linuxcncrsh_probe.out 2>&1 && grep -q 'MACHINE ON' /tmp/v5_linuxcncrsh_probe.out" >/dev/null 2>&1; then
+if remote "/etc/init.d/v5-linuxcnc-command-gate status && /usr/libexec/8ax/v5_linuxcncrsh_probe --host 127.0.0.1 --port '$linuxcncrsh_port' --password EMC --timeout-ms 1000 >/tmp/v5_linuxcncrsh_probe.out 2>&1 && tr -d '\\r' </tmp/v5_linuxcncrsh_probe.out | grep -Eq '^MACHINE (ON|OFF)$'" >/dev/null 2>&1; then
   ok "linuxcncrsh read-only machine-state confirmed: $linuxcncrsh_port"
   remote 'tail -n 5 /tmp/v5_linuxcncrsh_probe.out 2>/dev/null || true' | sed 's/^/INFO linuxcncrsh: /'
 else

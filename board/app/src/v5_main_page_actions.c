@@ -67,18 +67,6 @@ const char *v5_main_page_action_label(V5MainPageActionKind action)
         return "G55";
     case V5_MAIN_PAGE_ACTION_WCS_G56:
         return "G56";
-    case V5_MAIN_PAGE_ACTION_WCS_G57:
-        return "G57";
-    case V5_MAIN_PAGE_ACTION_WCS_G58:
-        return "G58";
-    case V5_MAIN_PAGE_ACTION_WCS_G59:
-        return "G59";
-    case V5_MAIN_PAGE_ACTION_WCS_G591:
-        return "G59.1";
-    case V5_MAIN_PAGE_ACTION_WCS_G592:
-        return "G59.2";
-    case V5_MAIN_PAGE_ACTION_WCS_G593:
-        return "G59.3";
     case V5_MAIN_PAGE_ACTION_AXIS_ALL:
         return "All Axes";
     case V5_MAIN_PAGE_ACTION_WORK_ZERO_X:
@@ -180,18 +168,6 @@ static int v5_main_page_wcs_index_for_action(V5MainPageActionKind action)
         return 1;
     case V5_MAIN_PAGE_ACTION_WCS_G56:
         return 2;
-    case V5_MAIN_PAGE_ACTION_WCS_G57:
-        return 3;
-    case V5_MAIN_PAGE_ACTION_WCS_G58:
-        return 4;
-    case V5_MAIN_PAGE_ACTION_WCS_G59:
-        return 5;
-    case V5_MAIN_PAGE_ACTION_WCS_G591:
-        return 6;
-    case V5_MAIN_PAGE_ACTION_WCS_G592:
-        return 7;
-    case V5_MAIN_PAGE_ACTION_WCS_G593:
-        return 8;
     default:
         return -1;
     }

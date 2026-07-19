@@ -30,7 +30,6 @@ static void write_json_text(FILE *fp, const char *text)
 
 void v5_settings_page_mark_restart_pending(V5SettingsPage *page)
 {
-    unsigned int i;
     if (!page || page->restart_pending) {
         return;
     }
@@ -38,13 +37,15 @@ void v5_settings_page_mark_restart_pending(V5SettingsPage *page)
     if (page->save_return_label) {
         lv_label_set_text(page->save_return_label, "保存并重启");
     }
-    for (i = 0U; i < page->button_count; ++i) {
-        if (page->buttons[i] == page->save_return_button) {
-            page->button_actions[i] = V5_MAIN_PAGE_ACTION_SETTINGS_SAVE_RETURN;
-            lv_obj_clear_state(page->buttons[i], LV_STATE_DISABLED);
-        } else if (page->buttons[i]) {
-            lv_obj_add_state(page->buttons[i], LV_STATE_DISABLED);
+    if (page->save_return_button) {
+        unsigned int i;
+        for (i = 0U; i < page->button_count; ++i) {
+            if (page->buttons[i] == page->save_return_button) {
+                page->button_actions[i] = V5_MAIN_PAGE_ACTION_SETTINGS_SAVE_RETURN;
+                break;
+            }
         }
+        lv_obj_clear_state(page->save_return_button, LV_STATE_DISABLED);
     }
     if (page->save_return_button) {
         lv_obj_invalidate(page->save_return_button);

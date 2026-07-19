@@ -14,16 +14,25 @@ import measure_v5_cold_boot as measure
 from measure_v5_cold_boot import (DeterministicProbeError, FatalMeasurementError,
                                   TransientProbeError, canonical_publisher_argv,
                                   parse_boot_stages, persist_cycle_evidence,
+                                  post_ready_ethercat_errors,
                                   prove_terminal, receive_declared_response,
                                   require_resource_lock, run, summarize_results,
                                   terminal_complete, write_segments)
 
 lines = [(1.2, "noise"), (2.5, "V5_BOOT_STAGE stage=linuxcnc_ready uptime_ms=21220")]
 assert parse_boot_stages(lines) == [{"stage": "linuxcnc_ready", "uptime_s": 21.22, "host_elapsed_s": 2.5}]
+assert post_ready_ethercat_errors([
+    (1.0, "EtherCAT WARNING 0: 1 datagram TIMED OUT!"),
+    (2.0, "LinuxCNC backend transport ready; WKC/DC stable")]) == []
+post_ready_loss = post_ready_ethercat_errors([
+    (2.0, "LinuxCNC backend transport ready; WKC/DC stable"),
+    (3.0, "EtherCAT 0: Domain 0: Working counter changed to 0/10."),
+    (4.0, "EtherCAT WARNING 0: 3 datagrams UNMATCHED!")])
+assert [item["stamp_s"] for item in post_ready_loss] == [3.0, 4.0]
 timeout = run(["python", "-c", "import time; time.sleep(1)"], timeout=0.01)
 assert timeout.returncode == 124 and "TIMEOUT" in timeout.stdout
 probe = {key: True for key in ("ethercat_health",
-                                "command_gate_ready", "position_fresh", "wcs_fresh", "state_fresh",
+                                "command_gate_ready",
                                 "touch_registered", "estop_active")}
 probe["machine_enabled"] = False
 pages = []
@@ -41,8 +50,9 @@ info = {"ui_ready": True, "width": 1024, "height": 600,
                            "first_frame": {"x": 0, "y": 0, "w": 1024, "h": 600,
                                            "frame_id": 2, "base_frame_id": 1}}}
 assert terminal_complete(probe, info)
-probe["state_fresh"] = False
+probe["ethercat_health"] = False
 assert not terminal_complete(probe, info)
+probe["ethercat_health"] = True
 measure_source = Path(__file__).with_name("measure_v5_cold_boot.py").read_text(encoding="utf-8")
 power_source = Path(__file__).parents[1].joinpath("v5_board_power_cycle.py").read_text(encoding="utf-8")
 assert 'POWER_TOOL = ROOT / "tools/v5_board_power_cycle.py"' in measure_source
@@ -50,19 +60,26 @@ assert "RELAY_COMMANDS" not in measure_source
 assert 'result["power_on_monotonic_s"]' in power_source
 assert power_source.index("command_monotonic_ns = time.monotonic_ns()") < power_source.index("time.sleep(0.12)")
 assert "console_ready.wait" in measure_source and "terminal_complete" in measure_source
+assert (measure_source.index("fetch_logs_into_state(target, state)") <
+        measure_source.index('state["post_ready_ethercat_errors"] = post_ready_ethercat_errors('))
 assert "parse_boot_stages(normalized_serial)" not in measure_source
+assert '["ethercat","slaves"]' not in measure_source
+assert '"halcmd"' not in measure_source
+assert 'v5-linuxcnc-command-gate","status' not in measure_source
+for forbidden in ('os.listdir("/proc")', 'subprocess.run(["flock"',
+                  "state_sample()", "V5_PUBLISHER_SCHEMA"):
+    assert forbidden not in measure_source, forbidden
 for token in (
-        "fields[3]==1 and fields[4]==0",
+        "fields[7:11]==(1,1,1,0)",
         'if not chunk: raise RuntimeError("command gate EOF',
         "declared<44 or declared>4096",
-        "pb[6]>pa[6]", "wb[10]>wa[10]",
-        "pa[7:21]+pb[7:21]", "wa[11:56]+wb[11:56]",
-        "<=1000000000", "len(wfields)==2", "proc_start_ticks(wpid)==wstart",
-        "proc_start_ticks(ppid)==pstart", "wmatches==[wpid]",
-        "ver==2", "len(raw)==840", "payload==808", "valid_mask&3==3", "not(typed_flags&4)",
-        "sseq2>sseq", "stat.S_ISCHR(os.stat(touch_real).st_mode)",
+        "bb[12]>ba[12]", "time.sleep(.25)",
+        'bf=struct.Struct("<12IQ"+("IIIII"*5)+"II")',
+        "ba[0:3]==(0x56425553,1,bf.size)", "ba[8]&7==7",
+        "ba[9:11]==bb[9:11]==(5,5)", "ba[-2]==fnv(bra[:-8])",
+        "<=1000000000", "stat.S_ISCHR(os.stat(touch_real).st_mode)",
         'ui_argv==[b"/usr/libexec/8ax/v5_lvgl_shell",b"--serve"]',
-        "taskset -c 1", "power_stdout.log"):
+        "taskset -c 1", "timeout=5.0", "power_stdout.log"):
     assert token in measure_source, token
 summary = summarize_results([{"cycle": 1, "ok": True, "segments": [
     {"stage": "power_on", "host_elapsed_s": 0},
@@ -212,7 +229,7 @@ for expected in measure.WCS_PUBLISHER_ARGV:
 
 # Executable response parser: complete frame succeeds, EOF and oversized
 # declared length fail without looping.
-response = struct.pack("<III8i", 0x56354347, 4, 44, *([0] * 8))
+response = struct.pack("<III8i", 0x56354347, 5, 44, *([0] * 8))
 chunks = iter((response[:7], response[7:]))
 assert receive_declared_response(lambda _size: next(chunks, b"")) == response
 for broken in (struct.pack("<III", 1, 1, 44),
@@ -227,11 +244,11 @@ for broken in (struct.pack("<III", 1, 1, 44),
 
 # Non-JSON output and a real remote nonzero are deterministic and must not
 # consume the transient retry.
-original_run = measure.run
+original_subprocess_run = measure.subprocess.run
 for completed in (subprocess.CompletedProcess(["ssh"], 1, "remote failed"),
                   subprocess.CompletedProcess(["ssh"], 0, "not-json")):
     calls = []
-    measure.run = lambda _args, timeout=5.0, value=completed: calls.append(1) or value
+    measure.subprocess.run = lambda *_args, value=completed, **_kwargs: calls.append(1) or value
     try:
         prove_terminal("board", info, measure.ssh_probe, lambda _p, _i: True,
                        lambda _s: (_ for _ in ()).throw(AssertionError("retried deterministic output")))
@@ -240,7 +257,7 @@ for completed in (subprocess.CompletedProcess(["ssh"], 1, "remote failed"),
     else:
         raise AssertionError("deterministic SSH probe corruption was accepted")
     assert len(calls) == 1
-measure.run = original_run
+measure.subprocess.run = original_subprocess_run
 
 # ui_ready is frozen at the HTTP observation before a deliberately slow SSH
 # light probe. The later proof and log fetch do not move that main boundary.
@@ -250,7 +267,8 @@ old_fetch, old_append = measure.fetch_boot_logs, measure.append_ui_stage_evidenc
 released = []
 def ready_capture(_port, stop, ready, sink, _errors, _handles):
     sink.extend([(time.monotonic(), "U-Boot fixture"),
-                 (time.monotonic(), "Starting kernel fixture")])
+                 (time.monotonic(), "Starting kernel fixture"),
+                 (time.monotonic(), "LinuxCNC backend transport ready; fixture")])
     ready.set(); stop.wait(2.0); released.append(True)
 def slow_ssh_run(args, timeout=15.0):
     if str(measure.POWER_TOOL) in args:

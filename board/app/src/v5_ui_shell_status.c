@@ -212,28 +212,31 @@ void shell_log_program_event(const char *event, const char *path, int ok, const 
                 g_v5_shell_main_page.toolpath_static_cache_hits,
                 g_v5_shell_main_page.toolpath_static_cache_misses);
         {
+            const V5StatusDisplayScene *scene =
+                g_v5_shell_main_page.toolpath_display_scene_valid ?
+                    g_v5_shell_main_page.toolpath_display_scene : NULL;
             unsigned int i;
             int min_x = 0;
             int max_x = 0;
             int min_y = 0;
             int max_y = 0;
-            if (g_v5_shell_main_page.trajectory_point_count > 0U) {
-                min_x = max_x = g_v5_shell_main_page.trajectory_points[0].x;
-                min_y = max_y = g_v5_shell_main_page.trajectory_points[0].y;
+            if (scene && g_v5_shell_main_page.trajectory_point_count > 0U) {
+                min_x = max_x = (int)lroundf(scene->points[0].x);
+                min_y = max_y = (int)lroundf(scene->points[0].y);
                 for (i = 1U; i < g_v5_shell_main_page.trajectory_point_count; ++i) {
-                    if (g_v5_shell_main_page.trajectory_points[i].x < min_x) min_x = g_v5_shell_main_page.trajectory_points[i].x;
-                    if (g_v5_shell_main_page.trajectory_points[i].x > max_x) max_x = g_v5_shell_main_page.trajectory_points[i].x;
-                    if (g_v5_shell_main_page.trajectory_points[i].y < min_y) min_y = g_v5_shell_main_page.trajectory_points[i].y;
-                    if (g_v5_shell_main_page.trajectory_points[i].y > max_y) max_y = g_v5_shell_main_page.trajectory_points[i].y;
+                    int x = (int)lroundf(scene->points[i].x);
+                    int y = (int)lroundf(scene->points[i].y);
+                    if (x < min_x) min_x = x;
+                    if (x > max_x) max_x = x;
+                    if (y < min_y) min_y = y;
+                    if (y > max_y) max_y = y;
                 }
             }
             fprintf(fp,
-                    ",\"program_wcs_valid\":%s,\"program_wcs_index\":%d,\"program_wcs_offset_x\":%.6f,\"program_wcs_offset_y\":%.6f,\"program_wcs_offset_z\":%.6f,\"toolpath_hidden\":%s,\"toolpath_min_x\":%d,\"toolpath_min_y\":%d,\"toolpath_max_x\":%d,\"toolpath_max_y\":%d",
-                    g_v5_shell_main_page.toolpath_program_wcs_valid ? "true" : "false",
-                    g_v5_shell_main_page.toolpath_program_wcs_index,
-                    g_v5_shell_main_page.toolpath_program_wcs_offset[0],
-                    g_v5_shell_main_page.toolpath_program_wcs_offset[1],
-                    g_v5_shell_main_page.toolpath_program_wcs_offset[2],
+                    ",\"program_wcs_valid\":%s,\"program_wcs_index\":%u,\"toolpath_hidden\":%s,\"toolpath_min_x\":%d,\"toolpath_min_y\":%d,\"toolpath_max_x\":%d,\"toolpath_max_y\":%d",
+                    scene && scene->program_wcs_mask ?
+                        "true" : "false",
+                    scene ? (unsigned int)scene->current_wcs_index : 255U,
                     lv_obj_has_flag(g_v5_shell_main_page.trajectory_line, LV_OBJ_FLAG_HIDDEN) ? "true" : "false",
                     min_x,
                     min_y,

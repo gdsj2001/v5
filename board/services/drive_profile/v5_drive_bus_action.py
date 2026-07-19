@@ -92,6 +92,7 @@ from v5_drive_health import (
     evaluate_drive_health,
     set_drive_batch_readback,
     fault_reset_batch,
+    request_full_target_set_state,
     precheck_targets_for_write,
 )
 from v5_drive_axis_model import (
@@ -113,6 +114,8 @@ from v5_drive_query import (
 )
 from v5_drive_bus_context import reset_resident_preload_caches
 import v5_drive_enable_window
+
+FACTORY_RESET_FAULT_CLEAR_RETRY_DELAY_S = 10.0
 
 
 def _run_factory_reset_impl(timeout_s: float, request: Dict[str, Any] | None = None) -> Dict[str, Any]:
@@ -170,6 +173,18 @@ def _run_factory_reset_impl(timeout_s: float, request: Dict[str, Any] | None = N
         target_results_by_position[position] = item
 
     batch = fault_reset_batch(targets, timeout_s)
+    initial_batch = batch
+    retry_performed = False
+    retry_preop_recovery: Dict[str, Any] | None = None
+    if (str(batch.get("code") or "") == "DRIVE_FAULT_RESET_BATCH_FAILED" and
+            bool(restore_writes) and
+            all(bool(write.get("ok")) for write in restore_writes.values())):
+        time.sleep(FACTORY_RESET_FAULT_CLEAR_RETRY_DELAY_S)
+        retry_performed = True
+        retry_preop_recovery = request_full_target_set_state(
+            targets, "PREOP", timeout_s)
+        if retry_preop_recovery.get("ok"):
+            batch = fault_reset_batch(targets, timeout_s)
     batch_writes = batch.get("writes") if isinstance(batch.get("writes"), dict) else {}
     batch_readbacks = batch.get("readbacks") if isinstance(batch.get("readbacks"), dict) else {}
     batch_failed = {str(position) for position in (batch.get("failed_positions") or [])}
@@ -228,6 +243,10 @@ def _run_factory_reset_impl(timeout_s: float, request: Dict[str, Any] | None = N
         "scan": scan,
         "factory_reset_batch": {
             "code": batch.get("code"),
+            "initial_code": initial_batch.get("code"),
+            "retry_performed": retry_performed,
+            "retry_delay_s": FACTORY_RESET_FAULT_CLEAR_RETRY_DELAY_S if retry_performed else 0.0,
+            "retry_preop_recovery": retry_preop_recovery,
             "message_cn": batch.get("message_cn"),
             "recovery_positions": batch.get("recovery_positions", []),
             "recovery": batch.get("recovery"),

@@ -139,6 +139,16 @@ static int resident_machine_code(char *out, size_t out_size)
     return 1;
 }
 
+void v5_settings_page_accept_machine_code(V5SettingsPage *page, const char *value)
+{
+    if (!is_six_digit_id(value)) {
+        return;
+    }
+    snprintf(g_resident_machine_code, sizeof(g_resident_machine_code), "%s", value);
+    g_resident_machine_code_loaded = 1;
+    v5_settings_page_refresh_machine_code_label(page);
+}
+
 void v5_settings_page_refresh_machine_code_label(V5SettingsPage *page)
 {
     char id[16];

@@ -17,6 +17,9 @@ typedef struct V5UiModel {
     V5UiStatusView last_good_status_view;
     int has_last_good_status;
     unsigned long long last_good_monotonic_ns;
+    V5StatusShmFrame status_frame_slots[2];
+    unsigned int status_frame_active_slot;
+    int status_frame_active_valid;
     V5StatusShmMmapReader status_reader;
     unsigned long long status_reader_retry_after_ns;
     unsigned long long status_reader_last_epoch;

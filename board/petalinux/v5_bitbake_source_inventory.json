@@ -1,8 +1,8 @@
 {
   "schema": "v5-bitbake-source-inventory-v1",
   "target": "petalinux-image-minimal",
-  "recipe_count": 305,
-  "source_package_count": 222,
+  "recipe_count": 304,
+  "source_package_count": 221,
   "recipes": [
     {
       "pn": "acl",
@@ -2677,16 +2677,6 @@
       ]
     },
     {
-      "pn": "tcf-agent",
-      "pv": "1.7.0+gitAUTOINC+0c9ebd5829",
-      "license": "EPL-1.0 | EDL-1.0",
-      "lic_files_chksum": "file://edl-v10.html;md5=522a390a83dc186513f0500543ad3679",
-      "srcrev": "0c9ebd5829b7aeebb411526ff0d414894994cc72",
-      "source_packages": [
-        "git2_git.eclipse.org.gitroot.tcf.org.eclipse.tcf.agent.tar.gz"
-      ]
-    },
-    {
       "pn": "tcp-wrappers",
       "pv": "7.6",
       "license": "BSD",
@@ -3729,15 +3719,6 @@
       "checksums": {},
       "recipes": [
         "u-boot-tools-native@2019.07"
-      ]
-    },
-    {
-      "path": "git2_git.eclipse.org.gitroot.tcf.org.eclipse.tcf.agent.tar.gz",
-      "scheme": "git",
-      "url": "git://git.eclipse.org/gitroot/tcf/org.eclipse.tcf.agent",
-      "checksums": {},
-      "recipes": [
-        "tcf-agent@1.7.0+gitAUTOINC+0c9ebd5829"
       ]
     },
     {

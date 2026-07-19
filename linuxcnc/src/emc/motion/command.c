@@ -649,6 +649,15 @@ void emcmotCommandHandler_locked(void *arg, long servo_period)
 	switch (emcmotCommand->command) {
 	case EMCMOT_ABORT:
 	    v5_reset_wrapped_rotary_turn_offsets();
+	    /*
+	     * V5 owns motion.digital-out-00 as the native RTCP program
+	     * request.  M64 is intentionally persistent, so an abort in the
+	     * RTCP segment must clear it before a later Start can create a
+	     * fresh low-to-high request edge.
+	     */
+	    if (emcmotConfig->numDIO > 0) {
+		emcmotDioWrite(0, 0);
+	    }
 	    /* abort motion */
 	    /* can happen at any time */
 	    /* this command attempts to stop all machine motion. it looks at

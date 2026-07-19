@@ -84,26 +84,20 @@ static int modal_tool_block_fresh(const V5NativeModalToolStatusBlock *block, uns
     return now - block->monotonic_ns <= max_age_ns;
 }
 
-int v5_native_modal_tool_status_read(const char *path, unsigned int max_age_ms, V5NativeReadback *readback)
+size_t v5_native_modal_tool_status_block_size(void)
 {
-    FILE *fp;
+    return sizeof(V5NativeModalToolStatusBlock);
+}
+
+int v5_native_modal_tool_status_read_from_memory(
+    const void *memory,
+    size_t size,
+    unsigned int max_age_ms,
+    V5NativeReadback *readback)
+{
     V5NativeModalToolStatusBlock block;
-    const char *actual_path;
-    if (!readback) {
-        return 0;
-    }
-    actual_path = modal_tool_status_path(path);
-    fp = fopen(actual_path, "rb");
-    if (!fp) {
-        v5_native_readback_set_unavailable(readback, "modal_tool_status_block_missing");
-        return 0;
-    }
-    if (fread(&block, 1U, sizeof(block), fp) != sizeof(block)) {
-        fclose(fp);
-        v5_native_readback_set_unavailable(readback, "modal_tool_status_block_short_read");
-        return 0;
-    }
-    fclose(fp);
+    if (!memory || size != sizeof(block) || !readback) return 0;
+    memcpy(&block, memory, sizeof(block));
     if (!modal_tool_block_fresh(&block, max_age_ms)) {
         v5_native_readback_set_unavailable(readback, "modal_tool_status_block_invalid_or_stale");
         return 0;
@@ -150,6 +144,30 @@ int v5_native_modal_tool_status_read(const char *path, unsigned int max_age_ms, 
            v5_native_readback_motion_line_known(readback) ||
            v5_native_readback_mdi_run_known(readback) ||
            v5_native_readback_all_homed_known(readback);
+}
+
+int v5_native_modal_tool_status_read(const char *path, unsigned int max_age_ms, V5NativeReadback *readback)
+{
+    FILE *fp;
+    V5NativeModalToolStatusBlock block;
+    const char *actual_path;
+    if (!readback) return 0;
+    actual_path = modal_tool_status_path(path);
+    fp = fopen(actual_path, "rb");
+    if (!fp) {
+        v5_native_readback_set_unavailable(
+            readback, "modal_tool_status_block_missing");
+        return 0;
+    }
+    if (fread(&block, 1U, sizeof(block), fp) != sizeof(block)) {
+        fclose(fp);
+        v5_native_readback_set_unavailable(
+            readback, "modal_tool_status_block_short_read");
+        return 0;
+    }
+    fclose(fp);
+    return v5_native_modal_tool_status_read_from_memory(
+        &block, sizeof(block), max_age_ms, readback);
 }
 
 int v5_native_modal_tool_status_write_ex(

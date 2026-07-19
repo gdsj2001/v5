@@ -310,8 +310,8 @@ def validate_contract(project_root, source_root):
         source_root,
         "project-spec/configs/config",
         (
-            'CONFIG_YOCTO_BB_NUMBER_THREADS="1"',
-            'CONFIG_YOCTO_PARALLEL_MAKE="2"',
+            'CONFIG_YOCTO_BB_NUMBER_THREADS="4"',
+            'CONFIG_YOCTO_PARALLEL_MAKE="4"',
             'CONFIG_SUBSYSTEM_ROOTFS_EXT4=y',
             'CONFIG_SUBSYSTEM_SDROOT_DEV="/dev/mmcblk0p2"',
             'CONFIG_SUBSYSTEM_RFS_FORMATS="tar.gz ext4"',
@@ -499,9 +499,10 @@ def validate_contract(project_root, source_root):
             '[ "$v5_ethercat_start_count" -eq 1 ] || bbfatal',
             "v5_ethercat_call_count=$(v5_ethercat_count_exact",
             '[ "$v5_ethercat_call_count" -eq 1 ] || bbfatal',
-            '$((v5_ethercat_start_number + 1)) ] || bbfatal',
+            'v5_ethercat_expected_call_number=$(awk',
+            '[ "$v5_ethercat_call_number" -eq "$v5_ethercat_expected_call_number" ] || bbfatal',
         ),
-        ('MASTER0_DEVICE="eth0"', "/lib/modules"),
+        ('MASTER0_DEVICE="eth0"', "/lib/modules", "$((v5_ethercat_start_number + 1))"),
     )
     validate_ethercat_permission_contract(
         source_root / "project-spec/meta-user/recipes-kernel/ethercat-master/ethercat-master_git.bb"

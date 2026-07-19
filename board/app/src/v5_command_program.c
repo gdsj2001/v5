@@ -18,7 +18,9 @@ void v5_program_controller_destroy(V5ProgramController *controller)
         return;
     }
     v5_program_runtime_destroy(&controller->runtime);
+#ifndef _WIN32
     malloc_trim(0);
+#endif
     memset(&controller->last_open, 0, sizeof(controller->last_open));
 }
 

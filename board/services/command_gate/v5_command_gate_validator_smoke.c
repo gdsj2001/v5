@@ -40,6 +40,9 @@ static int expect_reject(V5CommandGateIpcRequestFrame *frame, const char *label)
 int main(void)
 {
     V5CommandGateIpcRequestFrame frame;
+
+    init_frame(&frame, (V5CommandKind)1);
+    if (!expect_reject(&frame, "retired_program_open_kind")) return 21;
     unsigned int i;
 
     init_frame(&frame, V5_COMMAND_WCS_SELECT);

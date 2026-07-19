@@ -58,6 +58,14 @@ int main(void)
     snprintf(program_source_path, sizeof(program_source_path), "%s", open_result.source_path);
     snprintf(program_source_sha256, sizeof(program_source_sha256), "%s", open_result.source_sha256);
 
+    if (v5_command_start_prepare(
+            v5_program_controller_runtime(&controller),
+            &start_prepared) ||
+        !v5_program_runtime_publish_scene_ready(
+            &controller.runtime, open_result.loaded_epoch, 11ULL, 7U)) {
+        v5_program_controller_destroy(&controller);
+        return 14;
+    }
     if (!v5_command_start_prepare(
             v5_program_controller_runtime(&controller),
             &start_prepared)) {

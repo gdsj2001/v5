@@ -329,18 +329,22 @@ void v5_main_page_internal_reset_selection_idle_timer(V5MainPage *page)
 
 void v5_main_page_set_page_visible(V5MainPage *page, int visible)
 {
+    int normalized;
     if (!page) {
         return;
+    }
+    normalized = visible ? 1 : 0;
+    if (page->page_visible != normalized) {
+        page->page_visible = normalized;
+        (void)v5_main_page_internal_publish_program_scene_request(page);
+        page->toolpath_request_last_send_tick = lv_tick_get();
+        page->toolpath_request_retry_count = 0U;
     }
     if (page->selection_idle_timer) {
         lv_timer_pause(page->selection_idle_timer);
     }
-    if (page->jog_hold_timer) {
-        lv_timer_pause(page->jog_hold_timer);
-    }
-    if (!visible && (page->jog_pressed_button || page->jog_continuous_active)) {
-        if ((page->jog_long_press_elapsed || page->jog_continuous_active) &&
-            page->jog_pressed_axis) {
+    if (!normalized && (page->jog_pressed_button || page->jog_continuous_active)) {
+        if (page->jog_pressed_axis) {
             V5MainPageActionReport report;
             int ok = trigger_jog_for_captured_axis(
                 page,
@@ -356,11 +360,10 @@ void v5_main_page_set_page_visible(V5MainPage *page, int visible)
         }
         page->jog_pressed_button = 0;
         page->jog_pressed_axis = '\0';
-        page->jog_long_press_elapsed = 0;
         page->jog_continuous_active = 0;
         page->jog_keepalive_last_tick = 0U;
     }
-    if (visible) {
+    if (normalized) {
         v5_main_page_internal_reset_selection_idle_timer(page);
     }
 }
@@ -407,37 +410,12 @@ static int trigger_jog_for_captured_axis(
     return ok;
 }
 
-void v5_main_page_internal_jog_hold_timer_cb(lv_timer_t *timer)
-{
-    V5MainPage *page = timer ? (V5MainPage *)timer->user_data : 0;
-    V5MainPageActionReport report;
-    V5MainPageActionKind action;
-    int ok;
-    if (!page || !page->root ||
-        lv_obj_has_flag(page->root, LV_OBJ_FLAG_HIDDEN) ||
-        !page->jog_pressed_button) {
-        if (timer) {
-            lv_timer_pause(timer);
-        }
-        return;
-    }
-    lv_timer_pause(timer);
-    page->jog_long_press_elapsed = 1;
-    action = page->jog_pressed_positive
-        ? V5_MAIN_PAGE_ACTION_JOG_CONTINUOUS_PLUS
-        : V5_MAIN_PAGE_ACTION_JOG_CONTINUOUS_MINUS;
-    ok = trigger_jog_for_captured_axis(page, action, &report);
-    page->jog_continuous_active = ok && report.executed;
-    page->jog_keepalive_last_tick = lv_tick_get();
-    v5_main_page_internal_log_button_event(action, ok, ok ? &report : 0);
-}
-
 static void refresh_jog_keepalive(V5MainPage *page)
 {
     V5MainPageActionReport report;
     V5MainPageActionKind action;
     int ok;
-    if (!page || !page->jog_pressed_button || !page->jog_long_press_elapsed ||
+    if (!page || !page->jog_pressed_button ||
         lv_tick_elaps(page->jog_keepalive_last_tick) < V5_MAIN_PAGE_JOG_KEEPALIVE_MS) {
         return;
     }
@@ -453,28 +431,20 @@ static void refresh_jog_keepalive(V5MainPage *page)
 static void finish_jog_press(V5MainPage *page, lv_obj_t *button)
 {
     V5MainPageActionReport report;
-    V5MainPageActionKind action;
-    int ok = 0;
+    int ok;
     if (!page || page->jog_pressed_button != button) {
         return;
     }
-    if (page->jog_hold_timer) {
-        lv_timer_pause(page->jog_hold_timer);
-    }
-    if (page->jog_long_press_elapsed) {
-        action = V5_MAIN_PAGE_ACTION_JOG_STOP;
-        ok = trigger_jog_for_captured_axis(page, action, &report);
-        v5_main_page_internal_log_button_event(action, ok, ok ? &report : 0);
-    } else {
-        action = page->jog_pressed_positive
-            ? V5_MAIN_PAGE_ACTION_JOG_PLUS
-            : V5_MAIN_PAGE_ACTION_JOG_MINUS;
-        ok = trigger_jog_for_captured_axis(page, action, &report);
-        v5_main_page_internal_log_button_event(action, ok, ok ? &report : 0);
-    }
+    ok = trigger_jog_for_captured_axis(
+        page,
+        V5_MAIN_PAGE_ACTION_JOG_STOP,
+        &report);
+    v5_main_page_internal_log_button_event(
+        V5_MAIN_PAGE_ACTION_JOG_STOP,
+        ok,
+        ok ? &report : 0);
     page->jog_pressed_button = 0;
     page->jog_pressed_axis = '\0';
-    page->jog_long_press_elapsed = 0;
     page->jog_continuous_active = 0;
     page->jog_keepalive_last_tick = 0U;
     v5_main_page_internal_reset_selection_idle_timer(page);
@@ -497,20 +467,27 @@ void v5_main_page_internal_jog_button_event_cb(lv_event_t *event)
         }
         for (i = 0U; i < page->button_count; ++i) {
             if (page->buttons[i] == button) {
+                V5MainPageActionReport report;
+                V5MainPageActionKind action;
+                int ok;
                 page->jog_pressed_button = button;
                 page->jog_pressed_space = page->selection.space;
                 page->jog_pressed_axis = page->selection.axis;
                 page->jog_pressed_positive = page->button_actions[i] == V5_MAIN_PAGE_ACTION_JOG_PLUS;
-                page->jog_long_press_elapsed = 0;
                 page->jog_continuous_active = 0;
-                page->jog_keepalive_last_tick = 0U;
                 if (page->selection_idle_timer) {
                     lv_timer_pause(page->selection_idle_timer);
                 }
-                if (page->jog_hold_timer) {
-                    lv_timer_reset(page->jog_hold_timer);
-                    lv_timer_resume(page->jog_hold_timer);
-                }
+                action = page->jog_pressed_positive
+                    ? V5_MAIN_PAGE_ACTION_JOG_CONTINUOUS_PLUS
+                    : V5_MAIN_PAGE_ACTION_JOG_CONTINUOUS_MINUS;
+                ok = trigger_jog_for_captured_axis(page, action, &report);
+                page->jog_continuous_active = ok && report.executed;
+                page->jog_keepalive_last_tick = lv_tick_get();
+                v5_main_page_internal_log_button_event(
+                    action,
+                    ok,
+                    ok ? &report : 0);
                 return;
             }
         }
@@ -532,17 +509,13 @@ void v5_main_page_internal_main_page_root_delete_event_cb(lv_event_t *event)
     if (!page || lv_event_get_code(event) != LV_EVENT_DELETE) {
         return;
     }
-    if (page->jog_long_press_elapsed && page->jog_pressed_button) {
+    if (page->jog_pressed_button && page->jog_pressed_axis) {
         V5MainPageActionReport report;
         (void)trigger_jog_for_captured_axis(page, V5_MAIN_PAGE_ACTION_JOG_STOP, &report);
     }
     if (page->selection_idle_timer) {
         lv_timer_del(page->selection_idle_timer);
         page->selection_idle_timer = 0;
-    }
-    if (page->jog_hold_timer) {
-        lv_timer_del(page->jog_hold_timer);
-        page->jog_hold_timer = 0;
     }
     page->jog_pressed_button = 0;
     page->jog_continuous_active = 0;

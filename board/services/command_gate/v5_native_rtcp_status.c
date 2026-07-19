@@ -64,6 +64,30 @@ static int rtcp_block_valid(const V5NativeRtcpStatusBlock *block, unsigned int m
     return now - block->monotonic_ns <= max_age_ns;
 }
 
+size_t v5_native_rtcp_status_block_size(void)
+{
+    return sizeof(V5NativeRtcpStatusBlock);
+}
+
+int v5_native_rtcp_status_read_from_memory(
+    const void *memory,
+    size_t size,
+    unsigned int max_age_ms,
+    V5NativeReadback *readback)
+{
+    V5NativeRtcpStatusBlock block;
+    if (!memory || size != sizeof(block) || !readback) return 0;
+    memcpy(&block, memory, sizeof(block));
+    if (!rtcp_block_valid(&block, max_age_ms)) {
+        v5_native_readback_set_unavailable(
+            readback, "rtcp_status_block_invalid_or_stale");
+        return 0;
+    }
+    v5_native_readback_init(readback);
+    v5_native_readback_set_rtcp_actual(readback, block.active ? 1 : 0);
+    return 1;
+}
+
 int v5_native_rtcp_status_read(const char *path, unsigned int max_age_ms, V5NativeReadback *readback)
 {
     FILE *fp;
@@ -84,13 +108,8 @@ int v5_native_rtcp_status_read(const char *path, unsigned int max_age_ms, V5Nati
         return 0;
     }
     fclose(fp);
-    if (!rtcp_block_valid(&block, max_age_ms)) {
-        v5_native_readback_set_unavailable(readback, "rtcp_status_block_invalid_or_stale");
-        return 0;
-    }
-    v5_native_readback_init(readback);
-    v5_native_readback_set_rtcp_actual(readback, block.active ? 1 : 0);
-    return 1;
+    return v5_native_rtcp_status_read_from_memory(
+        &block, sizeof(block), max_age_ms, readback);
 }
 
 int v5_native_rtcp_status_write(const char *path, int valid, int active)

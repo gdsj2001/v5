@@ -7,7 +7,12 @@ ulimit -l unlimited 2>/dev/null || true
 
 RUN_DIR=/run/8ax
 RTAPI_FIFO_PATH=$RUN_DIR/v5_rtapi_fifo
-LINUXCNC_INI=/opt/8ax/v5/linuxcnc/ini/v5_bus.ini
+RTAPI_CPU_NUMBER=0
+REQUESTED_MODE_FILE=${V5_REQUESTED_MODE_FILE:-/opt/8ax/v5/config/settings/self_parameter_table.tsv}
+BUS_LINUXCNC_INI=/opt/8ax/v5/linuxcnc/ini/v5_bus.ini
+PULSE_LINUXCNC_INI=/opt/8ax/v5/linuxcnc/ini/v5_pulse.ini
+LINUXCNC_INI=
+REQUESTED_DRIVER_MODE=
 SETTINGS_RUNTIME=/opt/8ax/phase0_bus5/settings_runtime.json
 SETTINGS_PROJECT_ROOT=/opt/8ax/v5
 PULSE_CONTRACT=/opt/8ax/v5/linuxcnc/components/step_ip_v1_5.contract.json
@@ -27,6 +32,119 @@ MANAGEMENT_IFACE=eth0
 ETHERCAT_IFACE=eth1
 ETHERCAT_CONFIG=/opt/8ax/v5/linuxcnc/hal/ethercat-conf-2ms.xml
 ETHERCAT_LIFECYCLE_LIB=${V5_ETHERCAT_LIFECYCLE_LIB:-/usr/libexec/8ax/v5_ethercat_backend_lifecycle.sh}
+
+read_requested_driver_mode() {
+  [ -r "$REQUESTED_MODE_FILE" ] || {
+    echo "motion driver requested owner missing: $REQUESTED_MODE_FILE" >&2
+    return 1
+  }
+  requested_value=$(awk -F '\t' '
+    $1 == "SETTINGS" && $2 == "bus_pulse_setting" {
+      count += 1
+      value = $3
+    }
+    END {
+      if (count != 1) exit 2
+      sub(/\r$/, "", value)
+      print value
+    }
+  ' "$REQUESTED_MODE_FILE") || {
+    echo "motion driver requested owner must contain exactly one SETTINGS/bus_pulse_setting row" >&2
+    return 1
+  }
+  case "$requested_value" in
+    bus|BUS|Bus|ethercat|EtherCAT|总线)
+      printf '%s\n' bus
+      ;;
+    pulse|PULSE|Pulse|stepdir|step_dir|step/dir|脉冲)
+      printf '%s\n' pulse
+      ;;
+    *)
+      echo "motion driver requested value is unknown: $requested_value" >&2
+      return 1
+      ;;
+  esac
+}
+
+pulse_contract_runtime_selectable() {
+  [ -r "$PULSE_CONTRACT" ] || return 1
+  grep -Eq '"status"[[:space:]]*:[[:space:]]*"runtime_selectable"' "$PULSE_CONTRACT"
+}
+
+select_requested_backend() {
+  REQUESTED_DRIVER_MODE=$(read_requested_driver_mode) || return 1
+  case "$REQUESTED_DRIVER_MODE" in
+    bus)
+      LINUXCNC_INI=$BUS_LINUXCNC_INI
+      ;;
+    pulse)
+      LINUXCNC_INI=$PULSE_LINUXCNC_INI
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+  [ -r "$LINUXCNC_INI" ] || {
+    echo "selected LinuxCNC INI missing: $LINUXCNC_INI" >&2
+    return 1
+  }
+  echo "motion driver selected requested=$REQUESTED_DRIVER_MODE ini=$LINUXCNC_INI"
+}
+
+select_running_backend_for_stop() {
+  for cmdline in /proc/[0-9]*/cmdline; do
+    [ -r "$cmdline" ] || continue
+    command_line=$(tr '\000' ' ' <"$cmdline" 2>/dev/null || true)
+    case "$command_line" in
+      *milltask*"$BUS_LINUXCNC_INI"*)
+        REQUESTED_DRIVER_MODE=bus
+        LINUXCNC_INI=$BUS_LINUXCNC_INI
+        return 0
+        ;;
+      *milltask*"$PULSE_LINUXCNC_INI"*)
+        REQUESTED_DRIVER_MODE=pulse
+        LINUXCNC_INI=$PULSE_LINUXCNC_INI
+        return 0
+        ;;
+    esac
+  done
+  select_requested_backend
+}
+
+prepare_selected_transport() {
+  case "$REQUESTED_DRIVER_MODE" in
+    bus)
+      if ! ethercat master >/dev/null 2>&1; then
+        [ -x /etc/init.d/ethercat ] || {
+          echo "EtherCAT init owner missing" >&2
+          return 1
+        }
+        /etc/init.d/ethercat start
+      fi
+      ;;
+    pulse)
+      if ethercat master >/dev/null 2>&1; then
+        /etc/init.d/ethercat stop || return 1
+      fi
+      pulse_contract_runtime_selectable || {
+        echo "Pulse requested but contract is not runtime_selectable; refusing both motion backends" >&2
+        return 1
+      }
+      if ethercat master >/dev/null 2>&1; then
+        echo "Pulse requested but EtherCAT master remained active" >&2
+        return 1
+      fi
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+if [ "${1:-}" = requested-mode ]; then
+  read_requested_driver_mode
+  exit $?
+fi
 
 runtime_prepare() {
   mkdir -p "$RUN_DIR" /run/8ax_v5_product_ui /opt/8ax/v5/linuxcnc/var "$NC_PATH" /opt/8ax/v5/linuxcnc/remap_subs
@@ -77,11 +195,19 @@ set_command_gate_affinity() {
   fi
   taskset -a -pc 1 "$pid" >>"$COMMAND_GATE_LOG" 2>&1 || return 1
   for task in /proc/"$pid"/task/[0-9]*; do
-    [ -r "$task/stat" ] || return 1
+    [ -r "$task/stat" ] || continue
     tid=${task##*/}
-    renice -n "$MICROKERNEL_NON_RT_NICE" -p "$tid" >>"$COMMAND_GATE_LOG" 2>&1 || return 1
-    [ "$(awk '{print $19}' "$task/stat" 2>/dev/null || true)" = "$MICROKERNEL_NON_RT_NICE" ] || return 1
+    if ! renice -n "$MICROKERNEL_NON_RT_NICE" -p "$tid" >>"$COMMAND_GATE_LOG" 2>&1; then
+      [ ! -r "$task/stat" ] && continue
+      return 1
+    fi
+    nice_value=$(awk '{print $19}' "$task/stat" 2>/dev/null || true)
+    if [ "$nice_value" != "$MICROKERNEL_NON_RT_NICE" ]; then
+      [ ! -r "$task/stat" ] && continue
+      return 1
+    fi
   done
+  native_gate_running
 }
 
 set_management_process_affinity() {
@@ -408,6 +534,12 @@ stop_backend() {
 }
 
 start_backend() {
+  select_requested_backend || return 1
+  prepare_selected_transport || return 1
+  [ "$REQUESTED_DRIVER_MODE" = bus ] || {
+    echo "Pulse runtime backend is not available in the current product contract" >&2
+    return 1
+  }
   runtime_prepare
   linuxcnc_privileged_helpers_ok || {
     echo "LinuxCNC privileged helpers must be root:root 4755; refusing backend start" >&2
@@ -441,7 +573,7 @@ start_backend() {
     /dev/shm/v5_native_g53_geometry_status.bin
   : >"$LINUXCNC_LOG"
   chown petalinux:petalinux "$LINUXCNC_LOG" 2>/dev/null || true
-  su petalinux -c "cd /opt/8ax/v5/linuxcnc/ini && RTAPI_FIFO_PATH='$RTAPI_FIFO_PATH' TCLLIBPATH=/usr/lib/tcltk /usr/bin/linuxcnc -r '$LINUXCNC_INI' >>'$LINUXCNC_LOG' 2>&1" &
+  su petalinux -c "cd /opt/8ax/v5/linuxcnc/ini && RTAPI_CPU_NUMBER='$RTAPI_CPU_NUMBER' RTAPI_FIFO_PATH='$RTAPI_FIFO_PATH' TCLLIBPATH=/usr/lib/tcltk /usr/bin/linuxcnc -r '$LINUXCNC_INI' >>'$LINUXCNC_LOG' 2>&1" &
   echo "$!" >"$LINUXCNC_PID"
   if wait_linuxcnc_backend_ready; then
     echo "RTAPI and EtherCAT realtime paths pinned to CPU0; LinuxCNC non-realtime motion paths protected on CPU1"
@@ -504,10 +636,12 @@ case "${1:-}" in
     start_native_gate
     ;;
   stop)
+    select_running_backend_for_stop >/dev/null 2>&1 || true
     stop_gate
     stop_backend
     ;;
   restart)
+    select_running_backend_for_stop >/dev/null 2>&1 || true
     stop_gate
     stop_backend
     start_backend
@@ -515,6 +649,11 @@ case "${1:-}" in
     start_native_gate
     ;;
   restart-native)
+    select_requested_backend
+    [ "$REQUESTED_DRIVER_MODE" = bus ] || {
+      echo "native gate restart requires the active BUS backend in the current product contract" >&2
+      exit 1
+    }
     ethercat_backend_ready || {
       echo "LinuxCNC/EtherCAT backend is not ready; refusing native-gate-only restart" >&2
       exit 1
@@ -533,10 +672,15 @@ case "${1:-}" in
     start_native_gate
     ;;
   status)
+    select_requested_backend >/dev/null
+    [ "$REQUESTED_DRIVER_MODE" = bus ]
     ethercat_backend_ready && gate_running && native_gate_running
     ;;
+  requested-mode)
+    read_requested_driver_mode
+    ;;
   *)
-    echo "usage: $0 {start|stop|restart|restart-native|status}" >&2
+    echo "usage: $0 {start|stop|restart|restart-native|status|requested-mode}" >&2
     exit 2
     ;;
 esac

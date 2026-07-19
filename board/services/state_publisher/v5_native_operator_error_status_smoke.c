@@ -95,6 +95,20 @@ int main(void)
         strstr(status.next_cn, "取消急停") == NULL) {
         return 9;
     }
+    if (!v5_native_operator_error_status_from_alias(
+            "MOTION_MODEL_MAPPING_REVIEW_REQUIRED", &status) ||
+        strcmp(status.title_cn, "请核对轴从站映射") != 0 ||
+        strstr(status.reason_cn, "已经自动更新") == NULL ||
+        strstr(status.next_cn, "人工调整") == NULL) {
+        return 12;
+    }
+    if (!v5_native_operator_error_status_from_alias(
+            "ALL_HOME_AXIS_SLAVE_MAPPING_INVALID", &status) ||
+        strcmp(status.title_cn, "运动模型与从站映射不一致") != 0 ||
+        strstr(status.reason_cn, "运动保持禁用") == NULL ||
+        strstr(status.next_cn, "使能、回零或启动") == NULL) {
+        return 13;
+    }
     for (alias_index = 0U;
          alias_index < sizeof(required_home_aliases) / sizeof(required_home_aliases[0]);
          ++alias_index) {

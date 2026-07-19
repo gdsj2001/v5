@@ -16,6 +16,7 @@ SRC_URI = " \
     file://0005-v5-drain-generic-rx-burst.patch \
     file://0006-v5-keep-sent-datagram-state-on-duplicate-queue.patch \
     file://0007-v5-silent-cyclic-reference-clock-errors.patch \
+    file://0008-v5-bound-initial-dc-sync-wait.patch \
 "
 SRCREV = "b709e58147e65b5e3251b45f48c01ef33cc7366f"
 PV = "1.6.9+git${SRCPV}"
@@ -43,7 +44,9 @@ EXTRA_OECONF += " \
 
 INITSCRIPT_PACKAGES = "${PN}"
 INITSCRIPT_NAME_${PN} = "ethercat"
-INITSCRIPT_PARAMS_${PN} = "start 90 5 . stop 10 0 6 ."
+# Motion-driver SelectLink owns cold-start.  Keep the canonical stop link, but
+# never start EtherCAT unconditionally before SETTINGS/bus_pulse_setting is read.
+INITSCRIPT_PARAMS_${PN} = "stop 10 0 6 ."
 
 do_configure_prepend() {
     cd ${S}
@@ -112,9 +115,9 @@ v5_ethercat_apply_permissions() {\
     [ "$(v5_ethercat_count_exact 'v5_ethercat_apply_permissions() {' "$v5_ethercat_init")" -eq 1 ] || bbfatal "EtherCAT permission apply function count is not 1"
     v5_ethercat_call_count=$(v5_ethercat_count_exact '        v5_ethercat_apply_permissions' "$v5_ethercat_init")
     [ "$v5_ethercat_call_count" -eq 1 ] || bbfatal "EtherCAT permission call count is $v5_ethercat_call_count, expected 1"
-    v5_ethercat_start_number=$(awk -v v5_line="$v5_ethercat_start_line" '$0 == v5_line { print NR }' "$v5_ethercat_init")
+    v5_ethercat_expected_call_number=$(awk -v v5_line="$v5_ethercat_start_line" '$0 == v5_line { print NR + 1 }' "$v5_ethercat_init")
     v5_ethercat_call_number=$(awk '$0 == "        v5_ethercat_apply_permissions" { print NR }' "$v5_ethercat_init")
-    [ "$v5_ethercat_call_number" -eq $((v5_ethercat_start_number + 1)) ] || bbfatal "EtherCAT permission call is not adjacent to start target"
+    [ "$v5_ethercat_call_number" -eq "$v5_ethercat_expected_call_number" ] || bbfatal "EtherCAT permission call is not adjacent to start target"
 }
 
 FILES_${PN} += " \

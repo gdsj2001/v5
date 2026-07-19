@@ -1,7 +1,6 @@
 #include "v5_command_table.h"
 
 static const V5CommandEntry kV5Commands[] = {
-    {"program_open", "program_runtime"},
     {"start", "native_linuxcncrsh"},
     {"mdi_run", "native_linuxcncrsh"},
     {"pause", "native_linuxcncrsh"},

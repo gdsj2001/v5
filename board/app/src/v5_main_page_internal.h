@@ -2,11 +2,8 @@
 #define V5_MAIN_PAGE_INTERNAL_H
 
 #include "v5_main_page.h"
+#include "v5_toolpath_viewport.h"
 
-#define V5_TOOLPATH_X 3
-#define V5_TOOLPATH_Y 58
-#define V5_TOOLPATH_W 388
-#define V5_TOOLPATH_H 378
 #define V5_PROGRAM_PREVIEW_ROWS 4
 #define V5_PROGRAM_PREVIEW_X 0
 #define V5_PROGRAM_PREVIEW_Y 441
@@ -15,12 +12,8 @@
 #define V5_PROGRAM_PREVIEW_LINE_STEP 26
 #define V5_TOOLPATH_GESTURE_MIN_SCALE 0.35
 #define V5_TOOLPATH_GESTURE_MAX_SCALE 4.0
-#define V5_TOOLPATH_GESTURE_LEFT_INSET 132
-#define V5_TOOLPATH_GESTURE_RIGHT_INSET 64
-#define V5_TOOLPATH_GESTURE_BOTTOM_INSET 58
 #define V5_TOOLPATH_PROGRAM_LINE_WIDTH 1
 #define V5_MAIN_PAGE_SELECTION_IDLE_MS 3000U
-#define V5_MAIN_PAGE_JOG_HOLD_MS 500U
 #define V5_MAIN_PAGE_JOG_KEEPALIVE_MS 200U
 
 #ifndef M_PI
@@ -61,8 +54,6 @@ void v5_main_page_internal_prepare_toolpath_view_transform(
     const V5MainPage *page,
     V5ToolpathViewTransform *transform);
 
-void v5_main_page_internal_apply_toolpath_view_transform_to_snapshot(const V5MainPage *page, V5ToolpathDisplaySnapshot *display);
-
 void v5_main_page_internal_block_action_for_power_on_home(
     V5MainPage *page,
     V5MainPageActionKind action,
@@ -80,8 +71,6 @@ void v5_main_page_internal_clear_obj_style(lv_obj_t *obj);
 
 void v5_main_page_internal_clear_program_preview_highlight(V5MainPage *page);
 
-int v5_main_page_internal_clip_toolpath_segment(V5ToolpathScreenPoint *start, V5ToolpathScreenPoint *end);
-
 unsigned int v5_main_page_internal_count_preview_source_lines(const char *text);
 
 void v5_main_page_internal_create_main_program_edit_hit_area(V5MainPage *page);
@@ -95,11 +84,7 @@ void v5_main_page_internal_feed_override_reset_event_cb(lv_event_t *event);
 void v5_main_page_internal_format_main_page_wcs_coordinate(char *out, size_t out_size, const V5UiStatusView *status,
                                             const V5NativeReadback *readback, unsigned int axis);
 
-void v5_main_page_internal_hide_toolpath_model_geometry(V5MainPage *page);
-
 void v5_main_page_internal_coalesce_toolpath_invalidations(V5MainPage *page);
-
-void v5_main_page_internal_hide_toolpath_line(lv_obj_t *line);
 
 void v5_main_page_internal_hide_toolpath_program_line(V5MainPage *page);
 
@@ -107,13 +92,9 @@ lv_obj_t *v5_main_page_internal_create_toolpath_program_scene(
     V5MainPage *page,
     lv_obj_t *parent);
 
-void v5_main_page_internal_hide_toolpath_program_wcs_objects(V5MainPage *page);
-
 int v5_main_page_internal_is_view_action(V5MainPageActionKind action);
 
 void v5_main_page_internal_jog_button_event_cb(lv_event_t *event);
-
-void v5_main_page_internal_jog_hold_timer_cb(lv_timer_t *timer);
 
 void v5_main_page_internal_log_button_event(V5MainPageActionKind action, int ok, const V5MainPageActionReport *report);
 
@@ -121,24 +102,7 @@ lv_color_t v5_main_page_internal_main_coordinate_digit_color(const V5MainPage *p
 
 const V5MotionModelDescriptor *v5_main_page_internal_main_page_active_motion_model(const V5MainPage *page);
 
-int v5_main_page_internal_main_page_apply_program_preview_wcs_offset(
-    const V5MainPage *page,
-    const V5ProgramRuntime *runtime,
-    V5StatusPoint *points,
-    unsigned int count,
-    int *wcs_index_out,
-    double wcs_offset_out[3]);
-
 char v5_main_page_internal_main_page_axis_display_char(const V5MainPage *page, unsigned int axis_index);
-
-int v5_main_page_internal_main_page_axis_values_finite(const double axis[V5_STATUS_AXIS_COUNT]);
-
-void v5_main_page_internal_main_page_expand_visible_toolpath_fit(
-    V5MainPage *page,
-    const V5UiStatusView *status,
-    V5ToolpathDisplayFit *fit);
-
-void v5_main_page_internal_main_page_fit_expand_world_point(V5ToolpathDisplayFit *fit, const double axis[V5_STATUS_AXIS_COUNT]);
 
 int v5_main_page_internal_main_page_handle_program_preview_touch(
     V5MainPage *page,
@@ -146,40 +110,17 @@ int v5_main_page_internal_main_page_handle_program_preview_touch(
     int pressed,
     int *changed);
 
-int v5_main_page_internal_main_page_program_model_projection_changed(const V5MainPage *page);
-
-int v5_main_page_internal_main_page_capture_program_model_scene(
-    V5MainPage *page);
-
-int v5_main_page_internal_main_page_project_program_with_current_fit(V5MainPage *page);
-int v5_main_page_internal_main_page_project_program_fused(V5MainPage *page);
-
-int v5_main_page_internal_main_page_project_world_point_transformed(
-    const V5MainPage *page,
-    const double world[V5_STATUS_AXIS_COUNT],
-    V5ToolpathScreenPoint *point);
-
 void v5_main_page_internal_main_page_root_delete_event_cb(lv_event_t *event);
 
-int v5_main_page_internal_main_page_resolve_active_model_scene(
-    V5MainPage *page,
-    const V5UiStatusView *status);
-
-int v5_main_page_internal_main_page_rtcp_wcs_follow_model_scene_available(
-    const V5MainPage *page,
-    const V5MainPageModelScene **scene);
-
-int v5_main_page_internal_main_page_static_pose_changed(const V5MainPage *page);
-
-void v5_main_page_internal_main_page_store_static_pose(V5MainPage *page);
-
-int v5_main_page_internal_main_page_tool_length_mm(const V5MainPage *page, double *out);
-
-int v5_main_page_internal_main_page_prepare_program_fit_points(
-    V5MainPage *page,
-    unsigned int count);
-
 const char *v5_main_page_internal_main_page_wcs_code(const V5NativeReadback *readback);
+
+int v5_main_page_internal_publish_program_scene_request(V5MainPage *page);
+int v5_main_page_internal_apply_program_display_scene(
+    V5MainPage *page,
+    const V5StatusDisplayScene *scene);
+void v5_main_page_internal_apply_display_scene(
+    V5MainPage *page,
+    const V5StatusDisplayScene *scene);
 
 void v5_main_page_internal_make_button_rgb(V5MainPage *page, int x, int y, int w, int h, V5MainPageActionKind action, const char *text, uint8_t r, uint8_t g, uint8_t b);
 
@@ -203,12 +144,6 @@ void v5_main_page_internal_sync_override_sliders(
     const V5UiStatusView *status);
 
 lv_obj_t *v5_main_page_internal_make_panel(lv_obj_t *parent, int x, int y, int w, int h, uint8_t r, uint8_t g, uint8_t b);
-
-lv_obj_t *v5_main_page_internal_make_toolpath_v3_center_dot(lv_obj_t *parent, uint8_t r, uint8_t g, uint8_t b);
-
-lv_obj_t *v5_main_page_internal_make_toolpath_v3_dot(lv_obj_t *parent, uint8_t r, uint8_t g, uint8_t b, uint8_t br, uint8_t bg, uint8_t bb);
-
-lv_obj_t *v5_main_page_internal_make_toolpath_v3_line(lv_obj_t *parent, uint8_t r, uint8_t g, uint8_t b, uint8_t width);
 
 void v5_main_page_internal_make_v3_main_buttons(V5MainPage *page);
 
@@ -243,7 +178,7 @@ int v5_main_page_internal_remembered_program_preview_highlight_line(
 
 void v5_main_page_internal_reset_selection_idle_timer(V5MainPage *page);
 
-void v5_main_page_internal_reset_toolpath_view_rotation(V5MainPage *page);
+void v5_main_page_internal_reset_toolpath_view(V5MainPage *page);
 
 lv_color_t v5_main_page_internal_rgb(uint8_t r, uint8_t g, uint8_t b);
 
@@ -261,21 +196,11 @@ void v5_main_page_internal_set_obj_pos_if_changed(lv_obj_t *obj, lv_coord_t x, l
 
 void v5_main_page_internal_set_obj_text_color_if_changed(lv_obj_t *obj, lv_color_t color, uint32_t selector);
 
-void v5_main_page_internal_set_toolpath_axis_line(lv_obj_t *line, lv_point_t points[2], const V5ToolpathScreenPoint *start, const V5ToolpathScreenPoint *end, int valid);
-
-void v5_main_page_internal_set_toolpath_origin_cross(lv_obj_t *line, lv_point_t points[5], const V5ToolpathScreenPoint *origin, int valid);
-
-void v5_main_page_internal_set_toolpath_v3_center_dot(lv_obj_t *dot, const V5ToolpathScreenPoint *point, int valid);
-
-void v5_main_page_internal_set_toolpath_v3_dot_center(lv_obj_t *dot, const V5ToolpathScreenPoint *point, int valid);
-
 void v5_main_page_internal_show_home_precondition_popup(V5MainPage *page, const char *alias_code);
 
 void v5_main_page_internal_spindle_override_reset_event_cb(lv_event_t *event);
 
 int v5_main_page_internal_toolpath_points_in_graphics_zone(const lv_point_t *points, int count);
-
-V5ToolpathScreenPoint v5_main_page_internal_toolpath_scaffold_point(double x, double y);
 
 void v5_main_page_internal_update_axis_all_button_visuals(V5MainPage *page);
 
@@ -290,15 +215,6 @@ void v5_main_page_internal_update_main_page_modal_label(V5MainPage *page);
 void v5_main_page_internal_update_main_page_state_button_visuals(V5MainPage *page);
 
 void v5_main_page_internal_update_main_page_wcs_header(V5MainPage *page);
-
-void v5_main_page_internal_apply_dynamic_scene(
-    V5MainPage *page,
-    const V5MainPageDynamicScene *scene);
-
-void v5_main_page_internal_build_dynamic_scene(
-    V5MainPage *page,
-    const V5UiStatusView *status,
-    V5MainPageDynamicScene *scene);
 
 void v5_main_page_internal_update_toolpath_state_lines(V5MainPage *page, const V5UiStatusView *status);
 

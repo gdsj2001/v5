@@ -279,6 +279,9 @@ static void settings_popup_hide(V5SettingsPage *page)
     if (page->machine_code_label) {
         lv_obj_invalidate(page->machine_code_label);
     }
+    if (page->root) {
+        lv_obj_invalidate(page->root);
+    }
 }
 
 static void settings_popup_update_running(V5SettingsPage *page, const char *title, const char *message)
@@ -463,7 +466,7 @@ void v5_settings_page_status_timer_cb(lv_timer_t *timer)
         if (!modal_active) {
             settings_refresh_axis_table_once(page, &status);
             if (strcmp(status.action, "device_dna_register") == 0) {
-                v5_settings_page_refresh_machine_code_label(page);
+                v5_settings_page_accept_machine_code(page, status.vps_distribution_id);
             }
             v5_settings_page_set_status_text(page, 42, 221, 128, "%s: 完成 %s", label, status.code[0] ? status.code : detail);
         }

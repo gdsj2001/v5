@@ -48,6 +48,10 @@ typedef struct V5ProgramRuntime {
     char source_path[384];
     char source_sha256[65];
     unsigned int loaded_epoch;
+    int program_scene_ready;
+    unsigned int ready_program_generation;
+    unsigned long long ready_scene_generation;
+    unsigned int ready_fit_generation;
     char mdi_text[128];
 } V5ProgramRuntime;
 
@@ -114,6 +118,13 @@ int v5_program_runtime_preview_break_before(
     unsigned int point_index);
 int v5_program_runtime_preview_program_wcs_index(const V5ProgramRuntime *runtime);
 unsigned int v5_program_runtime_preview_wcs_mask(const V5ProgramRuntime *runtime);
+int v5_program_runtime_publish_scene_ready(
+    V5ProgramRuntime *runtime,
+    unsigned int program_generation,
+    unsigned long long scene_generation,
+    unsigned int fit_generation);
+void v5_program_runtime_invalidate_scene_ready(V5ProgramRuntime *runtime);
+int v5_program_runtime_scene_ready(const V5ProgramRuntime *runtime);
 int v5_program_runtime_prepare_start(
     const V5ProgramRuntime *runtime,
     V5CommandRequest *request);

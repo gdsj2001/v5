@@ -5,9 +5,11 @@ import argparse
 import ctypes
 import errno
 import math
+import mmap
 import os
 import resource
 import secrets
+import struct
 import sys
 import time
 
@@ -19,9 +21,15 @@ from v5_machine_status_projection import (
 )
 from v5_polling_cadence import StartToStartPollingCadence
 from v5_wcs_status_codec import (
+    BUS_STATUS_DEFAULT_PATH,
+    BUS_STATUS_INTERVAL_SECONDS,
+    BusStatusMmapWriter,
     DEFAULT_INTERVAL_MS,
     DEFAULT_POSITION_PATH,
+    HalBusStatusAccess,
     POSITION_AXIS_COUNT,
+    POSITION_BLOCK_STRUCT,
+    POSITION_SEQ_OFFSET,
     ROTARY_FULL_TURN_DEG,
 )
 
@@ -30,6 +38,56 @@ POSITION_HEARTBEAT_SECONDS = 0.1
 DISPLAY_BOUNDARY_HYSTERESIS = 0.0001
 POSITION_LOCK_PATH = '/run/8ax/v5_position_status_publisher.lock'
 POSITION_PIDFILE_PATH = '/run/8ax/v5_position_status_publisher.pid'
+
+
+class PositionStatusMmapWriter:
+    def __init__(self, path):
+        self.path = path
+        self.fd = -1
+        self.mapping = None
+        self.sequence = 0
+        self.open_count = 0
+
+    def open(self):
+        if self.mapping is not None:
+            return self
+        directory = os.path.dirname(self.path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        self.fd = os.open(
+            self.path,
+            os.O_RDWR | os.O_CREAT | getattr(os, 'O_CLOEXEC', 0),
+            0o600)
+        os.ftruncate(self.fd, POSITION_BLOCK_STRUCT.size)
+        self.mapping = mmap.mmap(
+            self.fd, POSITION_BLOCK_STRUCT.size, access=mmap.ACCESS_WRITE)
+        self.open_count += 1
+        return self
+
+    def next_sequence(self):
+        self.sequence = (self.sequence + 2) & 0xffffffff
+        if self.sequence == 0:
+            self.sequence = 2
+        return self.sequence
+
+    def publish(self, payload, even_sequence):
+        if self.mapping is None or len(payload) != POSITION_BLOCK_STRUCT.size:
+            raise RuntimeError('native_position_mapping_unavailable')
+        odd_sequence = even_sequence - 1 if even_sequence > 1 else 1
+        self.mapping[POSITION_SEQ_OFFSET:POSITION_SEQ_OFFSET + 4] = struct.pack(
+            '<I', odd_sequence)
+        self.mapping[:POSITION_SEQ_OFFSET] = payload[:POSITION_SEQ_OFFSET]
+        self.mapping[POSITION_SEQ_OFFSET + 4:] = payload[POSITION_SEQ_OFFSET + 4:]
+        self.mapping[POSITION_SEQ_OFFSET:POSITION_SEQ_OFFSET + 4] = struct.pack(
+            '<I', even_sequence)
+
+    def close(self):
+        if self.mapping is not None:
+            self.mapping.close()
+            self.mapping = None
+        if self.fd >= 0:
+            os.close(self.fd)
+            self.fd = -1
 
 
 class PosixFlock:
@@ -175,34 +233,42 @@ class PositionDisplayStabilizer:
 
     def _source_boundary_distance(self, index, stable, bucket, source):
         scaled_source = float(source) * self._scale
-        if (self._is_rotary(index) and
-                ((stable == 0 and bucket == self._rotary_period - 1) or
-                 (bucket == 0 and stable == self._rotary_period - 1))):
+        if self._is_rotary(index):
             phase = scaled_source % self._rotary_period
-            return min(phase, self._rotary_period - phase)
-        boundary = (
-            min(stable, bucket)
-            if max(stable, bucket) <= 0
-            else max(stable, bucket))
+            forward = (bucket - stable) % self._rotary_period
+            direction = 1.0 if forward == 1 else -1.0
+            boundary = (float(stable) + 0.5 * direction) % self._rotary_period
+            distance = abs(phase - boundary)
+            return min(distance, self._rotary_period - distance)
+        boundary = (float(stable) + float(bucket)) * 0.5
         return abs(scaled_source - boundary)
 
     def stabilize(self, mcs, cmd, source_generation,
-                  source_mcs=None, source_cmd=None):
+                   source_mcs=None, source_cmd=None, unit_per_count=None):
         if mcs is None or cmd is None:
             self.reset()
             return mcs, cmd
         values = list(mcs) + list(cmd)
         sources = list(source_mcs or mcs) + list(source_cmd or cmd)
+        quanta = list(unit_per_count or (
+            [self._hysteresis / self._scale] * POSITION_AXIS_COUNT))
         if (len(values) != POSITION_AXIS_COUNT * 2 or
-                len(sources) != POSITION_AXIS_COUNT * 2):
+                len(sources) != POSITION_AXIS_COUNT * 2 or
+                len(quanta) != POSITION_AXIS_COUNT):
             raise RuntimeError('native_position_display_sample_invalid')
         try:
             generation = int(source_generation)
-            buckets = [int(round(float(value) * self._scale)) for value in values]
+            buckets = []
+            for index, value in enumerate(values):
+                bucket = int(round(float(value) * self._scale))
+                if self._is_rotary(index):
+                    bucket %= self._rotary_period
+                buckets.append(bucket)
         except (TypeError, ValueError, OverflowError) as exc:
             raise RuntimeError('native_position_source_generation_invalid') from exc
         if generation <= 0 or not all(
-                math.isfinite(float(value)) for value in values + sources):
+                math.isfinite(float(value)) for value in values + sources + quanta
+                ) or any(float(value) <= 0.0 for value in quanta):
             raise RuntimeError('native_position_display_sample_invalid')
         if self._last_generation is not None:
             if generation == self._last_generation:
@@ -213,14 +279,24 @@ class PositionDisplayStabilizer:
                 self._candidate = [None] * len(self._candidate)
         for index, bucket in enumerate(buckets):
             stable = self._stable[index]
-            if stable is None or self._bucket_distance(index, bucket, stable) > 1:
+            bucket_distance = (
+                0 if stable is None
+                else self._bucket_distance(index, bucket, stable))
+            axis = index % POSITION_AXIS_COUNT
+            if stable is None:
                 self._stable[index] = bucket
                 self._candidate[index] = None
             elif bucket == stable:
                 self._candidate[index] = None
-            elif self._source_boundary_distance(
-                    index, stable, bucket, sources[index]
-                    ) <= self._hysteresis + 1.0e-9:
+            elif bucket_distance == 1 and self._source_boundary_distance(
+                     index, stable, bucket, sources[index]
+                     ) <= max(
+                         self._hysteresis,
+                         float(quanta[axis]) * self._scale
+                     ) + 1.0e-9:
+                self._candidate[index] = None
+            elif bucket_distance > 1:
+                self._stable[index] = bucket
                 self._candidate[index] = None
             elif self._candidate[index] == bucket:
                 self._stable[index] = bucket
@@ -244,11 +320,27 @@ class HalPositionReadAccess:
             f'joint-{joint}-pos-cmd' for joint in range(POSITION_AXIS_COUNT)]
 
         native_specs = [
+            ('display-metadata-valid', 'display-valid', 'v5-display-metadata-valid', hal_module.HAL_BIT),
+            ('display-metadata-generation', 'display-generation', 'v5-display-metadata-generation', hal_module.HAL_U32),
+            ('display-active-mask', 'display-active-mask', 'v5-display-active-mask', hal_module.HAL_U32),
+            ('display-commit-seq', 'display-commit-seq', 'v5-display-commit-seq', hal_module.HAL_U32),
             ('home-table-mapping-valid', 'home-table-valid', 'v5-home-table-valid', hal_module.HAL_BIT),
             ('home-table-map-gen', 'home-table-generation', 'v5-home-table-generation', hal_module.HAL_U32),
             ('home-table-active-mask', 'home-table-active-mask', 'v5-home-table-active-mask', hal_module.HAL_U32),
             ('home-table-commit-seq', 'home-table-commit', 'v5-home-table-commit', hal_module.HAL_U32),
         ]
+        display_fields = (
+            ('display-axis-code', 'axis-code', hal_module.HAL_U32),
+            ('display-unit-per-count', 'unit-per-count', hal_module.HAL_FLOAT),
+        )
+        for joint in range(POSITION_AXIS_COUNT):
+            suffix = f'{joint:02d}'
+            for owner_field, signal_field, pin_type in display_fields:
+                native_specs.append((
+                    f'{owner_field}-{suffix}',
+                    f'display-j{joint}-{signal_field}',
+                    f'v5-display-j{joint}-{signal_field}',
+                    pin_type))
         joint_fields = (
             ('home-config-valid', 'config-valid', hal_module.HAL_BIT),
             ('home-status-slot', 'status-slot', hal_module.HAL_U32),
@@ -292,6 +384,11 @@ class HalPositionReadAccess:
             str(item.get('NAME', '')): item
             for item in hal_module.get_info_signals()
         }
+        self._bus_status = HalBusStatusAccess(
+            hal_module,
+            self._component,
+            signal_info,
+            self._bind_source)
         for joint in range(POSITION_AXIS_COUNT):
             self._bind_source(
                 signal_info,
@@ -340,6 +437,7 @@ class HalPositionReadAccess:
             key: self._component.getitem(local_name)
             for key, local_name in self._scalar_names.items()
         }
+        self._bus_status.ready()
 
     def _bind_source(
             self, signal_info, local_name, source_pin, preferred_signal, pin_type):
@@ -400,6 +498,9 @@ class HalPositionReadAccess:
             values[3] * 100.0,
         )
 
+    def read_bus_status(self):
+        return self._bus_status.read()
+
 
 def lock_process_memory(process_name: str) -> None:
     try:
@@ -434,6 +535,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description='Publish the 30 Hz native position display projection.')
     parser.add_argument('--path', default=DEFAULT_POSITION_PATH)
+    parser.add_argument('--bus-path', default=BUS_STATUS_DEFAULT_PATH)
     parser.add_argument('--interval-ms', type=int, default=DEFAULT_INTERVAL_MS)
     parser.add_argument('--once', action='store_true')
     parser.add_argument('--mock-mcs', default='')
@@ -449,7 +551,12 @@ def main() -> int:
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr, flush=True)
         return 3
+    position_writer = PositionStatusMmapWriter(args.path)
+    bus_writer = None
     try:
+        position_writer.open()
+        if not args.mock_mcs:
+            bus_writer = BusStatusMmapWriter(args.bus_path).open()
         lock_process_memory('v5_position_status_publisher')
 
         if args.mock_mcs:
@@ -457,7 +564,8 @@ def main() -> int:
                 args.path,
                 parse_offsets(args.mock_mcs),
                 parse_offsets(args.mock_cmd_mcs),
-                writer_identity=lifecycle.writer_identity)
+                writer_identity=lifecycle.writer_identity,
+                position_writer=position_writer)
             return 0
 
         hal_access = load_hal()
@@ -467,6 +575,9 @@ def main() -> int:
         publish_cadence = PositionPublishCadence()
         display_stabilizer = PositionDisplayStabilizer()
         source_generation = 0
+        bus_source_generation = 0
+        next_bus_sample = 0.0
+        next_bus_error_log = 0.0
         consecutive_failures = 0
         next_status_log = 0.0
         sample_count = 0
@@ -477,6 +588,7 @@ def main() -> int:
             try:
                 native_positions = hal_access.read_joint_positions()
                 native_scalars = hal_access.read_display_scalars()
+                source_acquired_mono_ns = time.monotonic_ns()
                 source_generation += 1
                 published = write_position_status(
                     args.path,
@@ -488,10 +600,36 @@ def main() -> int:
                     native_scalars=native_scalars,
                     writer_identity=lifecycle.writer_identity,
                     display_stabilizer=display_stabilizer,
-                    source_generation=source_generation)
+                    source_generation=source_generation,
+                    source_acquired_mono_ns=source_acquired_mono_ns,
+                    position_writer=position_writer)
                 consecutive_failures = 0
                 sample_count += 1
                 published_count += 1 if published else 0
+                if bus_writer is not None and sample_now >= next_bus_sample:
+                    bus_source_generation += 1
+                    try:
+                        bus_snapshot = hal_access.read_bus_status()
+                        bus_writer.publish(
+                            bus_snapshot,
+                            lifecycle.writer_identity,
+                            bus_source_generation,
+                            time.monotonic_ns())
+                    except Exception as bus_exc:
+                        bus_writer.publish(
+                            None,
+                            lifecycle.writer_identity,
+                            bus_source_generation,
+                            time.monotonic_ns())
+                        if sample_now >= next_bus_error_log:
+                            print(
+                                'v5_position_status_publisher bus status '
+                                f'unavailable: {bus_exc}',
+                                file=sys.stderr,
+                                flush=True)
+                            next_bus_error_log = sample_now + 5.0
+                    next_bus_sample = (
+                        sample_now + BUS_STATUS_INTERVAL_SECONDS)
                 if args.once:
                     return 0
             except Exception as exc:
@@ -516,6 +654,9 @@ def main() -> int:
             _, missed = polling_cadence.wait_next()
             missed_slots += missed
     finally:
+        if bus_writer is not None:
+            bus_writer.close()
+        position_writer.close()
         lifecycle.release()
 
 

@@ -110,6 +110,7 @@ def test_nominal_writes_whole_batch_before_global_readback() -> None:
         ("scan",), ("read", "0", "fault"), ("read", "4", "fault"),
         ("write", "0", "drive.reset_fault"), ("write", "4", "drive.reset_fault"),
         ("scan",), ("state_batch", "OP"),
+        ("scan",),
         ("scan",), ("read", "0", "healthy"), ("read", "4", "healthy"),
     ]
 
@@ -133,6 +134,7 @@ def test_fault_held_preop_safeop_still_resets_before_single_op_restore() -> None
         ("scan",), ("read", "0", "fault"), ("read", "4", "fault"),
         ("write", "0", "drive.reset_fault"), ("write", "4", "drive.reset_fault"),
         ("scan",), ("state_batch", "OP"),
+        ("scan",),
         ("scan",), ("read", "0", "healthy"), ("read", "4", "healthy"),
     ]
 
@@ -142,6 +144,10 @@ def test_preflight_recovers_only_unavailable_target_once() -> None:
         [
             {"0": "OP", "4": "INIT"},
             {"0": "OP", "4": "PREOP"},
+            {"0": "PREOP", "4": "PREOP"},
+            {"0": "PREOP", "4": "PREOP"},
+            {"0": "PREOP", "4": "PREOP"},
+            {"0": "OP", "4": "OP"},
             {"0": "OP", "4": "OP"},
         ],
         {
@@ -199,10 +205,59 @@ def test_target_set_mismatch_fails_without_per_axis_fallback() -> None:
     assert commands == []
 
 
+def test_target_set_waits_for_all_actual_states() -> None:
+    commands: List[List[str]] = []
+    scans = iter([
+        {
+            "ok": True,
+            "slaves": [
+                {"position": "0", "state": "OP"},
+                {"position": "4", "state": "OP"},
+            ],
+        },
+        {
+            "ok": True,
+            "slaves": [
+                {"position": "0", "state": "SAFEOP"},
+                {"position": "4", "state": "PREOP"},
+            ],
+        },
+        {
+            "ok": True,
+            "slaves": [
+                {"position": "0", "state": "OP"},
+                {"position": "4", "state": "OP"},
+            ],
+        },
+    ])
+    original_scan = health.run_ethercat_slaves
+    original_command = health.run_command
+    original_sleep = health.time.sleep
+    try:
+        health.run_ethercat_slaves = lambda _timeout: next(scans)
+        health.run_command = lambda argv, _timeout: (
+            commands.append(list(argv)) or {"ok": True, "code": "OK"})
+        health.time.sleep = lambda _delay: None
+        result = health.request_full_target_set_state(TARGETS, "op", 1.0)
+    finally:
+        health.run_ethercat_slaves = original_scan
+        health.run_command = original_command
+        health.time.sleep = original_sleep
+    assert result["ok"] is True
+    assert result["code"] == "DRIVE_STATE_TARGET_SET_OK"
+    assert result["requested_state"] == "OP"
+    assert result["state_readback_ok"] is True
+    assert result["poll_count"] == 2
+    assert result["actual_states"] == {"0": "OP", "4": "OP"}
+    assert result["failed_positions"] == []
+    assert commands == [["ethercat", "states", "OP"]]
+
+
 test_nominal_writes_whole_batch_before_global_readback()
 test_persistent_actual_fault_never_triggers_state_recovery()
 test_fault_held_preop_safeop_still_resets_before_single_op_restore()
 test_preflight_recovers_only_unavailable_target_once()
 test_postwrite_mailbox_failure_does_not_loop_or_rewrite()
 test_target_set_mismatch_fails_without_per_axis_fallback()
+test_target_set_waits_for_all_actual_states()
 print("drive fault reset coordinated batch smoke ok")

@@ -43,12 +43,6 @@ int v5_linuxcncrsh_format_line(
     }
 
     switch (request->kind) {
-    case V5_COMMAND_PROGRAM_OPEN:
-        if (!request->text_value || !request->text_value[0]) {
-            return 0;
-        }
-        rc = snprintf(out, out_size, "Set Open %s", request->text_value);
-        return v5_linuxcncrsh_format_ok(rc, out_size);
     case V5_COMMAND_MDI_RUN:
         if (!request->text_value || !request->text_value[0]) {
             return 0;

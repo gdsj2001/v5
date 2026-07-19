@@ -2,7 +2,6 @@
 #include "v5_boot_closure.h"
 #include "v5_button_visuals.h"
 #include "v5_command_gate_ipc.h"
-#include "v5_settings_parameter_store.h"
 #include "v5_ui_first_frame_guard.h"
 #include "v5_lvgl_remote_display.h"
 #include "v5_motion_model_registry.h"
@@ -26,6 +25,37 @@ static void log_axis_param_event(const char *field_id, const char *value, int ok
     fprintf(fp, "{\"schema\":\"v5.ui_event.v1\",\"event\":\"settings_axis_param_commit\",\"field\":\"%s\",\"value\":\"%s\",\"ok\":%s}\n",
             field_id ? field_id : "", value ? value : "", ok ? "true" : "false");
     fclose(fp);
+}
+
+static void cache_default_axis_slave_mapping(
+    const V5MotionModelDescriptor *model)
+{
+    static const char axes[] = {'X', 'Y', 'Z', 'A', 'B', 'C'};
+    unsigned int i;
+    if (!model) {
+        return;
+    }
+    for (i = 0U; i < sizeof(axes); ++i) {
+        char axis_name[2] = {axes[i], '\0'};
+        char value[16];
+        unsigned int slot = 0U;
+        int row = v5_settings_axis_row_index_for_axis_name(axis_name);
+        if (row < 0) {
+            continue;
+        }
+        if (v5_motion_model_status_slot_for_axis(model, axes[i], &slot)) {
+            snprintf(value, sizeof(value), "%u", slot);
+        } else {
+            snprintf(value, sizeof(value), "NAT");
+        }
+        (void)v5_settings_axis_resident_parameter_table_set_axis(
+            V5_SETTINGS_PARAMETER_DISK_SELF,
+            axis_name,
+            "slave",
+            value);
+        v5_settings_axis_set_value((unsigned int)row, "slave", value, 1);
+        v5_settings_axis_apply_drive_display_for_row((unsigned int)row);
+    }
 }
 
 int v5_settings_axis_current_driver_mode_is_pulse(void)
@@ -149,67 +179,25 @@ int v5_settings_axis_table_commit_g53_value(unsigned int row, unsigned int col, 
     return ok;
 }
 
-static void apply_motion_model_binding_readback(const char *value)
-{
-    const V5MotionModelDescriptor *target = v5_motion_model_find(value);
-    unsigned char refreshed[256] = {0};
-    unsigned int slave_col;
-    size_t model_i;
-    if (!v5_motion_model_descriptor_valid(target)) {
-        return;
-    }
-    for (slave_col = 0U; slave_col < v5_settings_axis_table_column_count(); ++slave_col) {
-        if (strcmp(g_v5_axis_table_columns[slave_col].field_key, "slave") == 0) {
-            break;
-        }
-    }
-    if (slave_col >= v5_settings_axis_table_column_count()) {
-        return;
-    }
-    for (model_i = 0U; model_i < v5_motion_model_registry_count(); ++model_i) {
-        const V5MotionModelDescriptor *model = v5_motion_model_registry_at(model_i);
-        unsigned int axis_i;
-        if (!v5_motion_model_descriptor_valid(model)) {
-            continue;
-        }
-        for (axis_i = 0U; axis_i < model->active_axis_count; ++axis_i) {
-            unsigned char axis_code = (unsigned char)model->active_axes[axis_i];
-            char axis[2];
-            char slave[V5_AXIS_VALUE_CAP];
-            int row;
-            if (refreshed[axis_code]) {
-                continue;
-            }
-            refreshed[axis_code] = 1U;
-            axis[0] = (char)axis_code;
-            axis[1] = '\0';
-            row = v5_settings_axis_row_index_for_axis_name(axis);
-            if (row < 0 || !v5_settings_parameter_store_read_axis(
-                    g_v5_axis_table_project_root, V5_SETTINGS_PARAMETER_DISK_SELF,
-                    axis, "slave", slave, sizeof(slave))) {
-                continue;
-            }
-            if (!v5_settings_axis_resident_parameter_table_set_axis(
-                    V5_SETTINGS_PARAMETER_DISK_SELF, axis, "slave", slave)) {
-                continue;
-            }
-            v5_settings_axis_set_value((unsigned int)row, "slave", slave, 1);
-            v5_settings_axis_apply_drive_display_for_row((unsigned int)row);
-            v5_settings_axis_refresh_axis_row_refs((unsigned int)row);
-        }
-    }
-}
-
 int v5_settings_axis_table_commit_motion_model(const char *value)
 {
     V5SettingsApplyAxisCommitRequest request;
     V5SettingsApplyAxisCommitResult commit_result;
+    const V5MotionModelDescriptor *current_model;
+    const V5MotionModelDescriptor *target_model;
+    int model_changed;
     int ok;
     if (!value || !value[0]) {
         return 0;
     }
     memset(&request, 0, sizeof(request));
     memset(&commit_result, 0, sizeof(commit_result));
+    current_model = v5_motion_model_find(
+        v5_settings_axis_table_motion_model_value());
+    target_model = v5_motion_model_find(value);
+    model_changed = target_model &&
+        (!current_model ||
+         strcmp(current_model->canonical, target_model->canonical) != 0);
     request.project_root = g_v5_axis_table_project_root;
     request.axis = "RTCP";
     request.axis_index = 0U;
@@ -221,8 +209,16 @@ int v5_settings_axis_table_commit_motion_model(const char *value)
     ok = v5_command_gate_settings_axis_commit(&request, &commit_result, 3000U);
     log_axis_param_event("motion_model", value, ok);
     if (ok) {
-        apply_motion_model_binding_readback(commit_result.readback_value);
-        v5_settings_axis_set_motion_model_value(commit_result.readback_value, 1);
+        v5_settings_axis_table_reload_current_readback();
+        if (target_model) {
+            if (model_changed) {
+                cache_default_axis_slave_mapping(target_model);
+            }
+            v5_settings_axis_set_motion_model_value(
+                target_model->canonical,
+                1);
+            v5_settings_axis_table_refresh_visible_cells();
+        }
         v5_settings_axis_notify_settings_axis_commit_success();
     }
     return ok;

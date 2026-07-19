@@ -203,16 +203,13 @@ void v5_settings_axis_refresh_axis_cell_ref(V5AxisCellRef *ref)
     }
 }
 
-void v5_settings_axis_table_reload_current_readback(void)
+void v5_settings_axis_table_refresh_visible_cells(void)
 {
-    char project_root[sizeof(g_v5_axis_table_project_root)];
     lv_coord_t scroll_x = 0;
     unsigned int i;
-    snprintf(project_root, sizeof(project_root), "%s", g_v5_axis_table_project_root[0] ? g_v5_axis_table_project_root : ".");
     if (g_v5_axis_table_axis_scroll) {
         scroll_x = lv_obj_get_scroll_x(g_v5_axis_table_axis_scroll);
     }
-    v5_settings_axis_table_load_readback(project_root);
     for (i = 0U; i < g_v5_axis_table_cell_ref_count; ++i) {
         v5_settings_axis_refresh_axis_cell_ref(&g_v5_axis_table_cell_refs[i]);
     }
@@ -220,4 +217,12 @@ void v5_settings_axis_table_reload_current_readback(void)
         lv_obj_scroll_to_x(g_v5_axis_table_axis_scroll, scroll_x, LV_ANIM_OFF);
         lv_obj_invalidate(g_v5_axis_table_axis_scroll);
     }
+}
+
+void v5_settings_axis_table_reload_current_readback(void)
+{
+    char project_root[sizeof(g_v5_axis_table_project_root)];
+    snprintf(project_root, sizeof(project_root), "%s", g_v5_axis_table_project_root[0] ? g_v5_axis_table_project_root : ".");
+    v5_settings_axis_table_load_readback(project_root);
+    v5_settings_axis_table_refresh_visible_cells();
 }

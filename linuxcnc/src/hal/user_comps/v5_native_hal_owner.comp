@@ -33,6 +33,12 @@ pin in float wcp_c_base_counts;
 pin in float wcp_c_runtime_counts;
 pin in u32 wcp_c_generation;
 pin in bit wcp_c_valid;
+pin out bit display_metadata_valid;
+pin out u32 display_metadata_generation;
+pin out u32 display_active_mask;
+pin out u32 display_commit_seq;
+pin out u32 display_axis_code_##[5];
+pin out float display_unit_per_count_##[5];
 pin out bit home_config_valid_##[5];
 pin out u32 home_status_slot_##[5];
 pin out u32 home_axis_code_##[5];
@@ -118,6 +124,8 @@ static int read_machine_enabled_pin(void)
 
 typedef struct OwnerConfig {
     char model[V5_NATIVE_G53_MODEL_CAP];
+    uint32_t display_axis_code[V5_NATIVE_HOME_JOINT_COUNT];
+    double display_unit_per_count[V5_NATIVE_HOME_JOINT_COUNT];
     double g53_a_y;
     double g53_a_z;
     double g53_b_x;
@@ -203,6 +211,42 @@ static uint32_t home_fnv1a_u32(uint32_t value, uint32_t hash)
         hash *= 16777619U;
     }
     return hash;
+}
+
+static uint32_t display_metadata_identity(void)
+{
+    uint32_t identity = 2166136261U;
+    unsigned int slot;
+    for (slot = 0U; slot < V5_NATIVE_HOME_JOINT_COUNT; ++slot) {
+        uint64_t bits = 0U;
+        memcpy(&bits, &g_config.display_unit_per_count[slot], sizeof(bits));
+        identity = home_fnv1a_u32(slot, identity);
+        identity = home_fnv1a_u32(g_config.display_axis_code[slot], identity);
+        identity = home_fnv1a_u32((uint32_t)bits, identity);
+        identity = home_fnv1a_u32((uint32_t)(bits >> 32U), identity);
+    }
+    return identity ? identity : 1U;
+}
+
+static void publish_display_metadata(void)
+{
+    const uint32_t active_mask =
+        (1U << V5_NATIVE_HOME_JOINT_COUNT) - 1U;
+    unsigned int slot;
+    display_metadata_valid = 0;
+    display_metadata_generation = 0U;
+    display_active_mask = 0U;
+    display_commit_seq = 0U;
+    for (slot = 0U; slot < V5_NATIVE_HOME_JOINT_COUNT; ++slot) {
+        display_axis_code(slot) = g_config.display_axis_code[slot];
+        display_unit_per_count(slot) =
+            g_config.display_unit_per_count[slot];
+    }
+    display_metadata_generation = display_metadata_identity();
+    display_active_mask = active_mask;
+    display_commit_seq = 1U;
+    __sync_synchronize();
+    display_metadata_valid = 1;
 }
 
 static void home_config_reset_stage(void)
@@ -926,6 +970,7 @@ static void userinit(int argc, char **argv)
     const V5NativeG53ModelBranch *branch;
     const V5NativeG53ModelBranch *resolved_branch;
     V5NativeG53GeometryInput geometry;
+    unsigned int slot;
 
     branch = v5_native_g53_model_find(model);
     if (!v5_native_g53_model_branch_valid(branch) ||
@@ -961,6 +1006,19 @@ static void userinit(int argc, char **argv)
         exit(2);
     }
     snprintf(g_config.model, sizeof(g_config.model), "%s", branch->canonical);
+    for (slot = 0U; slot < V5_NATIVE_HOME_JOINT_COUNT; ++slot) {
+        char option[32];
+        double scale;
+        snprintf(option, sizeof(option), "--display-scale-%u", slot);
+        scale = required_double(argc, argv, option);
+        if (scale == 0.0) {
+            fprintf(stderr, "v5_native_hal_owner invalid %s=0\n", option);
+            exit(2);
+        }
+        g_config.display_axis_code[slot] =
+            (uint32_t)(unsigned char)branch->logical_axes[slot];
+        g_config.display_unit_per_count[slot] = 1.0 / fabs(scale);
+    }
 }
 
 static void on_signal(int signo)
@@ -1015,6 +1073,7 @@ void user_mainloop(void)
     g_gcode_rearm_seen_low = 0;
     g_previous_gcode_request = rtcp_gcode_request ? 1 : 0;
     g_hal_ready_ns = monotonic_ns();
+    publish_display_metadata();
     home_table_mapping_valid = 0;
     home_table_map_gen = 0U;
     home_table_active_mask = 0U;

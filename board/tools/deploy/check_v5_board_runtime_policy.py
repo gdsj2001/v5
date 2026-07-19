@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
+import math
 import os
 import re
 import stat
@@ -45,6 +46,8 @@ SETTINGS_ACTIOND_DAEMON_PATH = "/usr/libexec/8ax/drive_profile/v5_settings_actio
 DEV_ROOT = "/dev"
 SYS_CLASS_UIO_ROOT = "/sys/class/uio"
 TCF_ROOT = "/"
+TCF_EXECUTABLE_NAME = "tcf-agent"
+TCF_LISTENER_PORT = 1534
 TCF_ABSENCE_PATHS = (
     "usr/bin/tcf-agent",
     "usr/sbin/tcf-agent",
@@ -187,14 +190,27 @@ def position_identity_audit(pid: int, pidfile: str, owner_record=None) -> int:
         if position_lock_owner_pid() != owner_pid:
             raise RuntimeError("lock_owner")
         payload = Path(POSITION_BLOCK_PATH).read_bytes()
-        if len(payload) != 152:
+        if len(payload) != 256:
             raise RuntimeError("block_size")
-        magic, version, size, _mask, _axes, block_writer = struct.unpack_from("<6I", payload, 0)
-        if (magic, version, size, block_writer) != (0x56504F53, 2, 152, writer_identity):
+        magic, version, size, _mask, _axes, block_writer, sequence, _reserved = (
+            struct.unpack_from("<8I", payload, 0))
+        source_time, source_generation = struct.unpack_from("<QQ", payload, 32)
+        if ((magic, version, size, block_writer) !=
+                (0x56504F53, 3, 256, writer_identity) or
+                sequence == 0 or sequence & 1 or
+                source_time == 0 or source_generation == 0):
             raise RuntimeError("block_identity")
-        expected_crc = struct.unpack_from("<I", payload, 144)[0]
+        unit_per_count = struct.unpack_from("<5d", payload, 128)
+        following_error = struct.unpack_from("<5d", payload, 168)
+        display_digits = struct.unpack_from("<5B", payload, 208)
+        if (not all(math.isfinite(value) and value > 0.0
+                    for value in unit_per_count) or
+                not all(math.isfinite(value) for value in following_error) or
+                display_digits != (3, 3, 3, 3, 3)):
+            raise RuntimeError("display_metadata")
+        expected_crc = struct.unpack_from("<I", payload, 248)[0]
         actual_crc = 2166136261
-        for byte in payload[:144]:
+        for byte in payload[:248]:
             actual_crc = ((actual_crc ^ byte) * 16777619) & 0xffffffff
         if actual_crc != expected_crc:
             raise RuntimeError("block_crc")
@@ -561,7 +577,7 @@ def collect_tcf_proc_evidence(proc_root: Path):
         except OSError:
             continue
         readable_processes += 1
-        if argv and Path(argv[0].decode("utf-8", "ignore")).name == "tcf-agent":
+        if argv and Path(argv[0].decode("utf-8", "ignore")).name == TCF_EXECUTABLE_NAME:
             tcf_pids.append(int(proc.name))
     if proc_dirs and readable_processes == 0:
         failures.append("FAIL_TCF_PROCESS_EVIDENCE")
@@ -584,7 +600,7 @@ def collect_tcf_proc_evidence(proc_root: Path):
                 port = int(port_text, 16)
             except ValueError:
                 continue
-            if port == 1534:
+            if port == TCF_LISTENER_PORT:
                 listeners.append((table, address))
     return tcf_pids, listeners, failures
 

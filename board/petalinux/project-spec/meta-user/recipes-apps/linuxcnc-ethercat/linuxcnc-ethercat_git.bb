@@ -8,6 +8,8 @@ SRC_URI = " \
     git://github.com/linuxcnc-ethercat/linuxcnc-ethercat.git;protocol=https;branch=master \
     file://0001-v5-register-pdo-outputs-before-inputs.patch \
     file://0002-v5-dc-reference-health-pins.patch \
+    file://0003-v5-defer-master-activation-to-first-read.patch \
+    file://0004-v5-resident-runtime-ready-pin.patch \
 "
 SRCREV = "de7e377f76873fa99e8ea5dcafd7df916e118024"
 PV = "1.0+git${SRCPV}"
@@ -56,30 +58,6 @@ new = """    lcec_pdo_entry_reg_t *master_regs = lcec_allocate_pdo_entry_reg(pdo
 """
 if old not in text:
     raise SystemExit("V5 PDO direction ordering patch target not found in lcec_main.c")
-text = text.replace(old, new, 1)
-old = """  initf_supported = (&hal_init_funct_to_thread != NULL);
-  if (!initf_supported) {
-    rtapi_print_msg(RTAPI_MSG_WARN, LCEC_MSG_PFX
-        "linuxcnc lacks initf support; using legacy inline activation. "
-        "DC phasing will trim via PLL. Upgrade linuxcnc for clean activation.\\n");
-  }
-"""
-new = """  /*
-   * V5 board LinuxCNC 2.9.7 exports hal_init_funct_to_thread in headers/libs,
-   * but board halcmd does not implement the `initf` command. Probing only the
-   * symbol therefore misdetects support and leaves lcec to activate during the
-   * first write-all cycle, where IgH state datagrams race process-data startup.
-   *
-   * Force the native lcec legacy activation path for this image: activation is
-   * still done by lcec/IgH, just during rtapi_app_main instead of from a HAL
-   * command the installed halcmd cannot parse.
-   */
-  initf_supported = 0;
-  rtapi_print_msg(RTAPI_MSG_WARN, LCEC_MSG_PFX
-      "V5: board halcmd lacks initf; using lcec module-load activation.\\n");
-"""
-if old not in text:
-    raise SystemExit("V5 initf support probe patch target not found in lcec_main.c")
 text = text.replace(old, new, 1)
 old = """  LCEC_CONF_MASTER_T *master_conf;
   LCEC_CONF_SLAVE_T *slave_conf;

@@ -117,20 +117,15 @@ static int shell_status_display_equal(const V5UiStatusView *before, const V5UiSt
         return 0;
     }
     changed_mask = before->valid_mask | after->valid_mask;
+    if (!shell_refresh_display_scene_equal(before, after)) {
+        return 0;
+    }
     if ((changed_mask & V5_STATUS_VALID_MCS) != 0U &&
         !shell_axis_values_equal(before->mcs, after->mcs, 1000.0)) {
         return 0;
     }
-    if ((changed_mask & V5_STATUS_VALID_MCS) != 0U &&
-        !shell_axis_values_equal(before->raw_mcs, after->raw_mcs, 1000.0)) {
-        return 0;
-    }
     if ((changed_mask & V5_STATUS_VALID_CMD_MCS) != 0U &&
         !shell_axis_values_equal(before->cmd_mcs, after->cmd_mcs, 1000.0)) {
-        return 0;
-    }
-    if ((changed_mask & V5_STATUS_VALID_CMD_MCS) != 0U &&
-        !shell_axis_values_equal(before->raw_cmd_mcs, after->raw_cmd_mcs, 1000.0)) {
         return 0;
     }
     if ((changed_mask & V5_STATUS_VALID_TRAJECTORY) != 0U && !shell_trajectory_equal(before, after)) {
@@ -203,8 +198,9 @@ int shell_main_page_structure_refresh_pending(void)
         g_v5_shell_structure_program_epoch,
         runtime_has_program ? v5_program_runtime_loaded_epoch(runtime) : 0U,
         !runtime_has_program ||
-            (g_v5_shell_main_page.toolpath_model_scene_valid &&
-             g_v5_shell_main_page.toolpath_model_scene_fresh));
+            (g_v5_shell_main_page.last_status_valid &&
+             (g_v5_shell_main_page.last_status.valid_mask &
+              V5_STATUS_VALID_DISPLAY_SCENE) != 0U));
 }
 
 void shell_main_page_structure_refresh_consume(void)
@@ -287,6 +283,10 @@ int v5_ui_shell_refresh_once(void)
         V5NativeReadback before_native = g_v5_shell_main_page.native_readback;
         if (shell_refresh_native_readback(0)) {
             main_cache_changed = 1;
+        }
+        if (g_v5_shell_current_page == V5_SHELL_PAGE_NETWORK &&
+            shell_update_network_page()) {
+            shell_mark_page_cache_dirty(V5_SHELL_PAGE_NETWORK);
         }
         flags |= shell_refresh_classify_changes(
             0,

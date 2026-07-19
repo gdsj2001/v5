@@ -271,6 +271,7 @@ def compact_action_result_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         "code",
         "message_cn",
         "display_message_cn",
+        "vpsDistributionId",
         "failed_stage",
         "write_executed",
         "drive_write_executed",

@@ -28,6 +28,51 @@ static inline int shell_refresh_model_pose_equal(
             shell_refresh_quantized_pose_value(after->mcs[4]);
 }
 
+static inline int shell_refresh_display_scene_equal(
+    const V5UiStatusView *before,
+    const V5UiStatusView *after)
+{
+    const uint32_t scene_valid = V5_STATUS_VALID_DISPLAY_SCENE;
+    const V5StatusDisplayScene *before_scene;
+    const V5StatusDisplayScene *after_scene;
+    if (!before || !after) {
+        return 0;
+    }
+    if (((before->valid_mask ^ after->valid_mask) & scene_valid) != 0U) {
+        return 0;
+    }
+    if ((before->valid_mask & scene_valid) == 0U) {
+        return 1;
+    }
+    before_scene = before->display_scene;
+    after_scene = after->display_scene;
+    if (!before_scene || !after_scene) {
+        return 0;
+    }
+    return before->position_writer_identity == after->position_writer_identity &&
+        before->scene_generation == after->scene_generation &&
+        before_scene->program_source_identity ==
+            after_scene->program_source_identity &&
+        before_scene->program_generation == after_scene->program_generation &&
+        before_scene->native_generation == after_scene->native_generation &&
+        before_scene->active_model_generation ==
+            after_scene->active_model_generation &&
+        before_scene->rtcp_generation == after_scene->rtcp_generation &&
+        before_scene->wcs_generation == after_scene->wcs_generation &&
+        before_scene->view_generation == after_scene->view_generation &&
+        before_scene->fit_generation == after_scene->fit_generation &&
+        before_scene->build_count == after_scene->build_count &&
+        before_scene->rtcp_transform_count ==
+            after_scene->rtcp_transform_count &&
+        before_scene->project_count == after_scene->project_count &&
+        before_scene->active_model_id == after_scene->active_model_id &&
+        before_scene->flags == after_scene->flags &&
+        before_scene->point_count == after_scene->point_count &&
+        before_scene->segment_count == after_scene->segment_count &&
+        before_scene->marker_count == after_scene->marker_count &&
+        before_scene->program_wcs_mask == after_scene->program_wcs_mask;
+}
+
 static inline unsigned int shell_refresh_classify_changes(
     int display_changed,
     int pose_changed,
@@ -98,6 +143,7 @@ typedef struct V5ProgramRow {
 #define V5_SAFETY_READBACK_TIMEOUT_MS 80U
 #define V5_OPERATOR_ERROR_READ_MIN_NS 100000000ULL
 #define V5_OPERATOR_ERROR_SHOW_NS 6000000000ULL
+#define V5_AXIS_SLAVE_MAPPING_READ_RETRY_NS 1000000000ULL
 
 
 extern V5MainPage g_v5_shell_main_page;
@@ -172,6 +218,8 @@ void shell_clear_style(lv_obj_t *obj);
 
 void shell_update_program_row(void);
 
+int shell_update_network_page(void);
+
 void shell_format_program_size(off_t size, char *out, size_t out_cap);
 
 void shell_format_program_date(time_t when, char *out, size_t out_cap);
@@ -189,6 +237,10 @@ void shell_clear_mdi_edit_metadata(void);
 int shell_load_current_program_for_mdi_edit(void);
 
 int shell_refresh_operator_error(int force);
+
+void shell_reset_axis_slave_mapping_status_probe(void);
+
+int shell_refresh_axis_slave_mapping_status(int force);
 
 int shell_refresh_modal_line_readback(int force);
 

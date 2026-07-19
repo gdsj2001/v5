@@ -11,6 +11,7 @@
 #define V5_COORD_VALUE_W 124
 #define V5_COORD_DOT_W 5
 #define V5_COORD_DIGIT_ADVANCE 12
+#define V5_COORD_WHOLE_DIGITS 3
 #define V5_COORD_FRAC_DIGITS 3
 
 static lv_color_t color_rgb(unsigned char r, unsigned char g, unsigned char b)
@@ -120,28 +121,63 @@ static int draw_char(lv_color_t *buf, int canvas_w, int canvas_h, int x, int y, 
     return 6;
 }
 
-static int chars_width_until(const char *begin, const char *end)
+static int fixed_coordinate_text(
+    const char *text,
+    char *sign,
+    char whole[V5_COORD_WHOLE_DIGITS],
+    char fraction[V5_COORD_FRAC_DIGITS])
 {
-    int width = 0;
+    const char *whole_begin;
+    const char *dot;
     const char *p;
-    if (!begin || !end || end < begin) {
+    size_t whole_count;
+    size_t fraction_count;
+    int negative = 0;
+    if (!text || !sign || !whole || !fraction) {
         return 0;
     }
-    for (p = begin; p < end; ++p) {
-        char ch = *p;
-        if (ch == '.') {
-            width += V5_COORD_DOT_W;
-        } else if (ch == '-' || ch == '<' || ch == '>') {
-            width += 9;
-        } else if (ch >= '0' && ch <= '9') {
-            width += V5_COORD_DIGIT_ADVANCE;
-        } else if (ch == '+') {
-            width += 6;
-        } else {
-            width += 6;
+    whole_begin = text;
+    if (*whole_begin == '+' || *whole_begin == '-') {
+        negative = *whole_begin == '-';
+        ++whole_begin;
+    }
+    dot = strchr(whole_begin, '.');
+    if (!dot || dot == whole_begin) {
+        return 0;
+    }
+    for (p = whole_begin; p < dot; ++p) {
+        if (*p < '0' || *p > '9') {
+            return 0;
         }
     }
-    return width;
+    fraction_count = strlen(dot + 1);
+    if (fraction_count == 0U || fraction_count > V5_COORD_FRAC_DIGITS) {
+        return 0;
+    }
+    for (p = dot + 1; *p; ++p) {
+        if (*p < '0' || *p > '9') {
+            return 0;
+        }
+    }
+    while (whole_begin + 1 < dot && *whole_begin == '0') {
+        ++whole_begin;
+    }
+    whole_count = (size_t)(dot - whole_begin);
+    if (whole_count > V5_COORD_WHOLE_DIGITS) {
+        *sign = negative ? '<' : '>';
+        memset(whole, '9', V5_COORD_WHOLE_DIGITS);
+        memset(fraction, '9', V5_COORD_FRAC_DIGITS);
+        return 1;
+    }
+    *sign = negative ? '-' : '\0';
+    memset(whole, '0', V5_COORD_WHOLE_DIGITS);
+    memcpy(
+        whole + (V5_COORD_WHOLE_DIGITS - whole_count),
+        whole_begin,
+        whole_count);
+    memset(fraction, '0', V5_COORD_FRAC_DIGITS);
+    memcpy(fraction, dot + 1, fraction_count);
+    return 1;
 }
 
 static void draw_value(V5CoordinateDigits *digits, int base_x, int axis, const char *text, lv_color_t color)
@@ -149,15 +185,17 @@ static void draw_value(V5CoordinateDigits *digits, int base_x, int axis, const c
     int y;
     int x;
     int dot_x;
+    int sign_x;
+    char sign;
+    char whole[V5_COORD_WHOLE_DIGITS];
+    char fraction[V5_COORD_FRAC_DIGITS];
     const char *safe = text ? text : "";
-    const char *dot;
     const char *p;
     if (!digits || !digits->buffer || axis < 0 || axis >= (int)V5_COORD_DIGITS_AXIS_COUNT) {
         return;
     }
     y = axis * digits->row_step + 5;
-    dot = strchr(safe, '.');
-    if (!dot) {
+    if (!fixed_coordinate_text(safe, &sign, whole, fraction)) {
         x = base_x + digits->value_width - text_width(safe);
         for (p = safe; *p; ++p) {
             x += draw_char(digits->buffer, digits->width, digits->height, x, y, *p, color);
@@ -165,14 +203,39 @@ static void draw_value(V5CoordinateDigits *digits, int base_x, int axis, const c
         return;
     }
     dot_x = base_x + digits->value_width - (V5_COORD_DOT_W + V5_COORD_FRAC_DIGITS * V5_COORD_DIGIT_ADVANCE);
-    x = dot_x - chars_width_until(safe, dot);
-    for (p = safe; p < dot; ++p) {
-        x += draw_char(digits->buffer, digits->width, digits->height, x, y, *p, color);
+    x = dot_x - V5_COORD_WHOLE_DIGITS * V5_COORD_DIGIT_ADVANCE;
+    sign_x = x - 9;
+    if (sign) {
+        (void)draw_char(
+            digits->buffer,
+            digits->width,
+            digits->height,
+            sign_x,
+            y,
+            sign,
+            color);
+    }
+    for (unsigned int i = 0U; i < V5_COORD_WHOLE_DIGITS; ++i) {
+        x += draw_char(
+            digits->buffer,
+            digits->width,
+            digits->height,
+            x,
+            y,
+            whole[i],
+            color);
     }
     (void)draw_char(digits->buffer, digits->width, digits->height, dot_x, y, '.', color);
     x = dot_x + V5_COORD_DOT_W;
-    for (p = dot + 1; *p; ++p) {
-        x += draw_char(digits->buffer, digits->width, digits->height, x, y, *p, color);
+    for (unsigned int i = 0U; i < V5_COORD_FRAC_DIGITS; ++i) {
+        x += draw_char(
+            digits->buffer,
+            digits->width,
+            digits->height,
+            x,
+            y,
+            fraction[i],
+            color);
     }
 }
 

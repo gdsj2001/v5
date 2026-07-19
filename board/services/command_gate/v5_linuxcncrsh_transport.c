@@ -412,11 +412,18 @@ int v5_linuxcncrsh_send_request_text(int fd, const char *request, char *out, siz
            !v5_linuxcncrsh_response_has_word(response, "ERROR");
 }
 
-int v5_linuxcncrsh_send_fifo_commands(int fd, const char *line)
+int v5_linuxcncrsh_send_fifo_commands_with_sender(
+    int fd,
+    const char *line,
+    V5LinuxcncrshCommandSender sender,
+    void *user_data)
 {
     const char *p = line;
     char command[384];
 
+    if (!sender) {
+        return 0;
+    }
     while (p && *p) {
         const char *start;
         const char *end;
@@ -445,11 +452,26 @@ int v5_linuxcncrsh_send_fifo_commands(int fd, const char *line)
         }
         memcpy(command, start, len);
         command[len] = '\0';
-        if (!v5_linuxcncrsh_send_request_text(fd, command, 0, 0U)) {
+        if (!sender(fd, command, user_data)) {
             return 0;
         }
     }
     return 1;
+}
+
+static int v5_linuxcncrsh_send_fifo_command(
+    int fd,
+    const char *command,
+    void *user_data)
+{
+    (void)user_data;
+    return v5_linuxcncrsh_send_request_text(fd, command, 0, 0U);
+}
+
+int v5_linuxcncrsh_send_fifo_commands(int fd, const char *line)
+{
+    return v5_linuxcncrsh_send_fifo_commands_with_sender(
+        fd, line, v5_linuxcncrsh_send_fifo_command, 0);
 }
 #endif
 

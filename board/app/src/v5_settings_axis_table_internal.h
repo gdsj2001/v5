@@ -192,6 +192,7 @@ int v5_settings_axis_slave_option_used_by_other_row(unsigned int current_row, co
 int v5_settings_axis_axis_row_slave_is_nat(unsigned int row);
 
 void v5_settings_axis_apply_drive_display_for_row(unsigned int row);
+void v5_settings_axis_table_refresh_visible_cells(void);
 
 int v5_settings_axis_axis_cell_disabled_by_nat(unsigned int row, unsigned int col);
 

@@ -35,7 +35,7 @@ init	services/ui/init.d/v5-touch-diagnostics	/etc/init.d/v5-touch-diagnostics	07
 linuxcnc	linuxcnc/ini/v5_pulse.ini	/opt/8ax/v5/linuxcnc/ini/v5_pulse.ini	0644
 linuxcnc	linuxcnc/hal/v5_pulse.hal	/opt/8ax/v5/linuxcnc/hal/v5_pulse.hal	0644
 linuxcnc	linuxcnc/components/step_ip_v1_5.contract.json	/opt/8ax/v5/linuxcnc/components/step_ip_v1_5.contract.json	0644
-linuxcnc	linuxcnc/ini/v5_bus.ini	/opt/8ax/v5/linuxcnc/ini/v5_bus.ini	0644
+runtime_seed	linuxcnc/ini/v5_bus.ini	/opt/8ax/v5/linuxcnc/ini/v5_bus.ini	0644
 linuxcnc	linuxcnc/ini/v5_local_shmem.nml	/opt/8ax/v5/linuxcnc/ini/v5_local_shmem.nml	0644
 linuxcnc	linuxcnc/hal/v5_bus_2ms.hal	/opt/8ax/v5/linuxcnc/hal/v5_bus_2ms.hal	0644
 linuxcnc	linuxcnc/hal/ethercat-conf-2ms.xml	/opt/8ax/v5/linuxcnc/hal/ethercat-conf-2ms.xml	0644
@@ -89,7 +89,6 @@ script	services/drive_profile/v5_drive_profile_resident_snapshot.py	/usr/libexec
 script	services/drive_profile/v5_settings_actiond.py	/usr/libexec/8ax/drive_profile/v5_settings_actiond.py	0755
 module	services/drive_profile/v5_settings_action_contract.py	/usr/libexec/8ax/drive_profile/v5_settings_action_contract.py	0644
 module	services/drive_profile/v5_settings_action_runtime.py	/usr/libexec/8ax/drive_profile/v5_settings_action_runtime.py	0644
-script	services/drive_profile/v5_bus_zero_resident_gate.py	/usr/libexec/8ax/drive_profile/v5_bus_zero_resident_gate.py	0755
 module	services/drive_profile/v5_settings_restart.py	/usr/libexec/8ax/drive_profile/v5_settings_restart.py	0644
 init	services/drive_profile/init.d/v5-settings-actiond	/etc/init.d/v5-settings-actiond	0755
 config	config/drive-profiles/public/driver_profile_map.json	/opt/8ax/v5/config/drive-profiles/public/driver_profile_map.json	0644

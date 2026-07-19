@@ -1,6 +1,24 @@
 #!/bin/sh
 set -eu
 
+bind_service_init_to_cpu1() {
+  cpu_list=
+  while read -r key value rest; do
+    if [ "$key" = "Cpus_allowed_list:" ]; then
+      cpu_list=${value:-}
+      break
+    fi
+  done <"/proc/$$/status"
+  [ "$cpu_list" = "1" ] && return 0
+  [ -x /usr/bin/taskset ] || {
+    echo "taskset missing; service init cannot exclude CPU0" >&2
+    return 1
+  }
+  exec /usr/bin/taskset -c 1 "$0" "$@"
+}
+bind_service_init_to_cpu1 "$@"
+
+
 LD_BIND_NOW=1
 export LD_BIND_NOW
 ulimit -l unlimited 2>/dev/null || true
@@ -10,6 +28,7 @@ PIDFILE=/run/8ax/v5_position_status_publisher.pid
 LOCKFILE=/run/8ax/v5_position_status_publisher.lock
 LOGFILE=/run/8ax/v5_position_status_publisher.log
 STATUS_PATH=${V5_POSITION_STATUS_PATH:-/dev/shm/v5_native_position_status.bin}
+BUS_STATUS_PATH=${V5_BUS_STATUS_PATH:-/dev/shm/v5_native_bus_status.bin}
 INTERVAL_MS=${V5_POSITION_STATUS_INTERVAL_MS:-33}
 POSITION_NICE=0
 RUNTIME_MODULE_ROOT=/usr/libexec/8ax
@@ -51,6 +70,35 @@ if (len(payload) != POSITION_BLOCK_STRUCT.size or values[0] != POSITION_MAGIC or
 PY
 }
 
+bus_block_matches_owner() {
+  command -v python3 >/dev/null 2>&1 || return 1
+  python3 - "$BUS_STATUS_PATH" "$OWNER_WRITER" <<'PY'
+import sys
+from v5_wcs_status_codec import (
+    BUS_STATUS_CRC_OFFSET,
+    BUS_STATUS_MAGIC,
+    BUS_STATUS_STRUCT,
+    BUS_STATUS_VERSION,
+    crc32_like,
+)
+
+try:
+    payload = open(sys.argv[1], 'rb').read()
+    values = BUS_STATUS_STRUCT.unpack(payload)
+except (OSError, ValueError, TypeError):
+    raise SystemExit(1)
+if (len(payload) != BUS_STATUS_STRUCT.size or
+        values[0] != BUS_STATUS_MAGIC or
+        values[1] != BUS_STATUS_VERSION or
+        values[2] != BUS_STATUS_STRUCT.size or
+        not values[4] or values[4] & 1 or
+        values[5] != int(sys.argv[2]) or
+        values[11] == 0 or
+        values[-2] != crc32_like(payload[:BUS_STATUS_CRC_OFFSET])):
+    raise SystemExit(1)
+PY
+}
+
 start_service() {
   if owner_is_live; then
     echo "v5_position_status_publisher already running pid=$OWNER_PID writer=$OWNER_WRITER"
@@ -63,15 +111,19 @@ start_service() {
   mkdir -p /run/8ax
   rm -f "$PIDFILE"
   rm -f "$STATUS_PATH"
+  rm -f "$BUS_STATUS_PATH"
   setsid taskset -c 1 nice -n "$POSITION_NICE" "$DAEMON" \
-    --path "$STATUS_PATH" --interval-ms "$INTERVAL_MS" >>"$LOGFILE" 2>&1 &
+    --path "$STATUS_PATH" --bus-path "$BUS_STATUS_PATH" \
+    --interval-ms "$INTERVAL_MS" >>"$LOGFILE" 2>&1 &
   launched_pid=$!
-  echo "v5_position_status_publisher spawned pid=$launched_pid path=$STATUS_PATH interval_ms=$INTERVAL_MS"
+  echo "v5_position_status_publisher spawned pid=$launched_pid path=$STATUS_PATH bus_path=$BUS_STATUS_PATH interval_ms=$INTERVAL_MS"
 }
 
 stop_service() {
   if ! owner_is_live; then
     rm -f "$PIDFILE"
+    rm -f "$STATUS_PATH"
+    rm -f "$BUS_STATUS_PATH"
     echo "v5_position_status_publisher not running"
     return 0
   fi
@@ -89,6 +141,7 @@ stop_service() {
   fi
   rm -f "$PIDFILE"
   rm -f "$STATUS_PATH"
+  rm -f "$BUS_STATUS_PATH"
   echo "v5_position_status_publisher stopped pid=$pid"
 }
 
@@ -104,7 +157,7 @@ case "${1:-}" in
     start_service
     ;;
   status)
-    if owner_is_live && position_block_matches_owner; then
+    if owner_is_live && position_block_matches_owner && bus_block_matches_owner; then
       echo "v5_position_status_publisher running pid=$OWNER_PID writer=$OWNER_WRITER"
     else
       echo "v5_position_status_publisher not running"

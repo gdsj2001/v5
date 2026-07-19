@@ -363,6 +363,34 @@ int v5_command_gate_probe_estop_clean(
 #endif
 }
 
+int v5_command_gate_probe_axis_slave_mapping(
+    V5CommandGateAxisSlaveMappingStatus *status,
+    unsigned int timeout_ms)
+{
+#ifdef _WIN32
+    (void)timeout_ms;
+    if (status) memset(status, 0, sizeof(*status));
+    return 0;
+#else
+    V5CommandGateIpcRequestFrame frame;
+    V5CommandGateIpcResponseFrame response;
+    if (!status) return 0;
+    memset(status, 0, sizeof(*status));
+    init_request_frame(&frame, V5_COMMAND_GATE_IPC_OP_PROBE_AXIS_SLAVE_MAPPING);
+    if (!transact_response(&frame, &response, timeout_ms) ||
+        response.send_status != V5_COMMAND_GATE_SEND_SENT ||
+        !response.axis_slave_mapping_status_available) {
+        return 0;
+    }
+    status->available = 1;
+    status->applicable = response.axis_slave_mapping_applicable ? 1 : 0;
+    status->valid = response.axis_slave_mapping_valid ? 1 : 0;
+    status->generation = response.axis_slave_mapping_generation;
+    copy_cstr(status->code, sizeof(status->code), response.axis_slave_mapping_code);
+    return 1;
+#endif
+}
+
 int v5_command_gate_settings_axis_commit(
     const V5SettingsApplyAxisCommitRequest *request,
     V5SettingsApplyAxisCommitResult *result,

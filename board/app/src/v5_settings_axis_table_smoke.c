@@ -607,21 +607,46 @@ int main(void)
     {
         char model_before[64];
         char model_after[64];
+        char a_slave[64];
+        char b_slave[64];
+        char c_slave[64];
         if (!read_rtcp_ini_key(
                 "linuxcnc/ini/v5_bus.ini", "MODEL",
                 model_before, sizeof(model_before)) ||
             !v5_settings_parameter_store_write_axis_pair(
                 ".", V5_SETTINGS_PARAMETER_DISK_SELF,
                 "A", "B", "slave", "NAT", "NAT") ||
-            commit_motion_model_direct_smoke("XYZBC_TRT") ||
+            !commit_motion_model_direct_smoke("XYZBC_TRT") ||
             !read_rtcp_ini_key(
                 "linuxcnc/ini/v5_bus.ini", "MODEL",
                 model_after, sizeof(model_after)) ||
-            strcmp(model_before, model_after) != 0 ||
-            !v5_settings_parameter_store_write_axis_pair(
+            strcmp(model_before, model_after) == 0 ||
+            strcmp(model_after, "XYZBC_TRT") != 0 ||
+            !v5_settings_parameter_store_read_axis(
                 ".", V5_SETTINGS_PARAMETER_DISK_SELF,
-                "A", "B", "slave", "3", "NAT")) {
-            fprintf(stderr, "active rotary both-NAT must fail closed without changing model\n");
+                "A", "slave", a_slave, sizeof(a_slave)) ||
+            !v5_settings_parameter_store_read_axis(
+                ".", V5_SETTINGS_PARAMETER_DISK_SELF,
+                "B", "slave", b_slave, sizeof(b_slave)) ||
+            !v5_settings_parameter_store_read_axis(
+                ".", V5_SETTINGS_PARAMETER_DISK_SELF,
+                "C", "slave", c_slave, sizeof(c_slave)) ||
+            strcmp(a_slave, "NAT") != 0 ||
+            strcmp(b_slave, "3") != 0 ||
+            strcmp(c_slave, "4") != 0 ||
+            !commit_motion_model_direct_smoke("XYZAC_TRT") ||
+            !v5_settings_parameter_store_read_axis(
+                ".", V5_SETTINGS_PARAMETER_DISK_SELF,
+                "A", "slave", a_slave, sizeof(a_slave)) ||
+            !v5_settings_parameter_store_read_axis(
+                ".", V5_SETTINGS_PARAMETER_DISK_SELF,
+                "B", "slave", b_slave, sizeof(b_slave)) ||
+            strcmp(a_slave, "3") != 0 ||
+            strcmp(b_slave, "NAT") != 0) {
+            fprintf(stderr,
+                    "motion-model commit must atomically rewrite descriptor defaults: "
+                    "before=%s after=%s A=%s B=%s C=%s\n",
+                    model_before, model_after, a_slave, b_slave, c_slave);
             return 57;
         }
     }
@@ -682,27 +707,57 @@ int main(void)
     {
         char a_slave[64] = "";
         char b_slave[64] = "";
+        char c_slave[64] = "";
         char axis_b_min[64] = "";
         char joint_3_min[64] = "";
         char axis_b_scale[64] = "";
         char joint_3_scale[64] = "";
+        if (strcmp(v5_settings_axis_table_value(3U, 2U), "NAT") != 0 ||
+            strcmp(v5_settings_axis_table_value(4U, 2U), "3") != 0 ||
+            strcmp(v5_settings_axis_table_value(5U, 2U), "4") != 0) {
+            fprintf(stderr,
+                    "BC model commit must publish descriptor default mapping: A=%s B=%s C=%s\n",
+                    v5_settings_axis_table_value(3U, 2U),
+                    v5_settings_axis_table_value(4U, 2U),
+                    v5_settings_axis_table_value(5U, 2U));
+            return 53;
+        }
+        if (!v5_settings_axis_table_commit_value(4U, 2U, "4") ||
+            !v5_settings_axis_table_commit_value(5U, 2U, "3")) {
+            fprintf(stderr, "BC default mapping must remain manually overridable through slave dropdown commits\n");
+            return 53;
+        }
         if (!v5_settings_parameter_store_read_axis(
                 ".", V5_SETTINGS_PARAMETER_DISK_SELF, "A", "slave", a_slave, sizeof(a_slave)) ||
             !v5_settings_parameter_store_read_axis(
                 ".", V5_SETTINGS_PARAMETER_DISK_SELF, "B", "slave", b_slave, sizeof(b_slave)) ||
-            strcmp(a_slave, "NAT") != 0 || strcmp(b_slave, "3") != 0 ||
+            !v5_settings_parameter_store_read_axis(
+                ".", V5_SETTINGS_PARAMETER_DISK_SELF, "C", "slave", c_slave, sizeof(c_slave)) ||
+            strcmp(a_slave, "NAT") != 0 || strcmp(b_slave, "4") != 0 ||
+            strcmp(c_slave, "3") != 0 ||
             strcmp(v5_settings_axis_table_value(3U, 2U), "NAT") != 0 ||
-            strcmp(v5_settings_axis_table_value(4U, 2U), "3") != 0 ||
+            strcmp(v5_settings_axis_table_value(4U, 2U), "4") != 0 ||
+            strcmp(v5_settings_axis_table_value(5U, 2U), "3") != 0 ||
             !read_section_ini_key("linuxcnc/ini/v5_bus.ini", "AXIS_B", "MIN_LIMIT", axis_b_min, sizeof(axis_b_min)) ||
             !read_section_ini_key("linuxcnc/ini/v5_bus.ini", "JOINT_3", "MIN_LIMIT", joint_3_min, sizeof(joint_3_min)) ||
             !read_section_ini_key("linuxcnc/ini/v5_bus.ini", "AXIS_B", "SCALE", axis_b_scale, sizeof(axis_b_scale)) ||
             !read_section_ini_key("linuxcnc/ini/v5_bus.ini", "JOINT_3", "SCALE", joint_3_scale, sizeof(joint_3_scale)) ||
             strcmp(axis_b_min, joint_3_min) != 0 || strcmp(axis_b_scale, joint_3_scale) != 0) {
-            fprintf(stderr, "BC model binding/joint activation mismatch: A=%s B=%s uiA=%s uiB=%s bmin=%s jmin=%s bscale=%s jscale=%s\n",
-                    a_slave, b_slave,
+            fprintf(stderr, "BC model binding/joint activation mismatch: A=%s B=%s C=%s uiA=%s uiB=%s uiC=%s bmin=%s jmin=%s bscale=%s jscale=%s\n",
+                    a_slave, b_slave, c_slave,
                     v5_settings_axis_table_value(3U, 2U),
                     v5_settings_axis_table_value(4U, 2U),
+                    v5_settings_axis_table_value(5U, 2U),
                     axis_b_min, joint_3_min, axis_b_scale, joint_3_scale);
+            return 53;
+        }
+        if (!v5_settings_axis_table_commit_motion_model("XYZBC_TRT") ||
+            strcmp(v5_settings_axis_table_value(4U, 2U), "4") != 0 ||
+            strcmp(v5_settings_axis_table_value(5U, 2U), "3") != 0) {
+            fprintf(stderr,
+                    "reselecting the same model must preserve manual mapping: B=%s C=%s\n",
+                    v5_settings_axis_table_value(4U, 2U),
+                    v5_settings_axis_table_value(5U, 2U));
             return 53;
         }
     }
@@ -732,10 +787,12 @@ int main(void)
     {
         if (!v5_settings_axis_table_commit_motion_model("XYZAC_TRT") ||
             strcmp(v5_settings_axis_table_value(3U, 2U), "3") != 0 ||
-            strcmp(v5_settings_axis_table_value(4U, 2U), "NAT") != 0) {
-            fprintf(stderr, "BC to AC model roundtrip failed: A=%s B=%s\n",
+            strcmp(v5_settings_axis_table_value(4U, 2U), "NAT") != 0 ||
+            strcmp(v5_settings_axis_table_value(5U, 2U), "4") != 0) {
+            fprintf(stderr, "BC to AC model commit did not restore descriptor defaults: A=%s B=%s C=%s\n",
                     v5_settings_axis_table_value(3U, 2U),
-                    v5_settings_axis_table_value(4U, 2U));
+                    v5_settings_axis_table_value(4U, 2U),
+                    v5_settings_axis_table_value(5U, 2U));
             return 54;
         }
     }
@@ -764,10 +821,12 @@ int main(void)
     }
     if (!v5_settings_axis_table_commit_motion_model("XYZBC_TRT") ||
         strcmp(v5_settings_axis_table_value(3U, 2U), "NAT") != 0 ||
-        strcmp(v5_settings_axis_table_value(4U, 2U), "3") != 0) {
-        fprintf(stderr, "AC to BC model roundtrip failed: A=%s B=%s\n",
+        strcmp(v5_settings_axis_table_value(4U, 2U), "3") != 0 ||
+        strcmp(v5_settings_axis_table_value(5U, 2U), "4") != 0) {
+        fprintf(stderr, "AC to BC model commit did not restore descriptor defaults: A=%s B=%s C=%s\n",
                 v5_settings_axis_table_value(3U, 2U),
-                v5_settings_axis_table_value(4U, 2U));
+                v5_settings_axis_table_value(4U, 2U),
+                v5_settings_axis_table_value(5U, 2U));
         return 55;
     }
     if (strcmp(v5_settings_axis_table_value(0U, 16U), "777") != 0 ||

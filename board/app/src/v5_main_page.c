@@ -153,10 +153,11 @@ double v5_main_page_internal_point_angle_deg(const lv_point_t *a, const lv_point
 
 static int toolpath_point_in_graphics_zone(const lv_point_t *point)
 {
-    const int x0 = V5_TOOLPATH_X + V5_TOOLPATH_GESTURE_LEFT_INSET;
-    const int y0 = V5_TOOLPATH_Y;
-    const int x1 = V5_TOOLPATH_X + V5_TOOLPATH_W - V5_TOOLPATH_GESTURE_RIGHT_INSET;
-    const int y1 = V5_TOOLPATH_Y + V5_TOOLPATH_H - V5_TOOLPATH_GESTURE_BOTTOM_INSET;
+    const V5ToolpathViewport *viewport = v5_toolpath_viewport();
+    const int x0 = viewport->x + viewport->gesture_left_inset;
+    const int y0 = viewport->y;
+    const int x1 = viewport->x + viewport->width - viewport->gesture_right_inset;
+    const int y1 = viewport->y + viewport->height - viewport->gesture_bottom_inset;
     return point && point->x >= x0 && point->x <= x1 && point->y >= y0 && point->y <= y1;
 }
 
@@ -198,8 +199,9 @@ V5ToolpathScreenPoint v5_main_page_internal_apply_toolpath_view_transform_prepar
     V5ToolpathScreenPoint point,
     const V5ToolpathViewTransform *transform)
 {
-    const double cx = (double)V5_TOOLPATH_W * 0.5;
-    const double cy = (double)V5_TOOLPATH_H * 0.5;
+    const V5ToolpathViewport *viewport = v5_toolpath_viewport();
+    const double cx = (double)viewport->width * 0.5;
+    const double cy = (double)viewport->height * 0.5;
     double dx;
     double dy;
     double rx;
@@ -280,76 +282,6 @@ void v5_main_page_internal_apply_toolpath_view_transform_points(
     }
 }
 
-void v5_main_page_internal_apply_toolpath_view_transform_to_snapshot(const V5MainPage *page, V5ToolpathDisplaySnapshot *display)
-{
-    if (!page || !display) {
-        return;
-    }
-    if (display->trajectory_valid) {
-        v5_main_page_internal_apply_toolpath_view_transform_points(
-            page, display->trajectory, display->point_count);
-    }
-    if (display->mcs_valid) {
-        display->mcs_point = v5_main_page_internal_apply_toolpath_view_transform(page, display->mcs_point);
-    }
-    if (display->cmd_valid) {
-        display->cmd_point = v5_main_page_internal_apply_toolpath_view_transform(page, display->cmd_point);
-    }
-}
-
-static void main_page_plane_values(const double axis[V5_STATUS_AXIS_COUNT], V5ToolpathDisplayPlane plane, double *u, double *v)
-{
-    if (plane == V5_TOOLPATH_DISPLAY_XZ) {
-        *u = axis[0];
-        *v = axis[2];
-    } else if (plane == V5_TOOLPATH_DISPLAY_YZ) {
-        *u = axis[1];
-        *v = axis[2];
-    } else if (plane == V5_TOOLPATH_DISPLAY_3D) {
-        *u = (axis[0] * 0.7071067811865476) + (axis[1] * 0.7071067811865476);
-        *v = (axis[0] * -0.4082482904638631) + (axis[1] * 0.4082482904638631) + (axis[2] * 0.8164965809277261);
-    } else {
-        *u = axis[0];
-        *v = axis[1];
-    }
-}
-
-int v5_main_page_internal_main_page_axis_values_finite(const double axis[V5_STATUS_AXIS_COUNT])
-{
-    unsigned int i;
-    if (!axis) {
-        return 0;
-    }
-    for (i = 0U; i < V5_STATUS_AXIS_COUNT; ++i) {
-        if (!isfinite(axis[i])) {
-            return 0;
-        }
-    }
-    return 1;
-}
-
-void v5_main_page_internal_main_page_fit_expand_world_point(V5ToolpathDisplayFit *fit, const double axis[V5_STATUS_AXIS_COUNT])
-{
-    double u;
-    double v;
-    if (!fit || !fit->valid || !v5_main_page_internal_main_page_axis_values_finite(axis)) {
-        return;
-    }
-    main_page_plane_values(axis, fit->plane, &u, &v);
-    if (!fit->bounds.valid) {
-        fit->bounds.min_u = fit->bounds.max_u = u;
-        fit->bounds.min_v = fit->bounds.max_v = v;
-        fit->bounds.valid = 1;
-        return;
-    }
-    if (u < fit->bounds.min_u) fit->bounds.min_u = u;
-    if (u > fit->bounds.max_u) fit->bounds.max_u = u;
-    if (v < fit->bounds.min_v) fit->bounds.min_v = v;
-    if (v > fit->bounds.max_v) fit->bounds.max_v = v;
-}
-
-int v5_main_page_internal_main_page_tool_length_mm(const V5MainPage *page, double *out);
-
 const V5MotionModelDescriptor *v5_main_page_internal_main_page_active_motion_model(const V5MainPage *page)
 {
     if (!page || !v5_native_readback_motion_model_known(&page->native_readback)) {
@@ -374,4 +306,41 @@ char v5_main_page_internal_main_page_axis_display_char(const V5MainPage *page, u
         return '-';
     }
     return axis;
+}
+
+void v5_main_page_internal_update_coordinate_target_axes(V5MainPage *page)
+{
+    unsigned int i;
+    char old_fourth;
+    char new_fourth;
+    int selection_still_active = 0;
+    if (!page) return;
+    old_fourth = page->mcs_targets[3].axis;
+    new_fourth = v5_main_page_internal_main_page_axis_display_char(page, 3U);
+    for (i = 0U; i < V5_MAIN_PAGE_AXIS_COUNT; ++i) {
+        char axis = v5_main_page_internal_main_page_axis_display_char(page, i);
+        if (page->axis_labels[i]) {
+            char text[2] = {axis, '\0'};
+            v5_main_page_internal_set_label_text_if_changed(page->axis_labels[i], text);
+        }
+        page->mcs_targets[i].axis = axis;
+        page->wcs_targets[i].axis = axis;
+    }
+    if (!page->selection.all_axes && old_fourth &&
+        page->selection.axis == old_fourth && old_fourth != new_fourth &&
+        new_fourth != '-') page->selection.axis = new_fourth;
+    if (!page->selection.all_axes) {
+        for (i = 0U; i < V5_MAIN_PAGE_AXIS_COUNT; ++i) {
+            if (page->mcs_targets[i].axis == page->selection.axis) {
+                selection_still_active = 1;
+                break;
+            }
+        }
+        if (!selection_still_active) {
+            page->selection.space = V5_MAIN_PAGE_SELECT_MCS;
+            page->selection.axis = '*';
+            page->selection.all_axes = 1;
+            if (page->selection_idle_timer) lv_timer_pause(page->selection_idle_timer);
+        }
+    }
 }

@@ -16,6 +16,12 @@ extern "C" {
 #define V5_NATIVE_WCS_STATUS_OFFSET_COUNT V5_NATIVE_WCS_STATUS_AXIS_COUNT
 
 int v5_native_wcs_status_read(const char *path, unsigned int max_age_ms, V5NativeReadback *readback);
+size_t v5_native_wcs_status_block_size(void);
+int v5_native_wcs_status_read_from_memory(
+    const void *memory,
+    size_t size,
+    unsigned int max_age_ms,
+    V5NativeReadback *readback);
 int v5_native_wcs_status_write(
     const char *path,
     int valid,

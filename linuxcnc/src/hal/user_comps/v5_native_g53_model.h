@@ -8,9 +8,9 @@
 #include "hal/user_comps/v5_native_g53_model_bc.h"
 
 static const V5NativeG53ModelBranch v5_native_g53_model_branches[] = {
-    {"XYZAC_TRT", "xyzac-trt-kins", V5_NATIVE_G53_FIELD_MASK_AC,
+    {"XYZAC_TRT", "xyzac-trt-kins", "XYZAC", V5_NATIVE_G53_FIELD_MASK_AC,
      v5_native_g53_model_ac_project},
-    {"XYZBC_TRT", "xyzbc-trt-kins", V5_NATIVE_G53_FIELD_MASK_BC,
+    {"XYZBC_TRT", "xyzbc-trt-kins", "XYZBC", V5_NATIVE_G53_FIELD_MASK_BC,
      v5_native_g53_model_bc_project},
 };
 
@@ -41,6 +41,7 @@ static inline int v5_native_g53_model_branch_valid(
 {
     return branch && branch->canonical && branch->canonical[0] &&
            branch->kinematics_module && branch->kinematics_module[0] &&
+           branch->logical_axes && strlen(branch->logical_axes) == 5U &&
            branch->project && branch->active_field_mask != 0U &&
            (branch->active_field_mask & ~V5_NATIVE_G53_FIELD_MASK_ALL) == 0U;
 }

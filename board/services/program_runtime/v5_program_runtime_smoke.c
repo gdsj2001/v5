@@ -121,7 +121,15 @@ int main(void)
         v5_program_runtime_destroy(&runtime);
         return 3;
     }
-    if (!v5_program_runtime_prepare_start(&runtime, &start_request)) {
+    if (v5_program_runtime_prepare_start(&runtime, &start_request) ||
+        v5_program_runtime_publish_scene_ready(
+            &runtime, open_result.loaded_epoch + 1U, 11ULL, 7U) ||
+        v5_program_runtime_scene_ready(&runtime) ||
+        v5_program_runtime_prepare_start(&runtime, &start_request) ||
+        !v5_program_runtime_publish_scene_ready(
+            &runtime, open_result.loaded_epoch, 11ULL, 7U) ||
+        !v5_program_runtime_scene_ready(&runtime) ||
+        !v5_program_runtime_prepare_start(&runtime, &start_request)) {
         v5_program_runtime_destroy(&runtime);
         return 4;
     }

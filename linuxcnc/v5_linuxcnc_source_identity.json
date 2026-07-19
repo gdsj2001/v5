@@ -10,7 +10,7 @@
     "tree": "cbadbb8d029aefe7a8d0e3218885aaa59798337b"
   },
   "v5_source_tree": "c1f4c53315c8e614fafbe48992afa91e8aef8014",
-  "content_sha256": "b8dd441233cbaf56f00b69300f6fb673580143c300ee5b0e5a6bc35804643800",
+  "content_sha256": "a0fcdd7f10de0fbc0fb662a6aca8652325d11141d1cbc6e829b36700f8ecbaab",
   "implementation": "in_tree",
   "changed_files": [
     "scripts/linuxcnc.in",

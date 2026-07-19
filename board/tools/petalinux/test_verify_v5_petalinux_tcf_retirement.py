@@ -11,6 +11,8 @@ HERE = Path(__file__).resolve().parent
 VERIFY_PATH = HERE / "verify_v5_petalinux_source.py"
 PROJECT_ROOT = HERE.parents[2]
 ROOTFS_PATH = PROJECT_ROOT / "board" / "petalinux" / "project-spec" / "configs" / "rootfs_config"
+INVENTORY_PATH = PROJECT_ROOT / "board" / "petalinux" / "v5_bitbake_source_inventory.json"
+MANIFEST_PATH = PROJECT_ROOT / "board" / "third_party" / "petalinux-source-packages" / "v5_source_packages.json"
 
 
 def load_verifier():
@@ -54,6 +56,9 @@ def expect_failure(verifier, mutate, marker: str) -> None:
 
 def main() -> int:
     verifier = load_verifier()
+    archive_path = MANIFEST_PATH.parent / verifier.TCF_ARCHIVE_NAME
+    assert verifier.audit_tcf_production_closure(
+        ROOTFS_PATH, INVENTORY_PATH, MANIFEST_PATH, archive_path) == []
     text = ROOTFS_PATH.read_text(encoding="utf-8")
     for option in ("CONFIG_tcf-agent", "CONFIG_tcf-agent-dbg", "CONFIG_tcf-agent-dev"):
         disabled = "# %s is not set" % option

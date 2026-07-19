@@ -50,6 +50,7 @@ typedef int (*V5NativeG53ModelProjector)(
 typedef struct V5NativeG53ModelBranch {
     const char *canonical;
     const char *kinematics_module;
+    const char *logical_axes;
     uint32_t active_field_mask;
     V5NativeG53ModelProjector project;
 } V5NativeG53ModelBranch;

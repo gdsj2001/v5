@@ -79,6 +79,7 @@ def audit_sources(texts: dict[str, str]) -> None:
         assert token in boot, f"UI_EVENT_GATE_MISSING:{token}"
     assert 'rsplit(")", 1)[1].split()[19]' in boot, "PID_REUSE_START_TICKS_GATE_MISSING"
     assert 'accept_identity("position"' in boot, "POSITION_UNIQUE_WRITER_GATE_MISSING"
+    assert '"--bus-path", str(BUS_STATUS_PATH)' in boot, "POSITION_BUS_PATH_IDENTITY_MISSING"
     assert "import fcntl" not in boot, "PYTHON_FCNTL_RESURRECTED"
     assert "ctypes.CDLL(None, use_errno=True).flock" in boot, "LIBC_FLOCK_GATE_MISSING"
     assert 'if ready and checker is current_pre_ui_inputs' in boot, "FINAL_UNIQUE_RECHECK_MISSING"
@@ -155,6 +156,23 @@ def behavior_smoke(boot) -> None:
     boot.wait_pre_ui_inputs(1.0, sequence_checker(unavailable), lambda: watcher)
     assert watcher.wait_count == 3, "STATE_UNAVAILABLE_FALSE_READY"
 
+    transient_attempt = {"count": 0}
+    def transient_then_ready():
+        transient_attempt["count"] += 1
+        if transient_attempt["count"] == 1:
+            raise boot.ReadyError("State coordinate/trajectory values invalid")
+        generation = transient_attempt["count"]
+        return ({
+            "position": generation,
+            "state": generation,
+            "wcs": generation,
+            "modal": generation,
+        }, {"position": 11, "wcs": 12, "state": 13})
+    watcher = FakeWatcher()
+    result = boot.wait_pre_ui_inputs(1.0, transient_then_ready, lambda: watcher)
+    assert result["markers"]["state"] == 3
+    assert watcher.wait_count == 2, "TRANSIENT_STATE_FRAME_NOT_RETRIED"
+
     for marker in ("publisher exited before UI barrier pid=12", "pre-UI actual barrier timeout"):
         failure = boot.ReadyError(marker)
         watcher = FakeWatcher(failure)
@@ -213,8 +231,13 @@ def block_validation_smoke(boot) -> None:
             boot.time.monotonic_ns = lambda: now
 
             position = list(boot.POSITION_FMT.unpack(bytes(boot.POSITION_FMT.size)))
-            position[:7] = [0x56504F53, 2, 152, 3, 5, 77, now]
-            position[7:17] = [float(index) for index in range(10)]
+            position[:10] = [
+                0x56504F53, 3, boot.POSITION_FMT.size, 3, 5, 77,
+                2, 0, now, 1]
+            position[10:20] = [float(index) for index in range(10)]
+            position[20:25] = [0.001] * 5
+            position[25:30] = [0.0] * 5
+            position[30:35] = [3] * 5
             boot.POSITION_PATH.write_bytes(with_fnv_crc(boot, boot.POSITION_FMT, position, -2, 8))
 
             wcs = list(boot.WCS_FMT.unpack(bytes(boot.WCS_FMT.size)))
@@ -226,10 +249,20 @@ def block_validation_smoke(boot) -> None:
             valid_modal = list(boot.MODAL_FMT.unpack(boot.MODAL_PATH.read_bytes()))
             assert valid_modal[3] == 1 and valid_modal[4:7] == [1, 1, 1]
 
-            state = bytearray(840)
-            struct.pack_into("<8I", state, 0, 0x56355348, 2, 840, 840, 808, 0, 2, 0)
-            struct.pack_into("<QII10d", state, 32, time.monotonic_ns(), 3, 0,
-                             *([float(i) for i in range(10)]))
+            state = bytearray(boot.STATE_FRAME_SIZE)
+            struct.pack_into(
+                "<8I", state, 0, 0x56355348, 3,
+                boot.STATE_FRAME_SIZE, boot.STATE_FRAME_SIZE,
+                boot.STATE_PAYLOAD_SIZE, 0, 2, 0)
+            struct.pack_into("<QII", state, 32, time.monotonic_ns(), 0x203, 0)
+            struct.pack_into("<IIQQQ", state, 48, 77, 0, now, 1, 1)
+            struct.pack_into(
+                "<10d", state, 80, *([float(i) for i in range(10)]))
+            struct.pack_into("<5d", state, 160, *([0.001] * 5))
+            struct.pack_into("<5d", state, 200, *([0.0] * 5))
+            struct.pack_into("<5B", state, 240, *([3] * 5))
+            struct.pack_into("<Q", state, 1024, 1)
+            struct.pack_into("<I", state, 1052, 1)
             crc = binascii.crc32(state[:24]); crc = binascii.crc32(state[32:], crc) & 0xFFFFFFFF
             struct.pack_into("<I", state, 28, crc)
             boot.STATE_PATH.write_bytes(state)
@@ -282,27 +315,35 @@ def block_validation_smoke(boot) -> None:
             assert boot.current_pre_ui_inputs()[0]["state"] is None
             boot.STATE_PATH.write_bytes(state)
 
-            zero = bytes(840); boot.STATE_PATH.write_bytes(zero)
+            zero = bytes(boot.STATE_FRAME_SIZE); boot.STATE_PATH.write_bytes(zero)
             assert boot.current_pre_ui_inputs()[0]["state"] is None
             boot.STATE_PATH.write_bytes(state)
 
-            mismatch = bytearray(state); struct.pack_into("<d", mismatch, 48, 99.0)
+            mismatch = bytearray(state); struct.pack_into("<d", mismatch, 80, 99.0)
             struct.pack_into("<I", mismatch, 28, 0)
             crc = binascii.crc32(mismatch[:24]); crc = binascii.crc32(mismatch[32:], crc) & 0xFFFFFFFF
             struct.pack_into("<I", mismatch, 28, crc); boot.STATE_PATH.write_bytes(mismatch)
             assert boot.current_pre_ui_inputs()[0]["state"] is None
             boot.STATE_PATH.write_bytes(state)
 
-            bad_count = bytearray(state); struct.pack_into("<I", bad_count, 768, 17)
-            struct.pack_into("<I", bad_count, 28, 0)
-            crc = binascii.crc32(bad_count[:24]); crc = binascii.crc32(bad_count[32:], crc) & 0xFFFFFFFF
-            struct.pack_into("<I", bad_count, 28, crc); boot.STATE_PATH.write_bytes(bad_count)
             stable_reader = boot.read_state_seqlock
-            boot.read_state_seqlock = lambda _path: bytes(bad_count)
             try:
-                try: boot.current_pre_ui_inputs()
-                except boot.ReadyError as exc: assert "trajectory" in str(exc)
-                else: raise AssertionError("STATE_TRAJECTORY_COUNT_FALSE_READY")
+                for offset, value, name in (
+                    (boot.STATE_TRAJECTORY_COUNT_OFFSET, 17, "trajectory"),
+                    (boot.STATE_SCENE_POINT_COUNT_OFFSET, 513, "scene_point"),
+                    (boot.STATE_SCENE_SEGMENT_COUNT_OFFSET, 49, "scene_segment"),
+                    (boot.STATE_SCENE_MARKER_COUNT_OFFSET, 17, "scene_marker"),
+                ):
+                    bad_count = bytearray(state)
+                    struct.pack_into("<I", bad_count, offset, value)
+                    struct.pack_into("<I", bad_count, 28, 0)
+                    crc = binascii.crc32(bad_count[:24])
+                    crc = binascii.crc32(bad_count[32:], crc) & 0xFFFFFFFF
+                    struct.pack_into("<I", bad_count, 28, crc)
+                    boot.read_state_seqlock = lambda _path, raw=bytes(bad_count): raw
+                    try: boot.current_pre_ui_inputs()
+                    except boot.ReadyError as exc: assert "counts" in str(exc), name
+                    else: raise AssertionError(f"STATE_{name.upper()}_COUNT_FALSE_READY")
             finally: boot.read_state_seqlock = stable_reader
             boot.STATE_PATH.write_bytes(state)
 
@@ -312,13 +353,13 @@ def block_validation_smoke(boot) -> None:
             except boot.ReadyError as exc: assert "CRC" in str(exc)
             else: raise AssertionError("CRC_CORRUPTION_FALSE_READY")
 
-            position[6] = now - 2_000_000_000
+            position[8] = now - 2_000_000_000
             boot.POSITION_PATH.write_bytes(with_fnv_crc(boot, boot.POSITION_FMT, position, -2, 8))
             try: boot.current_pre_ui_inputs()
             except boot.ReadyError as exc: assert "stale" in str(exc)
             else: raise AssertionError("STALE_BLOCK_FALSE_READY")
 
-            position[6] = now; position[5] = 78
+            position[8] = now; position[5] = 78
             boot.POSITION_PATH.write_bytes(with_fnv_crc(boot, boot.POSITION_FMT, position, -2, 8))
             try: boot.current_pre_ui_inputs()
             except boot.ReadyError as exc: assert "owner" in str(exc)
@@ -396,8 +437,8 @@ def posix_inotify_smoke(boot) -> None:
         try:
             path = Path(directory) / "state.bin"
             with path.open("w+b") as stream:
-                stream.truncate(840)
-                page = mmap.mmap(stream.fileno(), 840)
+                stream.truncate(boot.STATE_FRAME_SIZE)
+                page = mmap.mmap(stream.fileno(), boot.STATE_FRAME_SIZE)
                 page[:4] = b"V5SH"
                 page.flush(); page.close()
             watcher.wait(1000)

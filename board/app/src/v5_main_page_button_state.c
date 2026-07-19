@@ -45,12 +45,6 @@ static int wcs_index_for_button_action(V5MainPageActionKind action)
     case V5_MAIN_PAGE_ACTION_WCS_G54: return 0;
     case V5_MAIN_PAGE_ACTION_WCS_G55: return 1;
     case V5_MAIN_PAGE_ACTION_WCS_G56: return 2;
-    case V5_MAIN_PAGE_ACTION_WCS_G57: return 3;
-    case V5_MAIN_PAGE_ACTION_WCS_G58: return 4;
-    case V5_MAIN_PAGE_ACTION_WCS_G59: return 5;
-    case V5_MAIN_PAGE_ACTION_WCS_G591: return 6;
-    case V5_MAIN_PAGE_ACTION_WCS_G592: return 7;
-    case V5_MAIN_PAGE_ACTION_WCS_G593: return 8;
     default: return -1;
     }
 }
@@ -205,15 +199,9 @@ void v5_main_page_internal_make_v3_main_buttons(V5MainPage *page)
     v5_main_page_internal_make_button_rgb(page, 920, 540, 104, 60, V5_MAIN_PAGE_ACTION_ESTOP_FORCE, "急停", 199, 70, 46);
     v5_main_page_internal_make_button_rgb(page, 842, 14, 38, 34, V5_MAIN_PAGE_ACTION_NAV_NETWORK, "网", 16, 48, 77);
 
-    v5_main_page_internal_make_button_rgb(page, 456, 282, 42, 20, V5_MAIN_PAGE_ACTION_WCS_G54, "G54", 32, 52, 73);
-    v5_main_page_internal_make_button_rgb(page, 502, 282, 42, 20, V5_MAIN_PAGE_ACTION_WCS_G55, "G55", 32, 52, 73);
-    v5_main_page_internal_make_button_rgb(page, 548, 282, 42, 20, V5_MAIN_PAGE_ACTION_WCS_G56, "G56", 32, 52, 73);
-    v5_main_page_internal_make_button_rgb(page, 594, 282, 42, 20, V5_MAIN_PAGE_ACTION_WCS_G57, "G57", 32, 52, 73);
-    v5_main_page_internal_make_button_rgb(page, 640, 282, 42, 20, V5_MAIN_PAGE_ACTION_WCS_G58, "G58", 32, 52, 73);
-    v5_main_page_internal_make_button_rgb(page, 456, 306, 50, 20, V5_MAIN_PAGE_ACTION_WCS_G59, "G59", 32, 52, 73);
-    v5_main_page_internal_make_button_rgb(page, 510, 306, 50, 20, V5_MAIN_PAGE_ACTION_WCS_G591, "G59.1", 32, 52, 73);
-    v5_main_page_internal_make_button_rgb(page, 564, 306, 50, 20, V5_MAIN_PAGE_ACTION_WCS_G592, "G59.2", 32, 52, 73);
-    v5_main_page_internal_make_button_rgb(page, 618, 306, 50, 20, V5_MAIN_PAGE_ACTION_WCS_G593, "G59.3", 32, 52, 73);
+    v5_main_page_internal_make_button_rgb(page, 402, 278, 50, 48, V5_MAIN_PAGE_ACTION_WCS_G54, "G54", 32, 52, 73);
+    v5_main_page_internal_make_button_rgb(page, 458, 278, 50, 48, V5_MAIN_PAGE_ACTION_WCS_G55, "G55", 32, 52, 73);
+    v5_main_page_internal_make_button_rgb(page, 514, 278, 50, 48, V5_MAIN_PAGE_ACTION_WCS_G56, "G56", 32, 52, 73);
     v5_main_page_internal_make_button_rgb(page, 402, 328, 108, 48, V5_MAIN_PAGE_ACTION_AXIS_ALL, "机械全轴", 42, 63, 85);
     v5_main_page_internal_make_button_rgb(page, 516, 328, 50, 48, V5_MAIN_PAGE_ACTION_RTCP_TOGGLE, "RTCP", 42, 63, 85);
     v5_main_page_internal_make_button_rgb(page, 572, 328, 80, 48, V5_MAIN_PAGE_ACTION_HOME, "回零", 42, 63, 85);

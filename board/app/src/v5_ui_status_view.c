@@ -24,30 +24,6 @@ static int finite_value(double value)
     return isfinite(value);
 }
 
-double v5_ui_status_view_rotary_phase_deg(double value)
-{
-    double phase;
-    if (!isfinite(value)) {
-        return value;
-    }
-    phase = fmod(value, 360.0);
-    if (phase < 0.0) {
-        phase += 360.0;
-    }
-    if (phase >= 360.0 || phase == 0.0) {
-        return 0.0;
-    }
-    return phase;
-}
-
-static void normalize_rotary_display_slots(double axis[V5_STATUS_AXIS_COUNT])
-{
-    unsigned int i;
-    for (i = 3U; i < V5_STATUS_AXIS_COUNT; ++i) {
-        axis[i] = v5_ui_status_view_rotary_phase_deg(axis[i]);
-    }
-}
-
 void v5_ui_status_view_init(V5UiStatusView *view)
 {
     if (!view) {
@@ -63,21 +39,51 @@ void v5_ui_status_view_clear_dynamic(V5UiStatusView *view)
         return;
     }
     view->valid_mask &= ~(V5_STATUS_VALID_MCS | V5_STATUS_VALID_CMD_MCS | V5_STATUS_VALID_TRAJECTORY);
-    memset(view->raw_mcs, 0, sizeof(view->raw_mcs));
-    memset(view->raw_cmd_mcs, 0, sizeof(view->raw_cmd_mcs));
     memset(view->mcs, 0, sizeof(view->mcs));
     memset(view->cmd_mcs, 0, sizeof(view->cmd_mcs));
+    memset(view->unit_per_count, 0, sizeof(view->unit_per_count));
+    memset(view->following_error, 0, sizeof(view->following_error));
+    memset(view->display_digits, 0, sizeof(view->display_digits));
     memset(view->trajectory, 0, sizeof(view->trajectory));
     view->trajectory_count = 0U;
+    view->valid_mask &= ~V5_STATUS_VALID_DISPLAY_SCENE;
+    view->display_scene = NULL;
 }
 
 int v5_ui_status_view_has_dynamic(const V5UiStatusView *view)
 {
-    return view && (view->valid_mask & (V5_STATUS_VALID_MCS | V5_STATUS_VALID_CMD_MCS | V5_STATUS_VALID_TRAJECTORY)) != 0U;
+    return view && (view->valid_mask & (V5_STATUS_VALID_MCS | V5_STATUS_VALID_CMD_MCS |
+        V5_STATUS_VALID_TRAJECTORY | V5_STATUS_VALID_DISPLAY_SCENE)) != 0U;
+}
+
+static int display_scene_valid(const V5StatusDisplayScene *scene)
+{
+    uint32_t i;
+    if (!scene || (scene->flags & V5_STATUS_SCENE_FLAG_VALID) == 0U ||
+        scene->native_generation == 0ULL || scene->view_generation == 0ULL ||
+        scene->fit_generation == 0ULL || scene->build_count == 0ULL ||
+        scene->project_count == 0ULL ||
+        scene->point_count > V5_STATUS_SCENE_POINT_COUNT ||
+        scene->segment_count > V5_STATUS_SCENE_SEGMENT_COUNT ||
+        scene->marker_count > V5_STATUS_SCENE_MARKER_COUNT) return 0;
+    for (i = 0U; i < scene->point_count; ++i) {
+        if (!isfinite(scene->points[i].x) || !isfinite(scene->points[i].y)) return 0;
+    }
+    for (i = 0U; i < scene->segment_count; ++i) {
+        if (!isfinite(scene->segments[i].start.x) || !isfinite(scene->segments[i].start.y) ||
+            !isfinite(scene->segments[i].end.x) || !isfinite(scene->segments[i].end.y)) return 0;
+    }
+    for (i = 0U; i < scene->marker_count; ++i) {
+        if (!isfinite(scene->markers[i].point.x) || !isfinite(scene->markers[i].point.y)) return 0;
+    }
+    return 1;
 }
 
 int v5_ui_status_view_from_frame(V5UiStatusView *view, const V5StatusShmFrame *frame)
 {
+    unsigned int axis;
+    const uint32_t position_display_mask =
+        V5_STATUS_VALID_MCS | V5_STATUS_VALID_CMD_MCS;
     if (!view || !frame) {
         return 0;
     }
@@ -89,17 +95,35 @@ int v5_ui_status_view_from_frame(V5UiStatusView *view, const V5StatusShmFrame *f
     view->valid_mask = frame->typed_valid_mask;
     view->frame_flags = frame->flags;
     view->status_epoch = frame->status_epoch;
+    view->position_writer_identity = frame->position_writer_identity;
+    view->source_acquired_mono_ns = frame->source_acquired_mono_ns;
+    view->source_generation = frame->source_generation;
+    view->scene_generation = frame->scene_generation;
+    if (view->position_writer_identity == 0U ||
+        view->source_acquired_mono_ns == 0ULL ||
+        view->source_generation == 0ULL) {
+        return 0;
+    }
+    if ((frame->typed_valid_mask & position_display_mask) != 0U) {
+        for (axis = 0U; axis < V5_STATUS_AXIS_COUNT; ++axis) {
+            if (!isfinite(frame->unit_per_count[axis]) ||
+                frame->unit_per_count[axis] <= 0.0 ||
+                !isfinite(frame->following_error[axis]) ||
+                frame->display_digits[axis] != 3U) {
+                return 0;
+            }
+        }
+        memcpy(view->unit_per_count, frame->unit_per_count, sizeof(view->unit_per_count));
+        memcpy(view->following_error, frame->following_error, sizeof(view->following_error));
+        memcpy(view->display_digits, frame->display_digits, sizeof(view->display_digits));
+    }
     if ((frame->typed_valid_mask & V5_STATUS_VALID_MCS) && finite_axis(frame->mcs)) {
-        memcpy(view->raw_mcs, frame->mcs, sizeof(view->raw_mcs));
         memcpy(view->mcs, frame->mcs, sizeof(view->mcs));
-        normalize_rotary_display_slots(view->mcs);
     } else {
         view->valid_mask &= ~V5_STATUS_VALID_MCS;
     }
     if ((frame->typed_valid_mask & V5_STATUS_VALID_CMD_MCS) && finite_axis(frame->cmd_mcs)) {
-        memcpy(view->raw_cmd_mcs, frame->cmd_mcs, sizeof(view->raw_cmd_mcs));
         memcpy(view->cmd_mcs, frame->cmd_mcs, sizeof(view->cmd_mcs));
-        normalize_rotary_display_slots(view->cmd_mcs);
     } else {
         view->valid_mask &= ~V5_STATUS_VALID_CMD_MCS;
     }
@@ -119,6 +143,14 @@ int v5_ui_status_view_from_frame(V5UiStatusView *view, const V5StatusShmFrame *f
         if (view->trajectory_count == 0U) {
             view->valid_mask &= ~V5_STATUS_VALID_TRAJECTORY;
         }
+    }
+    if (frame->scene_generation != 0ULL &&
+        (frame->typed_valid_mask & V5_STATUS_VALID_DISPLAY_SCENE) &&
+        display_scene_valid(&frame->display_scene)) {
+        view->display_scene = &frame->display_scene;
+    } else {
+        view->valid_mask &= ~V5_STATUS_VALID_DISPLAY_SCENE;
+        view->scene_generation = 0ULL;
     }
     if ((frame->typed_valid_mask & V5_STATUS_VALID_SPINDLE_SPEED) && finite_value(frame->spindle_speed_rpm)) {
         view->spindle_speed_rpm = frame->spindle_speed_rpm;

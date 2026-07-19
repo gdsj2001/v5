@@ -14,6 +14,8 @@
 #include "v5_native_modal_tool_status.h"
 #include "v5_native_operator_error_status.h"
 #include "v5_command_gate_ipc.h"
+#include "v5_bus_status_reader.h"
+#include "v5_network_status.h"
 #include "v5_settings_page.h"
 #include "v5_settings_axis_table.h"
 #include "v5_status_shm.h"
@@ -32,6 +34,129 @@
 #include <unistd.h>
 #include "v5_ui_shell_internal.h"
 #include "v5_ui_shell_program_delete.h"
+
+static lv_obj_t *g_v5_shell_network_ip_label;
+static lv_obj_t *g_v5_shell_network_debug_url_label;
+static lv_obj_t *g_v5_shell_bus_master_label;
+static lv_obj_t *g_v5_shell_bus_mapping_label;
+static lv_obj_t *g_v5_shell_bus_drive_label;
+static lv_obj_t *g_v5_shell_bus_axis_labels[V5_BUS_STATUS_JOINT_COUNT];
+static uint32_t g_v5_shell_network_next_refresh_ms;
+
+static int shell_network_label_set(lv_obj_t *label, const char *text)
+{
+    if (!label || !text || strcmp(lv_label_get_text(label), text) == 0) {
+        return 0;
+    }
+    lv_label_set_text(label, text);
+    return 1;
+}
+
+int shell_update_network_page(void)
+{
+    uint32_t now = lv_tick_get();
+    char ip[V5_NETWORK_STATUS_IPV4_CAP];
+    char ip_line[64];
+    char debug_url_line[96];
+    char master_line[96];
+    char mapping_line[96];
+    char drive_line[96];
+    V5BusStatus bus;
+    size_t joint;
+    int changed = 0;
+    int all_mapped_op = 1;
+    int any_fault = 0;
+
+    if (!g_v5_shell_network_ip_label || !g_v5_shell_network_debug_url_label) {
+        return 0;
+    }
+    if (g_v5_shell_network_next_refresh_ms &&
+        (int32_t)(now - g_v5_shell_network_next_refresh_ms) < 0) {
+        return 0;
+    }
+    g_v5_shell_network_next_refresh_ms = now + 200U;
+    if (!v5_network_status_read_ipv4("eth0", ip, sizeof(ip))) {
+        snprintf(ip, sizeof(ip), "%s", "--");
+    }
+    snprintf(ip_line, sizeof(ip_line), "PS eth0 IP: %s", ip);
+    snprintf(debug_url_line, sizeof(debug_url_line), "调试软件: http://%s:8091", ip);
+    changed |= shell_network_label_set(
+        g_v5_shell_network_ip_label, ip_line);
+    changed |= shell_network_label_set(
+        g_v5_shell_network_debug_url_label, debug_url_line);
+
+    if (!v5_bus_status_read(NULL, 0U, &bus)) {
+        changed |= shell_network_label_set(
+            g_v5_shell_bus_master_label,
+            "EtherCAT Master0: 回读不可用");
+        changed |= shell_network_label_set(
+            g_v5_shell_bus_mapping_label,
+            "映射从站: 回读不可用");
+        changed |= shell_network_label_set(
+            g_v5_shell_bus_drive_label,
+            "驱动状态: native回读不可用");
+        for (joint = 0U; joint < V5_BUS_STATUS_JOINT_COUNT; ++joint) {
+            changed |= shell_network_label_set(
+                g_v5_shell_bus_axis_labels[joint],
+                "映射轴--/S--  回读不可用");
+        }
+        return changed;
+    }
+
+    snprintf(
+        master_line,
+        sizeof(master_line),
+        "EtherCAT Master0: %s  Link %s",
+        (bus.master_flags & V5_BUS_MASTER_STATE_OP) ? "OP" : "非OP",
+        (bus.master_flags & V5_BUS_MASTER_LINK_UP) ? "UP" : "DOWN");
+    snprintf(
+        mapping_line,
+        sizeof(mapping_line),
+        "映射从站: %u响应 / %u配置",
+        bus.slaves_responding,
+        bus.active_count);
+    changed |= shell_network_label_set(
+        g_v5_shell_bus_master_label, master_line);
+    changed |= shell_network_label_set(
+        g_v5_shell_bus_mapping_label, mapping_line);
+    for (joint = 0U; joint < V5_BUS_STATUS_JOINT_COUNT; ++joint) {
+        const V5BusJointStatus *entry = &bus.joints[joint];
+        char row[128];
+        unsigned int fault;
+        if (!entry->valid) {
+            snprintf(row, sizeof(row), "J%u  未配置", (unsigned int)joint);
+            all_mapped_op = 0;
+        } else {
+            fault = (entry->statusword & 0x0008U) ? 1U : 0U;
+            snprintf(
+                row,
+                sizeof(row),
+                "%c/S%u  %s  fault=%u  sw=%04X",
+                entry->axis,
+                entry->slave_position,
+                (entry->flags & V5_BUS_JOINT_SLAVE_OP) ? "OP" : "非OP",
+                fault,
+                entry->statusword);
+            if (!(entry->flags & V5_BUS_JOINT_SLAVE_OP)) {
+                all_mapped_op = 0;
+            }
+            if (fault) {
+                any_fault = 1;
+            }
+        }
+        changed |= shell_network_label_set(
+            g_v5_shell_bus_axis_labels[joint], row);
+    }
+    snprintf(
+        drive_line,
+        sizeof(drive_line),
+        "驱动状态: %s",
+        all_mapped_op && !any_fault ? "全部从站OP，无故障" :
+        (any_fault ? "存在驱动故障" : "存在从站未进入OP"));
+    changed |= shell_network_label_set(
+        g_v5_shell_bus_drive_label, drive_line);
+    return changed;
+}
 
 void shell_clear_style(lv_obj_t *obj)
 {
@@ -455,7 +580,7 @@ lv_obj_t *shell_create_network_page(lv_obj_t *screen)
 {
     lv_obj_t *root = lv_obj_create(screen);
     int i;
-    static const char *axes[] = {"X", "Y", "Z", "A", "C", "S", "备用7", "备用8"};
+    static const char *reserved[] = {"S", "备用7", "备用8"};
     shell_clear_style(root);
     lv_obj_set_pos(root, 0, 0);
     lv_obj_set_size(root, 1024, 600);
@@ -465,24 +590,30 @@ lv_obj_t *shell_create_network_page(lv_obj_t *screen)
     shell_make_label(root, 270, 17, 520, 24, "P8 只读：不改网口、不扫写总线、不复位驱动", shell_rgb(155, 177, 198), LV_TEXT_ALIGN_LEFT);
     shell_make_panel(root, 28, 72, 452, 270, 7, 31, 48);
     shell_make_label(root, 52, 96, 360, 24, "PS eth0: SSH/调试/普通网络", shell_rgb(226, 238, 246), LV_TEXT_ALIGN_LEFT);
-    shell_make_label(root, 52, 132, 390, 24, "PS eth0 IP: --", shell_rgb(245, 214, 82), LV_TEXT_ALIGN_LEFT);
-    shell_make_label(root, 52, 168, 390, 24, "调试软件: http://--:8091", shell_rgb(245, 214, 82), LV_TEXT_ALIGN_LEFT);
+    g_v5_shell_network_ip_label =
+        shell_make_label(root, 52, 132, 390, 24, "PS eth0 IP: --", shell_rgb(245, 214, 82), LV_TEXT_ALIGN_LEFT);
+    g_v5_shell_network_debug_url_label =
+        shell_make_label(root, 52, 168, 390, 24, "调试软件: http://--:8091", shell_rgb(245, 214, 82), LV_TEXT_ALIGN_LEFT);
     shell_make_label(root, 52, 204, 390, 24, "PL eth1: EtherCAT 专用，不 DHCP，不维护 IP", shell_rgb(226, 238, 246), LV_TEXT_ALIGN_LEFT);
-    shell_make_label(root, 52, 240, 300, 24, "EtherCAT master: --", shell_rgb(155, 177, 198), LV_TEXT_ALIGN_LEFT);
-    shell_make_label(root, 52, 276, 260, 24, "Domain0: --/--", shell_rgb(155, 177, 198), LV_TEXT_ALIGN_LEFT);
-    shell_make_label(root, 52, 312, 390, 24, "驱动状态: --（等待 native owner 回读）", shell_rgb(155, 177, 198), LV_TEXT_ALIGN_LEFT);
+    g_v5_shell_bus_master_label =
+        shell_make_label(root, 52, 240, 390, 24, "EtherCAT Master0: 回读不可用", shell_rgb(155, 177, 198), LV_TEXT_ALIGN_LEFT);
+    g_v5_shell_bus_mapping_label =
+        shell_make_label(root, 52, 276, 390, 24, "映射从站: 回读不可用", shell_rgb(155, 177, 198), LV_TEXT_ALIGN_LEFT);
+    g_v5_shell_bus_drive_label =
+        shell_make_label(root, 52, 312, 390, 24, "驱动状态: native回读不可用", shell_rgb(155, 177, 198), LV_TEXT_ALIGN_LEFT);
     shell_make_panel(root, 506, 72, 440, 360, 7, 31, 48);
     for (i = 0; i < 8; ++i) {
         int y = 98 + i * 38;
         shell_make_panel(root, 532, y, 364, 30, (i < 5) ? 8 : 38, (i < 5) ? 36 : 54, (i < 5) ? 55 : 65);
         if (i < 5) {
-            char row[128];
-            snprintf(row, sizeof(row), "%s轴  OP--  fault=--  statusword=--", axes[i]);
-            shell_make_label(root, 548, y + 5, 320, 20, row, shell_rgb(155, 177, 198), LV_TEXT_ALIGN_LEFT);
+            g_v5_shell_bus_axis_labels[i] =
+                shell_make_label(root, 548, y + 5, 320, 20, "映射轴--/S--  回读不可用", shell_rgb(155, 177, 198), LV_TEXT_ALIGN_LEFT);
         } else {
-            shell_make_label(root, 548, y + 5, 320, 20, axes[i], shell_rgb(150, 170, 190), LV_TEXT_ALIGN_LEFT);
+            shell_make_label(root, 548, y + 5, 320, 20, reserved[i - 5], shell_rgb(150, 170, 190), LV_TEXT_ALIGN_LEFT);
         }
     }
     shell_text_button(root, "主页面", 920, 0, 104, 60, 41, 145, 107, shell_return_button_cb);
+    g_v5_shell_network_next_refresh_ms = 0U;
+    (void)shell_update_network_page();
     return root;
 }

@@ -136,13 +136,14 @@ def readback_once(target: Dict[str, Any],
 
 def request_full_target_set_state(targets: List[Dict[str, Any]], state: str,
                                   timeout_s: float) -> Dict[str, Any]:
+    requested_state = str(state or "").upper()
     target_positions = [str(target.get("position") or "") for target in targets]
     if (not target_positions or any(not position for position in target_positions)
             or len(set(target_positions)) != len(target_positions)):
         return {
             "ok": False,
             "code": "DRIVE_STATE_TARGET_SET_INVALID",
-            "requested_state": state,
+            "requested_state": requested_state,
             "operations": [],
             "target_positions": target_positions,
             "scanned_positions": [],
@@ -158,29 +159,66 @@ def request_full_target_set_state(targets: List[Dict[str, Any]], state: str,
         return {
             "ok": False,
             "code": "DRIVE_STATE_TARGET_SET_MISMATCH",
-            "requested_state": state,
+            "requested_state": requested_state,
             "operations": [],
             "target_positions": target_positions,
             "scanned_positions": scanned_positions,
             "failed_positions": target_positions,
         }
-    op = run_command(["ethercat", "states", state], min(timeout_s, 5.0))
+    op = run_command(
+        ["ethercat", "states", requested_state], min(timeout_s, 5.0))
     compact = compact_sdo_io(op)
     compact.update({
-        "requested_state": state,
+        "requested_state": requested_state,
         "positions": target_positions,
         "scope": "full_scanned_target_set",
     })
     operations = [compact]
-    time.sleep(0.35)
-    failed_positions = [] if op.get("ok") else target_positions
+    poll_count = 0
+    actual_states: Dict[str, str] = {}
+    failed_positions = list(target_positions)
+    state_readback_ok = False
+    if op.get("ok"):
+        deadline = time.monotonic() + max(0.5, min(timeout_s, 5.0))
+        while True:
+            remaining = deadline - time.monotonic()
+            scan_timeout = max(0.1, min(remaining, 1.0))
+            actual_scan = run_ethercat_slaves(scan_timeout)
+            poll_count += 1
+            actual_states = {
+                str(item.get("position") or ""):
+                    str(item.get("state") or "").upper()
+                for item in (actual_scan.get("slaves") or [])
+                if isinstance(item, dict)
+            } if actual_scan.get("ok") else {}
+            failed_positions = [
+                position for position in target_positions
+                if actual_states.get(position) != requested_state
+            ]
+            if (actual_scan.get("ok")
+                    and set(actual_states) == set(target_positions)
+                    and not failed_positions):
+                state_readback_ok = True
+                break
+            if remaining <= 0:
+                break
+            time.sleep(min(0.1, remaining))
+    ok = bool(op.get("ok")) and state_readback_ok
     return {
-        "ok": bool(op.get("ok")),
-        "code": "DRIVE_STATE_TARGET_SET_OK" if op.get("ok") else str(op.get("code") or "DRIVE_STATE_TARGET_SET_FAILED"),
-        "requested_state": state,
+        "ok": ok,
+        "code": (
+            "DRIVE_STATE_TARGET_SET_OK" if ok
+            else (str(op.get("code") or "DRIVE_STATE_TARGET_SET_FAILED")
+                  if not op.get("ok")
+                  else "DRIVE_STATE_TARGET_SET_READBACK_TIMEOUT")
+        ),
+        "requested_state": requested_state,
         "operations": operations,
         "target_positions": target_positions,
         "scanned_positions": scanned_positions,
+        "actual_states": actual_states,
+        "state_readback_ok": state_readback_ok,
+        "poll_count": poll_count,
         "failed_positions": failed_positions,
     }
 

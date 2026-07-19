@@ -6,6 +6,17 @@
 
 static lv_color_t g_digits_buffer[V5_COORD_DIGITS_MAIN_W * V5_COORD_DIGITS_MAIN_H];
 
+static int pixel_is(const V5CoordinateDigits *digits, int x, int y, lv_color_t expected)
+{
+    const lv_color_t *pixel;
+    if (!digits || !digits->buffer ||
+        x < 0 || x >= digits->width || y < 0 || y >= digits->height) {
+        return 0;
+    }
+    pixel = &digits->buffer[y * digits->width + x];
+    return memcmp(pixel, &expected, sizeof(expected)) == 0;
+}
+
 int main(void)
 {
     V5CoordinateDigits digits;
@@ -13,6 +24,7 @@ int main(void)
     lv_area_t canvas_coords;
     lv_area_t expected;
     const char *cached_text;
+    const lv_color_t digit_color = lv_color_make(86, 204, 252);
 
     lv_init();
     if (!v5_lvgl_headless_display_setup()) {
@@ -93,6 +105,48 @@ int main(void)
     lv_refr_now(lv_obj_get_disp(digits.canvas));
     if (v5_lvgl_headless_flush_count() == 0U) {
         return 14;
+    }
+    {
+        const unsigned int axis = 1U;
+        const int y = (int)axis * digits.row_step + 5;
+        const int dot_x = digits.col_x[0] + digits.value_width - (5 + 3 * 12);
+        const int sign_x = dot_x - (3 * 12 + 9);
+        const int first_whole_x = dot_x - 3 * 12;
+        const int last_whole_x = dot_x - 12;
+        if (!v5_coordinate_digits_set_value(
+                &digits, 0U, axis, "+00001.000", digit_color) ||
+            !pixel_is(&digits, first_whole_x + 2, y, digit_color) ||
+            !pixel_is(&digits, last_whole_x + 8, y + 2, digit_color) ||
+            !pixel_is(&digits, dot_x + 1, y + 17, digit_color)) {
+            fprintf(stderr, "coordinate fixed three-whole-digit mismatch\n");
+            return 15;
+        }
+        if (!v5_coordinate_digits_set_value(
+                &digits, 0U, axis, "-00001.000", digit_color) ||
+            !pixel_is(&digits, sign_x + 1, y + 9, digit_color) ||
+            !pixel_is(&digits, first_whole_x + 2, y, digit_color) ||
+            !pixel_is(&digits, last_whole_x + 8, y + 2, digit_color) ||
+            !pixel_is(&digits, dot_x + 1, y + 17, digit_color)) {
+            fprintf(stderr, "coordinate fixed-minus-slot mismatch\n");
+            return 16;
+        }
+        if (!v5_coordinate_digits_set_value(
+                &digits, 0U, axis, "-00123.000", digit_color) ||
+            !pixel_is(&digits, sign_x + 1, y + 9, digit_color) ||
+            !pixel_is(&digits, first_whole_x + 8, y + 2, digit_color) ||
+            !pixel_is(&digits, dot_x + 1, y + 17, digit_color)) {
+            fprintf(stderr, "coordinate minus moved with whole digits\n");
+            return 17;
+        }
+        if (!v5_coordinate_digits_set_value(
+                &digits, 0U, axis, "+01000.000", digit_color) ||
+            !pixel_is(&digits, sign_x + 1, y + 4, digit_color) ||
+            !pixel_is(&digits, first_whole_x + 2, y, digit_color) ||
+            !pixel_is(&digits, dot_x + 1, y + 17, digit_color) ||
+            !pixel_is(&digits, dot_x + 5 + 2, y, digit_color)) {
+            fprintf(stderr, "coordinate fixed-width overflow mismatch\n");
+            return 18;
+        }
     }
     return 0;
 }

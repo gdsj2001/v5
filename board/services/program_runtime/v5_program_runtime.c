@@ -6,16 +6,28 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
 #include <sys/stat.h>
-#include <unistd.h>
 
+#ifdef _WIN32
+#define S_ISREG(mode) (((mode) & _S_IFMT) == _S_IFREG)
+#endif
+
+#ifndef _WIN32
+#include <sys/mman.h>
+#include <unistd.h>
 #ifndef MAP_ANONYMOUS
 #define MAP_ANONYMOUS MAP_ANON
+#endif
 #endif
 
 static char *v5_program_runtime_alloc_text(size_t size)
 {
+#ifdef _WIN32
+    if (size == 0U || size > V5_PROGRAM_RUNTIME_MAX_GCODE_BYTES + 1U) {
+        return 0;
+    }
+    return (char *)malloc(size);
+#else
     void *mapped;
     if (size == 0U || size > V5_PROGRAM_RUNTIME_MAX_GCODE_BYTES + 1U) {
         return 0;
@@ -25,6 +37,7 @@ static char *v5_program_runtime_alloc_text(size_t size)
         return 0;
     }
     return (char *)mapped;
+#endif
 }
 
 static void v5_program_runtime_clear(V5ProgramRuntime *runtime)
@@ -33,12 +46,16 @@ static void v5_program_runtime_clear(V5ProgramRuntime *runtime)
         return;
     }
     if (runtime->gcode_text) {
+#ifdef _WIN32
+        free(runtime->gcode_text);
+#else
         if (runtime->gcode_text_mmap && runtime->gcode_map_size > 0U) {
             (void)munmap(runtime->gcode_text, runtime->gcode_map_size);
         } else {
             free(runtime->gcode_text);
         }
         (void)malloc_trim(0);
+#endif
     }
     runtime->gcode_text = 0;
     runtime->gcode_size = 0U;
@@ -66,6 +83,10 @@ static void v5_program_runtime_clear(V5ProgramRuntime *runtime)
     runtime->source_path[0] = '\0';
     runtime->source_sha256[0] = '\0';
     runtime->loaded_epoch = 0U;
+    runtime->program_scene_ready = 0;
+    runtime->ready_program_generation = 0U;
+    runtime->ready_scene_generation = 0ULL;
+    runtime->ready_fit_generation = 0U;
     runtime->mdi_text[0] = '\0';
 }
 
@@ -184,7 +205,11 @@ int v5_program_runtime_open_file(
     read_count = fread(buffer, 1U, size, fp);
     fclose(fp);
     if (read_count != size) {
+#ifdef _WIN32
+        free(buffer);
+#else
         (void)munmap(buffer, size + 1U);
+#endif
         v5_program_runtime_set_result(runtime, result, 0, "PROGRAM_READ_FAILED");
         return 0;
     }
@@ -192,8 +217,13 @@ int v5_program_runtime_open_file(
     buffer[size] = '\0';
     runtime->gcode_text = buffer;
     runtime->gcode_size = size;
+#ifdef _WIN32
+    runtime->gcode_map_size = 0U;
+    runtime->gcode_text_mmap = 0;
+#else
     runtime->gcode_map_size = size + 1U;
     runtime->gcode_text_mmap = 1;
+#endif
     runtime->line_count = v5_program_preview_count_lines(buffer, size);
     runtime->preview_trajectory_count = v5_program_preview_build(runtime, buffer, size, runtime->preview_trajectory);
     runtime->first_point_valid = v5_program_preview_find_first_point(
@@ -414,6 +444,49 @@ unsigned int v5_program_runtime_preview_wcs_mask(const V5ProgramRuntime *runtime
     return v5_program_runtime_has_open_program(runtime) ? runtime->preview_wcs_mask : 0U;
 }
 
+int v5_program_runtime_publish_scene_ready(
+    V5ProgramRuntime *runtime,
+    unsigned int program_generation,
+    unsigned long long scene_generation,
+    unsigned int fit_generation)
+{
+    if (!v5_program_runtime_has_open_program(runtime) ||
+        program_generation == 0U ||
+        program_generation != runtime->loaded_epoch ||
+        scene_generation == 0ULL ||
+        fit_generation == 0U) {
+        if (runtime) {
+            runtime->program_scene_ready = 0;
+        }
+        return 0;
+    }
+    runtime->ready_program_generation = program_generation;
+    runtime->ready_scene_generation = scene_generation;
+    runtime->ready_fit_generation = fit_generation;
+    runtime->program_scene_ready = 1;
+    return 1;
+}
+
+void v5_program_runtime_invalidate_scene_ready(V5ProgramRuntime *runtime)
+{
+    if (!runtime) {
+        return;
+    }
+    runtime->program_scene_ready = 0;
+    runtime->ready_program_generation = 0U;
+    runtime->ready_scene_generation = 0ULL;
+    runtime->ready_fit_generation = 0U;
+}
+
+int v5_program_runtime_scene_ready(const V5ProgramRuntime *runtime)
+{
+    return v5_program_runtime_has_open_program(runtime) &&
+        runtime->program_scene_ready &&
+        runtime->ready_program_generation == runtime->loaded_epoch &&
+        runtime->ready_scene_generation != 0ULL &&
+        runtime->ready_fit_generation != 0U;
+}
+
 int v5_program_runtime_prepare_start(
     const V5ProgramRuntime *runtime,
     V5CommandRequest *request)
@@ -428,7 +501,7 @@ int v5_program_runtime_prepare_start(
         request->text_value = runtime->mdi_text;
         return 1;
     }
-    if (v5_program_runtime_has_open_program(runtime)) {
+    if (v5_program_runtime_scene_ready(runtime)) {
         request->kind = V5_COMMAND_START;
         request->text_value = runtime->source_path;
         return 1;

@@ -25,6 +25,7 @@ typedef struct V5SettingsActionStatus {
     char run_id[64];
     char code[72];
     char message[768];
+    char vps_distribution_id[16];
     char result_path[192];
     char axis[16];
     char state[24];

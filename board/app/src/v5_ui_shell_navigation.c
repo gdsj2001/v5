@@ -7,6 +7,17 @@
 
 static int g_v5_shell_navigation_pending;
 static V5MainPageActionKind g_v5_shell_pending_navigation_action;
+static int g_v5_shell_cache_visibility_suppressed;
+
+static void shell_set_runtime_page_visibility(V5ShellPageKind page)
+{
+    v5_main_page_set_page_visible(
+        &g_v5_shell_main_page,
+        page == V5_SHELL_PAGE_MAIN);
+    v5_settings_page_set_page_visible(
+        &g_v5_shell_settings_page,
+        page == V5_SHELL_PAGE_SETTINGS);
+}
 
 static V5ShellPageKind shell_page_for_action(V5MainPageActionKind action)
 {
@@ -68,12 +79,9 @@ void shell_show_page_objects(V5ShellPageKind page)
     if ((unsigned int)page < (unsigned int)V5_SHELL_PAGE_COUNT && g_v5_shell_shell_pages[page]) {
         lv_obj_clear_flag(g_v5_shell_shell_pages[page], LV_OBJ_FLAG_HIDDEN);
     }
-    v5_main_page_set_page_visible(
-        &g_v5_shell_main_page,
-        page == V5_SHELL_PAGE_MAIN);
-    v5_settings_page_set_page_visible(
-        &g_v5_shell_settings_page,
-        page == V5_SHELL_PAGE_SETTINGS);
+    if (!g_v5_shell_cache_visibility_suppressed) {
+        shell_set_runtime_page_visibility(page);
+    }
     if (!g_v5_shell_top_status_layer) {
         return;
     }
@@ -106,7 +114,9 @@ int shell_show_page_objects_for_cache_blit(V5ShellPageKind page)
         return 0;
     }
     lv_disp_enable_invalidation(disp, false);
+    g_v5_shell_cache_visibility_suppressed = 1;
     shell_show_page_objects(page);
+    g_v5_shell_cache_visibility_suppressed = 0;
     lv_disp_enable_invalidation(disp, true);
     return disp->inv_p == 0U &&
         !lv_obj_has_flag(root, LV_OBJ_FLAG_HIDDEN);
@@ -232,6 +242,9 @@ static int shell_navigate_now(V5MainPageActionKind action)
     t0 = shell_monotonic_ns();
     page = shell_page_for_action(action);
     previous_page = g_v5_shell_current_page;
+    if (page == V5_SHELL_PAGE_NETWORK && shell_update_network_page()) {
+        shell_mark_page_cache_dirty(V5_SHELL_PAGE_NETWORK);
+    }
     if (!shell_capture_current_page()) {
         fprintf(stderr,
                 "V5_UI_NAV_FAIL stage=capture_current current=%u target=%u current_dirty=%d\n",
@@ -282,6 +295,9 @@ static int shell_navigate_now(V5MainPageActionKind action)
                     target_valid);
             return 0;
         }
+    }
+    if (g_v5_shell_remote_display_active) {
+        shell_set_runtime_page_visibility(page);
     }
     g_v5_shell_current_page = page;
     elapsed = shell_monotonic_ns() - t0;

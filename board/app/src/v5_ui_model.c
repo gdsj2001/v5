@@ -25,7 +25,9 @@ static unsigned long long monotonic_ns(void)
 
 static int frame_time_anomaly(const V5StatusShmFrame *frame, unsigned long long now_ns)
 {
-    return !frame || frame->status_epoch == 0ULL || now_ns == 0ULL || frame->status_epoch > now_ns;
+    return !frame || frame->source_acquired_mono_ns == 0ULL ||
+        frame->source_generation == 0ULL || frame->position_writer_identity == 0U ||
+        now_ns == 0ULL || frame->source_acquired_mono_ns > now_ns;
 }
 
 static unsigned long long frame_age_ns(const V5StatusShmFrame *frame, unsigned long long now_ns)
@@ -33,7 +35,7 @@ static unsigned long long frame_age_ns(const V5StatusShmFrame *frame, unsigned l
     if (frame_time_anomaly(frame, now_ns)) {
         return V5_STATUS_STALE_DYNAMIC_HIDE_NS + 1ULL;
     }
-    return now_ns - (unsigned long long)frame->status_epoch;
+    return now_ns - (unsigned long long)frame->source_acquired_mono_ns;
 }
 
 static void apply_unavailable_status(V5UiModel *model)
@@ -111,6 +113,9 @@ void v5_ui_model_init(V5UiModel *model)
     v5_ui_status_view_init(&model->last_good_status_view);
     model->has_last_good_status = 0;
     model->last_good_monotonic_ns = 0ULL;
+    memset(model->status_frame_slots, 0, sizeof(model->status_frame_slots));
+    model->status_frame_active_slot = 0U;
+    model->status_frame_active_valid = 0;
     v5_status_shm_mmap_reader_init(&model->status_reader);
     model->status_reader_retry_after_ns = 0ULL;
     model->status_reader_last_epoch = 0ULL;
@@ -139,14 +144,18 @@ static int status_reader_backing_replaced(V5UiModel *model)
     return 1;
 }
 
-int v5_ui_model_apply_status_frame(V5UiModel *model, const V5StatusShmFrame *frame)
+static int apply_status_frame_slot(
+    V5UiModel *model,
+    unsigned int candidate_slot)
 {
     V5UiStatusView view;
+    const V5StatusShmFrame *frame;
     unsigned long long now_ns;
     unsigned long long age_ns;
-    if (!model || !frame) {
+    if (!model || candidate_slot >= 2U) {
         return 0;
     }
+    frame = &model->status_frame_slots[candidate_slot];
 
     now_ns = monotonic_ns();
     if (!v5_ui_status_view_from_frame(&view, frame)) {
@@ -179,6 +188,8 @@ int v5_ui_model_apply_status_frame(V5UiModel *model, const V5StatusShmFrame *fra
 
     model->status_view = view;
     if (v5_ui_status_view_has_dynamic(&view)) {
+        model->status_frame_active_slot = candidate_slot;
+        model->status_frame_active_valid = 1;
         model->last_good_status_view = view;
         model->has_last_good_status = 1;
         model->last_good_monotonic_ns = now_ns;
@@ -186,9 +197,24 @@ int v5_ui_model_apply_status_frame(V5UiModel *model, const V5StatusShmFrame *fra
     return 1;
 }
 
+int v5_ui_model_apply_status_frame(V5UiModel *model, const V5StatusShmFrame *frame)
+{
+    unsigned int candidate_slot;
+    if (!model || !frame) {
+        return 0;
+    }
+    candidate_slot = model->status_frame_active_valid ?
+        (model->status_frame_active_slot ^ 1U) : 0U;
+    if (frame != &model->status_frame_slots[candidate_slot]) {
+        model->status_frame_slots[candidate_slot] = *frame;
+    }
+    return apply_status_frame_slot(model, candidate_slot);
+}
+
 int v5_ui_model_refresh_status_from_shm(V5UiModel *model, const char *path)
 {
-    V5StatusShmFrame frame;
+    V5StatusShmFrame *candidate;
+    unsigned int candidate_slot;
     unsigned long long now_ns;
 
     if (!model) {
@@ -205,7 +231,10 @@ int v5_ui_model_refresh_status_from_shm(V5UiModel *model, const char *path)
         return apply_last_good_status(model, now_ns);
     }
     model->status_reader_retry_after_ns = 0ULL;
-    if (!v5_status_shm_mmap_reader_read(&model->status_reader, &frame)) {
+    candidate_slot = model->status_frame_active_valid ?
+        (model->status_frame_active_slot ^ 1U) : 0U;
+    candidate = &model->status_frame_slots[candidate_slot];
+    if (!v5_status_shm_mmap_reader_read(&model->status_reader, candidate)) {
         model->status_reader_failure_count += 1U;
         if (model->status_reader_failure_count >= V5_STATUS_READER_FAILURE_CHECK_COUNT) {
             model->status_reader_failure_count = 0U;
@@ -214,7 +243,8 @@ int v5_ui_model_refresh_status_from_shm(V5UiModel *model, const char *path)
         return apply_last_good_status(model, now_ns);
     }
     model->status_reader_failure_count = 0U;
-    if (frame.status_epoch != 0ULL && frame.status_epoch == model->status_reader_last_epoch) {
+    if (candidate->source_generation != 0ULL &&
+        candidate->source_generation == model->status_reader_last_epoch) {
         model->status_reader_stagnant_count += 1U;
         if (model->status_reader_stagnant_count >= V5_STATUS_READER_STAGNANT_CHECK_COUNT) {
             model->status_reader_stagnant_count = 0U;
@@ -223,8 +253,8 @@ int v5_ui_model_refresh_status_from_shm(V5UiModel *model, const char *path)
             }
         }
     } else {
-        model->status_reader_last_epoch = frame.status_epoch;
+        model->status_reader_last_epoch = candidate->source_generation;
         model->status_reader_stagnant_count = 0U;
     }
-    return v5_ui_model_apply_status_frame(model, &frame);
+    return apply_status_frame_slot(model, candidate_slot);
 }

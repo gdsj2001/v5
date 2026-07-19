@@ -7,8 +7,6 @@
 static const char *v5_command_gate_name_for_kind(V5CommandKind kind)
 {
     switch (kind) {
-    case V5_COMMAND_PROGRAM_OPEN:
-        return "program_open";
     case V5_COMMAND_START:
         return "start";
     case V5_COMMAND_MDI_RUN:

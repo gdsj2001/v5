@@ -5,6 +5,7 @@ from pathlib import Path
 
 
 SCRIPT = Path(__file__).with_name("verify_v5_board_runtime.sh")
+BOARD_POLICY = Path(__file__).with_name("check_v5_board_runtime_policy.py")
 STATE_START = 'if remote "/usr/libexec/8ax/v5_state_publisher --path /dev/shm/v5_verify_state_publisher --once'
 STATE_END = '\nif remote "test -s \'$state_path\'"'
 STATE_CLEANUP = "remote 'rm -f /dev/shm/v5_verify_state_publisher /tmp/v5_verify_state_publisher.out' >/dev/null 2>&1 || true"
@@ -24,6 +25,7 @@ def audit_state_cleanup(text: str) -> None:
 
 def main() -> int:
     text = SCRIPT.read_text(encoding="utf-8")
+    board_policy = BOARD_POLICY.read_text(encoding="utf-8")
     audit_state_cleanup(text)
     forbidden = (
         "v5_wcs_status_publisher.py --once --path /dev/shm/v5_native_wcs_status.bin",
@@ -42,7 +44,22 @@ def main() -> int:
     )
     for token in required:
         assert token in text, f"verifier read-only or temporary-path contract missing: {token}"
+    assert "tr -d '\\\\r'" in text, "LINUXCNCRSH_MACHINE_STATE_CR_NORMALIZATION_MISSING"
+    assert "grep -Eq '^MACHINE (ON|OFF)$'" in text, \
+        "LINUXCNCRSH_MACHINE_STATE_READ_ONLY_ENUM_MISSING"
+    assert "grep -q 'MACHINE ON'" not in text, \
+        "LINUXCNCRSH_VERIFIER_REQUIRES_MACHINE_ENABLE"
     assert "tcf_absence_check=" in text and TCF_LABEL in text, "TCF_ABSENCE_GATE_MISSING"
+    required_board_tcf_contract = (
+        'TCF_EXECUTABLE_NAME = "tcf-agent"',
+        "TCF_LISTENER_PORT = 1534",
+        "def collect_tcf_proc_evidence(proc_root: Path):",
+        "name == TCF_EXECUTABLE_NAME",
+        "port == TCF_LISTENER_PORT",
+        "FAIL_TCF_ROOTFS_MANIFEST",
+    )
+    for token in required_board_tcf_contract:
+        assert token in board_policy, f"TCF_BOARD_POLICY_CONTRACT_MISSING:{token}"
     tcf_begin = text.index("tcf_absence_check=")
     tcf_end = text.index("\n\n", tcf_begin)
     tcf_block = text[tcf_begin:tcf_end]

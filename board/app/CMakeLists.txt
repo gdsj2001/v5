@@ -11,10 +11,14 @@ set(LV_LVGL_H_INCLUDE_SIMPLE ON CACHE BOOL "Use simple LVGL include" FORCE)
 
 add_subdirectory("${V5_LVGL_DIR}" "${CMAKE_BINARY_DIR}/third_party/lvgl" EXCLUDE_FROM_ALL)
 
-set(V5_MAIN_PAGE_MODEL_SOURCES
-    src/v5_main_page_model_projector.c
-    src/v5_main_page_model_projector_ac.c
-    src/v5_main_page_model_projector_bc.c
+set(V5_PROGRAM_SCENE_PRODUCER_SOURCES
+    ../services/state_publisher/v5_program_scene_producer.c
+    ../services/state_publisher/v5_program_scene_projection.c
+    ../services/state_publisher/v5_program_scene_cache.c
+    ../services/state_publisher/v5_program_scene_model.c
+    ../services/state_publisher/v5_program_scene_model_ac.c
+    ../services/state_publisher/v5_program_scene_model_bc.c
+    ../services/state_publisher/v5_program_scene_ipc.c
 )
 
 add_library(v5_button_visuals STATIC
@@ -65,20 +69,21 @@ target_compile_definitions(v5_coordinate_digits_smoke PRIVATE
 
 target_link_libraries(v5_coordinate_digits_smoke PRIVATE lvgl)
 
-add_executable(v5_main_page_model_projector_smoke
-    src/v5_main_page_model_projector_smoke.c
-    ${V5_MAIN_PAGE_MODEL_SOURCES}
+add_executable(v5_program_scene_producer_smoke
+    src/v5_program_scene_producer_smoke.c
+    ${V5_PROGRAM_SCENE_PRODUCER_SOURCES}
     ../services/command_gate/v5_native_readback.c
 )
 
-target_include_directories(v5_main_page_model_projector_smoke PRIVATE
+target_include_directories(v5_program_scene_producer_smoke PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
     "${V5_ROOT_DIR}/services/command_gate"
+    "${V5_ROOT_DIR}/services/state_publisher"
 )
 
 if(NOT WIN32)
-    target_link_libraries(v5_main_page_model_projector_smoke PRIVATE m)
+    target_link_libraries(v5_program_scene_producer_smoke PRIVATE m)
 endif()
 
 add_executable(v5_lvgl_shell
@@ -97,10 +102,8 @@ add_executable(v5_lvgl_shell
     src/v5_remote_input_ipc.c
     src/v5_remote_metrics.c
     src/v5_lvgl_touch_input.c
+    src/v5_network_status.c
     src/v5_main_page.c
-    src/v5_main_page_model_projection.c
-    ${V5_MAIN_PAGE_MODEL_SOURCES}
-    src/v5_main_page_fit.c
     src/v5_main_page_status_text.c
     src/v5_main_page_toolpath_primitives.c
     src/v5_main_page_toolpath_geometry.c
@@ -136,7 +139,6 @@ add_executable(v5_lvgl_shell
     src/v5_settings_action_ipc.c
     src/v5_main_page_actions.c
     src/v5_parameter_table.c
-    src/v5_toolpath_display.c
     src/v5_ui_model.c
     src/v5_ui_shell.c
     src/v5_ui_shell_status.c
@@ -171,10 +173,8 @@ add_executable(v5_program_page_double_click_smoke
     src/v5_remote_input_ipc.c
     src/v5_remote_metrics.c
     src/v5_lvgl_touch_input.c
+    src/v5_network_status.c
     src/v5_main_page.c
-    src/v5_main_page_model_projection.c
-    ${V5_MAIN_PAGE_MODEL_SOURCES}
-    src/v5_main_page_fit.c
     src/v5_main_page_status_text.c
     src/v5_main_page_toolpath_primitives.c
     src/v5_main_page_toolpath_geometry.c
@@ -209,7 +209,6 @@ add_executable(v5_program_page_double_click_smoke
     src/v5_settings_action_ipc.c
     src/v5_main_page_actions.c
     src/v5_parameter_table.c
-    src/v5_toolpath_display.c
     src/v5_ui_model.c
     src/v5_ui_shell.c
     src/v5_ui_shell_status.c
@@ -325,11 +324,13 @@ target_include_directories(v5_ui_page_cache_registry_smoke PRIVATE
 
 add_library(v5_status_shm_projection STATIC
     src/v5_status_shm_reader.c
+    src/v5_bus_status_reader.c
     ../services/state_publisher/v5_cpu_usage_snapshot.c
     ../services/state_publisher/v5_native_sample.c
     ../services/state_publisher/v5_state_publisher_service.c
     ../services/state_publisher/v5_status_shm_mmap.c
     ../services/state_publisher/v5_status_shm_writer.c
+    ${V5_PROGRAM_SCENE_PRODUCER_SOURCES}
     ../services/command_gate/v5_native_readback.c
     ../services/command_gate/v5_native_rtcp_status.c
     ../services/command_gate/v5_native_wcs_status.c
@@ -338,6 +339,9 @@ add_library(v5_status_shm_projection STATIC
 )
 
 target_link_libraries(v5_status_shm_projection PUBLIC v5_operator_error_status)
+if(NOT WIN32)
+    target_link_libraries(v5_status_shm_projection PUBLIC m)
+endif()
 
 target_include_directories(v5_status_shm_projection PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
@@ -388,6 +392,14 @@ add_library(v5_command_gate_client STATIC
     ../services/command_gate/v5_command_gate.c
     ../services/command_gate/v5_command_table.c
     ../services/command_gate/v5_command_gate_ipc.c
+)
+
+add_library(v5_linuxcncrsh_format STATIC
+    ../services/command_gate/v5_linuxcncrsh_format.c
+)
+
+target_include_directories(v5_linuxcncrsh_format PUBLIC
+    "${V5_ROOT_DIR}/services/command_gate"
 )
 
 target_include_directories(v5_command_gate_client PUBLIC
@@ -474,6 +486,9 @@ target_include_directories(v5_program_runtime PUBLIC
     "${V5_ROOT_DIR}/services/program_runtime"
     "${V5_ROOT_DIR}/services/command_gate"
 )
+if(NOT WIN32)
+    target_link_libraries(v5_program_runtime PUBLIC m)
+endif()
 
 add_library(v5_program_commands STATIC
     src/v5_command_first_point.c
@@ -510,9 +525,6 @@ add_executable(v5_main_page_actions_smoke
     src/v5_ui_first_frame_guard.c
     src/v5_ui_first_frame_guard_test_remote.c
     src/v5_main_page.c
-    src/v5_main_page_model_projection.c
-    ${V5_MAIN_PAGE_MODEL_SOURCES}
-    src/v5_main_page_fit.c
     src/v5_main_page_status_text.c
     src/v5_main_page_toolpath_primitives.c
     src/v5_main_page_toolpath_geometry.c
@@ -550,7 +562,6 @@ add_executable(v5_main_page_actions_smoke
     src/v5_main_page_actions.c
     src/v5_coordinate_panel.c
     src/v5_coordinate_digits.c
-    src/v5_toolpath_display.c
     src/v5_ui_status_view.c
     src/v5_status_shm_reader.c
 )
@@ -563,6 +574,7 @@ target_include_directories(v5_main_page_actions_smoke PRIVATE
     "${V5_ROOT_DIR}/services/program_runtime"
     "${V5_ROOT_DIR}/services/drive_profile"
     "${V5_ROOT_DIR}/services/microkernel"
+    "${V5_ROOT_DIR}/services/state_publisher"
 )
 
 target_compile_definitions(v5_main_page_actions_smoke PRIVATE
@@ -571,7 +583,7 @@ target_compile_definitions(v5_main_page_actions_smoke PRIVATE
     V5_MAIN_PAGE_HOME_TRANSACTION_TEST_HOOKS
 )
 
-target_link_libraries(v5_main_page_actions_smoke PRIVATE lvgl v5_button_visuals v5_lvgl_clock v5_program_commands v5_command_gate_core v5_microkernel_contract Threads::Threads m)
+target_link_libraries(v5_main_page_actions_smoke PRIVATE lvgl v5_button_visuals v5_lvgl_clock v5_status_shm_projection v5_program_commands v5_command_gate_core v5_microkernel_contract Threads::Threads m)
 
 add_executable(v5_main_page_smoke
     src/lv_font_zh_16.c
@@ -582,9 +594,6 @@ add_executable(v5_main_page_smoke
     src/v5_ui_first_frame_guard.c
     src/v5_ui_first_frame_guard_test_remote.c
     src/v5_main_page.c
-    src/v5_main_page_model_projection.c
-    ${V5_MAIN_PAGE_MODEL_SOURCES}
-    src/v5_main_page_fit.c
     src/v5_main_page_status_text.c
     src/v5_main_page_toolpath_primitives.c
     src/v5_main_page_toolpath_geometry.c
@@ -622,7 +631,6 @@ add_executable(v5_main_page_smoke
     src/v5_main_page_actions.c
     src/v5_coordinate_panel.c
     src/v5_coordinate_digits.c
-    src/v5_toolpath_display.c
     src/v5_ui_status_view.c
     src/v5_status_shm_reader.c
 )
@@ -635,6 +643,7 @@ target_include_directories(v5_main_page_smoke PRIVATE
     "${V5_ROOT_DIR}/services/program_runtime"
     "${V5_ROOT_DIR}/services/drive_profile"
     "${V5_ROOT_DIR}/services/microkernel"
+    "${V5_ROOT_DIR}/services/state_publisher"
 )
 
 target_compile_definitions(v5_main_page_smoke PRIVATE
@@ -642,13 +651,12 @@ target_compile_definitions(v5_main_page_smoke PRIVATE
     LV_LVGL_H_INCLUDE_SIMPLE
 )
 
-target_link_libraries(v5_main_page_smoke PRIVATE lvgl v5_button_visuals v5_lvgl_clock v5_program_commands v5_command_gate_core v5_microkernel_contract Threads::Threads m)
+target_link_libraries(v5_main_page_smoke PRIVATE lvgl v5_button_visuals v5_lvgl_clock v5_status_shm_projection v5_program_commands v5_command_gate_core v5_microkernel_contract Threads::Threads m)
 
 add_executable(v5_ui_display_models_smoke
     src/v5_ui_display_models_smoke.c
     src/v5_coordinate_panel.c
     src/v5_remote_metrics.c
-    src/v5_toolpath_display.c
     src/v5_ui_status_view.c
     src/v5_status_shm_reader.c
 )
@@ -759,7 +767,7 @@ add_executable(v5_program_runtime_smoke
 
 target_link_libraries(v5_program_runtime_smoke PRIVATE
     v5_program_runtime
-    v5_command_gate_core
+    v5_command_gate_client
 )
 
 add_executable(v5_program_command_smoke
@@ -768,7 +776,7 @@ add_executable(v5_program_command_smoke
 
 target_link_libraries(v5_program_command_smoke PRIVATE
     v5_program_commands
-    v5_command_gate_core
+    v5_linuxcncrsh_format
 )
 
 add_executable(v5_command_wrappers_smoke

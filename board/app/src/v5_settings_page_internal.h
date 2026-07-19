@@ -12,6 +12,7 @@ lv_obj_t *v5_settings_page_make_label(
     lv_obj_t *parent, const char *text, int x, int y, int w, int h,
     uint8_t r, uint8_t g, uint8_t b);
 void v5_settings_page_refresh_machine_code_label(V5SettingsPage *page);
+void v5_settings_page_accept_machine_code(V5SettingsPage *page, const char *value);
 void v5_settings_page_set_status_text(
     V5SettingsPage *page, uint8_t r, uint8_t g, uint8_t b, const char *fmt, ...);
 const char *v5_settings_page_status_action_label(const char *action);

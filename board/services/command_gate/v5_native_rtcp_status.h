@@ -13,6 +13,12 @@ extern "C" {
 #define V5_NATIVE_RTCP_STATUS_DEFAULT_MAX_AGE_MS 1000U
 
 int v5_native_rtcp_status_read(const char *path, unsigned int max_age_ms, V5NativeReadback *readback);
+size_t v5_native_rtcp_status_block_size(void);
+int v5_native_rtcp_status_read_from_memory(
+    const void *memory,
+    size_t size,
+    unsigned int max_age_ms,
+    V5NativeReadback *readback);
 int v5_native_rtcp_status_write(const char *path, int valid, int active);
 
 #ifdef __cplusplus

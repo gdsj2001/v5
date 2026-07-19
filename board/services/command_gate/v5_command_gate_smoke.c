@@ -1,5 +1,6 @@
 #include "v5_command_gate.h"
 #include "v5_linuxcncrsh_client.h"
+#include "v5_linuxcncrsh_internal.h"
 #include "v5_native_home.h"
 #include "v5_native_home_runtime_owner.h"
 #include "v5_native_hal_owner_client.h"
@@ -7,6 +8,32 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+
+#ifndef _WIN32
+typedef struct StartTransactionProbe {
+    unsigned int call_count;
+    unsigned int open_count;
+    unsigned int run_count;
+} StartTransactionProbe;
+
+static int fail_open_sender(int fd, const char *command, void *user_data)
+{
+    StartTransactionProbe *probe = (StartTransactionProbe *)user_data;
+    (void)fd;
+    if (!probe || !command) {
+        return 0;
+    }
+    probe->call_count += 1U;
+    if (strncmp(command, "Set Open ", 9U) == 0) {
+        probe->open_count += 1U;
+        return 0;
+    }
+    if (strcmp(command, "Set Run 0") == 0) {
+        probe->run_count += 1U;
+    }
+    return 1;
+}
+#endif
 
 int main(void)
 {
@@ -90,6 +117,27 @@ int main(void)
     if (v5_linuxcncrsh_format_start_transaction(
             &prepared, &request, 0, 0U)) {
         return 8;
+    }
+#ifndef _WIN32
+    {
+        StartTransactionProbe probe = {0};
+        if (v5_linuxcncrsh_send_fifo_commands_with_sender(
+                7, line, fail_open_sender, &probe) ||
+            probe.call_count != 3U ||
+            probe.open_count != 1U ||
+            probe.run_count != 0U) {
+            return 9;
+        }
+    }
+#endif
+    memset(&request, 0, sizeof(request));
+    request.kind = V5_COMMAND_RESUME;
+    if (!v5_command_gate_prepare(&request, &prepared) ||
+        !v5_linuxcncrsh_format_line(
+            &prepared, &request, line, sizeof(line)) ||
+        strcmp(line, "Set Resume") != 0 ||
+        strstr(line, "Set Open") != 0) {
+        return 12;
     }
     if (!v5_linuxcncrsh_estop_reset_ready(1, 0) ||
         v5_linuxcncrsh_estop_reset_ready(1, 1) ||

@@ -35,10 +35,13 @@ def healthy_readback(position: str) -> Dict[str, Any]:
 
 def run_case(begin_ok: bool, finish_ok: bool = True,
              failed_restore_positions: set[str] | None = None,
-             raise_batch: bool = False) -> Tuple[Dict[str, Any], List[Tuple[Any, ...]]]:
+             raise_batch: bool = False,
+             transient_batch_failure: bool = False,
+             retry_preop_ok: bool = True) -> Tuple[Dict[str, Any], List[Tuple[Any, ...]]]:
     events: List[Tuple[Any, ...]] = []
     failed_positions = failed_restore_positions or set()
     originals: Dict[str, Callable[..., Any]] = {}
+    batch_calls = 0
 
     def replace(name: str, value: Callable[..., Any]) -> None:
         originals[name] = getattr(bus, name)
@@ -69,9 +72,20 @@ def run_case(begin_ok: bool, finish_ok: bool = True,
         return {"ok": position not in failed_positions, "code": "WRITE_RESULT"}
 
     def batch(targets: List[Dict[str, Any]], _timeout: float) -> Dict[str, Any]:
+        nonlocal batch_calls
+        batch_calls += 1
         events.append(("batch_readback", tuple(str(target["position"]) for target in targets)))
         if raise_batch:
             raise RuntimeError("batch failed unexpectedly")
+        if transient_batch_failure and batch_calls == 1:
+            return {
+                "ok": False, "code": "DRIVE_FAULT_RESET_BATCH_FAILED",
+                "writes": {position: {"ok": True, "code": "RESET_OK"}
+                           for position in ("0", "4")},
+                "readbacks": {position: healthy_readback(position) for position in ("0", "4")},
+                "failed_positions": ["4"], "recovery_positions": [],
+                "recovery": None, "write_executed": True,
+            }
         return {
             "ok": True, "code": "DRIVE_FAULT_RESET_BATCH_OK",
             "writes": {position: {"ok": True, "code": "RESET_OK"}
@@ -79,6 +93,19 @@ def run_case(begin_ok: bool, finish_ok: bool = True,
             "readbacks": {position: healthy_readback(position) for position in ("0", "4")},
             "failed_positions": [], "recovery_positions": [],
             "recovery": None, "write_executed": True,
+        }
+
+    def request_state(targets: List[Dict[str, Any]], state: str,
+                      _timeout: float) -> Dict[str, Any]:
+        positions = tuple(str(target["position"]) for target in targets)
+        events.append(("target_set_state", state, positions))
+        return {
+            "ok": retry_preop_ok,
+            "code": ("DRIVE_STATE_TARGET_SET_OK" if retry_preop_ok
+                     else "DRIVE_STATE_TARGET_SET_FAILED"),
+            "requested_state": state,
+            "target_positions": list(positions),
+            "failed_positions": [] if retry_preop_ok else list(positions),
         }
 
     def finish(run_id: str, _timeout: float, restore: bool = False) -> Dict[str, Any]:
@@ -92,11 +119,14 @@ def run_case(begin_ok: bool, finish_ok: bool = True,
 
     original_begin = bus.v5_drive_enable_window.begin
     original_finish = bus.v5_drive_enable_window.finish_safely
+    original_sleep = bus.time.sleep
     bus.v5_drive_enable_window.begin = begin
     bus.v5_drive_enable_window.finish_safely = finish
+    bus.time.sleep = lambda delay: events.append(("retry_delay", delay))
     replace("precheck_targets_for_write", precheck)
     replace("write_command", write)
     replace("fault_reset_batch", batch)
+    replace("request_full_target_set_state", request_state)
     replace("mark_reset_invalid", lambda *_args, **_kwargs: None)
     replace("drive_display_update_from_health", lambda axis, _health, status, position: {
         "axis": axis, "position": position, "write_status": status})
@@ -110,6 +140,7 @@ def run_case(begin_ok: bool, finish_ok: bool = True,
     finally:
         bus.v5_drive_enable_window.begin = original_begin
         bus.v5_drive_enable_window.finish_safely = original_finish
+        bus.time.sleep = original_sleep
         for name, value in originals.items():
             setattr(bus, name, value)
     return result, events
@@ -133,6 +164,32 @@ assert partial_result["ok"] is False
 assert partial_result["code"] == "DRIVE_RESET_PARTIAL"
 assert [event[0] for event in partial_events].count("restore") == 2
 assert partial_events.index(("restore", "4", "drive.restore_factory_defaults")) < partial_events.index(("batch_readback", ("0", "4")))
+
+retry_result, retry_events = run_case(True, transient_batch_failure=True)
+assert retry_result["ok"] is True
+assert retry_result["code"] == "DRIVE_RESET_OK"
+assert retry_result["factory_reset_batch"]["initial_code"] == "DRIVE_FAULT_RESET_BATCH_FAILED"
+assert retry_result["factory_reset_batch"]["retry_performed"] is True
+assert retry_events == [
+    ("window_begin", "factory-reset-run"),
+    ("precheck", ("drive.restore_factory_defaults",), True),
+    ("restore", "0", "drive.restore_factory_defaults"),
+    ("restore", "4", "drive.restore_factory_defaults"),
+    ("batch_readback", ("0", "4")),
+    ("retry_delay", bus.FACTORY_RESET_FAULT_CLEAR_RETRY_DELAY_S),
+    ("target_set_state", "PREOP", ("0", "4")),
+    ("batch_readback", ("0", "4")),
+    ("window_finish", "factory-reset-run", False),
+]
+assert retry_result["factory_reset_batch"]["retry_preop_recovery"]["ok"] is True
+
+retry_preop_failed, retry_preop_failed_events = run_case(
+    True, transient_batch_failure=True, retry_preop_ok=False)
+assert retry_preop_failed["ok"] is False
+assert retry_preop_failed["code"] == "DRIVE_RESET_PARTIAL"
+assert retry_preop_failed["factory_reset_batch"]["retry_preop_recovery"]["ok"] is False
+assert [event[0] for event in retry_preop_failed_events].count(
+    "batch_readback") == 1
 
 all_failed, _all_failed_events = run_case(
     True, failed_restore_positions={"0", "4"})

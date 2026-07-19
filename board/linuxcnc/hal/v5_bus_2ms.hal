@@ -43,6 +43,11 @@ loadusr -W lcec_conf /opt/8ax/v5/linuxcnc/hal/ethercat-conf-2ms.xml
 loadusr -Wn v5_native_hal_owner /usr/bin/v5_native_hal_owner \
     --model=[RTCP]MODEL \
     --kins-module=[RTCP]KINS_MODULE \
+    --display-scale-0=[JOINT_0]SCALE \
+    --display-scale-1=[JOINT_1]SCALE \
+    --display-scale-2=[JOINT_2]SCALE \
+    --display-scale-3=[JOINT_3]SCALE \
+    --display-scale-4=[JOINT_4]SCALE \
     --rtcp-default=[RTCP]DEFAULT_ACTIVE \
     --g53-a-y=[RTCP]G53_A_Y \
     --g53-a-z=[RTCP]G53_A_Z \
@@ -137,6 +142,25 @@ net v5-wcheckpoint-c-base motion.v5-wcheckpoint-c-base-counts => v5-native-hal-o
 net v5-wcheckpoint-c-runtime motion.v5-wcheckpoint-c-runtime-counts => v5-native-hal-owner.wcp-c-runtime-counts
 net v5-wcheckpoint-c-generation motion.v5-wcheckpoint-c-generation => v5-native-hal-owner.wcp-c-generation motion.v5-bus-home-wcp-c-generation
 net v5-wcheckpoint-c-valid motion.v5-wcheckpoint-c-valid => v5-native-hal-owner.wcp-c-valid motion.v5-bus-home-wcp-c-valid
+
+# Active logical axes and display scale come from the selected model and
+# runtime JOINT SCALE.  They deliberately do not depend on the axis-to-slave
+# mapping table, so a mapping mismatch keeps motion disabled without blocking
+# the settings UI needed to correct that table.
+net v5-display-metadata-valid v5-native-hal-owner.display-metadata-valid
+net v5-display-metadata-generation v5-native-hal-owner.display-metadata-generation
+net v5-display-active-mask v5-native-hal-owner.display-active-mask
+net v5-display-commit-seq v5-native-hal-owner.display-commit-seq
+net v5-display-j0-axis-code v5-native-hal-owner.display-axis-code-00
+net v5-display-j0-unit-per-count v5-native-hal-owner.display-unit-per-count-00
+net v5-display-j1-axis-code v5-native-hal-owner.display-axis-code-01
+net v5-display-j1-unit-per-count v5-native-hal-owner.display-unit-per-count-01
+net v5-display-j2-axis-code v5-native-hal-owner.display-axis-code-02
+net v5-display-j2-unit-per-count v5-native-hal-owner.display-unit-per-count-02
+net v5-display-j3-axis-code v5-native-hal-owner.display-axis-code-03
+net v5-display-j3-unit-per-count v5-native-hal-owner.display-unit-per-count-03
+net v5-display-j4-axis-code v5-native-hal-owner.display-axis-code-04
+net v5-display-j4-unit-per-count v5-native-hal-owner.display-unit-per-count-04
 
 # One atomically committed resident table feeds both the crossbar and Home.
 net v5-home-table-valid v5-native-hal-owner.home-table-mapping-valid => v5-bus-axis-router.table-mapping-valid motion.v5-bus-home-config-mapping-valid

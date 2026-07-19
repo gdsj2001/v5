@@ -41,6 +41,10 @@ class SequencedHal(FakeHal):
 
 def projection_values():
     values = {
+        'v5-native-hal-owner.display-metadata-valid': True,
+        'v5-native-hal-owner.display-metadata-generation': 0x62E4A301,
+        'v5-native-hal-owner.display-active-mask': 0x1F,
+        'v5-native-hal-owner.display-commit-seq': 1,
         'v5-native-hal-owner.home-table-mapping-valid': True,
         'v5-native-hal-owner.home-table-map-gen': 0x46A18ECC,
         'v5-native-hal-owner.home-table-active-mask': 0x1F,
@@ -51,6 +55,10 @@ def projection_values():
             (4, 'C', 4, 24, 10000))
     for joint, axis, slot, zero, scale in axes:
         suffix = f'{joint:02d}'
+        values[f'v5-native-hal-owner.display-axis-code-{suffix}'] = ord(axis)
+        values[
+            f'v5-native-hal-owner.display-unit-per-count-{suffix}'
+        ] = 1.0 / float(scale)
         values[f'v5-native-hal-owner.home-config-valid-{suffix}'] = True
         values[f'v5-native-hal-owner.home-mapping-generation-{suffix}'] = 0x46A18ECC
         values[f'v5-native-hal-owner.home-axis-code-{suffix}'] = ord(axis)
@@ -83,15 +91,19 @@ def check_router_zero_relative_counts_are_not_offset_twice() -> None:
     assert raw_mcs[3] == 0.0 and raw_mcs[4] == -18000.0
 
 
-def check_display_projection_truncates_one_count_jitter_once() -> None:
+def check_display_projection_rounds_fourth_digit_for_ui_only() -> None:
     low = display_position_projection([0.0, 29.9824, 0.0, 0.0, 0.0])
     high = display_position_projection([0.0, 29.9825, 0.0, 0.0, 0.0])
     edge = display_position_projection([0.0, 29.9830, 0.0, 0.0, 0.0])
     negative = display_position_projection([0.0, -29.9829, 0.0, 0.0, 0.0])
+    negative_zero = display_position_projection([0.0, -0.0001, 0.0, 0.0, 0.0])
+    rotary_wrap = display_position_projection([0.0, 359.9999, 0.0, 0.0, 0.0])
     assert low[1] == 29.982
-    assert high[1] == 29.982
+    assert high[1] == 29.983
     assert edge[1] == 29.983
-    assert negative[1] == -29.982
+    assert negative[1] == -29.983
+    assert negative_zero[1] == 0.0
+    assert rotary_wrap[1] == 360.0
 
 
 def check_one_count_displays_one_count_not_clamped() -> None:
@@ -134,6 +146,7 @@ def check_actual_projects_without_command_input() -> None:
 
 def check_bc_mapping_projects_b_and_c() -> None:
     values = projection_values()
+    values['v5-native-hal-owner.display-axis-code-03'] = ord('B')
     values['v5-native-hal-owner.home-axis-code-03'] = ord('B')
     for field in ('valid', 'generation', 'logical-counts', 'base-counts', 'runtime-counts'):
         values[f'v5-native-hal-owner.wcp-b-{field}'] = values.pop(
@@ -142,6 +155,16 @@ def check_bc_mapping_projects_b_and_c() -> None:
     mcs, _ = projection.project(
         [0.0, 0.0, 0.0, 0.0, -18000.0], None)
     assert mcs[3] == 0.0 and mcs[4] == 0.0
+
+
+def check_display_metadata_comes_from_active_model_scale() -> None:
+    values = projection_values()
+    values['v5-native-hal-owner.display-unit-per-count-01'] = 0.0005
+    values['v5-native-hal-owner.home-counts-per-unit-01'] = 2000.0
+    projection = NativeRotaryDisplayProjection(FakeHal(values))
+    unit_per_count, display_digits = projection.display_metadata()
+    assert unit_per_count == [0.0001, 0.0005, 0.0001, 0.0001, 0.0001]
+    assert display_digits == [3, 3, 3, 3, 3]
 
 
 def check_invalid_native_mapping_fails_closed() -> None:
@@ -154,6 +177,32 @@ def check_invalid_native_mapping_fails_closed() -> None:
         assert str(exc) == 'native_rotary_projection_mapping_invalid'
     else:
         raise AssertionError('invalid native mapping did not fail closed')
+
+
+def check_unconfigured_zero_table_keeps_native_display_available() -> None:
+    values = projection_values()
+    values.update({
+        'v5-native-hal-owner.home-table-mapping-valid': False,
+        'v5-native-hal-owner.home-table-map-gen': 0,
+        'v5-native-hal-owner.home-table-active-mask': 0,
+        'v5-native-hal-owner.home-table-commit-seq': 0,
+    })
+    hal = FakeHal(values)
+    projection = NativeRotaryDisplayProjection(hal)
+    raw_mcs = [1.0, 2.0, 3.0, -0.0001, 360.0001]
+    raw_cmd = [4.0, 5.0, 6.0, 720.0001, -360.0001]
+    mcs, cmd = projection.project(raw_mcs, raw_cmd)
+    assert mcs[:3] == raw_mcs[:3] and cmd[:3] == raw_cmd[:3]
+    assert math.isclose(mcs[3], 359.9999, abs_tol=1.0e-12)
+    assert math.isclose(mcs[4], 0.0001, abs_tol=1.0e-12)
+    assert math.isclose(cmd[3], 0.0001, abs_tol=1.0e-12)
+    assert math.isclose(cmd[4], 359.9999, abs_tol=1.0e-12)
+    assert raw_mcs[3:] == [-0.0001, 360.0001]
+    unit_per_count, display_digits = projection.display_metadata()
+    assert unit_per_count == [0.0001] * 5
+    assert display_digits == [3] * 5
+    assert not any(name.startswith('v5-native-hal-owner.wcp-')
+                   for name in hal.read_counts)
 
 
 def check_inconsistent_wcheckpoint_window_fails_closed() -> None:
@@ -192,6 +241,10 @@ def check_stable_generation_uses_fast_metadata_path() -> None:
 
     # Static mapping and wcheckpoint metadata are loaded once.  Every 33 ms
     # sample still reads fresh validity, generation and logical counts.
+    assert hal.read_count(
+        'v5-native-hal-owner.display-unit-per-count-03') == 1
+    assert hal.read_count(
+        'v5-native-hal-owner.display-unit-per-count-04') == 1
     assert hal.read_count('v5-native-hal-owner.home-table-active-mask') == 2
     assert hal.read_count('v5-native-hal-owner.home-table-commit-seq') == 32
     assert hal.read_count('v5-native-hal-owner.home-counts-per-unit-03') == 1
@@ -294,13 +347,15 @@ def check_invalid_sample_drops_cache_before_same_generation_recovers() -> None:
 
 def main() -> int:
     check_router_zero_relative_counts_are_not_offset_twice()
-    check_display_projection_truncates_one_count_jitter_once()
+    check_display_projection_rounds_fourth_digit_for_ui_only()
     check_one_count_displays_one_count_not_clamped()
     check_fractional_actual_count_is_preserved()
     check_fractional_command_phase_is_not_truncated()
     check_actual_projects_without_command_input()
     check_bc_mapping_projects_b_and_c()
+    check_display_metadata_comes_from_active_model_scale()
     check_invalid_native_mapping_fails_closed()
+    check_unconfigured_zero_table_keeps_native_display_available()
     check_inconsistent_wcheckpoint_window_fails_closed()
     check_wcheckpoint_valid_drop_fails_closed()
     check_stable_generation_uses_fast_metadata_path()

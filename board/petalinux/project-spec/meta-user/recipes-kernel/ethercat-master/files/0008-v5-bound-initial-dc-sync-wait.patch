@@ -1,0 +1,32 @@
+From: V5 Runtime Owners <v5-runtime@local>
+Subject: [PATCH] v5: bound initial DC sync wait before SAFEOP
+
+The V5 five-slave SV630N chain does not reach the 10 us initial discipline
+threshold during IgH's five-second configuration wait.  After that timeout,
+the cyclic lcec owner converges DC and WKC normally, while the product
+readiness gate independently requires all slaves in OP, complete domain WKC,
+dc-phased, and a fresh advancing reference clock.
+
+Keep 250 initial 2 ms samples for early discipline, but stop adding 4.5 seconds
+of unconditional boot latency.  This does not change AL transition timeouts,
+PDO/watchdog handling, or the final fail-closed readiness contract.
+
+diff --git a/master/fsm_slave_config.c b/master/fsm_slave_config.c
+--- a/master/fsm_slave_config.c
++++ b/master/fsm_slave_config.c
+@@ -42,9 +42,13 @@
+  */
+ #define EC_DC_MAX_SYNC_DIFF_NS 10000
+ 
+-/** Maximum time (in ms) to wait for clock discipline.
++/** Maximum time (in ms) to wait for initial clock discipline.
++ *
++ * V5 keeps final DC/WKC readiness fail-closed in the LinuxCNC lifecycle gate.
++ * The SV630N chain does not converge inside the upstream five-second wait, so
++ * cap this configuration-only phase at 250 servo cycles.
+  */
+-#define EC_DC_SYNC_WAIT_MS 5000
++#define EC_DC_SYNC_WAIT_MS 500
+ 
+ /** Time offset (in ns), that is added to cyclic start time.
+  */

@@ -1,6 +1,24 @@
 #!/bin/sh
 set -eu
 
+bind_service_init_to_cpu1() {
+  cpu_list=
+  while read -r key value rest; do
+    if [ "$key" = "Cpus_allowed_list:" ]; then
+      cpu_list=${value:-}
+      break
+    fi
+  done <"/proc/$$/status"
+  [ "$cpu_list" = "1" ] && return 0
+  [ -x /usr/bin/taskset ] || {
+    echo "taskset missing; service init cannot exclude CPU0" >&2
+    return 1
+  }
+  exec /usr/bin/taskset -c 1 "$0" "$@"
+}
+bind_service_init_to_cpu1 "$@"
+
+
 LD_BIND_NOW=1
 export LD_BIND_NOW
 ulimit -l unlimited 2>/dev/null || true

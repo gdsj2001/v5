@@ -6,6 +6,7 @@
 #include "v5_lvgl_headless.h"
 #include "v5_main_page_home_transaction.h"
 #include "v5_native_home.h"
+#include "v5_program_scene_ipc.h"
 
 #include <stdio.h>
 #include <stdint.h>
@@ -431,6 +432,30 @@ static lv_obj_t *button_for_action(V5MainPage *page, V5MainPageActionKind action
     return 0;
 }
 
+static int button_geometry_matches(V5MainPage *page, V5MainPageActionKind action, int x, int y, int width, int height)
+{
+    lv_obj_t *button = button_for_action(page, action);
+    return button &&
+           lv_obj_get_x(button) == x &&
+           lv_obj_get_y(button) == y &&
+           lv_obj_get_width(button) == width &&
+           lv_obj_get_height(button) == height;
+}
+
+static int button_text_present(V5MainPage *page, const char *text)
+{
+    unsigned int i;
+    if (!page || !text) {
+        return 0;
+    }
+    for (i = 0U; i < page->button_count; ++i) {
+        if (page->button_labels[i] && same_text(lv_label_get_text(page->button_labels[i]), text)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int button_bg_matches(V5MainPage *page, V5MainPageActionKind action, int r, int g, int b)
 {
     lv_obj_t *button = button_for_action(page, action);
@@ -604,19 +629,9 @@ static int exercise_jog_press_timing(V5MainPage *page)
         return 0;
     }
     lv_event_send(button, LV_EVENT_PRESSED, 0);
-    lv_tick_inc(499U);
-    (void)lv_timer_handler();
-    lv_event_send(button, LV_EVENT_RELEASED, 0);
-    if (page->last_action.request.kind != V5_COMMAND_JOG_INCREMENT ||
-        page->last_action.request.increment_value != page->jog_step ||
-        page->last_action.request.axis_value <= 0.0 || page->jog_pressed_button) {
-        return 0;
-    }
-    lv_event_send(button, LV_EVENT_PRESSED, 0);
-    lv_tick_inc(500U);
-    (void)lv_timer_handler();
     if (page->last_action.request.kind != V5_COMMAND_JOG_CONTINUOUS ||
-        !page->jog_long_press_elapsed) {
+        page->last_action.request.axis_value <= 0.0 ||
+        page->jog_pressed_button != button) {
         return 0;
     }
     lv_tick_inc(V5_MAIN_PAGE_JOG_KEEPALIVE_MS);
@@ -626,15 +641,16 @@ static int exercise_jog_press_timing(V5MainPage *page)
         return 0;
     }
     lv_event_send(button, LV_EVENT_PRESS_LOST, 0);
-    if (page->jog_pressed_button || page->jog_long_press_elapsed ||
+    if (page->jog_pressed_button ||
         page->last_action.request.kind != V5_COMMAND_JOG_STOP) {
         return 0;
     }
     lv_event_send(button, LV_EVENT_PRESSED, 0);
-    lv_tick_inc(V5_MAIN_PAGE_JOG_HOLD_MS);
-    (void)lv_timer_handler();
+    if (page->last_action.request.kind != V5_COMMAND_JOG_CONTINUOUS) {
+        return 0;
+    }
     lv_event_send(button, LV_EVENT_CANCEL, 0);
-    return !page->jog_pressed_button && !page->jog_long_press_elapsed &&
+    return !page->jog_pressed_button &&
            page->last_action.request.kind == V5_COMMAND_JOG_STOP;
 }
 
@@ -691,6 +707,75 @@ static int write_preview_scroll_program(const char *path)
     return fclose(fp) == 0;
 }
 
+static int exercise_program_open_and_gesture_generations(
+    V5MainPage *page,
+    V5ProgramController *controller,
+    const char *path,
+    V5ProgramOpenResult *open_result)
+{
+    V5ProgramSceneRequest request;
+    V5ProgramSceneRequestServer server;
+    const V5ProgramRuntime *runtime;
+    lv_point_t initial[2] = {{160, 180}, {240, 180}};
+    lv_point_t moved[2] = {{150, 170}, {260, 195}};
+    unsigned int fit_generation;
+    unsigned int loaded_epoch;
+    unsigned int view_generation;
+    int changed = 0;
+    int ok = 0;
+    if (!page || !controller || !path || !open_result) return 0;
+#ifdef _WIN32
+    return v5_main_page_open_program(page, path, open_result);
+#else
+    v5_program_scene_request_server_init(&server);
+    v5_main_page_set_page_visible(page, 1);
+    if (!v5_program_scene_request_server_open(&server, 0)) return 0;
+    runtime = v5_program_controller_runtime(controller);
+    loaded_epoch = runtime ? v5_program_runtime_loaded_epoch(runtime) : 0U;
+    view_generation = page->toolpath_view_generation;
+    fit_generation = page->toolpath_fit_generation;
+    if (!v5_main_page_open_program(page, path, open_result)) goto cleanup;
+    runtime = v5_program_controller_runtime(controller);
+    if (!runtime || !v5_program_runtime_has_open_program(runtime) ||
+        v5_program_runtime_loaded_epoch(runtime) == 0U ||
+        v5_program_runtime_loaded_epoch(runtime) == loaded_epoch ||
+        page->toolpath_view_generation != view_generation ||
+        page->toolpath_fit_generation != fit_generation ||
+        !v5_main_page_apply_status_flags(
+            page, 0, V5_MAIN_PAGE_REFRESH_POSE)) goto cleanup;
+    v5_program_scene_request_init(&request);
+    if (!v5_program_scene_request_server_drain_latest(&server, &request) ||
+        request.reserved != V5_PROGRAM_SCENE_MESSAGE_PROGRAM_MODEL ||
+        request.program_generation != v5_program_runtime_loaded_epoch(runtime) ||
+        request.program_source_identity != v5_program_scene_source_identity(
+            v5_program_runtime_source_sha256(runtime)) ||
+        request.point_count == 0U ||
+        request.view_generation != view_generation ||
+        request.fit_generation != fit_generation) goto cleanup;
+
+    if (!v5_main_page_handle_touch_points(
+            page, initial, 2, 1, &changed) || changed ||
+        !v5_main_page_handle_touch_points(
+            page, moved, 2, 1, &changed) || !changed ||
+        page->toolpath_view_generation != view_generation + 1U ||
+        page->toolpath_fit_generation != fit_generation ||
+        !v5_main_page_apply_status_flags(
+            page, 0, V5_MAIN_PAGE_REFRESH_POSE) ||
+        !v5_program_scene_request_server_drain_latest(&server, &request) ||
+        request.program_generation != v5_program_runtime_loaded_epoch(runtime) ||
+        request.view_generation != page->toolpath_view_generation ||
+        request.fit_generation != fit_generation ||
+        request.scale <= 1.0f ||
+        !v5_main_page_handle_touch_points(page, 0, 0, 0, &changed)) {
+        goto cleanup;
+    }
+    ok = 1;
+cleanup:
+    v5_program_scene_request_server_close(&server, 0);
+    return ok;
+#endif
+}
+
 static int expect_missing_gate(V5MainPage *page, V5MainPageActionKind action)
 {
     V5MainPageActionReport report;
@@ -739,7 +824,7 @@ static int expect_power_on_home_block(
     return lv_obj_has_flag(page->power_on_home_popup, LV_OBJ_FLAG_HIDDEN);
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
     V5MainPage page;
     V5MainPageActionReport visual_report_before;
@@ -754,6 +839,21 @@ int main(void)
     screen = lv_scr_act();
     if (!v5_main_page_create(&page, screen)) {
         return 2;
+    }
+    if (argc == 2 &&
+        strcmp(argv[1], "--program-scene-generations-only") == 0) {
+        const char *path = "v5_program_scene_generations_smoke.ngc";
+        V5ProgramOpenResult open_result;
+        int ok;
+        memset(&open_result, 0, sizeof(open_result));
+        v5_program_controller_init(&controller);
+        v5_main_page_bind_program_controller(&page, &controller);
+        ok = write_first_point_program(path) &&
+            exercise_program_open_and_gesture_generations(
+                &page, &controller, path, &open_result);
+        unlink(path);
+        v5_program_controller_destroy(&controller);
+        return ok ? 0 : 126;
     }
     v5_main_page_home_transaction_set_send_hook(home_send_hook);
     v5_main_page_home_transaction_set_progress_hook(home_progress_hook);
@@ -783,6 +883,18 @@ int main(void)
         !button_bg_matches(&page, V5_MAIN_PAGE_ACTION_JOG_STEP_1, 29, 151, 104) ||
         !button_bg_matches(&page, V5_MAIN_PAGE_ACTION_JOG_STEP_10, 32, 52, 73)) {
         return 44;
+    }
+    if (!button_geometry_matches(&page, V5_MAIN_PAGE_ACTION_WCS_G54, 402, 278, 50, 48) ||
+        !button_geometry_matches(&page, V5_MAIN_PAGE_ACTION_WCS_G55, 458, 278, 50, 48) ||
+        !button_geometry_matches(&page, V5_MAIN_PAGE_ACTION_WCS_G56, 514, 278, 50, 48) ||
+        !button_geometry_matches(&page, V5_MAIN_PAGE_ACTION_RTCP_TOGGLE, 516, 328, 50, 48) ||
+        button_text_present(&page, "G57") ||
+        button_text_present(&page, "G58") ||
+        button_text_present(&page, "G59") ||
+        button_text_present(&page, "G59.1") ||
+        button_text_present(&page, "G59.2") ||
+        button_text_present(&page, "G59.3")) {
+        return 122;
     }
     visual_button = lv_btn_create(screen);
     if (!visual_button) {
@@ -928,7 +1040,16 @@ int main(void)
     if (!expect_local(&page, V5_MAIN_PAGE_ACTION_VIEW_XZ, "view_xz") || page.view_plane != V5_TOOLPATH_DISPLAY_XZ) {
         return 6;
     }
-    if (!expect_local(&page, V5_MAIN_PAGE_ACTION_VIEW_3D, "view_3d") || page.view_plane != V5_TOOLPATH_DISPLAY_3D) {
+    page.toolpath_manual_scale = 2.0;
+    page.toolpath_manual_rotate_deg = 19.0;
+    page.toolpath_manual_pan_x = 29.0;
+    page.toolpath_manual_pan_y = -17.0;
+    if (!expect_local(&page, V5_MAIN_PAGE_ACTION_VIEW_3D, "view_3d") ||
+        page.view_plane != V5_TOOLPATH_DISPLAY_3D ||
+        page.toolpath_manual_scale != 1.0 ||
+        page.toolpath_manual_rotate_deg != 0.0 ||
+        page.toolpath_manual_pan_x != 0.0 ||
+        page.toolpath_manual_pan_y != 0.0) {
         return 7;
     }
 
@@ -1208,7 +1329,8 @@ int main(void)
         V5ProgramOpenResult open_result;
         memset(&open_result, 0, sizeof(open_result));
         if (!write_first_point_program(first_point_path) ||
-            !v5_main_page_open_program(&page, first_point_path, &open_result) ||
+            !exercise_program_open_and_gesture_generations(
+                &page, &controller, first_point_path, &open_result) ||
             !expect_first_point(&page, first_point_path)) {
             unlink(first_point_path);
             v5_program_controller_destroy(&controller);
@@ -1322,6 +1444,17 @@ int main(void)
         v5_native_readback_set_current_line(&stopped_readback, 8);
         v5_native_readback_set_motion_line(&stopped_readback, 8);
         v5_main_page_set_native_readback(&page, &stopped_readback);
+        if (v5_program_runtime_scene_ready(
+                v5_program_controller_runtime(&controller)) ||
+            !v5_program_runtime_publish_scene_ready(
+                &controller.runtime,
+                open_result.loaded_epoch,
+                11ULL,
+                7U)) {
+            unlink(preview_scroll_path);
+            v5_program_controller_destroy(&controller);
+            return 121;
+        }
         if (!expect_command(&page, V5_MAIN_PAGE_ACTION_START, "start", "native_linuxcncrsh")) {
             unlink(preview_scroll_path);
             v5_program_controller_destroy(&controller);

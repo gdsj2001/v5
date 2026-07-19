@@ -55,6 +55,7 @@ static int v5_ui_shell_bootstrap_common(
     unsigned long long peak_cpu_pct_x100 = 0ULL;
 
     g_v5_shell_ui_ready = 0;
+    shell_reset_axis_slave_mapping_status_probe();
     v5_ui_model_init(&g_v5_shell_model);
     g_v5_shell_remote_display_active = remote_display ? 1 : 0;
     snprintf(
@@ -162,6 +163,7 @@ static int v5_ui_shell_bootstrap_common(
         g_v5_shell_model.lvgl_initialized && page_registry_ready && all_page_caches_ready;
     if (g_v5_shell_ui_ready && main_page_created) {
         v5_main_page_set_command_execution_enabled(&g_v5_shell_main_page, 1);
+        (void)shell_refresh_axis_slave_mapping_status(1);
     }
     return g_v5_shell_ui_ready ? 0 : 1;
 }
