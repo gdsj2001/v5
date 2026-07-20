@@ -90,6 +90,8 @@ def _raw_limit_save() -> dict:
         "new_zero_physical": 0.1,
         "ui_min_limit_distance": -1.1,
         "ui_max_limit_distance": 0.9,
+        "min_limit_disabled": False,
+        "max_limit_disabled": False,
         "raw_min_limit": -1.0,
         "raw_max_limit": 1.0,
         "updated_sections": ["AXIS_X", "JOINT_0"],
@@ -171,6 +173,48 @@ def test_axis_zero_verify_rolls_back_persistence_after_raw_limit_readback_failur
             raise AssertionError("axis-zero raw-limit mismatch was accepted")
     assert restore_mock.call_count == 1
     assert runtime == original
+
+
+def test_rotary_axis_zero_accepts_explicit_disabled_raw_limits() -> None:
+    runtime = {"axes": [{"axis": "B", "zero_model": {
+        "zero_counts": 10.0, "zero_anchor_counts": 10.0,
+        "source": "old", "slave_position": 4}}]}
+
+    def persist(owner, *_args, **_kwargs):
+        owner["axes"][0]["zero_model"].update(
+            {"zero_counts": -248668.0, "zero_anchor_counts": -248668.0})
+        return {"raw_limit_save": {
+            "new_zero_physical": -24.8668,
+            "ui_min_limit_distance": 0.0,
+            "ui_max_limit_distance": 0.0,
+            "min_limit_disabled": True,
+            "max_limit_disabled": True,
+            "raw_min_limit": 0.0,
+            "raw_max_limit": 0.0,
+            "updated_sections": ["AXIS_B", "JOINT_3"],
+        }}
+
+    with mock.patch.object(axis_model, "request_slave_position", return_value=4), \
+         mock.patch.object(axis_model, "load_settings_runtime", return_value=runtime), \
+         mock.patch.object(axis_model, "derive_counts_per_unit", return_value=(10000.0, {})), \
+         mock.patch.object(axis_model, "current_axis_counts", side_effect=[
+             (-248668.0, {"position": "4"}), (-248668.0, {"position": "4"})]), \
+         mock.patch.object(axis_model, "persist_axis_zero_model", side_effect=persist), \
+         mock.patch.object(axis_model, "snapshot_axis_zero_persistence", return_value={
+             "settings_runtime_json": "{}", "runtime_ini": ""}), \
+         mock.patch.object(axis_model, "read_runtime_ini_sections", return_value={
+             "AXIS_B": {"MIN_LIMIT": "0", "MAX_LIMIT": "0"},
+             "JOINT_3": {"MIN_LIMIT": "0", "MAX_LIMIT": "0"},
+         }):
+        result = axis_model.axis_zero_verify({
+            "axis": "B", "driver_mode": "bus",
+            "target_scope": "bus_count_domain_zero", "apply_mode": "count_domain_zero",
+            "_run_id": "run-rotary-disabled-limits"}, 1.0)
+    assert result["ok"] is True
+    assert result["raw_limit_readback"]["min_limit_disabled"] is True
+    assert result["raw_limit_readback"]["max_limit_disabled"] is True
+    assert result["raw_limit_readback"]["raw_min"] == 0.0
+    assert result["raw_limit_readback"]["raw_max"] == 0.0
 
 
 def test_axis_zero_verify_rolls_back_when_raw_limit_formula_is_wrong() -> None:

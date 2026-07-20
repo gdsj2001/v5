@@ -74,6 +74,19 @@ int main(void)
     V5NativeHomeRuntimeState runtime_state;
     V5NativeHomeProgress progress;
     char owner_code[64];
+    unsigned int home_axis_codes[V5_NATIVE_HOME_JOINT_COUNT] = {
+        (unsigned int)'X', (unsigned int)'Y', (unsigned int)'Z',
+        (unsigned int)'B', (unsigned int)'C'};
+
+    if (strcmp(v5_native_home_failure_code(1U, 3U, home_axis_codes),
+               "ALL_HOME_AXIS_B_CONFIG_INVALID") != 0 ||
+        strcmp(v5_native_home_failure_code(
+                   1U, V5_NATIVE_HOME_JOINT_COUNT, home_axis_codes),
+               "ALL_HOME_NATIVE_CONFIG_INVALID") != 0 ||
+        strcmp(v5_native_home_failure_code(2U, 0U, home_axis_codes),
+               "ALL_HOME_COUNT_READBACK_INVALID") != 0) {
+        return 32;
+    }
 
     for (i = 0U; i < sizeof(home_required) / sizeof(home_required[0]); ++i) {
         if (!v5_command_gate_requires_power_on_home(home_required[i])) {

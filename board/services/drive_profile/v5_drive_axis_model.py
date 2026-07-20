@@ -350,9 +350,13 @@ def axis_zero_verify(request: Dict[str, Any], timeout_s: float) -> Dict[str, Any
         raw_zero = finite_float(raw_limit_save.get("new_zero_physical"))
         min_distance = finite_float(raw_limit_save.get("ui_min_limit_distance"))
         max_distance = finite_float(raw_limit_save.get("ui_max_limit_distance"))
+        min_limit_disabled = raw_limit_save.get("min_limit_disabled")
+        max_limit_disabled = raw_limit_save.get("max_limit_disabled")
         sections = raw_limit_save.get("updated_sections")
         if (expected_min is None or expected_max is None or raw_zero is None or
                 min_distance is None or max_distance is None or
+                not isinstance(min_limit_disabled, bool) or
+                not isinstance(max_limit_disabled, bool) or
                 not isinstance(sections, list) or not sections):
             raise DriveActionError(
                 "SETTINGS_AXIS_ZERO_RAW_LIMIT_EVIDENCE_INVALID",
@@ -365,14 +369,16 @@ def axis_zero_verify(request: Dict[str, Any], timeout_s: float) -> Dict[str, Any
             abs(expected_max) * 2.0e-9,
             1.0e-9,
         )
-        formula_min = raw_zero + min_distance
-        formula_max = raw_zero + max_distance
+        formula_min = 0.0 if min_limit_disabled else raw_zero + min_distance
+        formula_max = 0.0 if max_limit_disabled else raw_zero + max_distance
         if (abs(expected_min - formula_min) > formula_tolerance or
                 abs(expected_max - formula_max) > formula_tolerance):
             raise DriveActionError(
                 "SETTINGS_AXIS_ZERO_RAW_LIMIT_FORMULA_MISMATCH",
                 "%s轴设0的 raw 软限位不符合新零位加相对距离公式，正在回滚。" % axis,
                 {"raw_zero": raw_zero,
+                 "min_limit_disabled": min_limit_disabled,
+                 "max_limit_disabled": max_limit_disabled,
                  "negative_limit_distance": min_distance,
                  "positive_limit_distance": max_distance,
                  "expected_raw_min": formula_min,
@@ -410,13 +416,15 @@ def axis_zero_verify(request: Dict[str, Any], timeout_s: float) -> Dict[str, Any
             "code": "SETTINGS_AXIS_ZERO_RAW_LIMIT_DISK_READBACK_OK",
             "runtime_ini": str(contract.RUNTIME_SETTINGS_INI),
             "raw_zero": raw_zero,
+            "min_limit_disabled": min_limit_disabled,
+            "max_limit_disabled": max_limit_disabled,
             "negative_limit_distance": min_distance,
             "positive_limit_distance": max_distance,
             "raw_min": expected_min,
             "raw_max": expected_max,
             "formula": {
-                "raw_min": "raw_zero + negative_limit_distance",
-                "raw_max": "raw_zero + positive_limit_distance",
+                "raw_min": "0 when disabled else raw_zero + negative_limit_distance",
+                "raw_max": "0 when disabled else raw_zero + positive_limit_distance",
             },
             "sections": read_sections,
             "tolerance": formula_tolerance,

@@ -28,7 +28,13 @@ typedef struct V5BusZeroEvidence {
     double home_reference;
 } V5BusZeroEvidence;
 
-static int v5_native_home_zero_evidence_for_slave(
+typedef enum V5BusZeroEvidenceState {
+    V5_BUS_ZERO_EVIDENCE_INVALID = -1,
+    V5_BUS_ZERO_EVIDENCE_ABSENT = 0,
+    V5_BUS_ZERO_EVIDENCE_VALID = 1
+} V5BusZeroEvidenceState;
+
+static V5BusZeroEvidenceState v5_native_home_zero_evidence_for_slave(
     const char *json,
     const V5NativeMotionParameters *parameters,
     unsigned int expected_slave_position,
@@ -37,7 +43,7 @@ static int v5_native_home_zero_evidence_for_slave(
     unsigned int i;
     int found = 0;
     if (!json || !parameters || !evidence) {
-        return 0;
+        return V5_BUS_ZERO_EVIDENCE_INVALID;
     }
     memset(evidence, 0, sizeof(*evidence));
     for (i = 0U; i < V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT; ++i) {
@@ -52,16 +58,22 @@ static int v5_native_home_zero_evidence_for_slave(
         if (!v5_settings_apply_runtime_axis_object(
                 json, axis_name, &axis_start, &axis_end) ||
             !v5_settings_apply_json_object_for_key(
-                axis_start, axis_end, "zero_model", &zero_start, &zero_end) ||
-            !v5_settings_apply_json_number_value(
+                axis_start, axis_end, "zero_model", &zero_start, &zero_end)) {
+            continue;
+        }
+        if (!v5_settings_apply_json_number_value(
                 zero_start, zero_end, "slave_position", &zero_slave_position) ||
             !isfinite(zero_slave_position) ||
             zero_slave_position < 0.0 ||
             zero_slave_position > (double)UINT_MAX ||
-            zero_slave_position != floor(zero_slave_position) ||
-            (unsigned int)zero_slave_position != expected_slave_position) {
+            zero_slave_position != floor(zero_slave_position)) {
+            if (candidate->active && candidate->slave_mapping_known &&
+                candidate->slave_position == expected_slave_position) {
+                return V5_BUS_ZERO_EVIDENCE_INVALID;
+            }
             continue;
         }
+        if ((unsigned int)zero_slave_position != expected_slave_position) continue;
         if (found ||
             !v5_settings_apply_json_number_value(
                 zero_start, zero_end, "zero_counts", &candidate_evidence.zero_counts) ||
@@ -73,12 +85,12 @@ static int v5_native_home_zero_evidence_for_slave(
             !isfinite(candidate_evidence.counts_per_unit) ||
             candidate_evidence.counts_per_unit == 0.0 ||
             !isfinite(candidate_evidence.home_reference)) {
-            return 0;
+            return V5_BUS_ZERO_EVIDENCE_INVALID;
         }
         *evidence = candidate_evidence;
         found = 1;
     }
-    return found;
+    return found ? V5_BUS_ZERO_EVIDENCE_VALID : V5_BUS_ZERO_EVIDENCE_ABSENT;
 }
 
 int v5_native_home_mapping_load(
@@ -189,13 +201,23 @@ int v5_native_home_runtime_owner_load_bus(
     for (i = 0U; i < V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT; ++i) {
         V5NativeMotionAxisParameters *axis = &parameters->axes[i];
         V5BusZeroEvidence evidence;
+        V5BusZeroEvidenceState evidence_state;
         double expected;
         double reference_scale_epsilon;
         if (!axis->active) {
             continue;
         }
-        if (!v5_native_home_zero_evidence_for_slave(
-                json, parameters, axis->slave_position, &evidence)) {
+        evidence_state = v5_native_home_zero_evidence_for_slave(
+            json, parameters, axis->slave_position, &evidence);
+        if (evidence_state == V5_BUS_ZERO_EVIDENCE_INVALID) {
+            continue;
+        }
+        if (evidence_state == V5_BUS_ZERO_EVIDENCE_ABSENT) {
+            axis->bus_zero_counts = 0.0;
+            axis->bus_counts_per_unit = 1.0 / axis->positioning_resolution_units;
+            axis->bus_home_reference = 0.0;
+            axis->bus_zero_evidence_known = 1;
+            ++loaded_zero_count;
             continue;
         }
         axis->bus_zero_counts = evidence.zero_counts;

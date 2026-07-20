@@ -90,6 +90,48 @@ static int physical_slave_zero_owner_smoke(void)
         goto cleanup;
     }
     fputs("{\"axes\":["
+          "{\"axis\":\"Y\",\"zero_model\":{\"zero_counts\":2000,"
+          "\"counts_per_unit\":100,\"raw_zero_position\":20,\"slave_position\":1}}"
+          "]}\n", fp);
+    if (fclose(fp) != 0) {
+        fp = 0;
+        goto cleanup;
+    }
+    fp = 0;
+    if (!v5_native_motion_parameters_load(
+            "board/linuxcnc/ini/v5_bus.ini", &parameters, code, sizeof(code))) {
+        goto cleanup;
+    }
+    axis_a = 0;
+    axis_b = 0;
+    for (i = 0U; i < V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT; ++i) {
+        if (parameters.axes[i].axis == 'A') axis_a = &parameters.axes[i];
+        if (parameters.axes[i].axis == 'B') axis_b = &parameters.axes[i];
+    }
+    if (!axis_a || !axis_b) goto cleanup;
+    axis_a->active = 0;
+    axis_b->active = 1;
+    axis_b->status_slot = 3U;
+    if (!v5_native_motion_parameters_load_runtime_owner(
+            temp_root, runtime_path,
+            "board/linuxcnc/components/step_ip_v1_5.contract.json",
+            &parameters, code, sizeof(code)) ||
+        strcmp(code, "BUS_HOME_RUNTIME_OWNER_LOADED") != 0 ||
+        !(readback_x = v5_native_motion_parameters_axis(&parameters, 'X')) ||
+        !(readback_y = v5_native_motion_parameters_axis(&parameters, 'Y')) ||
+        !readback_x->bus_zero_evidence_known ||
+        !close_enough(readback_x->bus_zero_counts, 0.0) ||
+        !close_enough(readback_x->bus_home_reference, 0.0) ||
+        !close_enough(readback_x->bus_counts_per_unit,
+                      1.0 / readback_x->positioning_resolution_units) ||
+        !readback_y->bus_zero_evidence_known ||
+        !close_enough(readback_y->bus_zero_counts, 2000.0)) {
+        goto cleanup;
+    }
+    if (!(fp = fopen(runtime_path, "wb"))) {
+        goto cleanup;
+    }
+    fputs("{\"axes\":["
           "{\"axis\":\"X\",\"zero_model\":{\"zero_counts\":1000,"
           "\"counts_per_unit\":100,\"raw_zero_position\":99,\"slave_position\":0}},"
           "{\"axis\":\"Y\",\"zero_model\":{\"zero_counts\":2000,"

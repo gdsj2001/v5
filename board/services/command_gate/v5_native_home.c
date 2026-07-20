@@ -69,11 +69,25 @@ static void publish_progress(
     callback(&progress, user_data);
 }
 
-#ifndef _WIN32
-static const char *native_home_failure_code(unsigned int failure)
+const char *v5_native_home_failure_code(
+    unsigned int failure,
+    unsigned int current_joint,
+    const unsigned int *axis_code_by_joint)
 {
     switch (failure) {
-    case 1U: return "ALL_HOME_NATIVE_CONFIG_INVALID";
+    case 1U:
+        if (axis_code_by_joint && current_joint < V5_NATIVE_HOME_JOINT_COUNT) {
+            switch (axis_code_by_joint[current_joint]) {
+            case (unsigned int)'X': return "ALL_HOME_AXIS_X_CONFIG_INVALID";
+            case (unsigned int)'Y': return "ALL_HOME_AXIS_Y_CONFIG_INVALID";
+            case (unsigned int)'Z': return "ALL_HOME_AXIS_Z_CONFIG_INVALID";
+            case (unsigned int)'A': return "ALL_HOME_AXIS_A_CONFIG_INVALID";
+            case (unsigned int)'B': return "ALL_HOME_AXIS_B_CONFIG_INVALID";
+            case (unsigned int)'C': return "ALL_HOME_AXIS_C_CONFIG_INVALID";
+            default: break;
+            }
+        }
+        return "ALL_HOME_NATIVE_CONFIG_INVALID";
     case 2U: return "ALL_HOME_COUNT_READBACK_INVALID";
     case 3U: return "ALL_HOME_LIMIT_ACTIVE";
     case 4U: return "HOME_CANCELLED";
@@ -95,6 +109,7 @@ static const char *native_home_failure_code(unsigned int failure)
     }
 }
 
+#ifndef _WIN32
 static V5NativeHomePhase native_home_phase(unsigned int phase)
 {
     switch (phase) {
@@ -213,7 +228,10 @@ static int wait_native_all_homed(
              * already visible to the operator. */
             if (transaction && native_status.home_transaction == transaction &&
                 (native_status.home_failed_mask || native_status.home_cancelled_mask)) {
-                const char *failure = native_home_failure_code(native_status.home_failure);
+                const char *failure = v5_native_home_failure_code(
+                    native_status.home_failure,
+                    native_status.home_current_joint,
+                    native_status.home_axis_code_by_joint);
                 int cancelled = native_status.home_cancelled_mask != 0U &&
                                 native_status.home_phase == 5U &&
                                 native_status.home_failure == 4U;

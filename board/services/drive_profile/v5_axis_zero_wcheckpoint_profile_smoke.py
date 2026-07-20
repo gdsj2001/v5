@@ -20,6 +20,15 @@ def fixture(path: Path, include_crev: bool = True) -> None:
         encoding="utf-8")
 
 
+def disabled_limit_fixture(path: Path) -> None:
+    path.write_text(
+        "[TRAJ]\nCOORDINATES = X Y Z B C\n"
+        "[AXIS_B]\nMIN_LIMIT = 0\nMAX_LIMIT = 0\n"
+        "WCHECKPOINT_COUNTS_PER_REV = 3600000\n"
+        "[JOINT_3]\nMIN_LIMIT = 0\nMAX_LIMIT = 0\nSCALE = 10000\n",
+        encoding="utf-8")
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as temporary:
         ini = Path(temporary) / "v5_bus.ini"
@@ -35,6 +44,20 @@ def main() -> int:
         assert text.count("MAX_LIMIT = 210") == 2
         assert result["wcheckpoint_profile_updated"] is True
         assert result["wcheckpoint_counts_per_rev"] == 3600000
+
+        disabled_limit_fixture(ini)
+        with mock.patch.object(contract, "RUNTIME_SETTINGS_INI", ini), \
+                mock.patch.object(context, "resident_preload_active", True):
+            context.runtime_ini_sections_cache.clear()
+            result = update_runtime_ini_raw_limits(
+                "B", 4, 0.0, -24.8668, 10000.0)
+        text = ini.read_text(encoding="utf-8")
+        assert text.count("MIN_LIMIT = 0") == 2
+        assert text.count("MAX_LIMIT = 0") == 2
+        assert result["min_limit_disabled"] is True
+        assert result["max_limit_disabled"] is True
+        assert result["raw_min_limit"] == 0.0
+        assert result["raw_max_limit"] == 0.0
 
         fixture(ini, include_crev=False)
         with mock.patch.object(contract, "RUNTIME_SETTINGS_INI", ini), \

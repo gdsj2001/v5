@@ -46,6 +46,11 @@ typedef void (*V5NativeHomeProgressCallback)(
     const V5NativeHomeProgress *progress,
     void *user_data);
 
+const char *v5_native_home_failure_code(
+    unsigned int failure,
+    unsigned int current_joint,
+    const unsigned int *axis_code_by_joint);
+
 V5LinuxcncrshSendStatus v5_native_home_send(
     const V5LinuxcncrshConfig *config,
     V5NativeHomeResult *result,

@@ -7,6 +7,9 @@ int main(void)
 {
     static const char *required_home_aliases[] = {
         "ALL_HOME_NATIVE_CONFIG_INVALID", "ALL_HOME_COUNT_READBACK_INVALID",
+        "ALL_HOME_AXIS_X_CONFIG_INVALID", "ALL_HOME_AXIS_Y_CONFIG_INVALID",
+        "ALL_HOME_AXIS_Z_CONFIG_INVALID", "ALL_HOME_AXIS_A_CONFIG_INVALID",
+        "ALL_HOME_AXIS_B_CONFIG_INVALID", "ALL_HOME_AXIS_C_CONFIG_INVALID",
         "ALL_HOME_LIMIT_ACTIVE", "HOME_CANCELLED",
         "HOME_PRECONDITION_ESTOP", "HOME_PRECONDITION_DISABLED", "ALL_HOME_DRIVE_FAULT",
         "ALL_HOME_RTCP_FORCE_OFF_NOT_CONFIRMED", "HOME_PRECONDITION_MOVING",
@@ -108,6 +111,13 @@ int main(void)
         strstr(status.reason_cn, "运动保持禁用") == NULL ||
         strstr(status.next_cn, "使能、回零或启动") == NULL) {
         return 13;
+    }
+    if (!v5_native_operator_error_status_from_alias(
+            "ALL_HOME_AXIS_B_CONFIG_INVALID", &status) ||
+        strcmp(status.title_cn, "B轴回零配置无效") != 0 ||
+        strstr(status.reason_cn, "B轴回零配置缺失或无效") == NULL ||
+        strstr(status.next_cn, "彻底重启") == NULL) {
+        return 14;
     }
     for (alias_index = 0U;
          alias_index < sizeof(required_home_aliases) / sizeof(required_home_aliases[0]);

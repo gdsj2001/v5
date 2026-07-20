@@ -213,6 +213,9 @@ def main() -> int:
     assert "使能、回零或启动" in mapping_invalid.next_cn
     required_home_aliases = {
         "ALL_HOME_NATIVE_CONFIG_INVALID", "ALL_HOME_COUNT_READBACK_INVALID",
+        "ALL_HOME_AXIS_X_CONFIG_INVALID", "ALL_HOME_AXIS_Y_CONFIG_INVALID",
+        "ALL_HOME_AXIS_Z_CONFIG_INVALID", "ALL_HOME_AXIS_A_CONFIG_INVALID",
+        "ALL_HOME_AXIS_B_CONFIG_INVALID", "ALL_HOME_AXIS_C_CONFIG_INVALID",
         "ALL_HOME_LIMIT_ACTIVE", "HOME_CANCELLED",
         "HOME_PRECONDITION_ESTOP", "HOME_PRECONDITION_DISABLED", "ALL_HOME_DRIVE_FAULT",
         "ALL_HOME_RTCP_FORCE_OFF_NOT_CONFIRMED", "HOME_PRECONDITION_MOVING",
@@ -239,6 +242,10 @@ def main() -> int:
         assert translated.display_mode == DISPLAY_POPUP, code
         assert translated.title_cn and translated.reason_cn and translated.next_cn, code
         assert code not in translated.reason_cn and code not in translated.next_cn, code
+    b_config = translate_internal_alias("ALL_HOME_AXIS_B_CONFIG_INVALID")
+    assert b_config.title_cn == "B轴回零配置无效"
+    assert "B轴回零配置缺失或无效" in b_config.reason_cn
+    assert "彻底重启" in b_config.next_cn
     assert required_home_aliases <= set(ALIAS_PRESENTATION)
     retired_home_adapter_aliases = {
         "ALL_HOME_NOT_SUBMITTED", "ALL_HOME_FAILED", "ALL_HOME_REQUEST_INVALID",
