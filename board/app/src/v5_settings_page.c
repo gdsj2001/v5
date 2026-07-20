@@ -169,7 +169,11 @@ int v5_settings_page_apply_status(V5SettingsPage *page, const V5UiStatusView *st
         if (!page->mcs_labels[i]) {
             continue;
         }
-        v5_settings_page_format_mcs_value(row_valid ? status->mcs[slot] : 0.0, row_valid, text, sizeof(text));
+        double value = row_valid ? status->mcs[slot] : 0.0;
+        if (row_valid && (page->pending_mcs_mask & (1U << slot)) != 0U) {
+            value = page->pending_mcs[slot];
+        }
+        v5_settings_page_format_mcs_value(value, row_valid, text, sizeof(text));
         lv_label_set_text(page->mcs_labels[i], text);
         lv_obj_set_style_text_color(page->mcs_labels[i], row_valid ? v5_settings_page_rgb(88, 204, 255) : v5_settings_page_rgb(155, 177, 198), 0);
         v5_coordinate_digits_set_value(

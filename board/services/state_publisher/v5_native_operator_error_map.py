@@ -35,7 +35,7 @@ GROUP_PRESENTATION = {
     "PROGRAM_FILE": ("程序文件错误", "检查程序文件是否存在、可读且有正确结束标记，修正后重新打开"),
     "PROGRAM_MODEL": ("程序与运动模型不匹配", "选择与当前运动模型匹配的程序；或在系统设置中切换运动模型、保存并重启后再运行"),
     "MOTION_HOME": ("需要回零", "选择机械全轴并完成本次开机回零，再重新执行当前动作"),
-    "MOTION_LIMIT": ("轴限位阻止运动", "停止当前动作，检查目标位置、软限位和限位开关，确认后再运动"),
+    "MOTION_LIMIT": ("轴限位已触发", "只允许向未触发限位的反方向点动退出；限位清除后重新发起原动作"),
     "MOTION_JOG": ("点动未执行", "松开点动按钮，检查轴选择、锁定和运行状态后重新点动"),
     "MOTION_KINEMATICS": ("运动学状态错误", "停止运行并检查运动模型、旋转中心和运动学配置，修正并重启后再试"),
     "MOTION_PROBE": ("探测条件错误", "检查探针状态、探测方向和目标距离，恢复正确状态后重新探测"),
@@ -56,8 +56,25 @@ GROUP_DISPLAY_MODE = {group: DISPLAY_POPUP for group in GROUP_PRESENTATION}
 GROUP_DISPLAY_MODE["MOTION_JOG"] = DISPLAY_TOP_STATUS
 GROUP_DISPLAY_MODE["MACHINE_MODE"] = DISPLAY_TOP_STATUS
 SOURCE_DISPLAY_MODE = {
+    "MOTION_FMT_09B1E5798E39": DISPLAY_TOP_STATUS,
+    "MOTION_FMT_13F001E392C8": DISPLAY_TOP_STATUS,
+    "MOTION_FMT_1FCD246E8375": DISPLAY_TOP_STATUS,
+    "MOTION_FMT_34B5429DF845": DISPLAY_TOP_STATUS,
+    "MOTION_FMT_5149D2A0E504": DISPLAY_TOP_STATUS,
+    "MOTION_FMT_86FF963F6394": DISPLAY_TOP_STATUS,
+    "MOTION_FMT_871313624A0B": DISPLAY_TOP_STATUS,
+    "MOTION_FMT_A81154751688": DISPLAY_TOP_STATUS,
+    "MOTION_FMT_AA66C1D38A91": DISPLAY_TOP_STATUS,
+    "MOTION_FMT_3F298AB997D6": DISPLAY_LOG_ONLY,
+    "MOTION_FMT_5C5699EBD985": DISPLAY_LOG_ONLY,
+    "MOTION_FMT_60FB8A6E1E7C": DISPLAY_LOG_ONLY,
     "MOTION_FMT_73BD5ADAF3CF": DISPLAY_LOG_ONLY,
+    "MOTION_FMT_81DD291C04A1": DISPLAY_LOG_ONLY,
+    "MOTION_FMT_A0AC1F80A9F7": DISPLAY_LOG_ONLY,
     "MOTION_FMT_B1C1DF723CAD": DISPLAY_LOG_ONLY,
+    "MOTION_FMT_B5B9E3D281A6": DISPLAY_LOG_ONLY,
+    "MOTION_FMT_C08ABEA36427": DISPLAY_LOG_ONLY,
+    "TASK_FMT_D8EA0D58D356": DISPLAY_LOG_ONLY,
 }
 SOURCE_CAPTURE_DISPLAY_MODE = {
     (
@@ -75,6 +92,48 @@ SOURCE_CAPTURE_PRESENTATION = {
     )
     for axis in _AXIS_WORDS
 }
+
+
+def _directional_limit_presentation(source_id: str, captures: Tuple[str, ...]):
+    joint = None
+    axis = None
+    direction = None
+    limit_kind = None
+    if source_id == "MOTION_FMT_09B1E5798E39" and len(captures) >= 4:
+        axis = captures[2].upper()
+        direction = "正向" if captures[3].lower().startswith("pos") else "负向"
+        limit_kind = "软限位"
+    elif source_id in {"MOTION_FMT_13F001E392C8", "MOTION_FMT_AA66C1D38A91"} and captures:
+        joint = captures[0]
+        direction = "正向" if source_id == "MOTION_FMT_13F001E392C8" else "负向"
+        limit_kind = "软限位"
+    elif source_id in {"MOTION_FMT_1FCD246E8375", "MOTION_FMT_871313624A0B"} and captures:
+        joint = captures[0]
+        direction = "正向" if source_id == "MOTION_FMT_1FCD246E8375" else "负向"
+        limit_kind = "物理限位"
+    elif source_id in {"MOTION_FMT_34B5429DF845", "MOTION_FMT_A81154751688"} and len(captures) >= 3:
+        joint = captures[2]
+        direction = "正向" if source_id == "MOTION_FMT_A81154751688" else "负向"
+        limit_kind = "软限位"
+    elif source_id in {"MOTION_FMT_5149D2A0E504", "MOTION_FMT_86FF963F6394"} and len(captures) >= 2:
+        joint = captures[1]
+        direction = "正向" if source_id == "MOTION_FMT_5149D2A0E504" else "负向"
+        limit_kind = "软限位"
+    elif source_id == "MOTION_FMT_E3CF637D93B3" and captures:
+        return (
+            "物理限位输入异常",
+            f"关节{captures[0]}正负物理限位同时生效，无法判定安全退出方向",
+            "保持机器停止，检查正负限位开关、接线和输入极性，排除异常后重新使能",
+        )
+    if not direction or not limit_kind:
+        return None
+    target = f"{axis}轴" if axis else f"关节{joint}"
+    retreat = "负向" if direction == "正向" else "正向"
+    return (
+        f"{limit_kind}已触发",
+        f"{target}{direction}{limit_kind}：只能{retreat}点动退出",
+        f"保持使能并只向{retreat}点动；限位清除后重新发起原动作",
+    )
 
 ALIAS_PRESENTATION = {
     "POWER_ON_HOME_REQUIRED": (
@@ -512,7 +571,10 @@ class NativeOperatorErrorMap:
                 entry.source_id,
                 tuple(_normalize(value) for value in match.groups()),
             )
-            presentation = SOURCE_CAPTURE_PRESENTATION.get(capture_key)
+            presentation = (
+                _directional_limit_presentation(entry.source_id, capture_key[1]) or
+                SOURCE_CAPTURE_PRESENTATION.get(capture_key)
+            )
             if presentation:
                 title_cn, reason_cn, next_cn = presentation
             else:
@@ -570,11 +632,12 @@ def poll_operator_error_events(channel, error_types, error_map, path: str, gener
             continue
         if kind not in error_types:
             continue
-        generation = (int(generation) + 1) & 0xFFFFFFFFFFFFFFFF
-        if generation == 0:
-            generation = 1
         message = error_map.translate(raw_text)
-        write_operator_error_status(path, 1, kind, generation, message)
+        if message.display_mode != DISPLAY_LOG_ONLY:
+            generation = (int(generation) + 1) & 0xFFFFFFFFFFFFFFFF
+            if generation == 0:
+                generation = 1
+            write_operator_error_status(path, 1, kind, generation, message)
         print(
             f'v5_native_operator_error generation={generation} source_id={message.source_id} '
             f'display_mode={message.display_mode} fingerprint={message.fingerprint} '

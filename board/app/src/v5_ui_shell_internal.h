@@ -107,8 +107,6 @@ static inline unsigned int shell_refresh_classify_changes(
 #define V5_MDI_VISIBLE_ROWS 18U
 #define V5_MDI_VISUAL_ROW_H 28U
 #define V5_MDI_CURSOR_BLINK_MS 500U
-#define V5_UI_CACHE_BOOT_WORKER_ID 0U
-
 typedef enum V5ShellPageKind {
     V5_SHELL_PAGE_MAIN = 0,
     V5_SHELL_PAGE_SETTINGS,
@@ -122,7 +120,7 @@ typedef enum V5ShellPageKind {
     V5_SHELL_PAGE_COUNT
 } V5ShellPageKind;
 
-struct V5UiPageCacheQueueEvidence;
+struct V5UiPageCacheEvidence;
 
 typedef struct V5ProgramRow {
     char name[168];
@@ -202,12 +200,13 @@ unsigned int shell_page_cache_slot(V5ShellPageKind page);
 void shell_show_page_objects(V5ShellPageKind page);
 int shell_show_page_objects_for_cache_blit(V5ShellPageKind page);
 int shell_apply_page_resident_model(V5ShellPageKind page);
+int shell_create_page_if_needed(V5ShellPageKind page, lv_obj_t *screen);
 int shell_prepare_page_cache(V5ShellPageKind page);
 int shell_boot_page_cache_registry_validate(void);
-int shell_run_boot_page_cache_queue(
+int shell_prepare_boot_main_cache(
     lv_obj_t *screen,
     int remote_display,
-    struct V5UiPageCacheQueueEvidence *evidence,
+    struct V5UiPageCacheEvidence *evidence,
     unsigned long long *peak_cpu_pct_x100);
 void shell_mark_page_cache_dirty(V5ShellPageKind page);
 int shell_main_page_structure_refresh_pending(void);

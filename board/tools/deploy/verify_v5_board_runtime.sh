@@ -56,7 +56,7 @@ check_remote_test "v5_linuxcncrsh_golden_run installed executable" 'test -x /usr
 check_remote_test "v5 remote ui relay installed executable" 'test -x /usr/libexec/8ax/v5_remote_ui_relay.py'
 check_remote_test "typed status SHM reader installed module" 'test -r /usr/libexec/8ax/v5_status_shm_reader.py'
 check_remote_test "v5 UI boot ready helper installed executable" 'test -x /usr/libexec/8ax/v5_ui_boot_ready.py'
-check_remote_test "v5 UI cache queue contract installed module" 'test -r /usr/libexec/8ax/v5_ui_cache_queue_contract.py'
+check_remote_test "v5 UI Main cache contract installed module" 'test -r /usr/libexec/8ax/v5_ui_main_cache_contract.py'
 check_remote_test "state publisher init installed" 'test -x /etc/init.d/v5-state-publisher'
 check_remote_test "retired Python HAL owner init scripts absent" 'test ! -e /etc/init.d/v5-rtcp-status-publisher && test ! -e /etc/init.d/v5-g53-geometry-memory-owner'
 check_remote_test "wcs status publisher init installed" 'test -x /etc/init.d/v5-wcs-status-publisher'
@@ -215,6 +215,15 @@ else
   sed 's/^/INFO command gate: /' /tmp/v5_command_gate_status.out
 fi
 rm -f /tmp/v5_command_gate_status.out
+
+if remote '/usr/libexec/8ax/v5_command_gate_drive_window probe v5-runtime-verify >/tmp/v5_drive_window_probe.out 2>&1 && grep -q "\"ok\":true" /tmp/v5_drive_window_probe.out' >/dev/null 2>&1; then
+  ok "Command Gate drive-window IPC ABI and fresh Machine actual probe"
+  remote 'cat /tmp/v5_drive_window_probe.out' | sed 's/^/INFO command gate drive window: /'
+else
+  fail_msg "Command Gate drive-window IPC ABI and fresh Machine actual probe"
+  remote 'cat /tmp/v5_drive_window_probe.out 2>/dev/null || true' | sed 's/^/INFO command gate drive window: /'
+fi
+remote 'rm -f /tmp/v5_drive_window_probe.out' >/dev/null 2>&1 || true
 
 if remote '/etc/init.d/v5-ui-relay status' >/tmp/v5_ui_relay_status.out 2>&1; then
   ok "v5-ui-relay init status running"

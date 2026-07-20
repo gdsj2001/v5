@@ -33,6 +33,8 @@ typedef struct V5SettingsActionStatus {
     int restart_required;
     int restart_deferred;
     int backend_restart_required;
+    int settings_mcs_position_valid;
+    double settings_mcs_position;
 } V5SettingsActionStatus;
 
 int v5_settings_action_start(V5MainPageActionKind action, V5SettingsActionResult *result);

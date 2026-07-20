@@ -5,7 +5,6 @@ import re
 from typing import Any, Dict, List, Tuple
 
 import v5_drive_bus_contract as contract
-from v5_command_gate_zero_client import apply_axis_zero_live
 from v5_drive_bus_contract import DriveActionError, axis_unit, finite_float, now_utc
 from v5_drive_parameter_table import read_parameter_tsv
 from v5_drive_runtime_store import (
@@ -316,9 +315,8 @@ def axis_zero_verify(request: Dict[str, Any], timeout_s: float) -> Dict[str, Any
     persistence_snapshot = snapshot_axis_zero_persistence()
     disk_write: Dict[str, Any] = {}
     verify_read_evidence: Dict[str, Any] = {}
-    live_apply: Dict[str, Any] = {}
+    raw_limit_readback: Dict[str, Any] = {}
     persistence_touched = False
-    live_attempted = False
     try:
         persistence_touched = True
         disk_write = persist_axis_zero_model(
@@ -340,50 +338,117 @@ def axis_zero_verify(request: Dict[str, Any], timeout_s: float) -> Dict[str, Any
                  "saved_zero_physical": saved_physical,
                  "delta_physical": delta, "unit": unit},
             )
-        live_attempted = True
-        live_apply = apply_axis_zero_live(
-            axis, slave_position, zero_run_id, min(max(timeout_s, 0.5), 3.0))
-        if not live_apply.get("ok"):
+        raw_limit_save = disk_write.get("raw_limit_save")
+        if not isinstance(raw_limit_save, dict):
             raise DriveActionError(
-                str(live_apply.get("code") or "SETTINGS_AXIS_ZERO_LIVE_APPLY_FAILED"),
-                "%s轴硬盘零点已写入但机械坐标实时重算失败，正在回滚。" % axis,
-                live_apply,
+                "SETTINGS_AXIS_ZERO_RAW_LIMIT_EVIDENCE_MISSING",
+                "%s轴设0未返回 raw 软限位写盘证据，正在回滚。" % axis,
+                disk_write,
             )
+        expected_min = finite_float(raw_limit_save.get("raw_min_limit"))
+        expected_max = finite_float(raw_limit_save.get("raw_max_limit"))
+        raw_zero = finite_float(raw_limit_save.get("new_zero_physical"))
+        min_distance = finite_float(raw_limit_save.get("ui_min_limit_distance"))
+        max_distance = finite_float(raw_limit_save.get("ui_max_limit_distance"))
+        sections = raw_limit_save.get("updated_sections")
+        if (expected_min is None or expected_max is None or raw_zero is None or
+                min_distance is None or max_distance is None or
+                not isinstance(sections, list) or not sections):
+            raise DriveActionError(
+                "SETTINGS_AXIS_ZERO_RAW_LIMIT_EVIDENCE_INVALID",
+                "%s轴设0的 raw 零位/软限位证据不完整，正在回滚。" % axis,
+                raw_limit_save,
+            )
+        formula_tolerance = max(
+            1.0 / counts_per_unit,
+            abs(expected_min) * 2.0e-9,
+            abs(expected_max) * 2.0e-9,
+            1.0e-9,
+        )
+        formula_min = raw_zero + min_distance
+        formula_max = raw_zero + max_distance
+        if (abs(expected_min - formula_min) > formula_tolerance or
+                abs(expected_max - formula_max) > formula_tolerance):
+            raise DriveActionError(
+                "SETTINGS_AXIS_ZERO_RAW_LIMIT_FORMULA_MISMATCH",
+                "%s轴设0的 raw 软限位不符合新零位加相对距离公式，正在回滚。" % axis,
+                {"raw_zero": raw_zero,
+                 "negative_limit_distance": min_distance,
+                 "positive_limit_distance": max_distance,
+                 "expected_raw_min": formula_min,
+                 "expected_raw_max": formula_max,
+                 "written_raw_min": expected_min,
+                 "written_raw_max": expected_max,
+                 "tolerance": formula_tolerance},
+            )
+        ini_sections = read_runtime_ini_sections(contract.RUNTIME_SETTINGS_INI)
+        read_sections: Dict[str, Any] = {}
+        for section_name in sections:
+            section_key = str(section_name or "").upper()
+            table = ini_sections.get(section_key, {})
+            actual_min = finite_float(table.get("MIN_LIMIT"))
+            actual_max = finite_float(table.get("MAX_LIMIT"))
+            read_sections[section_key] = {
+                "raw_min": actual_min,
+                "raw_max": actual_max,
+            }
+            if (actual_min is None or actual_max is None or
+                    abs(actual_min - expected_min) > formula_tolerance or
+                    abs(actual_max - expected_max) > formula_tolerance):
+                raise DriveActionError(
+                    "SETTINGS_AXIS_ZERO_RAW_LIMIT_READBACK_MISMATCH",
+                    "%s轴设0后的 raw 软限位硬盘回读不一致，正在回滚。" % axis,
+                    {"section": section_key,
+                     "expected_raw_min": expected_min,
+                     "expected_raw_max": expected_max,
+                     "actual_raw_min": actual_min,
+                     "actual_raw_max": actual_max,
+                     "tolerance": formula_tolerance},
+                )
+        raw_limit_readback = {
+            "ok": True,
+            "code": "SETTINGS_AXIS_ZERO_RAW_LIMIT_DISK_READBACK_OK",
+            "runtime_ini": str(contract.RUNTIME_SETTINGS_INI),
+            "raw_zero": raw_zero,
+            "negative_limit_distance": min_distance,
+            "positive_limit_distance": max_distance,
+            "raw_min": expected_min,
+            "raw_max": expected_max,
+            "formula": {
+                "raw_min": "raw_zero + negative_limit_distance",
+                "raw_max": "raw_zero + positive_limit_distance",
+            },
+            "sections": read_sections,
+            "tolerance": formula_tolerance,
+        }
     except Exception as exc:
         rollback: Dict[str, Any] = {}
-        rollback_live: Dict[str, Any] = {}
         rollback_error = ""
         if persistence_touched:
             try:
                 rollback = restore_axis_zero_persistence(persistence_snapshot)
                 runtime.clear()
                 runtime.update(load_settings_runtime())
-                if live_attempted:
-                    rollback_live = apply_axis_zero_live(
-                        axis, slave_position, zero_run_id + "-rollback",
-                        min(max(timeout_s, 0.5), 3.0),
-                        float(live_apply.get("previous_mcs_position") or 0.0))
-                    if not rollback_live.get("ok"):
-                        rollback_error = str(rollback_live.get("code") or "live_rollback_failed")
             except Exception as rollback_exc:
                 rollback_error = "%s: %s" % (type(rollback_exc).__name__, rollback_exc)
-        code = exc.code if isinstance(exc, DriveActionError) else "SETTINGS_AXIS_ZERO_LIVE_TRANSACTION_FAILED"
-        message_cn = exc.message_cn if isinstance(exc, DriveActionError) else "设0实时事务失败，已尝试恢复动作前零点。"
+        code = exc.code if isinstance(exc, DriveActionError) else "SETTINGS_AXIS_ZERO_PERSISTENCE_TRANSACTION_FAILED"
+        message_cn = exc.message_cn if isinstance(exc, DriveActionError) else "设0持久化事务失败，已尝试恢复动作前零点和软限位。"
         detail = exc.detail if isinstance(exc, DriveActionError) else "%s: %s" % (type(exc).__name__, exc)
         if rollback_error:
-            code = "SETTINGS_AXIS_ZERO_ROLLBACK_FAILED_MACHINE_OFF_REQUIRED"
-            message_cn = "%s轴设0失败且回滚未完成，必须保持Machine Off并彻底重启。" % axis
+            code = "SETTINGS_AXIS_ZERO_PERSISTENCE_ROLLBACK_FAILED"
+            message_cn = "%s轴设0失败且持久文件回滚未完成，禁止继续保存并必须彻底重启。" % axis
         raise DriveActionError(code, message_cn, {
             "cause": detail,
             "persistence_rollback": rollback,
-            "live_rollback": rollback_live,
             "rollback_error": rollback_error,
         })
-    message = "%s轴设0成功：机械坐标已按新零点实时重算为 %.6f %s；硬盘软限位已更新，其余较重参数将在彻底重启后生效。" % (
-        axis, float(live_apply.get("mcs_position") or 0.0), unit)
+    settings_mcs_position = (captured_counts - saved_counts) / counts_per_unit
+    settings_zero_display_verified = abs(settings_mcs_position) <= max(1.0 / counts_per_unit, 1.0e-9)
+    message = "%s轴零位与 raw 软限位已保存；设置页机械坐标已按新零位重算为 %.6f %s，全局将在保存并重启后生效。" % (
+        axis, settings_mcs_position, unit)
     return {
         "ok": True,
-        "code": "SETTINGS_COUNT_DOMAIN_ZERO_LIVE_APPLIED_RESTART_REQUIRED",
+        "code": "SETTINGS_COUNT_DOMAIN_ZERO_SAVED_RESTART_REQUIRED",
         "message_cn": message,
         "display_message_cn": message,
         "axis": axis,
@@ -400,6 +465,9 @@ def axis_zero_verify(request: Dict[str, Any], timeout_s: float) -> Dict[str, Any
         "current_encoder_physical": current_physical,
         "saved_zero_physical": saved_physical,
         "delta_physical": delta,
+        "settings_mcs_position": settings_mcs_position,
+        "settings_mcs_position_valid": True,
+        "settings_zero_display_verified": settings_zero_display_verified,
         "settings_runtime_json": str(contract.SETTINGS_RUNTIME_JSON),
         "zero_model_source": (axis_after.get("zero_model") or {}).get("source", "") if isinstance(axis_after.get("zero_model"), dict) else "",
         "zero_run_id": zero_run_id,
@@ -407,7 +475,7 @@ def axis_zero_verify(request: Dict[str, Any], timeout_s: float) -> Dict[str, Any
         "disk_write": disk_write,
         "capture_encoder_read": capture_read_evidence,
         "encoder_read": verify_read_evidence,
-        "live_apply": live_apply,
+        "raw_limit_readback": raw_limit_readback,
         "write_executed": True,
         "drive_write_executed": False,
         "motion_executed": False,
@@ -415,16 +483,12 @@ def axis_zero_verify(request: Dict[str, Any], timeout_s: float) -> Dict[str, Any
         "restart_deferred": True,
         "raw_limit_disk_saved": True,
         "raw_limit_live_verified": False,
-        "raw_runtime_zero_verified": True,
-        "memory_zero_verified": True,
-        "zero_display_verified": True,
+        "raw_runtime_zero_verified": False,
+        "memory_zero_verified": False,
+        "zero_display_verified": False,
         "pending_runtime_proof": True,
         "canonical_clean_restart_required": True,
-        "commit_seq": int(live_apply.get("commit_seq") or 0),
-        "fresh_previous_mcs_position": float(
-            live_apply.get("previous_mcs_position") or 0.0),
-        "fresh_mcs_position": float(live_apply.get("mcs_position") or 0.0),
-        "fresh_mcs_tolerance": float(live_apply.get("tolerance_units") or 0.0),
+        "commit_seq": 0,
     }
 
 

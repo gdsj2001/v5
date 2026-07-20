@@ -10,19 +10,16 @@ typedef struct V5UiPageCacheRegistryEntry {
     const void *root;
 } V5UiPageCacheRegistryEntry;
 
-typedef struct V5UiPageCacheQueueEvidence {
-    unsigned int sequence;
+typedef struct V5UiPageCacheEvidence {
     unsigned int page;
     unsigned int slot;
-    unsigned int worker_id;
     unsigned int create_ok;
     unsigned int apply_ok;
     unsigned int render_ok;
     unsigned int capture_ok;
     unsigned int cache_valid;
     unsigned int invalidation_clean;
-    unsigned int yielded;
-} V5UiPageCacheQueueEvidence;
+} V5UiPageCacheEvidence;
 
 static inline int v5_ui_page_cache_projection_required(
     int projection_valid,
@@ -32,13 +29,18 @@ static inline int v5_ui_page_cache_projection_required(
     return !projection_valid || !owner_same || !visible_payload_equal;
 }
 
-static inline int v5_ui_page_cache_registry_validate(
+static inline int v5_ui_page_cache_registry_validate_required_roots(
     const V5UiPageCacheRegistryEntry *entries,
     size_t entry_count,
     unsigned int page_count,
     unsigned int cache_page_count,
+    unsigned int required_root_mask,
     size_t *bad_index)
 {
+    const unsigned int bit_count = (unsigned int)(sizeof(required_root_mask) * 8U);
+    const unsigned int valid_page_mask = page_count >= bit_count
+        ? ~0U
+        : ((1U << page_count) - 1U);
     unsigned int page;
     size_t i;
     size_t j;
@@ -46,12 +48,14 @@ static inline int v5_ui_page_cache_registry_validate(
     if (bad_index) {
         *bad_index = 0U;
     }
-    if (!entries || entry_count != (size_t)page_count || page_count != cache_page_count) {
+    if (!entries || entry_count != (size_t)page_count || page_count != cache_page_count ||
+        (required_root_mask & ~valid_page_mask) != 0U) {
         return 0;
     }
     for (i = 0U; i < entry_count; ++i) {
         if (entries[i].page >= page_count || entries[i].slot >= cache_page_count ||
-            !entries[i].name || !entries[i].name[0] || !entries[i].root) {
+            !entries[i].name || !entries[i].name[0] ||
+            ((required_root_mask & (1U << entries[i].page)) != 0U && !entries[i].root)) {
             if (bad_index) {
                 *bad_index = i;
             }
@@ -82,6 +86,26 @@ static inline int v5_ui_page_cache_registry_validate(
         }
     }
     return 1;
+}
+
+static inline int v5_ui_page_cache_registry_validate(
+    const V5UiPageCacheRegistryEntry *entries,
+    size_t entry_count,
+    unsigned int page_count,
+    unsigned int cache_page_count,
+    size_t *bad_index)
+{
+    const unsigned int bit_count = (unsigned int)(sizeof(unsigned int) * 8U);
+    const unsigned int required_root_mask = page_count >= bit_count
+        ? ~0U
+        : ((1U << page_count) - 1U);
+    return v5_ui_page_cache_registry_validate_required_roots(
+        entries,
+        entry_count,
+        page_count,
+        cache_page_count,
+        required_root_mask,
+        bad_index);
 }
 
 static inline unsigned int v5_ui_page_cache_affected_mask(
@@ -129,40 +153,6 @@ static inline int v5_ui_structure_event_pending(
         consumed_view_generation != current_view_generation ||
         consumed_program_present != current_program_present ||
         consumed_program_epoch != current_program_epoch;
-}
-
-static inline int v5_ui_page_cache_queue_evidence_validate(
-    const V5UiPageCacheQueueEvidence *entries,
-    size_t entry_count,
-    unsigned int page_count,
-    unsigned int worker_id,
-    size_t *bad_index)
-{
-    size_t i;
-    if (bad_index) {
-        *bad_index = 0U;
-    }
-    if (!entries || entry_count != (size_t)page_count) {
-        return 0;
-    }
-    for (i = 0U; i < entry_count; ++i) {
-        if (entries[i].sequence != (unsigned int)i ||
-            entries[i].page != (unsigned int)i ||
-            entries[i].worker_id != worker_id ||
-            !entries[i].create_ok ||
-            !entries[i].apply_ok ||
-            !entries[i].render_ok ||
-            !entries[i].capture_ok ||
-            !entries[i].cache_valid ||
-            !entries[i].invalidation_clean ||
-            !entries[i].yielded) {
-            if (bad_index) {
-                *bad_index = i;
-            }
-            return 0;
-        }
-    }
-    return 1;
 }
 
 #endif

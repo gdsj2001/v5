@@ -90,14 +90,16 @@ def audit_sources(texts: dict[str, str]) -> None:
         assert token in relay, f"UI_LIFECYCLE_IDENTITY_GATE_MISSING:{token}"
     assert "time.sleep(0.1)" not in relay, "UI_STATUS_POLL_RESURRECTED"
     start = start_body(relay)
-    assert start.index("wait_boot_inputs_ready") < start.index('"$UI_DAEMON" --serve'), "UI_SPAWNED_BEFORE_ACTUAL_BARRIER"
-    assert "v5_bus.ini" in relay and "v5_pulse.ini" in relay, "BUS_PULSE_MODE_DETECTOR_MISSING"
-    assert "active_ini=conflict" in relay, "BUS_PULSE_CONFLICT_GATE_MISSING"
-    assert "v5_ui_relay rejects disabled Pulse runtime mode" in relay, "PULSE_RUNTIME_FAIL_CLOSED_MISSING"
-    assert 'expected_ini="$PROJECT_ROOT/linuxcnc/ini/v5_pulse.ini"' not in relay, "PULSE_RUNTIME_BARRIER_RESURRECTED"
-    record = relay.split("  record_active_ini() {", 1)[1].split("\n  }", 1)[0]
-    command = "active_ini=\nrecord_active_ini() {" + record + "\n}\nrecord_active_ini bus\nrecord_active_ini pulse\ntest \"$active_ini\" = conflict"
-    assert subprocess.run(["sh", "-c", command], check=False).returncode == 0, "BUS_PULSE_CONFLICT_BEHAVIOR_MISSING"
+    assert start.index('"$UI_DAEMON" --serve') < start.index(
+        "wait_boot_inputs_ready"
+    ), "UI_CACHE_NOT_STARTED_IN_PARALLEL"
+    wait_inputs = relay.split("wait_boot_inputs_ready() {", 1)[1].split(
+        "\nstale_service_pids() {", 1
+    )[0]
+    assert '"$BACKEND_READINESS_PROBE" --wait data --timeout-ms 120000' in wait_inputs, "BACKEND_DATA_EVENT_GATE_MISSING"
+    assert "/proc/[0-9]*/cmdline" not in wait_inputs, "ACTIVE_INI_PROC_SCAN_REMAINED"
+    assert 'expected_ini="$PROJECT_ROOT/linuxcnc/ini/v5_bus.ini"' in wait_inputs, "CANONICAL_BUS_INI_MISSING"
+    assert "v5_pulse.ini" not in wait_inputs, "PULSE_RUNTIME_BARRIER_RESURRECTED"
     boot = texts[str(UI_ROOT / "v5_ui_boot_ready.py")]
     for token in ("inotify_init1", "inotify_add_watch", "select.poll", "publisher exited before UI barrier"):
         assert token in boot, f"UI_EVENT_GATE_MISSING:{token}"
@@ -112,6 +114,7 @@ def audit_sources(texts: dict[str, str]) -> None:
     for token in ("POSITION_LOCK", "WCS_LOCK", "STATE_LOCK"):
         assert token in boot, f"PUBLISHER_LIFECYCLE_LOCK_MISSING:{token}"
     assert "validate_final_publisher_barrier(" in boot, "FINAL_PUBLISHER_BARRIER_MISSING"
+    assert "require_backend_motion_ready" in boot, "FINAL_BACKEND_READY_GATE_MISSING"
     assert '"schema": FAILURE_SCHEMA' in boot, "STRUCTURED_UI_FAILURE_MISSING"
 
 

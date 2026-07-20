@@ -22,24 +22,22 @@ ERROR_FLAG=+
 MASTER_PHASE=Idle
 FAULT_COUNT=0
 DMESG_FAIL=0
-SECOND_DC=0
 DIRECT_PREOP_BLOCK=0
 PREOP_REQUESTS=0
-ALL_OP_OVERRIDE=
 
-backend_running() {
-  return 0
+backend_residue_running() {
+  return 1
 }
 
 sleep() {
-  SECOND_DC=1
+  return 0
 }
 
 dmesg() {
   [ "$DMESG_FAIL" = "0" ] || return 1
   i=0
   while [ "$i" -lt "$FAULT_COUNT" ]; do
-    echo 'EtherCAT ERROR 0-0: AL status message 0x001A: "Synchronization error".'
+    echo 'EtherCAT ERROR: datagrams UNMATCHED'
     i=$((i + 1))
   done
 }
@@ -49,7 +47,7 @@ ethercat() {
   case "$command_name" in
     master)
       printf 'Phase: %s\n' "$MASTER_PHASE"
-      echo 'Active: yes'
+      echo 'Active: no'
       echo 'Link: UP'
       echo 'Slaves: 5'
       ;;
@@ -59,9 +57,6 @@ ethercat() {
         printf '%s  0:%s  %s  %s  SV630N\n' "$i" "$i" "$STATE" "$ERROR_FLAG"
         i=$((i + 1))
       done
-      ;;
-    domains)
-      echo 'Domain0: WorkingCounter 10/10'
       ;;
     states)
       requested=${2:-}
@@ -77,37 +72,9 @@ ethercat() {
           STATE=INIT
           ERROR_FLAG=+
           ;;
-        *)
-          return 1
-          ;;
+        *) return 1 ;;
       esac
       ;;
-    *)
-      return 1
-      ;;
-  esac
-}
-
-halcmd() {
-  [ "${1:-}" = getp ] || return 1
-  case "${2:-}" in
-    lcec.0.slaves-responding) echo 5 ;;
-    lcec.0.all-op)
-      if [ -n "$ALL_OP_OVERRIDE" ]; then
-        echo "$ALL_OP_OVERRIDE"
-      elif [ "$STATE" = OP ]; then
-        echo TRUE
-      else
-        echo FALSE
-      fi
-      ;;
-    lcec.0.dc-phased) echo TRUE ;;
-    lcec.0.dc-time-valid) echo TRUE ;;
-    lcec.0.dc-time-age-cycles) echo 0 ;;
-    lcec.0.dc-time-ok-seq)
-      [ "$SECOND_DC" = "0" ] && echo 41 || echo 42
-      ;;
-    lcec.0.dc-time-error-count) echo 0 ;;
     *) return 1 ;;
   esac
 }
@@ -115,36 +82,27 @@ halcmd() {
 . "$SCRIPT_DIR/v5_ethercat_backend_lifecycle.sh"
 
 ethercat_transport_scanned
-FAULT_COUNT=1
+FAULT_COUNT=9
 capture_ethercat_attach_fault_baseline
-ethercat_no_post_attach_faults
-FAULT_COUNT=2
-if ethercat_no_post_attach_faults; then
-  echo 'post-attach EtherCAT fault was accepted' >&2
+[ "$(cat "$ETHERCAT_ATTACH_FAULT_BASELINE")" = 9 ]
+
+# A hot restart may add one diagnostic UNMATCHED event while resident OP/WKC/DC
+# actuals remain healthy.  The lifecycle library must not contain a dmesg-count
+# ready gate; native readiness is owned by v5_native_hal_owner instead.
+FAULT_COUNT=10
+[ "$(ethercat_kernel_fault_count)" = 10 ]
+if grep -Eq 'ethercat_no_post_attach_faults|ethercat_backend_ready|ethercat_domain_wkc_ready|ethercat_reference_clock_healthy|halcmd getp|ethercat domains' \
+    "$SCRIPT_DIR/v5_ethercat_backend_lifecycle.sh"; then
+  echo 'retired shell runtime readiness gate was restored' >&2
   exit 1
 fi
 
 DMESG_FAIL=1
 if ethercat_kernel_fault_count >/dev/null; then
-  echo 'unreadable kernel log was accepted' >&2
+  echo 'unreadable diagnostic kernel log was accepted' >&2
   exit 1
 fi
 DMESG_FAIL=0
-
-FAULT_COUNT=1
-MASTER_PHASE=Operation
-STATE=OP
-SECOND_DC=0
-ethercat_backend_ready
-
-STATE=SAFEOP
-ALL_OP_OVERRIDE=TRUE
-if ethercat_resident_all_op; then
-  echo 'resident all-op without per-slave OP readback was accepted' >&2
-  exit 1
-fi
-STATE=OP
-ALL_OP_OVERRIDE=
 
 STATE=PREOP
 ERROR_FLAG=E

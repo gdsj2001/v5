@@ -2,7 +2,9 @@
 #include "v5_settings_action_ipc.h"
 
 #include <errno.h>
+#include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
@@ -273,6 +275,40 @@ static int json_bool_value(const char *json, const char *key)
     return strncmp(p, "true", 4) == 0;
 }
 
+static int json_double_value(const char *json, const char *key, double *value_out)
+{
+    const char *p;
+    char *end = 0;
+    char pattern[80];
+    double value;
+    if (value_out) {
+        *value_out = 0.0;
+    }
+    if (!value_out) {
+        return 0;
+    }
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key ? key : "");
+    p = strstr(json ? json : "", pattern);
+    if (!p) {
+        return 0;
+    }
+    p = strchr(p, ':');
+    if (!p) {
+        return 0;
+    }
+    ++p;
+    while (*p == ' ' || *p == '\t') {
+        ++p;
+    }
+    errno = 0;
+    value = strtod(p, &end);
+    if (end == p || errno == ERANGE || !isfinite(value)) {
+        return 0;
+    }
+    *value_out = value;
+    return 1;
+}
+
 static void json_string_value(const char *json, const char *key, char *out, size_t out_size)
 {
     const char *p;
@@ -446,6 +482,11 @@ int v5_settings_action_poll_status(V5SettingsActionStatus *status)
     status->restart_required = json_bool_value(response, "restart_required");
     status->restart_deferred = json_bool_value(response, "restart_deferred");
     status->backend_restart_required = json_bool_value(response, "backend_restart_required");
+    status->settings_mcs_position_valid =
+        json_bool_value(response, "settings_mcs_position_valid") &&
+        json_double_value(response,
+                          "settings_mcs_position",
+                          &status->settings_mcs_position);
     return status->available;
 }
 

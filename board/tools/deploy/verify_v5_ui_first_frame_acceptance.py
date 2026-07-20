@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Board acceptance for the resident page cache and modal first-frame path."""
+"""Board acceptance for Main-first lazy page caches and modal first frames."""
 
 from __future__ import annotations
 
@@ -24,17 +24,19 @@ from pathlib import Path
 UI_SERVICE_SOURCE = Path(__file__).resolve().parents[2] / "services" / "ui"
 sys.path.insert(0, str(UI_SERVICE_SOURCE))
 
-from v5_ui_cache_queue_contract import self_test_lines, validate_queue_trace
+from v5_ui_main_cache_contract import self_test_lines, validate_main_cache_trace
 
 
 WIDTH = 1024
 HEIGHT = 600
 EXPECTED_CACHE_BUDGET_BYTES = WIDTH * HEIGHT * 4 * 13
-EXPECTED_QUEUE = ["main", "settings", "tool", "probe", "offset", "io", "network", "program", "mdi"]
+EXPECTED_CACHE_POLICY = "main_first_navigation_lazy_v1"
+REGISTERED_PAGE_COUNT = 9
 FULL_RECT = (0, 0, WIDTH, HEIGHT)
 MEMORY_TOLERANCE_KIB = 1024
 GLOBAL_LOCKED_TOLERANCE_KIB = 2048
 FIRST_VISIBLE_DEADLINE_SECONDS = 0.2
+FIRST_LAZY_PAGE_DEADLINE_SECONDS = 1.0
 PRE_TARGET_FEEDBACK_MAX_RATIO = 0.10
 IDLE_DIRTY_MAX_FRAME_RATIO = 0.50
 IDLE_DIRTY_MAX_UNION_RATIO = 0.50
@@ -456,9 +458,9 @@ for value in cpu1_windows:
         cpu1_maximum = max(cpu1_maximum, cpu1_consecutive)
     else:
         cpu1_consecutive = 0
-queue_trace = [
+main_cache_trace = [
     line for line in Path("/run/8ax/v5_ui_boot.log").read_text(errors="replace").splitlines()
-    if line.startswith("V5_UI_CACHE_QUEUE ")
+    if line.startswith("V5_UI_MAIN_CACHE ")
 ]
 print(json.dumps({
     "returncode": proc.returncode,
@@ -480,7 +482,7 @@ print(json.dumps({
     "vmlck_max_kib": max((item["vmlck_kib"] for item in pre_ready_target), default=0),
     "cpu_lists": sorted(set(item["cpus"] for item in pre_ready_target)),
     "gate_status_transitions": gate,
-    "ui_cache_queue_trace": queue_trace,
+    "ui_main_cache_trace": main_cache_trace,
     "framebuffer_sha256_before": fb_before,
     "framebuffer_sha256_after": framebuffer_hash(),
 }, separators=(",", ":")))
@@ -564,9 +566,17 @@ def validate_ready_metadata(ready: dict) -> None:
         raise AcceptanceError(f"bad ready metadata schema: {ready}")
     if int(ready.get("cache_budget_bytes") or 0) != EXPECTED_CACHE_BUDGET_BYTES:
         raise AcceptanceError(f"cache budget mismatch: {ready.get('cache_budget_bytes')}")
-    queue = ready.get("cache_queue")
-    if not isinstance(queue, list) or [item.get("page") for item in queue] != EXPECTED_QUEUE:
-        raise AcceptanceError(f"cache queue mismatch: {queue}")
+    if ready.get("cache_policy") != EXPECTED_CACHE_POLICY:
+        raise AcceptanceError(f"cache policy mismatch: {ready.get('cache_policy')!r}")
+    if int(ready.get("cache_page_count") or 0) != 1:
+        raise AcceptanceError(f"boot cache page count mismatch: {ready.get('cache_page_count')!r}")
+    if int(ready.get("cache_registered_page_count") or 0) != REGISTERED_PAGE_COUNT:
+        raise AcceptanceError(
+            f"registered page count mismatch: {ready.get('cache_registered_page_count')!r}"
+        )
+    main_cache = ready.get("main_cache")
+    if not isinstance(main_cache, dict) or main_cache.get("page") != "main":
+        raise AcceptanceError(f"Main cache metadata mismatch: {main_cache!r}")
     if ready.get("cpus_allowed_list") != "1":
         raise AcceptanceError(f"UI startup affinity is not CPU1: {ready.get('cpus_allowed_list')!r}")
     for field in ("boot_id", "ui_instance_id"):
@@ -706,6 +716,7 @@ def validate_first_visible_events(
     base_frame_id: int,
     elapsed_ms: float,
     label: str,
+    deadline_seconds: float = FIRST_VISIBLE_DEADLINE_SECONDS,
 ) -> dict | None:
     if not events:
         return None
@@ -720,7 +731,7 @@ def validate_first_visible_events(
             f"large frame appeared before target full label={label} "
             f"feedback_area={feedback_area} limit_ratio={PRE_TARGET_FEEDBACK_MAX_RATIO}"
         )
-    if elapsed_ms > FIRST_VISIBLE_DEADLINE_SECONDS * 1000.0:
+    if elapsed_ms > deadline_seconds * 1000.0:
         raise AcceptanceError(
             f"target full missed first-visible deadline label={label} elapsed_ms={elapsed_ms:.1f}"
         )
@@ -744,12 +755,18 @@ def wait_full_event(
     release_ack_monotonic_ns: int | None = None,
 ) -> dict:
     started_ns = release_ack_monotonic_ns or time.monotonic_ns()
-    deadline_ns = started_ns + int(min(timeout, FIRST_VISIBLE_DEADLINE_SECONDS) * 1_000_000_000)
+    deadline_ns = started_ns + int(timeout * 1_000_000_000)
     while True:
         diag = diagnostics(args)
         events = recent_events_after(diag, after_frame_id)
         elapsed_ms = max(0.0, (time.monotonic_ns() - started_ns) / 1_000_000.0)
-        result = validate_first_visible_events(events, after_frame_id, elapsed_ms, label)
+        result = validate_first_visible_events(
+            events,
+            after_frame_id,
+            elapsed_ms,
+            label,
+            timeout,
+        )
         if result is not None:
             result["release_ack_monotonic_ns"] = started_ns
             return result
@@ -757,7 +774,7 @@ def wait_full_event(
             break
         time.sleep(0.01)
     raise FirstVisibleTimeout(
-        f"missing full cache/popup frame within {FIRST_VISIBLE_DEADLINE_SECONDS:.1f}s "
+        f"missing full cache/popup frame within {timeout:.1f}s "
         f"label={label} after_frame_id={after_frame_id}"
     )
 
@@ -769,6 +786,7 @@ def click_for_full(
     label: str,
     memory_samples: list[dict],
     cpu_windows: list[float],
+    timeout: float = FIRST_VISIBLE_DEADLINE_SECONDS,
 ) -> dict:
     before = sample_ui(args)
     before_diag = diagnostics(args)
@@ -778,6 +796,7 @@ def click_for_full(
         args,
         before_frame_id,
         label,
+        timeout=timeout,
         release_ack_monotonic_ns=int(receipt["release_ack_monotonic_ns"]),
     )
     event["release_seq"] = int(receipt["release_seq"])
@@ -1048,13 +1067,13 @@ def run_startup_acceptance(args: argparse.Namespace) -> dict:
         raise AcceptanceError(
             f"UI service restart retained stale instance id={before_ui_instance_id!r}"
         )
-    queue_trace = result.get("ui_cache_queue_trace")
-    if not isinstance(queue_trace, list) or not all(isinstance(line, str) for line in queue_trace):
-        raise AcceptanceError(f"startup monitor returned no cache queue trace: {queue_trace!r}")
+    main_cache_trace = result.get("ui_main_cache_trace")
+    if not isinstance(main_cache_trace, list) or not all(isinstance(line, str) for line in main_cache_trace):
+        raise AcceptanceError(f"startup monitor returned no Main cache trace: {main_cache_trace!r}")
     try:
-        validate_queue_trace(queue_trace)
+        validate_main_cache_trace(main_cache_trace)
     except ValueError as exc:
-        raise AcceptanceError(f"startup cache queue trace invalid: {exc}") from exc
+        raise AcceptanceError(f"startup Main cache trace invalid: {exc}") from exc
     validate_startup_cpu_evidence(result)
     statuses = [int(item.get("status") or 0) for item in result.get("gate_status_transitions", [])]
     if 503 not in statuses or 200 not in statuses or statuses.index(503) > max(index for index, value in enumerate(statuses) if value == 200):
@@ -1084,7 +1103,8 @@ def run_cycle(args: argparse.Namespace, cycle: int, ready: dict) -> tuple[dict, 
         for page, open_point, return_point in PAGE_STEPS:
             first_visible_events.append(
                 click_for_full(
-                    args, remote_input, open_point, f"cycle={cycle} open={page}", memory_samples, cpu_windows
+                    args, remote_input, open_point, f"cycle={cycle} open={page}", memory_samples, cpu_windows,
+                    timeout=FIRST_LAZY_PAGE_DEADLINE_SECONDS if cycle == 1 else FIRST_VISIBLE_DEADLINE_SECONDS,
                 )
             )
             dirty_window = verify_idle_dirty_is_partial(
@@ -1100,7 +1120,8 @@ def run_cycle(args: argparse.Namespace, cycle: int, ready: dict) -> tuple[dict, 
 
         first_visible_events.append(
             click_for_full(
-                args, remote_input, SETTINGS_OPEN, f"cycle={cycle} open=settings", memory_samples, cpu_windows
+                args, remote_input, SETTINGS_OPEN, f"cycle={cycle} open=settings", memory_samples, cpu_windows,
+                timeout=FIRST_LAZY_PAGE_DEADLINE_SECONDS if cycle == 1 else FIRST_VISIBLE_DEADLINE_SECONDS,
             )
         )
         first_visible_events.append(
@@ -1371,7 +1392,10 @@ def self_test() -> int:
         "ui_pid": 77,
         "ui_start_ticks": 12345,
         "cache_budget_bytes": EXPECTED_CACHE_BUDGET_BYTES,
-        "cache_queue": [{"page": page} for page in EXPECTED_QUEUE],
+        "cache_policy": EXPECTED_CACHE_POLICY,
+        "cache_page_count": 1,
+        "cache_registered_page_count": REGISTERED_PAGE_COUNT,
+        "main_cache": {"page": "main", "slot": 0},
         "cpus_allowed_list": "1",
         "first_frame": {
             "frame_id": 2,
@@ -1393,7 +1417,7 @@ def self_test() -> int:
             pass
         else:
             raise AssertionError(f"invalid ready identity accepted field={field}")
-    validate_queue_trace(self_test_lines())
+    validate_main_cache_trace(self_test_lines())
     compile(REMOTE_RESTART_MONITOR, "REMOTE_RESTART_MONITOR", "exec")
     assert '"before_ui_instance_id"' in REMOTE_RESTART_MONITOR
     assert '"cpu_window_count"' in REMOTE_RESTART_MONITOR

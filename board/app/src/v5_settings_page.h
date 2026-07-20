@@ -27,6 +27,8 @@ typedef struct V5SettingsPage {
     lv_obj_t *mcs_labels[V5_MAIN_PAGE_AXIS_COUNT];
     unsigned int mcs_status_slots[V5_MAIN_PAGE_AXIS_COUNT];
     unsigned int mcs_model_registry_id;
+    uint32_t pending_mcs_mask;
+    double pending_mcs[V5_STATUS_AXIS_COUNT];
     V5CoordinateDigits mcs_digits;
     lv_color_t mcs_digits_buffer[V5_COORD_DIGITS_SETTINGS_W * V5_COORD_DIGITS_SETTINGS_H];
     lv_timer_t *status_timer;
@@ -51,6 +53,7 @@ typedef struct V5SettingsPage {
     int action_visual_active;
     V5MainPageActionReport last_action;
     char last_axis_table_refresh_run_id[64];
+    char last_axis_zero_preview_run_id[64];
     V5UiNavigationCallback navigation_cb;
     void *navigation_user_data;
 } V5SettingsPage;

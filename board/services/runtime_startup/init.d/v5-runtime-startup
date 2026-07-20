@@ -1,0 +1,175 @@
+#!/bin/sh
+set -eu
+
+bind_service_init_to_cpu1() {
+  cpu_list=
+  while read -r key value rest; do
+    if [ "$key" = "Cpus_allowed_list:" ]; then
+      cpu_list=${value:-}
+      break
+    fi
+  done <"/proc/$$/status"
+  [ "$cpu_list" = "1" ] && return 0
+  [ -x /usr/bin/taskset ] || {
+    echo "taskset missing; runtime startup cannot exclude CPU0" >&2
+    return 1
+  }
+  exec /usr/bin/taskset -c 1 "$0" "$@"
+}
+bind_service_init_to_cpu1 "$@"
+
+RUN_DIR=/run/8ax
+LOGFILE=$RUN_DIR/v5_runtime_startup.log
+LOCKFILE=$RUN_DIR/v5_runtime_startup.transaction.lock
+BACKEND_READINESS_PROBE=/usr/libexec/8ax/v5_backend_readiness_probe
+COMMAND_GATE=/etc/init.d/v5-linuxcnc-command-gate
+POSITION=/etc/init.d/v5-position-status-publisher
+WCS=/etc/init.d/v5-wcs-status-publisher
+STATE=/etc/init.d/v5-state-publisher
+ACTIOND=/etc/init.d/v5-settings-actiond
+UI=/etc/init.d/v5-ui-relay
+
+command_gate_job=
+actiond_job=
+publishers_job=
+ui_job=
+
+require_runtime_files() {
+  for path in "$BACKEND_READINESS_PROBE" "$COMMAND_GATE" "$POSITION" \
+      "$WCS" "$STATE" "$ACTIOND" "$UI"; do
+    [ -x "$path" ] || {
+      echo "runtime startup dependency missing: $path" >&2
+      return 1
+    }
+  done
+  command -v flock >/dev/null 2>&1
+}
+
+terminate_job() {
+  pid=${1:-}
+  [ -n "$pid" ] || return 0
+  kill -0 "$pid" 2>/dev/null || return 0
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+}
+
+stop_runtime() {
+  rc=0
+  for service in "$UI" "$ACTIOND" "$STATE" "$WCS" "$POSITION" "$COMMAND_GATE"; do
+    if [ -x "$service" ] && ! "$service" stop >>"$LOGFILE" 2>&1; then
+      rc=1
+    fi
+  done
+  return "$rc"
+}
+
+rollback_start() {
+  terminate_job "$ui_job"
+  terminate_job "$publishers_job"
+  terminate_job "$actiond_job"
+  terminate_job "$command_gate_job"
+  stop_runtime || true
+}
+
+start_publishers_after_data_ready() {
+  "$BACKEND_READINESS_PROBE" --wait data --timeout-ms 120000
+  "$POSITION" start &
+  position_job=$!
+  "$WCS" start &
+  wcs_job=$!
+  "$STATE" start &
+  state_job=$!
+  rc=0
+  if ! wait "$position_job"; then rc=1; fi
+  if ! wait "$wcs_job"; then rc=1; fi
+  if ! wait "$state_job"; then rc=1; fi
+  return "$rc"
+}
+
+status_runtime() {
+  "$BACKEND_READINESS_PROBE" --require motion >/dev/null 2>&1 &&
+    "$COMMAND_GATE" status >/dev/null 2>&1 &&
+    "$POSITION" status >/dev/null 2>&1 &&
+    "$WCS" status >/dev/null 2>&1 &&
+    "$STATE" status >/dev/null 2>&1 &&
+    "$ACTIOND" status >/dev/null 2>&1 &&
+    "$UI" status >/dev/null 2>&1
+}
+
+start_runtime() {
+  require_runtime_files
+  mkdir -p "$RUN_DIR"
+  exec 9>"$LOCKFILE"
+  flock -x 9
+  if status_runtime; then
+    echo "v5 runtime event DAG already ready"
+    return 0
+  fi
+  : >"$LOGFILE"
+  "$COMMAND_GATE" start >>"$LOGFILE" 2>&1 &
+  command_gate_job=$!
+  "$ACTIOND" start >>"$LOGFILE" 2>&1 &
+  actiond_job=$!
+  start_publishers_after_data_ready >>"$LOGFILE" 2>&1 &
+  publishers_job=$!
+  "$UI" start >>"$LOGFILE" 2>&1 &
+  ui_job=$!
+
+  if ! wait "$actiond_job"; then
+    echo "v5 runtime actiond/profile branch failed" >&2
+    rollback_start
+    return 1
+  fi
+  actiond_job=
+  if ! wait "$command_gate_job"; then
+    echo "v5 runtime Command Gate branch failed" >&2
+    rollback_start
+    return 1
+  fi
+  command_gate_job=
+  if ! wait "$publishers_job"; then
+    echo "v5 runtime Publisher branch failed" >&2
+    rollback_start
+    return 1
+  fi
+  publishers_job=
+  if ! wait "$ui_job"; then
+    echo "v5 runtime UI/relay/cache/final-barrier branch failed" >&2
+    rollback_start
+    return 1
+  fi
+  ui_job=
+  if ! status_runtime; then
+    echo "v5 runtime final event DAG status failed" >&2
+    rollback_start
+    return 1
+  fi
+  echo "v5 runtime event DAG ready"
+}
+
+case "${1:-}" in
+  start) start_runtime ;;
+  stop)
+    mkdir -p "$RUN_DIR"
+    : >>"$LOGFILE"
+    stop_runtime
+    ;;
+  restart)
+    mkdir -p "$RUN_DIR"
+    : >>"$LOGFILE"
+    stop_runtime
+    start_runtime
+    ;;
+  status)
+    if status_runtime; then
+      echo "v5 runtime event DAG ready"
+    else
+      echo "v5 runtime event DAG not ready"
+      exit 1
+    fi
+    ;;
+  *)
+    echo "usage: $0 {start|stop|restart|status}" >&2
+    exit 2
+    ;;
+esac

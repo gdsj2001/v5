@@ -288,6 +288,35 @@ int v5_drive_write_window_abort(
     return 1;
 }
 
+int v5_drive_write_window_check_owner(
+    const char *run_id,
+    char *code,
+    size_t code_capacity)
+{
+    int allowed = 0;
+    const char *status = "DRIVE_WRITE_WINDOW_BAD_RUN_ID";
+    if (!code || code_capacity == 0U) {
+        return 0;
+    }
+    code[0] = '\0';
+    if (!run_id_ok(run_id)) {
+        snprintf(code, code_capacity, "%s", status);
+        return 0;
+    }
+    DRIVE_WINDOW_LOCK();
+    if (!g_drive_write_window.active) {
+        status = "DRIVE_WRITE_WINDOW_NOT_ACTIVE";
+    } else if (strcmp(g_drive_write_window.run_id, run_id) != 0) {
+        status = "DRIVE_WRITE_WINDOW_OWNER_MISMATCH";
+    } else {
+        status = "DRIVE_WRITE_WINDOW_OWNER_OK";
+        allowed = 1;
+    }
+    snprintf(code, code_capacity, "%s", status);
+    DRIVE_WINDOW_UNLOCK();
+    return allowed;
+}
+
 int v5_drive_write_window_blocks_kind(V5CommandKind kind)
 {
     int active;

@@ -353,15 +353,23 @@ enable_service() {
     done
 }
 
+disable_service() {
+    name=$1
+    for level in 0 1 2 3 4 5 6; do
+        dir=$rootfs_stage/etc/rc$level.d
+        [ -d "$dir" ] || continue
+        rm -f "$dir"/S??"$name" "$dir"/K??"$name"
+    done
+}
+
 for level in 2 3 4 5; do
     rm -f "$rootfs_stage/etc/rc${level}.d"/S??ethercat
 done
-enable_service v5-linuxcnc-command-gate 05 19
-enable_service v5-position-status-publisher 06 18
-enable_service v5-wcs-status-publisher 06 17
-enable_service v5-state-publisher 07 16
-enable_service v5-ui-relay 08 15
-enable_service v5-settings-actiond 07 14
+for service in v5-linuxcnc-command-gate v5-position-status-publisher \
+    v5-wcs-status-publisher v5-state-publisher v5-ui-relay v5-settings-actiond; do
+    disable_service "$service"
+done
+enable_service v5-runtime-startup 05 14
 enable_service v5-touch-diagnostics 96 14
 
 rm -f \
@@ -403,7 +411,8 @@ for required in \
     opt/8ax/v5/config/settings/self_parameter_table.tsv \
     opt/8ax/v5/config/settings/drive_parameter_table.tsv \
     opt/8ax/v5/linuxcnc/ini/v5_bus.ini \
-    etc/init.d/v5-ui-relay
+    etc/init.d/v5-ui-relay \
+    etc/init.d/v5-runtime-startup
 do
     [ -s "$rootfs_stage/$required" ] || fail "assembled rootfs is missing: $required"
 done
@@ -584,7 +593,8 @@ for required in \
     usr/libexec/8ax/v5_command_gate_server \
     opt/8ax/v5/config/settings/self_parameter_table.tsv \
     opt/8ax/v5/linuxcnc/ini/v5_bus.ini \
-    etc/init.d/v5-ui-relay
+    etc/init.d/v5-ui-relay \
+    etc/init.d/v5-runtime-startup
 do
     [ -s "$root_mount/$required" ] || fail "rootfs readback is missing: $required"
 done

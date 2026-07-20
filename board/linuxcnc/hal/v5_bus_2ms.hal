@@ -43,6 +43,9 @@ loadusr -W lcec_conf /opt/8ax/v5/linuxcnc/hal/ethercat-conf-2ms.xml
 loadusr -Wn v5_native_hal_owner /usr/bin/v5_native_hal_owner \
     --model=[RTCP]MODEL \
     --kins-module=[RTCP]KINS_MODULE \
+    --active-ini=/opt/8ax/v5/linuxcnc/ini/v5_bus.ini \
+    --expected-slaves=5 \
+    --expected-wkc=10 \
     --display-scale-0=[JOINT_0]SCALE \
     --display-scale-1=[JOINT_1]SCALE \
     --display-scale-2=[JOINT_2]SCALE \
@@ -98,6 +101,20 @@ net v5-safety-estop-active v5-safety-latch.0.estop-active => v5-native-hal-owner
 net v5-safety-actual-valid v5-native-hal-owner.safety-actual-valid => motion.v5-bus-home-safety-actual-valid
 net estop-loop v5-safety-latch.0.estop-ok => iocontrol.0.emc-enable-in
 net v5-machine-enabled motion.motion-enabled => v5-native-hal-owner.machine-enabled motion.v5-bus-home-machine-enabled
+
+# Publish the backend contract once inside the resident native owner.  These
+# native HAL actuals replace repeated ethercat/halcmd/proc shell scans.
+net v5-backend-activated lcec.0.activated => v5-native-hal-owner.backend-activated
+net v5-backend-slaves-responding lcec.0.slaves-responding => v5-native-hal-owner.backend-slaves-responding
+net v5-backend-all-op lcec.0.all-op => v5-native-hal-owner.backend-all-op
+net v5-backend-domain-wkc lcec.0.domain-working-counter => v5-native-hal-owner.backend-domain-wkc
+net v5-backend-domain-wc-complete lcec.0.domain-wc-complete => v5-native-hal-owner.backend-domain-wc-complete
+net v5-backend-dc-phased lcec.0.dc-phased => v5-native-hal-owner.backend-dc-phased
+net v5-backend-dc-time-valid lcec.0.dc-time-valid => v5-native-hal-owner.backend-dc-time-valid
+net v5-backend-dc-time-ok-seq lcec.0.dc-time-ok-seq => v5-native-hal-owner.backend-dc-time-ok-seq
+net v5-backend-dc-time-age-cycles lcec.0.dc-time-age-cycles => v5-native-hal-owner.backend-dc-time-age-cycles
+net v5-backend-dc-time-error-count lcec.0.dc-time-error-count => v5-native-hal-owner.backend-dc-time-error-count
+setp v5-native-hal-owner.backend-contract-wired TRUE
 
 net tool-change-loop iocontrol.0.tool-change => iocontrol.0.tool-changed
 net tool-prepare-loop iocontrol.0.tool-prepare => iocontrol.0.tool-prepared

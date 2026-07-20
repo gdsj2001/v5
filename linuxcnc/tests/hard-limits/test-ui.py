@@ -130,7 +130,7 @@ assert(s.enabled == True)
 comp['x-neg-lim-sw'] = True
 
 # let linuxcnc react to the limit switch
-expected_error = 'joint 0 on limit switch error'
+expected_error = "Can't jog joint 0 further past min hard limit."
 start_time = time.time()
 while (time.time() - start_time < 5):
     error = e.poll()
@@ -168,37 +168,21 @@ assert(s.joint[0]['min_hard_limit'] == True)
 assert(s.joint[0]['max_soft_limit'] == False)
 assert(s.joint[0]['max_hard_limit'] == False)
 assert(s.joint[0]['inpos'] == True)
-assert(s.joint[0]['enabled'] == False)
-
-assert(s.limit[0] == 1)
-assert(s.inpos == True)
-assert(s.enabled == False)
-
-# turn the machine back on with Override Limits enabled
-c.override_limits()
-time.sleep(1)
-s.poll()
-print_status(s)
-print("command.serial: {}".format(c.serial))
-# this fails in 2.6.12 due to the stat RCS message having a status of
-# RCS_EXEC...  as if though the override_limits command didn't set status
-# back to RCS_DONE when it finished.
-# assert_wait_complete(c)
-
-c.state(linuxcnc.STATE_ON)
-assert_wait_complete(c)
-
-# verify that Status reflects the new situation
-s.poll()
-assert(s.joint[0]['min_soft_limit'] == False)
-assert(s.joint[0]['min_hard_limit'] == True)
-assert(s.joint[0]['max_soft_limit'] == False)
-assert(s.joint[0]['max_hard_limit'] == False)
-assert(s.joint[0]['inpos'] == True)
 assert(s.joint[0]['enabled'] == True)
 
 assert(s.limit[0] == 1)
 assert(s.inpos == True)
+assert(s.enabled == True)
+
+# the active negative switch must reject another negative jog without
+# requiring limit override or a machine re-enable
+blocked_x = s.position[0]
+c.jog(linuxcnc.JOG_CONTINUOUS, 1, 0, -1)
+time.sleep(0.3)
+s.poll()
+if abs(s.position[0] - blocked_x) > 1e-6:
+    print("negative jog moved further into active negative hard limit")
+    sys.exit(1)
 assert(s.enabled == True)
 
 # jog X in the positive direction, off the negative limit switch

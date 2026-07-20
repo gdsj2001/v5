@@ -725,6 +725,15 @@ add_executable(v5_linuxcncrsh_probe
 
 target_link_libraries(v5_linuxcncrsh_probe PRIVATE v5_command_gate_core)
 
+if(UNIX)
+    add_executable(v5_backend_readiness_probe
+        ../services/command_gate/v5_backend_readiness_probe.c
+    )
+    target_include_directories(v5_backend_readiness_probe PRIVATE
+        "${V5_ROOT_DIR}/../linuxcnc/src/hal/user_comps"
+    )
+endif()
+
 add_executable(v5_command_gate_server
     ../services/command_gate/v5_command_gate_server.c
     ../services/command_gate/v5_command_gate_server_io.c
@@ -937,6 +946,9 @@ endif()
 
 file(STRINGS "${V5_RUNTIME_DEPLOY_MANIFEST}" V5_RUNTIME_DEPLOY_ROWS)
 set(V5_PRODUCT_RUNTIME_TARGETS)
+set(V5_UNIX_ONLY_RUNTIME_TARGETS
+    v5_backend_readiness_probe
+)
 foreach(V5_RUNTIME_DEPLOY_ROW IN LISTS V5_RUNTIME_DEPLOY_ROWS)
     string(STRIP "${V5_RUNTIME_DEPLOY_ROW}" V5_RUNTIME_DEPLOY_ROW_STRIPPED)
     if(V5_RUNTIME_DEPLOY_ROW_STRIPPED STREQUAL "" OR
@@ -954,9 +966,13 @@ foreach(V5_RUNTIME_DEPLOY_ROW IN LISTS V5_RUNTIME_DEPLOY_ROWS)
         if(V5_RUNTIME_DEPLOY_SOURCE MATCHES "^build/board/app/")
             get_filename_component(V5_RUNTIME_DEPLOY_TARGET "${V5_RUNTIME_DEPLOY_SOURCE}" NAME)
             if(NOT TARGET "${V5_RUNTIME_DEPLOY_TARGET}")
-                message(FATAL_ERROR
-                    "Deploy manifest board/app binary has no CMake target: ${V5_RUNTIME_DEPLOY_TARGET}"
-                )
+                if(NOT UNIX AND V5_RUNTIME_DEPLOY_TARGET IN_LIST V5_UNIX_ONLY_RUNTIME_TARGETS)
+                    continue()
+                else()
+                    message(FATAL_ERROR
+                        "Deploy manifest board/app binary has no CMake target: ${V5_RUNTIME_DEPLOY_TARGET}"
+                    )
+                endif()
             endif()
             list(APPEND V5_PRODUCT_RUNTIME_TARGETS "${V5_RUNTIME_DEPLOY_TARGET}")
         elseif(NOT V5_RUNTIME_DEPLOY_SOURCE STREQUAL "build/ethercat/lcec.so")

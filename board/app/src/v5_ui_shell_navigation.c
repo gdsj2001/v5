@@ -220,31 +220,29 @@ static int shell_restore_previous_page_after_failed_prepare(V5ShellPageKind prev
 
 /*
  * REQ-UI-FIRST-FRAME-CACHE: this is the canonical path for all current
- * and future page switches. Navigation must show a cached/restored frame
- * within 0.2 s on the board. Any later page, popup, keyboard, network, tool,
- * probe, offset, IO, or similar full-screen surface must be pre-rendered into
- * a resident display cache at boot/canonical reload, or preserve the opening
- * frame before covering the page. cache_blit/frame restore is always the first
- * visible action; normal LVGL refresh may follow only for the dirty target
- * page, overlay, or changed cell.
+ * and future page switches. Boot creates and caches Main only. A target page
+ * that has never been visited is created on the actual navigation edge while
+ * the current frame remains visible and output is suppressed. The target is
+ * exposed only after its complete cache can be blitted. Cached targets keep
+ * the normal cache-first path; unrelated sibling pages are never prebuilt.
  */
 static int shell_navigate_now(V5MainPageActionKind action)
 {
     unsigned long long t0;
     unsigned long long elapsed;
     int cache_ok = 0;
+    int target_created = 0;
+    int creation_guard_active = 0;
+    int previous_output_suppressed = 0;
     V5ShellPageKind page;
     V5ShellPageKind previous_page;
-    if (!g_v5_shell_main_page.root || !g_v5_shell_settings_page.root) {
+    if (!g_v5_shell_main_page.root) {
         fprintf(stderr, "V5_UI_NAV_FAIL stage=roots action=%u\n", (unsigned int)action);
         return 0;
     }
     t0 = shell_monotonic_ns();
     page = shell_page_for_action(action);
     previous_page = g_v5_shell_current_page;
-    if (page == V5_SHELL_PAGE_NETWORK && shell_update_network_page()) {
-        shell_mark_page_cache_dirty(V5_SHELL_PAGE_NETWORK);
-    }
     if (!shell_capture_current_page()) {
         fprintf(stderr,
                 "V5_UI_NAV_FAIL stage=capture_current current=%u target=%u current_dirty=%d\n",
@@ -253,7 +251,6 @@ static int shell_navigate_now(V5MainPageActionKind action)
                 g_v5_shell_page_cache_dirty[previous_page]);
         return 0;
     }
-    shell_mdi_editor_set_active(page == V5_SHELL_PAGE_MDI);
     if (page == V5_SHELL_PAGE_MDI) {
         if (action == V5_MAIN_PAGE_ACTION_NAV_MDI_EDIT) {
             if (!g_v5_shell_mdi_edit_prepared && !shell_load_current_program_for_mdi_edit()) {
@@ -265,8 +262,41 @@ static int shell_navigate_now(V5MainPageActionKind action)
             g_v5_shell_mdi_line[0] = '\0';
             shell_clear_mdi_edit_metadata();
         }
+    }
+    if (!g_v5_shell_shell_pages[page]) {
+        if (g_v5_shell_remote_display_active) {
+            previous_output_suppressed =
+                v5_lvgl_remote_display_set_output_suppressed(1);
+            creation_guard_active = 1;
+        }
+        printf(
+            "V5_UI_LAZY_CACHE event=start source=%s target=%s slot=%u\n",
+            shell_page_name(previous_page),
+            shell_page_name(page),
+            shell_page_cache_slot(page));
+        fflush(stdout);
+        if (!shell_create_page_if_needed(page, lv_scr_act())) {
+            if (creation_guard_active) {
+                (void)shell_show_page_objects_for_cache_blit(previous_page);
+                (void)v5_lvgl_remote_display_set_output_suppressed(
+                    previous_output_suppressed);
+            }
+            fprintf(stderr,
+                    "V5_UI_LAZY_CACHE event=fail stage=create source=%s target=%s slot=%u\n",
+                    shell_page_name(previous_page),
+                    shell_page_name(page),
+                    shell_page_cache_slot(page));
+            return 0;
+        }
+        target_created = 1;
+    }
+    shell_mdi_editor_set_active(page == V5_SHELL_PAGE_MDI);
+    if (page == V5_SHELL_PAGE_MDI) {
         shell_update_mdi_line();
         shell_mark_page_cache_dirty(V5_SHELL_PAGE_MDI);
+    }
+    if (page == V5_SHELL_PAGE_NETWORK && shell_update_network_page()) {
+        shell_mark_page_cache_dirty(V5_SHELL_PAGE_NETWORK);
     }
     if (!g_v5_shell_remote_display_active) {
         shell_show_page_objects(page);
@@ -278,6 +308,11 @@ static int shell_navigate_now(V5MainPageActionKind action)
             cache_ok = shell_prepare_page_cache(page);
         } else {
             cache_ok = shell_show_page_objects_for_cache_blit(page);
+        }
+        if (creation_guard_active) {
+            (void)v5_lvgl_remote_display_set_output_suppressed(
+                previous_output_suppressed);
+            creation_guard_active = 0;
         }
         if (cache_ok) {
             cache_ok = v5_lvgl_remote_display_cache_blit(shell_page_cache_slot(page));
@@ -301,6 +336,19 @@ static int shell_navigate_now(V5MainPageActionKind action)
     }
     g_v5_shell_current_page = page;
     elapsed = shell_monotonic_ns() - t0;
+    if (target_created) {
+        printf(
+            "V5_UI_LAZY_CACHE event=end source=%s target=%s slot=%u cache_valid=%u elapsed_us=%llu\n",
+            shell_page_name(previous_page),
+            shell_page_name(page),
+            shell_page_cache_slot(page),
+            g_v5_shell_remote_display_active
+                ? (unsigned int)v5_lvgl_remote_display_cache_valid(
+                    shell_page_cache_slot(page))
+                : 1U,
+            elapsed / 1000ULL);
+        fflush(stdout);
+    }
     shell_log_navigation_perf(shell_page_name(page), cache_ok, elapsed);
     return 1;
 }

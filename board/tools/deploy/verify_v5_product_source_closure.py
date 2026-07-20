@@ -25,6 +25,7 @@ KNOWN_KINDS = {
     "runtime_seed_merge",
     "config",
     "gcode",
+    "kernel_module",
 }
 C_SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx"}
 HEADER_SUFFIXES = {".h", ".hh", ".hpp", ".hxx"}
@@ -70,11 +71,21 @@ def parse_manifest(path: Path, board_root: Path) -> Tuple[List[Dict[str, str]], 
             raise ClosureError(f"manifest line {line_number}: duplicate destination {destination}")
         seen_sources.add(normalized_source)
         seen_destinations.add(destination)
-        if kind == "binary":
+        if kind == "binary" and source.parts[:3] == ("build", "board", "app"):
             target = source.name
             if not target or target in binary_targets:
                 raise ClosureError(f"manifest line {line_number}: duplicate/empty binary target {target}")
             binary_targets.add(target)
+        elif kind == "binary":
+            if normalized_source != "build/ethercat/lcec.so":
+                raise ClosureError(
+                    f"manifest line {line_number}: unregistered external binary {normalized_source}"
+                )
+        elif kind == "kernel_module":
+            if source.parts[:2] != ("build", "ethercat") or source.suffix != ".ko":
+                raise ClosureError(
+                    f"manifest line {line_number}: invalid kernel module source {normalized_source}"
+                )
         elif not (board_root / Path(*source.parts)).is_file():
             raise ClosureError(f"manifest line {line_number}: source is missing: {normalized_source}")
         rows.append(
@@ -266,7 +277,7 @@ def validate_manifest_sources(
     board_root: Path, rows: List[Dict[str, str]], validate_shell: bool
 ) -> None:
     for row in rows:
-        if row["kind"] == "binary":
+        if row["kind"] in {"binary", "kernel_module"}:
             continue
         source = board_root / Path(row["source"])
         suffix = source.suffix.lower()
@@ -306,7 +317,11 @@ def verify_closure(
     )
     runtime_headers = collect_reachable_headers(board_root, runtime_c_sources)
     test_headers = collect_reachable_headers(board_root, cmake_test_sources) - runtime_headers
-    manifest_sources = {row["source"] for row in rows if row["kind"] != "binary"}
+    manifest_sources = {
+        row["source"]
+        for row in rows
+        if row["kind"] not in {"binary", "kernel_module"}
+    }
     unclassified: List[str] = []
     test_count = 0
     scanned_count = 0

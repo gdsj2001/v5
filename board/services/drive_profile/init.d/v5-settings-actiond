@@ -9,6 +9,8 @@ DAEMON=/usr/libexec/8ax/drive_profile/v5_settings_actiond.py
 PIDFILE=/run/8ax/v5_settings_actiond.pid
 LOGFILE=/run/8ax/v5_settings_actiond.log
 SOCKET=/run/8ax_v5_product_ui/settings_actiond.sock
+PROFILE_SNAPSHOT_BUILDER=/usr/libexec/8ax/drive_profile/v5_drive_profile_resident_snapshot.py
+PROFILE_SNAPSHOT=/run/8ax_v5_drive/drive_profile_resident_snapshot.json
 
 is_running() {
   [ -r "$PIDFILE" ] || return 1
@@ -33,9 +35,11 @@ start_service() {
   fi
   test -x "$DAEMON"
   mkdir -p /run/8ax /run/8ax_v5_product_ui
-  if [ -x /usr/libexec/8ax/drive_profile/v5_drive_profile_resident_snapshot.py ]; then
-    /usr/libexec/8ax/drive_profile/v5_drive_profile_resident_snapshot.py --profile-root /opt/8ax/drive-profiles --out /run/8ax_v5_drive/drive_profile_resident_snapshot.json >/run/8ax/v5_drive_profile_resident_snapshot.log 2>&1 || true
-  fi
+  test -x "$PROFILE_SNAPSHOT_BUILDER"
+  rm -f "$PROFILE_SNAPSHOT"
+  "$PROFILE_SNAPSHOT_BUILDER" --profile-root /opt/8ax/drive-profiles \
+    --out "$PROFILE_SNAPSHOT" >/run/8ax/v5_drive_profile_resident_snapshot.log 2>&1
+  test -s "$PROFILE_SNAPSHOT"
   rm -f "$PIDFILE" "$SOCKET"
   setsid "$DAEMON" >>"$LOGFILE" 2>&1 &
   echo "$!" >"$PIDFILE"

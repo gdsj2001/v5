@@ -65,16 +65,18 @@ probe["boot_id"] = "11111111-1111-4111-8111-111111111111"
 probe["ui_instance_id"] = "22222222-2222-4222-8222-222222222222"
 probe["ui_pid"] = 123
 probe["ui_start_ticks"] = 12345
-pages = []
-for index, page in enumerate(
-        ("main", "settings", "tool", "probe", "offset", "io", "network", "program", "mdi"), 1):
-    pages.append({"page": page, "completed": index, "total": 9, "worker_id": 0,
-                  "cache_valid": 1, "invalidation_clean": 1, "elapsed_us": 10,
-                  "yield_us": 1, "create_us": 4, "prepare_us": 5,
-                  "cpu_pct_x100": index, "peak_cpu_pct_x100": index,
-                  "budget_bytes": 31_948_800})
 info = {"ui_ready": True, "width": 1024, "height": 600,
-        "ready_metadata": {"cache_queue": pages, "cache_page_count": 9,
+        "ready_metadata": {"cache_policy": "main_first_navigation_lazy_v1",
+                           "cache_page_count": 1,
+                           "cache_registered_page_count": 9,
+                           "main_cache": {
+                               "page": "main", "slot": 0,
+                               "create_ok": 1, "apply_ok": 1,
+                               "render_ok": 1, "capture_ok": 1,
+                               "cache_valid": 1, "invalidation_clean": 1,
+                               "elapsed_us": 10, "create_us": 4,
+                               "prepare_us": 6, "cpu_pct_x100": 1,
+                               "budget_bytes": 31_948_800},
                            "cache_budget_bytes": 31_948_800, "current_frame_id": 2,
                            "boot_id": probe["boot_id"],
                            "ui_instance_id": probe["ui_instance_id"],

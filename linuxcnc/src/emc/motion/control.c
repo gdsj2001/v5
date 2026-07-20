@@ -787,9 +787,10 @@ static void process_probe_inputs(void)
 
 static void check_for_faults(void)
 {
+    static unsigned char hard_limit_latched[EMCMOT_MAX_JOINTS] = {0};
     int joint_num, spindle_num, error_num;
     emcmot_joint_t *joint;
-    int neg_limit_override, pos_limit_override;
+    int neg_limit_override, pos_limit_override, hard_limit_state;
 
     /* check for various global fault conditions */
     /* only check enable input if running */
@@ -815,22 +816,37 @@ static void check_for_faults(void)
 	    /* are any limits for this joint overridden? */
 	    neg_limit_override = emcmotStatus->overrideLimitMask & ( 1 << (joint_num*2));
 	    pos_limit_override = emcmotStatus->overrideLimitMask & ( 2 << (joint_num*2));
-	    /* check for hard limits */
-	    if ((GET_JOINT_PHL_FLAG(joint) && ! pos_limit_override ) ||
-		(GET_JOINT_NHL_FLAG(joint) && ! neg_limit_override )) {
-		/* joint is on limit switch, should we trip? */
-		if (get_homing(joint_num)) {
-		    /* no, ignore limits */
-		} else {
-		    /* trip on limits */
-		    if (!GET_JOINT_ERROR_FLAG(joint)) {
-			/* report the error just this once */
-			reportError(_("joint %d on limit switch error"),
-			    joint_num);
+	    hard_limit_state = 0;
+	    if (GET_JOINT_NHL_FLAG(joint) && !neg_limit_override) hard_limit_state |= 1;
+	    if (GET_JOINT_PHL_FLAG(joint) && !pos_limit_override) hard_limit_state |= 2;
+	    if (get_homing(joint_num)) {
+		hard_limit_latched[joint_num] = 0;
+	    } else if (hard_limit_state == 1 || hard_limit_state == 2) {
+		/* A single directional hard limit stops the current move without
+		 * dropping machine/drive enable.  joint_jog_ok() continues to reject
+		 * motion into the active switch while allowing a jog away from it. */
+		if (hard_limit_latched[joint_num] != hard_limit_state) {
+		    if (hard_limit_state == 2) {
+			reportError(_("Can't jog joint %d further past max hard limit."), joint_num);
+		    } else {
+			reportError(_("Can't jog joint %d further past min hard limit."), joint_num);
 		    }
-		    SET_JOINT_ERROR_FLAG(joint, 1);
-		    emcmotInternal->enabling = 0;
+		    tpAbort(&emcmotInternal->coord_tp);
+		    joint_jog_abort_all(0);
+		    axis_jog_abort_all(0);
+		    SET_MOTION_ERROR_FLAG(1);
 		}
+		hard_limit_latched[joint_num] = (unsigned char)hard_limit_state;
+	    } else if (hard_limit_state == 3) {
+		/* Both directions active cannot identify a safe retreat direction. */
+		if (!GET_JOINT_ERROR_FLAG(joint)) {
+		    reportError(_("joint %d on limit switch error"), joint_num);
+		}
+		hard_limit_latched[joint_num] = 3;
+		SET_JOINT_ERROR_FLAG(joint, 1);
+		emcmotInternal->enabling = 0;
+	    } else {
+		hard_limit_latched[joint_num] = 0;
 	    }
 	    /* check for amp fault */
 	    if (GET_JOINT_FAULT_FLAG(joint)) {

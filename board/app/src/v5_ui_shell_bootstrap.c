@@ -47,11 +47,10 @@ static int v5_ui_shell_bootstrap_common(
     lv_obj_t *screen;
     int status_refresh_ok;
     int main_page_created;
-    int settings_page_created;
     int main_page_applied;
-    int all_page_caches_ready;
+    int main_cache_ready;
     int page_registry_ready;
-    V5UiPageCacheQueueEvidence queue_evidence[V5_SHELL_PAGE_COUNT];
+    V5UiPageCacheEvidence main_cache_evidence;
     unsigned long long peak_cpu_pct_x100 = 0ULL;
 
     g_v5_shell_ui_ready = 0;
@@ -93,17 +92,16 @@ static int v5_ui_shell_bootstrap_common(
     g_v5_shell_current_page = V5_SHELL_PAGE_MAIN;
     shell_create_top_status_layer(screen);
     shell_create_operator_error_popup(screen);
-    all_page_caches_ready = shell_run_boot_page_cache_queue(
+    main_cache_ready = shell_prepare_boot_main_cache(
         screen,
         g_v5_shell_remote_display_active,
-        queue_evidence,
+        &main_cache_evidence,
         &peak_cpu_pct_x100);
-    main_page_created = queue_evidence[V5_SHELL_PAGE_MAIN].create_ok ? 1 : 0;
-    settings_page_created = queue_evidence[V5_SHELL_PAGE_SETTINGS].create_ok ? 1 : 0;
+    main_page_created = main_cache_evidence.create_ok ? 1 : 0;
     main_page_applied = g_v5_shell_remote_display_active
-        ? (queue_evidence[V5_SHELL_PAGE_MAIN].apply_ok ? 1 : 0)
+        ? (main_cache_evidence.apply_ok ? 1 : 0)
         : 0;
-    if (!all_page_caches_ready) {
+    if (!main_cache_ready) {
         return 1;
     }
     page_registry_ready = shell_boot_page_cache_registry_validate();
@@ -124,8 +122,7 @@ static int v5_ui_shell_bootstrap_common(
         if (!shell_show_page_objects_for_cache_blit(V5_SHELL_PAGE_MAIN) ||
             !disp || disp->rendering_in_progress || disp->inv_p != 0U) {
             fprintf(stderr,
-                    "V5_UI_CACHE_QUEUE event=fail worker_id=%u stage=main_select invalidation_clean=0\n",
-                    V5_UI_CACHE_BOOT_WORKER_ID);
+                    "V5_UI_MAIN_CACHE event=fail stage=main_select invalidation_clean=0\n");
             return 1;
         }
         if (!v5_lvgl_remote_display_claim_physical_framebuffer()) {
@@ -138,8 +135,7 @@ static int v5_ui_shell_bootstrap_common(
         }
         if (disp->rendering_in_progress || disp->inv_p != 0U) {
             fprintf(stderr,
-                    "V5_UI_CACHE_QUEUE event=fail worker_id=%u stage=main_blit invalidation_clean=0\n",
-                    V5_UI_CACHE_BOOT_WORKER_ID);
+                    "V5_UI_MAIN_CACHE event=fail stage=main_blit invalidation_clean=0\n");
             return 1;
         }
         (void)v5_lvgl_remote_input_setup();
@@ -154,11 +150,6 @@ static int v5_ui_shell_bootstrap_common(
                 &g_v5_shell_main_page,
                 &g_v5_shell_model.status_view)
             : 0;
-        if (settings_page_created) {
-            (void)v5_settings_page_apply_status(
-                &g_v5_shell_settings_page,
-                &g_v5_shell_model.status_view);
-        }
         lv_obj_invalidate(screen);
         lv_refr_now(NULL);
     }
@@ -170,7 +161,7 @@ static int v5_ui_shell_bootstrap_common(
         main_page_applied);
     g_v5_shell_ui_ready =
         g_v5_shell_model.lvgl_initialized && page_registry_ready &&
-        all_page_caches_ready && main_page_created && main_page_applied &&
+        main_cache_ready && main_page_created && main_page_applied &&
         (!g_v5_shell_remote_display_active || status_refresh_ok);
     if (g_v5_shell_ui_ready && main_page_created) {
         v5_main_page_set_command_execution_enabled(&g_v5_shell_main_page, 1);

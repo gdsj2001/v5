@@ -56,6 +56,17 @@ int main(int argc, char **argv)
     if (argc < 3 || !run_id_ok(run_id)) {
         return emit_result(0, "DRIVE_WRITE_WINDOW_BAD_ARGUMENTS", run_id, 0, 0);
     }
+    if (strcmp(argv[1], "probe") == 0 && argc == 3) {
+        ok = v5_command_gate_probe_safety(&result, 5000U) &&
+             result.send_status == V5_COMMAND_GATE_SEND_SENT &&
+             result.machine_enable_known;
+        return emit_result(
+            ok,
+            ok ? "DRIVE_WRITE_WINDOW_PROBE_OK" : result.readback_code,
+            run_id,
+            result.machine_enabled,
+            result.machine_enabled);
+    }
     if (strcmp(argv[1], "begin") == 0 && argc == 3) {
         request.kind = V5_COMMAND_DRIVE_WRITE_BEGIN;
     } else if (strcmp(argv[1], "finish") == 0 && argc == 4 &&

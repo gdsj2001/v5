@@ -165,6 +165,7 @@ int v5_native_home_runtime_owner_load_bus(
 {
     char *json;
     unsigned int i;
+    unsigned int loaded_zero_count = 0U;
     if (!v5_native_home_mapping_load(
             settings_project_root, parameters, code, code_cap)) {
         return 0;
@@ -195,9 +196,7 @@ int v5_native_home_runtime_owner_load_bus(
         }
         if (!v5_native_home_zero_evidence_for_slave(
                 json, parameters, axis->slave_position, &evidence)) {
-            free(json);
-            snprintf(code, code_cap, "BUS_HOME_AXIS_%c_ZERO_EVIDENCE_MISSING", axis->axis);
-            return 0;
+            continue;
         }
         axis->bus_zero_counts = evidence.zero_counts;
         axis->bus_counts_per_unit = evidence.counts_per_unit;
@@ -205,16 +204,24 @@ int v5_native_home_runtime_owner_load_bus(
         expected = axis->bus_zero_counts / axis->bus_counts_per_unit;
         reference_scale_epsilon = fmax(1.0, fabs(expected)) * 1.0e-9;
         if (fabs(expected - axis->bus_home_reference) > reference_scale_epsilon) {
-            free(json);
-            snprintf(code, code_cap, "%s", "BUS_HOME_ZERO_EVIDENCE_MISMATCH");
-            return 0;
+            axis->bus_zero_counts = 0.0;
+            axis->bus_counts_per_unit = 0.0;
+            axis->bus_home_reference = 0.0;
+            continue;
         }
         axis->bus_zero_evidence_known = 1;
+        ++loaded_zero_count;
     }
     free(json);
     snprintf(parameters->pulse_contract_status, sizeof(parameters->pulse_contract_status), "%s", "not_applicable");
     parameters->runtime_owner_loaded = 1;
-    snprintf(code, code_cap, "%s", "BUS_HOME_RUNTIME_OWNER_LOADED");
+    snprintf(
+        code,
+        code_cap,
+        "%s",
+        loaded_zero_count == parameters->active_axis_count
+            ? "BUS_HOME_RUNTIME_OWNER_LOADED"
+            : "BUS_HOME_RUNTIME_OWNER_LOADED_PARTIAL");
     return 1;
 }
 

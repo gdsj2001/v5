@@ -55,6 +55,16 @@ TCF_ABSENCE_PATHS = (
     "usr/sbin/tcf-agent",
 )
 TCF_ROOTFS_MANIFEST_PATHS = ("boot/v5-rootfs-file-manifest.tsv",)
+RUNTIME_STARTUP_INIT = Path("/etc/init.d/v5-runtime-startup")
+BACKEND_READINESS_PROBE = Path("/usr/libexec/8ax/v5_backend_readiness_probe")
+PRODUCT_BOOT_SERVICES = (
+    "v5-linuxcnc-command-gate",
+    "v5-position-status-publisher",
+    "v5-wcs-status-publisher",
+    "v5-state-publisher",
+    "v5-settings-actiond",
+    "v5-ui-relay",
+)
 
 EXPECTED_NICE = {
     "v5_command_gate": -5,
@@ -81,6 +91,45 @@ SANDBOX_AUDIT_PATHS = (
     ("native_hal_owner_socket", "/run/8ax_v5_product_ui/v5_native_hal_owner.sock"),
     ("settings_actiond_socket", "/run/8ax_v5_product_ui/settings_actiond.sock"),
 )
+
+def audit_runtime_startup_boot_graph() -> int:
+    failures = []
+    for path in (RUNTIME_STARTUP_INIT, BACKEND_READINESS_PROBE):
+        if not path.is_file() or not os.access(path, os.X_OK):
+            failures.append(f"FAIL_RUNTIME_STARTUP_EXECUTABLE:{path}")
+    expected_links = tuple(
+        (Path(f"/etc/rc{level}.d/S05v5-runtime-startup"), "../init.d/v5-runtime-startup")
+        for level in (2, 3, 4, 5)
+    ) + tuple(
+        (Path(f"/etc/rc{level}.d/K14v5-runtime-startup"), "../init.d/v5-runtime-startup")
+        for level in (0, 1, 6)
+    )
+    for path, expected_target in expected_links:
+        if not path.is_symlink():
+            failures.append(f"FAIL_RUNTIME_STARTUP_LINK_MISSING:{path}")
+            continue
+        try:
+            target = os.readlink(path)
+        except OSError as exc:
+            failures.append(f"FAIL_RUNTIME_STARTUP_LINK_READ:{path}:{exc}")
+            continue
+        if target != expected_target:
+            failures.append(
+                f"FAIL_RUNTIME_STARTUP_LINK_TARGET:{path}:{target}:{expected_target}"
+            )
+    for level in range(7):
+        root = Path(f"/etc/rc{level}.d")
+        if not root.is_dir():
+            continue
+        for service in PRODUCT_BOOT_SERVICES:
+            for pattern in (f"S??{service}", f"K??{service}"):
+                for survivor in root.glob(pattern):
+                    failures.append(f"FAIL_RUNTIME_SHADOW_BOOT_LINK:{survivor}")
+    for failure in failures:
+        print(failure, file=sys.stderr)
+    if not failures:
+        print("OK_RUNTIME_STARTUP_EVENT_DAG links=7 shadow_product_links=0")
+    return int(bool(failures))
 
 def cpu_list_contains_zero(text: str) -> bool:
     for part in text.strip().split(","):
@@ -1108,6 +1157,7 @@ rc |= audit_linuxcnc_control_listeners()
 rc |= audit_tcf_retirement()
 rc |= audit_uio_devices()
 rc |= audit_ethercat_devices()
+rc |= audit_runtime_startup_boot_graph()
 audit_sandbox_paths()
 sys.exit(rc)
 '''

@@ -280,6 +280,11 @@ def compact_action_result_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         "restart_deferred",
         "backend_restart_required",
         "canonical_clean_restart_required",
+        "axis",
+        "slave_index",
+        "settings_mcs_position",
+        "settings_mcs_position_valid",
+        "settings_zero_display_verified",
         "raw_limit_disk_saved",
         "raw_limit_live_verified",
         "raw_runtime_zero_verified",
@@ -292,6 +297,7 @@ def compact_action_result_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         "fresh_mcs_tolerance",
         "snapshot_generated_at",
         "snapshot_profile_count",
+        "raw_limit_readback",
     ):
         if key in payload:
             compact[key] = payload.get(key)

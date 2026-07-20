@@ -5,13 +5,9 @@
 #include "v5_ui_page_cache_registry.h"
 #include "v5_v3_local_pages.h"
 
-#include <sched.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
-#include <unistd.h>
-
-#define V5_UI_CACHE_PREP_YIELD_US 5000U
 
 typedef lv_obj_t *(*V5ShellPageCreateFn)(lv_obj_t *screen);
 
@@ -107,6 +103,44 @@ _Static_assert(
     V5_SHELL_PAGE_COUNT <= sizeof(unsigned int) * 8U,
     "page dirty mask must represent every shell page");
 
+static const V5ShellPageCacheDescriptor *shell_page_cache_descriptor(
+    V5ShellPageKind page)
+{
+    size_t i;
+    for (i = 0U; i < sizeof(g_v5_shell_page_cache_registry) /
+                            sizeof(g_v5_shell_page_cache_registry[0]); ++i) {
+        if (g_v5_shell_page_cache_registry[i].page == page) {
+            return &g_v5_shell_page_cache_registry[i];
+        }
+    }
+    return NULL;
+}
+
+int shell_create_page_if_needed(V5ShellPageKind page, lv_obj_t *screen)
+{
+    const V5ShellPageCacheDescriptor *descriptor;
+    lv_obj_t *root;
+    if (!screen || (unsigned int)page >= (unsigned int)V5_SHELL_PAGE_COUNT) {
+        return 0;
+    }
+    if (g_v5_shell_shell_pages[page]) {
+        return 1;
+    }
+    descriptor = shell_page_cache_descriptor(page);
+    if (!descriptor || !descriptor->create) {
+        return 0;
+    }
+    root = descriptor->create(screen);
+    if (!root) {
+        return 0;
+    }
+    g_v5_shell_shell_pages[page] = root;
+    if (g_v5_shell_remote_display_active) {
+        shell_mark_page_cache_dirty(page);
+    }
+    return 1;
+}
+
 const char *shell_page_name(V5ShellPageKind page)
 {
     size_t i;
@@ -153,11 +187,12 @@ int shell_boot_page_cache_registry_validate(void)
             ? g_v5_shell_shell_pages[page]
             : NULL;
     }
-    if (!v5_ui_page_cache_registry_validate(
+    if (!v5_ui_page_cache_registry_validate_required_roots(
             entries,
             sizeof(entries) / sizeof(entries[0]),
             (unsigned int)V5_SHELL_PAGE_COUNT,
             V5_REMOTE_DISPLAY_CACHE_PAGE_COUNT,
+            1U << (unsigned int)V5_SHELL_PAGE_MAIN,
             &bad_index)) {
         if (bad_index < sizeof(entries) / sizeof(entries[0])) {
             fprintf(stderr,
@@ -189,7 +224,7 @@ static int shell_page_layout_complete(lv_obj_t *root)
 
 static int shell_prepare_page_cache_with_evidence(
     V5ShellPageKind page,
-    V5UiPageCacheQueueEvidence *evidence)
+    V5UiPageCacheEvidence *evidence)
 {
     int previous_suppressed;
     int ok;
@@ -251,183 +286,114 @@ int shell_prepare_page_cache(V5ShellPageKind page)
     return shell_prepare_page_cache_with_evidence(page, NULL);
 }
 
-int shell_run_boot_page_cache_queue(
+int shell_prepare_boot_main_cache(
     lv_obj_t *screen,
     int remote_display,
-    V5UiPageCacheQueueEvidence evidence[V5_SHELL_PAGE_COUNT],
+    V5UiPageCacheEvidence *evidence,
     unsigned long long *peak_cpu_pct_x100)
 {
-    size_t bad_index = 0U;
-    unsigned int page_index;
-    const unsigned int total = (unsigned int)(
-        sizeof(g_v5_shell_page_cache_registry) /
-        sizeof(g_v5_shell_page_cache_registry[0]));
+    const V5ShellPageCacheDescriptor *descriptor =
+        shell_page_cache_descriptor(V5_SHELL_PAGE_MAIN);
+    unsigned long long page_started;
+    unsigned long long create_finished;
+    unsigned long long prepare_finished;
+    unsigned long long elapsed_us;
+    unsigned long long create_us;
+    unsigned long long prepare_us;
+    unsigned long long cpu_us = 0ULL;
+    unsigned long long cpu_pct_x100 = 0ULL;
+    clock_t cpu_started;
+    lv_obj_t *root;
 
-    if (!screen || !evidence || !peak_cpu_pct_x100) {
+    if (!screen || !descriptor || !evidence || !peak_cpu_pct_x100) {
         return 0;
     }
-    memset(evidence, 0, sizeof(*evidence) * V5_SHELL_PAGE_COUNT);
+    memset(evidence, 0, sizeof(*evidence));
     *peak_cpu_pct_x100 = 0ULL;
+    evidence->page = (unsigned int)descriptor->page;
+    evidence->slot = descriptor->slot;
+
     if (remote_display) {
         if (!v5_lvgl_remote_display_output_suppressed()) {
             fprintf(stderr,
-                    "V5_UI_CACHE_QUEUE event=fail worker_id=%u stage=queue_start reason=output_not_suppressed\n",
-                    V5_UI_CACHE_BOOT_WORKER_ID);
+                    "V5_UI_MAIN_CACHE event=fail stage=start reason=output_not_suppressed\n");
             return 0;
         }
         printf(
-            "V5_UI_CACHE_QUEUE event=start worker_id=%u worker_count=1 mode=caller_thread total=%u output_suppressed=1\n",
-            V5_UI_CACHE_BOOT_WORKER_ID,
-            total);
+            "V5_UI_MAIN_CACHE event=start page=%s slot=%u output_suppressed=1\n",
+            descriptor->name,
+            descriptor->slot);
         fflush(stdout);
     }
 
-    for (page_index = 0U; page_index < total; ++page_index) {
-        const V5ShellPageCacheDescriptor *descriptor =
-            &g_v5_shell_page_cache_registry[page_index];
-        V5UiPageCacheQueueEvidence *item = &evidence[page_index];
-        unsigned long long page_started;
-        unsigned long long create_finished;
-        unsigned long long prepare_finished;
-        unsigned long long elapsed_us;
-        unsigned long long create_us;
-        unsigned long long prepare_us;
-        unsigned long long cpu_us = 0ULL;
-        unsigned long long cpu_pct_x100 = 0ULL;
-        clock_t cpu_started;
-        lv_obj_t *root;
-
-        item->sequence = page_index;
-        item->page = (unsigned int)descriptor->page;
-        item->slot = descriptor->slot;
-        item->worker_id = V5_UI_CACHE_BOOT_WORKER_ID;
-        if ((unsigned int)descriptor->page >= (unsigned int)V5_SHELL_PAGE_COUNT ||
-            descriptor->slot >= V5_REMOTE_DISPLAY_CACHE_PAGE_COUNT ||
-            !descriptor->name || !descriptor->name[0] || !descriptor->create) {
-            fprintf(stderr,
-                    "V5_UI_CACHE_QUEUE event=fail worker_id=%u sequence=%u stage=descriptor page=%u slot=%u\n",
-                    V5_UI_CACHE_BOOT_WORKER_ID,
-                    page_index,
-                    (unsigned int)descriptor->page,
-                    descriptor->slot);
-            return 0;
-        }
-        if (remote_display) {
-            printf(
-                "V5_UI_CACHE_QUEUE event=page_start worker_id=%u sequence=%u page=%s slot=%u\n",
-                V5_UI_CACHE_BOOT_WORKER_ID,
-                page_index,
+    page_started = shell_monotonic_ns();
+    cpu_started = clock();
+    if (!shell_create_page_if_needed(descriptor->page, screen)) {
+        fprintf(stderr,
+                "V5_UI_MAIN_CACHE event=fail stage=create page=%s slot=%u\n",
                 descriptor->name,
                 descriptor->slot);
-            fflush(stdout);
-        }
-        page_started = shell_monotonic_ns();
-        cpu_started = clock();
-        root = descriptor->create(screen);
-        create_finished = shell_monotonic_ns();
-        item->create_ok = root ? 1U : 0U;
-        if (!root) {
-            fprintf(stderr,
-                    "V5_UI_CACHE_QUEUE event=fail worker_id=%u sequence=%u page=%s slot=%u stage=create\n",
-                    V5_UI_CACHE_BOOT_WORKER_ID,
-                    page_index,
-                    descriptor->name,
-                    descriptor->slot);
-            return 0;
-        }
-        g_v5_shell_shell_pages[descriptor->page] = root;
-        if (remote_display) {
-            shell_mark_page_cache_dirty(descriptor->page);
-            if (!shell_prepare_page_cache_with_evidence(descriptor->page, item)) {
-                fprintf(stderr,
-                        "V5_UI_CACHE_QUEUE event=fail worker_id=%u sequence=%u page=%s slot=%u stage=prepare apply_ok=%u render_ok=%u capture_ok=%u cache_valid=%u invalidation_clean=%u\n",
-                        V5_UI_CACHE_BOOT_WORKER_ID,
-                        page_index,
-                        descriptor->name,
-                        descriptor->slot,
-                        item->apply_ok,
-                        item->render_ok,
-                        item->capture_ok,
-                        item->cache_valid,
-                        item->invalidation_clean);
-                return 0;
-            }
-        }
-        prepare_finished = shell_monotonic_ns();
-        if (remote_display) {
-            sched_yield();
-            usleep(V5_UI_CACHE_PREP_YIELD_US);
-            item->yielded = 1U;
-        }
-        elapsed_us = (shell_monotonic_ns() - page_started) / 1000ULL;
-        create_us = (create_finished - page_started) / 1000ULL;
-        prepare_us = (prepare_finished - create_finished) / 1000ULL;
-        if (cpu_started != (clock_t)-1) {
-            clock_t cpu_finished = clock();
-            if (cpu_finished != (clock_t)-1 && cpu_finished >= cpu_started) {
-                cpu_us = (unsigned long long)(cpu_finished - cpu_started) * 1000000ULL /
-                    (unsigned long long)CLOCKS_PER_SEC;
-            }
-        }
-        if (elapsed_us > 0ULL) {
-            cpu_pct_x100 = cpu_us * 10000ULL / elapsed_us;
-        }
-        if (cpu_pct_x100 > *peak_cpu_pct_x100) {
-            *peak_cpu_pct_x100 = cpu_pct_x100;
-        }
-        if (remote_display) {
-            printf(
-                "V5_UI_CACHE_PREP page=%s completed=%u total=%u elapsed_us=%llu create_us=%llu prepare_us=%llu yield_us=%u cpu_pct_x100=%llu peak_cpu_pct_x100=%llu worker_id=%u cache_valid=%u invalidation_clean=%u budget_bytes=%lu\n",
-                descriptor->name,
-                page_index + 1U,
-                total,
-                elapsed_us,
-                create_us,
-                prepare_us,
-                V5_UI_CACHE_PREP_YIELD_US,
-                cpu_pct_x100,
-                *peak_cpu_pct_x100,
-                V5_UI_CACHE_BOOT_WORKER_ID,
-                item->cache_valid,
-                item->invalidation_clean,
-                (unsigned long)v5_lvgl_remote_display_cache_budget_bytes());
-            printf(
-                "V5_UI_CACHE_QUEUE event=page_end worker_id=%u sequence=%u page=%s slot=%u create_ok=%u apply_ok=%u render_ok=%u capture_ok=%u cache_valid=%u invalidation_clean=%u yielded=%u\n",
-                V5_UI_CACHE_BOOT_WORKER_ID,
-                page_index,
-                descriptor->name,
-                descriptor->slot,
-                item->create_ok,
-                item->apply_ok,
-                item->render_ok,
-                item->capture_ok,
-                item->cache_valid,
-                item->invalidation_clean,
-                item->yielded);
-            fflush(stdout);
-        }
+        return 0;
     }
+    root = g_v5_shell_shell_pages[descriptor->page];
+    create_finished = shell_monotonic_ns();
+    evidence->create_ok = root ? 1U : 0U;
 
     if (remote_display) {
-        if (!v5_ui_page_cache_queue_evidence_validate(
-                evidence,
-                V5_SHELL_PAGE_COUNT,
-                V5_SHELL_PAGE_COUNT,
-                V5_UI_CACHE_BOOT_WORKER_ID,
-                &bad_index)) {
+        if (!shell_prepare_page_cache_with_evidence(descriptor->page, evidence)) {
             fprintf(stderr,
-                    "V5_UI_CACHE_QUEUE event=fail worker_id=%u stage=evidence bad_index=%lu\n",
-                    V5_UI_CACHE_BOOT_WORKER_ID,
-                    (unsigned long)bad_index);
+                    "V5_UI_MAIN_CACHE event=fail stage=prepare page=%s slot=%u "
+                    "apply_ok=%u render_ok=%u capture_ok=%u cache_valid=%u "
+                    "invalidation_clean=%u\n",
+                    descriptor->name,
+                    descriptor->slot,
+                    evidence->apply_ok,
+                    evidence->render_ok,
+                    evidence->capture_ok,
+                    evidence->cache_valid,
+                    evidence->invalidation_clean);
             return 0;
         }
-        printf(
-            "V5_UI_CACHE_QUEUE event=end worker_id=%u worker_count=1 completed=%u total=%u evidence_valid=1 peak_cpu_pct_x100=%llu\n",
-            V5_UI_CACHE_BOOT_WORKER_ID,
-            total,
-            total,
-            *peak_cpu_pct_x100);
-        fflush(stdout);
     }
-    return 1;
+    prepare_finished = shell_monotonic_ns();
+    elapsed_us = (prepare_finished - page_started) / 1000ULL;
+    create_us = (create_finished - page_started) / 1000ULL;
+    prepare_us = (prepare_finished - create_finished) / 1000ULL;
+    if (cpu_started != (clock_t)-1) {
+        clock_t cpu_finished = clock();
+        if (cpu_finished != (clock_t)-1 && cpu_finished >= cpu_started) {
+            cpu_us = (unsigned long long)(cpu_finished - cpu_started) * 1000000ULL /
+                (unsigned long long)CLOCKS_PER_SEC;
+        }
+    }
+    if (elapsed_us > 0ULL) {
+        cpu_pct_x100 = cpu_us * 10000ULL / elapsed_us;
+    }
+    *peak_cpu_pct_x100 = cpu_pct_x100;
+
+    if (remote_display) {
+        printf(
+            "V5_UI_MAIN_CACHE event=end page=%s slot=%u create_ok=%u apply_ok=%u "
+            "render_ok=%u capture_ok=%u cache_valid=%u invalidation_clean=%u "
+            "elapsed_us=%llu create_us=%llu prepare_us=%llu cpu_pct_x100=%llu "
+            "budget_bytes=%lu\n",
+            descriptor->name,
+            descriptor->slot,
+            evidence->create_ok,
+            evidence->apply_ok,
+            evidence->render_ok,
+            evidence->capture_ok,
+            evidence->cache_valid,
+            evidence->invalidation_clean,
+            elapsed_us,
+            create_us,
+            prepare_us,
+            cpu_pct_x100,
+            (unsigned long)v5_lvgl_remote_display_cache_budget_bytes());
+        fflush(stdout);
+        return evidence->create_ok && evidence->apply_ok &&
+            evidence->render_ok && evidence->capture_ok &&
+            evidence->cache_valid && evidence->invalidation_clean;
+    }
+    return evidence->create_ok;
 }

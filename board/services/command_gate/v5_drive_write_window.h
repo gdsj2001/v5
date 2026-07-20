@@ -47,6 +47,10 @@ int v5_drive_write_window_abort(
     const char *run_id,
     const V5DriveWriteWindowOps *ops,
     V5DriveWriteWindowResult *result);
+int v5_drive_write_window_check_owner(
+    const char *run_id,
+    char *code,
+    size_t code_capacity);
 int v5_drive_write_window_blocks_kind(V5CommandKind kind);
 void v5_drive_write_window_reset_for_test(void);
 

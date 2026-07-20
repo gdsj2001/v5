@@ -64,6 +64,7 @@ int main(void)
     FakeDriveWindow fake;
     V5DriveWriteWindowOps ops;
     V5DriveWriteWindowResult result;
+    char owner_code[64];
 
     init_fake(&fake, 1);
     ops.context = &fake;
@@ -83,6 +84,14 @@ int main(void)
         v5_drive_write_window_blocks_kind(V5_COMMAND_ESTOP_FORCE)) {
         return 1;
     }
+    if (!v5_drive_write_window_check_owner(
+            "settings:run-1", owner_code, sizeof(owner_code)) ||
+        strcmp(owner_code, "DRIVE_WRITE_WINDOW_OWNER_OK") != 0 ||
+        v5_drive_write_window_check_owner(
+            "settings:run-2", owner_code, sizeof(owner_code)) ||
+        strcmp(owner_code, "DRIVE_WRITE_WINDOW_OWNER_MISMATCH") != 0) {
+        return 14;
+    }
     if (v5_drive_write_window_begin("settings:run-2", &ops, &result) ||
         strcmp(result.code, "DRIVE_WRITE_WINDOW_BUSY") != 0) {
         return 2;
@@ -91,6 +100,11 @@ int main(void)
         !result.ok || result.final_machine_enabled || fake.on_calls != 0 ||
         v5_drive_write_window_blocks_kind(V5_COMMAND_START)) {
         return 3;
+    }
+    if (v5_drive_write_window_check_owner(
+            "settings:run-1", owner_code, sizeof(owner_code)) ||
+        strcmp(owner_code, "DRIVE_WRITE_WINDOW_NOT_ACTIVE") != 0) {
+        return 15;
     }
 
     init_fake(&fake, 0);

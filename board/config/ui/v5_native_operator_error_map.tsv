@@ -325,7 +325,7 @@ MOTION_FMT_D66736E7A86A	reportError:motion/command.c	"Attempt to decrease non-ex
 MOTION_FMT_D778C773F9D9	reportError:motion/command.c	"%s move on line %d fails kinematicsInverse"	"%s在行%d运动学逆向失败"	MOTION_KINEMATICS
 MOTION_FMT_D93BE6AFCA20	reportError:motion/command.c	"need to be enabled, in coord mode for rigid tap move"	"需要启用，在坐标模式下进行刚性攻丝移动"	MACHINE_MODE
 MOTION_FMT_D9B4FADC5EEE	reportError:motion/command.c	"must be in joint mode to home"	"必须以关节模式回零"	MOTION_HOME
-MOTION_FMT_E3CF637D93B3	reportError:motion/control.c	"joint %d on limit switch error"	"关节%d 限位开关错误"	MOTION_LIMIT
+MOTION_FMT_E3CF637D93B3	reportError:motion/control.c	"joint %d on limit switch error"	"关节%d正负物理限位同时生效，方向无法判定"	MOTION_LIMIT
 MOTION_FMT_E7AA879C7547	reportError:motion/command.c	"Can't jog locking joint_num=%d"	"关节%d当前被锁定，无法点动"	MOTION_JOG
 MOTION_FMT_EC55CEA3DECC	reportError:motion/command.c	"can't add rigid tap move at line %d, error code %d"	"不能在%d行添加刚性攻丝移动，错误代码 %d"	SPINDLE
 MOTION_FMT_EC7EBB822279	reportError:motion/command.c	"Cannot jog while jog-inhibit is active."	"点动抑制触发时无法进行点动。"	MOTION_JOG

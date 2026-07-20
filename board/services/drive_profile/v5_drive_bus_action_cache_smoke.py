@@ -160,6 +160,23 @@ def main() -> int:
         if runtime_store.saved_zero_counts(final_y) != 1000.0:
             print("same-axis update overwrote the other axis", final_runtime)
             return 15
+        conflict_zero = runtime_store.persist_axis_zero_model(
+            final_runtime,
+            "X",
+            0,
+            41000.0,
+            10000.0,
+            {"source": "active_runtime_ini.SCALE", "counts_per_unit": 10000.0},
+            {"position": "1", "read": {"value": 41000.0}, "profile_id": "smoke"},
+        )
+        conflict_runtime = json.loads(contract.SETTINGS_RUNTIME_JSON.read_text(encoding="utf-8"))
+        conflict_x, _ = runtime_store.find_runtime_axis(conflict_runtime, "X")
+        conflict_y, _ = runtime_store.find_runtime_axis(conflict_runtime, "Y")
+        if (conflict_zero.get("superseded_zero_axes") != ["Y"] or
+                int((conflict_x.get("zero_model") or {}).get("slave_position", -1)) != 1 or
+                isinstance(conflict_y.get("zero_model"), dict)):
+            print("physical slave retained duplicate zero owners", conflict_runtime, conflict_zero)
+            return 31
         old_snapshot = {
             "generated_at": "old-generation",
             "profile_count": 1,

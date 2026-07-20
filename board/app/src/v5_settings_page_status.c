@@ -127,6 +127,75 @@ static void settings_refresh_axis_table_once(V5SettingsPage *page, const V5Setti
     v5_settings_axis_table_reload_current_readback();
 }
 
+static const V5MotionModelDescriptor *settings_page_active_model(
+    const V5SettingsPage *page)
+{
+    size_t i;
+    if (!page || page->mcs_model_registry_id == 0U) {
+        return 0;
+    }
+    for (i = 0U; i < v5_motion_model_registry_count(); ++i) {
+        const V5MotionModelDescriptor *model = v5_motion_model_registry_at(i);
+        if (model && model->registry_id == page->mcs_model_registry_id) {
+            return model;
+        }
+    }
+    return 0;
+}
+
+static void settings_apply_axis_zero_preview_once(
+    V5SettingsPage *page,
+    const V5SettingsActionStatus *status)
+{
+    const V5MotionModelDescriptor *model;
+    const char *run_id;
+    unsigned int slot;
+    unsigned int i;
+    char text[24];
+    if (!page || !status || !status->ok ||
+        strcmp(status->action, "settings_axis_zero") != 0 ||
+        !status->axis[0] || !status->settings_mcs_position_valid) {
+        return;
+    }
+    run_id = status->run_id[0] ? status->run_id : status->action;
+    if (strcmp(page->last_axis_zero_preview_run_id, run_id) == 0) {
+        return;
+    }
+    model = settings_page_active_model(page);
+    if (!model ||
+        !v5_motion_model_status_slot_for_axis(model, status->axis[0], &slot) ||
+        slot >= V5_STATUS_AXIS_COUNT) {
+        return;
+    }
+    page->pending_mcs[slot] = status->settings_mcs_position;
+    page->pending_mcs_mask |= (1U << slot);
+    snprintf(page->last_axis_zero_preview_run_id,
+             sizeof(page->last_axis_zero_preview_run_id),
+             "%s",
+             run_id);
+    v5_settings_page_mark_restart_pending(page);
+    v5_settings_page_format_mcs_value(
+        status->settings_mcs_position, 1, text, sizeof(text));
+    for (i = 0U; i < V5_MAIN_PAGE_AXIS_COUNT; ++i) {
+        if (page->mcs_status_slots[i] != slot || !page->mcs_labels[i]) {
+            continue;
+        }
+        lv_label_set_text(page->mcs_labels[i], text);
+        lv_obj_set_style_text_color(
+            page->mcs_labels[i], v5_settings_page_rgb(88, 204, 255), 0);
+        v5_coordinate_digits_set_value(
+            &page->mcs_digits,
+            0U,
+            i,
+            text,
+            v5_settings_page_rgb(88, 204, 255));
+        lv_obj_invalidate(page->mcs_labels[i]);
+    }
+    if (page->root) {
+        lv_obj_invalidate(page->root);
+    }
+}
+
 static void settings_popup_set_close_enabled(V5SettingsPage *page, int enabled)
 {
     if (!page || !page->popup_close) {
@@ -449,6 +518,7 @@ void v5_settings_page_status_timer_cb(lv_timer_t *timer)
             v5_settings_page_set_status_text(page, 88, 204, 255, "%s: 执行中", label);
         }
     } else if (status.ok) {
+        settings_apply_axis_zero_preview_once(page, &status);
         if ((status.restart_required || status.restart_deferred) &&
             page->popup_action[0] &&
             strcmp(page->popup_action, status.action) == 0 &&

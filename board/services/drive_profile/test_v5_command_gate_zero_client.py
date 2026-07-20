@@ -85,26 +85,41 @@ def _axis_zero_runtime():
         "source": "old", "slave_position": 0}}]}
 
 
-def test_axis_zero_verify_requires_fresh_mcs_and_keeps_restart_pending() -> None:
+def _raw_limit_save() -> dict:
+    return {
+        "new_zero_physical": 0.1,
+        "ui_min_limit_distance": -1.1,
+        "ui_max_limit_distance": 0.9,
+        "raw_min_limit": -1.0,
+        "raw_max_limit": 1.0,
+        "updated_sections": ["AXIS_X", "JOINT_0"],
+    }
+
+
+def _raw_limit_sections(max_value: float = 1.0) -> dict:
+    return {
+        "AXIS_X": {"MIN_LIMIT": "-1", "MAX_LIMIT": str(max_value)},
+        "JOINT_0": {"MIN_LIMIT": "-1", "MAX_LIMIT": str(max_value)},
+    }
+
+
+def test_axis_zero_verify_saves_zero_and_raw_limits_without_live_apply() -> None:
     runtime = _axis_zero_runtime()
 
     def persist(owner, *_args, **_kwargs):
         owner["axes"][0]["zero_model"].update(
             {"zero_counts": 1000.0, "zero_anchor_counts": 1000.0,
              "source": "settings_axis_zero"})
-        return {"raw_limit_save": {"raw_min_limit": -1.0, "raw_max_limit": 1.0}}
+        return {"raw_limit_save": _raw_limit_save()}
 
     patches = [
         mock.patch.object(axis_model, "request_slave_position", return_value=0),
         mock.patch.object(axis_model, "load_settings_runtime", return_value=runtime),
         mock.patch.object(axis_model, "derive_counts_per_unit", return_value=(10000.0, {"source": "test"})),
-        mock.patch.object(axis_model, "current_axis_counts", side_effect=[(1000.0, {"position": "0"}), (1000.0, {"position": "0"})]),
+        mock.patch.object(axis_model, "current_axis_counts", side_effect=[(1000.0, {"position": "0"}), (1050.0, {"position": "0"})]),
         mock.patch.object(axis_model, "persist_axis_zero_model", side_effect=persist),
         mock.patch.object(axis_model, "snapshot_axis_zero_persistence", return_value={"settings_runtime_json": "{}", "runtime_ini": ""}),
-        mock.patch.object(axis_model, "apply_axis_zero_live", return_value={
-            "ok": True, "code": "SETTINGS_COUNT_DOMAIN_ZERO_LIVE_APPLIED_RESTART_REQUIRED",
-            "commit_seq": 7, "mcs_position": 0.0, "tolerance_units": 0.0001,
-            "zero_display_verified": True}),
+        mock.patch.object(axis_model, "read_runtime_ini_sections", return_value=_raw_limit_sections()),
     ]
     with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
         result = axis_model.axis_zero_verify({
@@ -112,30 +127,31 @@ def test_axis_zero_verify_requires_fresh_mcs_and_keeps_restart_pending() -> None
             "target_scope": "bus_count_domain_zero", "apply_mode": "count_domain_zero",
             "_run_id": "run-success"}, 1.0)
     assert result["ok"] is True
-    assert result["zero_display_verified"] is True
-    assert result["commit_seq"] == 7
+    assert result["code"] == "SETTINGS_COUNT_DOMAIN_ZERO_SAVED_RESTART_REQUIRED"
+    assert result["settings_mcs_position"] == 0.0
+    assert result["settings_mcs_position_valid"] is True
+    assert result["settings_zero_display_verified"] is True
+    assert result["zero_display_verified"] is False
+    assert result["commit_seq"] == 0
     assert result["restart_deferred"] is True
     assert result["raw_limit_live_verified"] is False
+    assert result["raw_limit_readback"]["raw_min"] == -1.0
+    assert result["raw_limit_readback"]["raw_max"] == 1.0
+    assert abs(result["delta_physical"] - 0.005) < 1.0e-12
 
 
-def test_axis_zero_verify_rolls_back_disk_and_live_after_mcs_failure() -> None:
+def test_axis_zero_verify_rolls_back_persistence_after_raw_limit_readback_failure() -> None:
     runtime = _axis_zero_runtime()
     original = _axis_zero_runtime()
 
     def persist(owner, *_args, **_kwargs):
         owner["axes"][0]["zero_model"].update(
             {"zero_counts": 1000.0, "zero_anchor_counts": 1000.0})
-        return {}
+        return {"raw_limit_save": _raw_limit_save()}
 
     def restore(_snapshot):
         return {"ok": True}
 
-    live = mock.Mock(side_effect=[
-        {"ok": False, "code": "SETTINGS_AXIS_ZERO_FRESH_MCS_NOT_EXPECTED",
-         "commit_seq": 9, "previous_mcs_position": 12.5},
-        {"ok": True, "code": "SETTINGS_COUNT_DOMAIN_ZERO_LIVE_APPLIED_RESTART_REQUIRED",
-         "commit_seq": 10, "zero_display_verified": True},
-    ])
     with mock.patch.object(axis_model, "request_slave_position", return_value=0), \
          mock.patch.object(axis_model, "load_settings_runtime", side_effect=[runtime, original]), \
          mock.patch.object(axis_model, "derive_counts_per_unit", return_value=(10000.0, {})), \
@@ -143,17 +159,47 @@ def test_axis_zero_verify_rolls_back_disk_and_live_after_mcs_failure() -> None:
          mock.patch.object(axis_model, "persist_axis_zero_model", side_effect=persist), \
          mock.patch.object(axis_model, "snapshot_axis_zero_persistence", return_value={"settings_runtime_json": "{}", "runtime_ini": ""}), \
          mock.patch.object(axis_model, "restore_axis_zero_persistence", side_effect=restore) as restore_mock, \
-         mock.patch.object(axis_model, "apply_axis_zero_live", live):
+         mock.patch.object(axis_model, "read_runtime_ini_sections", return_value=_raw_limit_sections(2.0)):
         try:
             axis_model.axis_zero_verify({
                 "axis": "X", "driver_mode": "bus",
                 "target_scope": "bus_count_domain_zero", "apply_mode": "count_domain_zero",
                 "_run_id": "run-fail"}, 1.0)
         except axis_model.DriveActionError as exc:
-            assert exc.code == "SETTINGS_AXIS_ZERO_FRESH_MCS_NOT_EXPECTED"
+            assert exc.code == "SETTINGS_AXIS_ZERO_RAW_LIMIT_READBACK_MISMATCH"
         else:
-            raise AssertionError("axis-zero MCS failure was accepted")
+            raise AssertionError("axis-zero raw-limit mismatch was accepted")
     assert restore_mock.call_count == 1
-    assert live.call_count == 2
-    assert live.call_args_list[1].args[4] == 12.5
+    assert runtime == original
+
+
+def test_axis_zero_verify_rolls_back_when_raw_limit_formula_is_wrong() -> None:
+    runtime = _axis_zero_runtime()
+    original = _axis_zero_runtime()
+
+    def persist(owner, *_args, **_kwargs):
+        owner["axes"][0]["zero_model"].update(
+            {"zero_counts": 1000.0, "zero_anchor_counts": 1000.0})
+        bad = _raw_limit_save()
+        bad["raw_min_limit"] = -0.5
+        return {"raw_limit_save": bad}
+
+    with mock.patch.object(axis_model, "request_slave_position", return_value=0), \
+         mock.patch.object(axis_model, "load_settings_runtime", side_effect=[runtime, original]), \
+         mock.patch.object(axis_model, "derive_counts_per_unit", return_value=(10000.0, {})), \
+         mock.patch.object(axis_model, "current_axis_counts", side_effect=[(1000.0, {"position": "0"}), (1000.0, {"position": "0"})]), \
+         mock.patch.object(axis_model, "persist_axis_zero_model", side_effect=persist), \
+         mock.patch.object(axis_model, "snapshot_axis_zero_persistence", return_value={"settings_runtime_json": "{}", "runtime_ini": ""}), \
+         mock.patch.object(axis_model, "restore_axis_zero_persistence", return_value={"ok": True}) as restore_mock:
+        try:
+            axis_model.axis_zero_verify({
+                "axis": "X", "driver_mode": "bus",
+                "target_scope": "bus_count_domain_zero", "apply_mode": "count_domain_zero",
+                "_run_id": "run-rejected"}, 1.0)
+        except axis_model.DriveActionError as exc:
+            assert exc.code == "SETTINGS_AXIS_ZERO_RAW_LIMIT_FORMULA_MISMATCH"
+            assert exc.detail["rollback_error"] == ""
+        else:
+            raise AssertionError("axis-zero bad raw-limit formula was accepted")
+    assert restore_mock.call_count == 1
     assert runtime == original

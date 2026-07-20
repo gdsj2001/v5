@@ -10,7 +10,7 @@
     "tree": "cbadbb8d029aefe7a8d0e3218885aaa59798337b"
   },
   "v5_source_tree": "c1f4c53315c8e614fafbe48992afa91e8aef8014",
-  "content_sha256": "4be3f089c463988850374dcfac91a1ea193ad20a98b60193242bfe53029f419a",
+  "content_sha256": "de9b052205f3099a09361cab82c3eca1b644e1711f9b55cdb0a488e0f6dfc9cc",
   "implementation": "in_tree",
   "changed_files": [
     "scripts/linuxcnc.in",
@@ -56,6 +56,7 @@
     "src/hal/user_comps/v5_native_g53_model_bc.h",
     "src/hal/user_comps/v5_native_g53_model_smoke.c",
     "src/hal/user_comps/v5_native_g53_model_types.h",
+    "src/hal/user_comps/v5_backend_readiness_protocol.h",
     "src/hal/user_comps/v5_native_hal_owner.comp",
     "src/hal/user_comps/v5_native_hal_owner_protocol.h",
     "src/hal/utils/Submakefile",
@@ -277,11 +278,28 @@
       "pin out bit safety_force;",
       "pin out bit rtcp_ui_request;",
       "V5_NATIVE_HAL_OWNER_SOCKET_PATH",
+      "V5_BACKEND_READINESS_SOCKET_PATH",
+      "backend_cpu_contract_capture",
+      "backend_readiness_arm",
+      "backend_readiness_tick",
+      "registered_processes_failure",
+      "backend_domain_wkc",
+      "backend_dc_time_ok_seq",
       "chmod(address.sun_path, 0660)",
       "v5_native_g53_model_resolve",
       "strcmp(kins_module, branch->kinematics_module)",
       "g_config.g53_active_field_mask = branch->active_field_mask",
       "g_config.kins.x_rot_point"
+    ],
+    "src/hal/user_comps/v5_backend_readiness_protocol.h": [
+      "V5_BACKEND_READINESS_OP_ARM",
+      "V5_BACKEND_READINESS_STATUS_REVOKED",
+      "owner_start_ticks",
+      "backend_data_ready",
+      "motion_backend_ready",
+      "first_full_wkc_ns",
+      "dc_fresh_pair_ready_ns",
+      "backend_ready_published_ns"
     ],
     "src/hal/user_comps/v5_native_g53_model.h": [
       "v5_native_g53_model_branches",
@@ -381,7 +399,11 @@
       "input->a_"
     ],
     "src/hal/user_comps/v5_native_hal_owner.comp": [
-      "strcmp(g_config.model"
+      "strcmp(g_config.model",
+      "popen(",
+      "system(",
+      "halcmd",
+      "ethercat domains"
     ],
     "src/emc/task/taskintf.cc": [
       "z20_wrap_public_degrees",
@@ -436,7 +458,9 @@
       "required_ascii": [
         "v5_native_hal_owner",
         "/run/8ax_v5_product_ui/v5_native_hal_owner.sock",
+        "/run/8ax_v5_product_ui/v5_backend_readiness.sock",
         "/dev/shm/v5_native_g53_geometry_status.bin",
+        "v5_native_hal_owner invalid --active-ini",
         "v5_native_hal_owner invalid --model/kins-module branch",
         "XYZAC_TRT",
         "XYZBC_TRT",

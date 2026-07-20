@@ -493,6 +493,25 @@ def persist_axis_zero_model(runtime: Dict[str, Any],
     if zero_run_id:
         new_zero_model["zero_run_id"] = zero_run_id
     new_zero_model.pop("zero_generation", None)
+    superseded_zero_axes: List[str] = []
+    owner_axes = owner_runtime.get("axes")
+    if isinstance(owner_axes, list):
+        for candidate in owner_axes:
+            if candidate is axis_cfg or not isinstance(candidate, dict):
+                continue
+            candidate_zero = candidate.get("zero_model")
+            if not isinstance(candidate_zero, dict):
+                continue
+            candidate_slave = finite_float(candidate_zero.get("slave_position"))
+            if (candidate_slave is None or candidate_slave < 0.0 or
+                    candidate_slave != float(int(candidate_slave)) or
+                    int(candidate_slave) != slave_position):
+                continue
+            candidate_axis = str(candidate.get("axis") or "").strip().upper()
+            candidate.pop("zero_model", None)
+            candidate.pop("zero_model_writeback", None)
+            if candidate_axis:
+                superseded_zero_axes.append(candidate_axis)
     axis_cfg["zero_model"] = new_zero_model
     axis_cfg["zero_model_writeback"] = {
         "ok": True,
@@ -518,6 +537,7 @@ def persist_axis_zero_model(runtime: Dict[str, Any],
         "old_zero_source": old_zero_source,
         "new_zero_physical": new_zero_physical,
         "slave_position": slave_position,
+        "superseded_zero_axes": superseded_zero_axes,
         "raw_limit_save": raw_limit_save,
     }
 

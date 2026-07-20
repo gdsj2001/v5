@@ -26,6 +26,7 @@ ulimit -l unlimited 2>/dev/null || true
 UI_DAEMON=/usr/libexec/8ax/v5_lvgl_shell
 RELAY_DAEMON=/usr/libexec/8ax/v5_remote_ui_relay.py
 BOOT_READY=/usr/libexec/8ax/v5_ui_boot_ready.py
+BACKEND_READINESS_PROBE=/usr/libexec/8ax/v5_backend_readiness_probe
 PIDFILE=/run/8ax/v5_ui_relay.pid
 UI_PIDFILE=/run/8ax/v5_ui_shell.pid
 RELAY_STARTFILE=/run/8ax/v5_ui_relay.start_ticks
@@ -42,7 +43,6 @@ REMOTE_WIDTH=${V5_UI_REMOTE_WIDTH:-1024}
 REMOTE_HEIGHT=${V5_UI_REMOTE_HEIGHT:-600}
 PROJECT_ROOT=${V5_PROJECT_ROOT:-/opt/8ax/v5}
 UI_INPUT_NICE=0
-PROFILE_SNAPSHOT=/usr/libexec/8ax/drive_profile/v5_drive_profile_resident_snapshot.py
 
 boot_stage() {
   stage="$1"
@@ -138,7 +138,8 @@ is_ui_ready() {
     grep -q '"ui_instance_id":"[0-9a-f]\{8\}-[0-9a-f]\{4\}-[0-9a-f]\{4\}-[0-9a-f]\{4\}-[0-9a-f]\{12\}"' "$UI_READY_PATH" &&
     grep -q "\"ui_pid\":$pid" "$UI_READY_PATH" &&
     grep -q "\"ui_start_ticks\":$ui_start_ticks" "$UI_READY_PATH" &&
-    grep -q '"publisher_barrier":{' "$UI_READY_PATH"
+    grep -q '"publisher_barrier":{' "$UI_READY_PATH" &&
+    grep -q '"backend_ready":{' "$UI_READY_PATH"
 }
 
 is_running() {
@@ -184,48 +185,10 @@ set_display_irq_affinity() {
 }
 
 
-build_profile_snapshot() {
-  if [ -x "$PROFILE_SNAPSHOT" ]; then
-    "$PROFILE_SNAPSHOT" --project-root "$PROJECT_ROOT" --out /run/8ax_v5_drive/drive_profile_resident_snapshot.json >>"$LOGFILE" 2>&1 || true
-  fi
-}
-
 wait_boot_inputs_ready() {
-  active_ini=""
-  record_active_ini() {
-    found="$1"
-    case "$active_ini:$found" in
-      :bus) active_ini=bus ;;
-      :pulse) active_ini=pulse ;;
-      bus:bus|pulse:pulse) ;;
-      *) active_ini=conflict ;;
-    esac
-  }
-  for cmdline in /proc/[0-9]*/cmdline; do
-    [ -r "$cmdline" ] || continue
-    cmd=$(tr '\000' ' ' <"$cmdline" 2>/dev/null || true)
-    case "$cmd" in
-      *milltask*"$PROJECT_ROOT/linuxcnc/ini/v5_bus.ini"*) record_active_ini bus ;;
-      *milltask*"$PROJECT_ROOT/linuxcnc/ini/v5_pulse.ini"*) record_active_ini pulse ;;
-    esac
-  done
-  case "$active_ini" in
-    bus)
-      expected_ini="$PROJECT_ROOT/linuxcnc/ini/v5_bus.ini"
-      ;;
-    pulse)
-      echo "v5_ui_relay rejects disabled Pulse runtime mode" >&2
-      return 1
-      ;;
-    conflict)
-      echo "v5_ui_relay conflicting BUS/Pulse motion owners" >&2
-      return 1
-      ;;
-    *)
-      echo "v5_ui_relay active motion driver mode unavailable" >&2
-      return 1
-      ;;
-  esac
+  expected_ini="$PROJECT_ROOT/linuxcnc/ini/v5_bus.ini"
+  test -x "$BACKEND_READINESS_PROBE"
+  "$BACKEND_READINESS_PROBE" --wait data --timeout-ms 120000 >>"$LOGFILE" 2>&1
   test -s "$PROJECT_ROOT/config/settings/self_parameter_table.tsv"
   test -s "$PROJECT_ROOT/config/settings/drive_parameter_table.tsv"
   python3 -c 'import json,sys; p=json.load(open(sys.argv[1])); raise SystemExit(0 if p.get("loaded") and int(p.get("profile_count") or 0)>0 and int(p.get("map_file_count") or 0)>0 else 1)' \
@@ -330,14 +293,6 @@ start_service() {
     /run/8ax_v5_product_ui/remote_framebuffer.bgra \
     /run/8ax_v5_product_ui/remote_dirty \
     /run/8ax_v5_product_ui/remote_input
-  build_profile_snapshot
-  boot_stage profile_snapshot_ready
-  if ! wait_boot_inputs_ready; then
-    echo "v5_ui_relay publisher actual barrier failed" >&2
-    publish_startup_failure boot_inputs_ready "publisher actual barrier failed" || true
-    return 1
-  fi
-  boot_stage boot_inputs_ready
   set_display_irq_affinity
 
   V5_UI_READY_PATH="$UI_READY_PATH" V5_UI_REMOTE_INPUT="$REMOTE_INPUT" \
@@ -373,6 +328,14 @@ start_service() {
   fi
   boot_stage remote_relay_ready
 
+  if ! wait_boot_inputs_ready; then
+    echo "v5_ui_relay backend/profile/publisher barrier failed" >&2
+    publish_startup_failure boot_inputs_ready "backend/profile/publisher barrier failed" || true
+    stop_stale_processes
+    return 1
+  fi
+  boot_stage boot_inputs_ready
+
   V5_PROJECT_ROOT="$PROJECT_ROOT" V5_UI_REMOTE_INPUT="$REMOTE_INPUT" \
     setsid taskset -c 1 nice -n "$UI_INPUT_NICE" "$UI_DAEMON" --serve >>"$UI_BOOT_LOG" 2>&1 &
   echo "$!" >"$UI_PIDFILE"
@@ -397,6 +360,7 @@ start_service() {
       --ui-log "$UI_BOOT_LOG" \
       --ready-path "$UI_READY_PATH" \
       --publisher-snapshot-path "$PUBLISHER_SNAPSHOT_PATH" \
+      --backend-readiness-probe "$BACKEND_READINESS_PROBE" \
       --expected-ini "$PROJECT_ROOT/linuxcnc/ini/v5_bus.ini" \
       --diagnostics-url "http://127.0.0.1:$PORT/remote/diagnostics" \
       --startup-instance-id "$STARTUP_INSTANCE_ID" \

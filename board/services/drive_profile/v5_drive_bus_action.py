@@ -557,6 +557,27 @@ def run_set_drive(timeout_s: float, request: Dict[str, Any] | None = None) -> Di
                 run_id, timeout_s, restore=False)
 
 
+def run_axis_zero(timeout_s: float, request: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    request_payload = dict(request) if isinstance(request, dict) else {}
+    run_id = str(request_payload.get("_run_id") or request_payload.get("run_id") or
+                 "direct-%d-%d" % (os.getpid(), time.monotonic_ns()))
+    request_payload["_run_id"] = run_id
+    try:
+        return axis_zero_verify(request_payload, timeout_s)
+    except DriveActionError as exc:
+        return {
+            "ok": False,
+            "code": exc.code,
+            "message_cn": exc.message_cn,
+            "display_message_cn": exc.message_cn,
+            "detail": compact_error_detail(exc.detail),
+            "write_executed": False,
+            "drive_write_executed": False,
+            "motion_executed": False,
+            "failed_stage": "axis_zero",
+        }
+
+
 def preload_resident_state() -> Dict[str, Any]:
     status: Dict[str, Any] = {"schema": "v5.drive_bus_action.resident_preload.v1"}
     reset_resident_preload_caches()
@@ -621,10 +642,7 @@ def run_action(action: str, timeout_s: float = 8.0, write_result_file: bool = Tr
     elif action == "read":
         result = read_drive(timeout_s)
     elif action == "axis-zero":
-        try:
-            result = axis_zero_verify(request or {}, timeout_s)
-        except DriveActionError as exc:
-            result = {"ok": False, "code": exc.code, "message_cn": exc.message_cn, "display_message_cn": exc.message_cn, "detail": exc.detail, "write_executed": False, "motion_executed": False}
+        result = run_axis_zero(timeout_s, request)
     elif action == "factory-reset":
         result = run_factory_reset(timeout_s, request)
     elif action == "fault-reset":

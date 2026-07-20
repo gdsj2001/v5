@@ -85,10 +85,25 @@ pin out float kins_z_rot_point;
 pin out float kins_x_offset;
 pin out float kins_y_offset;
 pin out float kins_z_offset;
+pin in bit backend_contract_wired;
+pin in bit backend_activated;
+pin in u32 backend_slaves_responding;
+pin in bit backend_all_op;
+pin in u32 backend_domain_wkc;
+pin in bit backend_domain_wc_complete;
+pin in bit backend_dc_phased;
+pin in bit backend_dc_time_valid;
+pin in u32 backend_dc_time_ok_seq;
+pin in u32 backend_dc_time_age_cycles;
+pin in u32 backend_dc_time_error_count;
 ;;
 
+#include <ctype.h>
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <glob.h>
+#include <limits.h>
 #include <grp.h>
 #include <math.h>
 #include <poll.h>
@@ -120,10 +135,14 @@ static int read_machine_enabled_pin(void)
 #undef machine_enabled
 
 #include "hal/user_comps/v5_native_hal_owner_protocol.h"
+#include "hal/user_comps/v5_backend_readiness_protocol.h"
 #include "hal/user_comps/v5_native_g53_model.h"
 
 typedef struct OwnerConfig {
     char model[V5_NATIVE_G53_MODEL_CAP];
+    char active_ini[192];
+    uint32_t expected_slaves;
+    uint32_t expected_wkc;
     uint32_t display_axis_code[V5_NATIVE_HOME_JOINT_COUNT];
     double display_unit_per_count[V5_NATIVE_HOME_JOINT_COUNT];
     double g53_a_y;
@@ -148,6 +167,36 @@ typedef struct HomeConfigRecord {
     double counts_per_unit;
 } HomeConfigRecord;
 
+#define V5_BACKEND_REGISTERED_PROCESS_CAP 6U
+#define V5_BACKEND_IDENTITY_CHECK_NS 100000000ULL
+
+typedef struct BackendRegisteredProcess {
+    pid_t pid;
+    uint64_t start_ticks;
+} BackendRegisteredProcess;
+
+typedef struct BackendReadinessState {
+    uint32_t lifecycle_generation;
+    uint64_t owner_start_ticks;
+    int armed;
+    int cpu_contract_ready;
+    int backend_data_ready;
+    int motion_backend_ready;
+    int revoked;
+    char revoke_code[V5_BACKEND_READINESS_CODE_CAP];
+    uint64_t cpu_contract_ready_ns;
+    uint64_t first_full_wkc_ns;
+    uint64_t dc_fresh_pair_ready_ns;
+    uint64_t backend_data_ready_ns;
+    uint64_t backend_ready_published_ns;
+    uint32_t first_dc_seq;
+    uint32_t first_dc_errors;
+    int first_dc_seen;
+    uint64_t last_identity_check_ns;
+    BackendRegisteredProcess registered[V5_BACKEND_REGISTERED_PROCESS_CAP];
+    size_t registered_count;
+} BackendReadinessState;
+
 static OwnerConfig g_config;
 static volatile sig_atomic_t g_stop;
 static gid_t g_product_gid;
@@ -168,6 +217,7 @@ static int g_home_rtcp_latched;
 static uint32_t g_home_rtcp_seen_transaction;
 static int g_gcode_rearm_seen_low;
 static int g_previous_gcode_request;
+static BackendReadinessState g_backend_readiness;
 
 static void fill_wcheckpoint_response(
     unsigned int target,
@@ -531,6 +581,612 @@ static uint32_t fnv1a(const void *data, size_t size)
     return value;
 }
 
+static int read_text_file(const char *path, char *buffer, size_t capacity)
+{
+    int fd;
+    ssize_t count;
+    if (!path || !buffer || capacity < 2U) return 0;
+    fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return 0;
+    count = read(fd, buffer, capacity - 1U);
+    close(fd);
+    if (count <= 0) return 0;
+    buffer[(size_t)count] = '\0';
+    return 1;
+}
+
+static int numeric_name(const char *name, pid_t *value)
+{
+    char *end = 0;
+    long parsed;
+    if (!name || !*name) return 0;
+    parsed = strtol(name, &end, 10);
+    if (!end || *end || parsed <= 0 || parsed > INT_MAX) return 0;
+    if (value) *value = (pid_t)parsed;
+    return 1;
+}
+
+static int read_task_stat(
+    pid_t pid,
+    pid_t tid,
+    uint64_t *start_ticks,
+    long *nice_value,
+    long *rt_priority,
+    long *policy)
+{
+    char path[96];
+    char buffer[4096];
+    char *right;
+    char *save = 0;
+    char *token;
+    unsigned int field = 3U;
+    int have_start = start_ticks ? 0 : 1;
+    int have_nice = nice_value ? 0 : 1;
+    int have_rt = rt_priority ? 0 : 1;
+    int have_policy = policy ? 0 : 1;
+    if (pid == tid)
+        snprintf(path, sizeof(path), "/proc/%ld/stat", (long)pid);
+    else
+        snprintf(path, sizeof(path), "/proc/%ld/task/%ld/stat", (long)pid, (long)tid);
+    if (!read_text_file(path, buffer, sizeof(buffer))) return 0;
+    right = strrchr(buffer, ')');
+    if (!right || right[1] != ' ') return 0;
+    token = strtok_r(right + 2, " ", &save);
+    while (token) {
+        char *end = 0;
+        if (field == 19U && nice_value) {
+            *nice_value = strtol(token, &end, 10);
+            if (!end || *end) return 0;
+            have_nice = 1;
+        } else if (field == 22U && start_ticks) {
+            *start_ticks = strtoull(token, &end, 10);
+            if (!end || *end || !*start_ticks) return 0;
+            have_start = 1;
+        } else if (field == 40U && rt_priority) {
+            *rt_priority = strtol(token, &end, 10);
+            if (!end || *end) return 0;
+            have_rt = 1;
+        } else if (field == 41U && policy) {
+            *policy = strtol(token, &end, 10);
+            if (!end || *end) return 0;
+            have_policy = 1;
+        }
+        token = strtok_r(0, " ", &save);
+        ++field;
+    }
+    return have_start && have_nice && have_rt && have_policy;
+}
+
+static int read_task_cpu_list(pid_t pid, pid_t tid, char *cpu, size_t capacity)
+{
+    char path[96];
+    char buffer[4096];
+    char *line;
+    char *save = 0;
+    if (!cpu || capacity < 2U) return 0;
+    snprintf(path, sizeof(path), "/proc/%ld/task/%ld/status", (long)pid, (long)tid);
+    if (!read_text_file(path, buffer, sizeof(buffer))) return 0;
+    line = strtok_r(buffer, "\n", &save);
+    while (line) {
+        static const char prefix[] = "Cpus_allowed_list:";
+        if (strncmp(line, prefix, sizeof(prefix) - 1U) == 0) {
+            char *value = line + sizeof(prefix) - 1U;
+            size_t length;
+            while (*value == ' ' || *value == '\t') ++value;
+            length = strlen(value);
+            while (length && (value[length - 1U] == ' ' || value[length - 1U] == '\t' ||
+                              value[length - 1U] == '\r')) --length;
+            if (!length || length >= capacity) return 0;
+            memcpy(cpu, value, length);
+            cpu[length] = '\0';
+            return 1;
+        }
+        line = strtok_r(0, "\n", &save);
+    }
+    return 0;
+}
+
+static int read_task_comm(pid_t pid, pid_t tid, char *comm, size_t capacity)
+{
+    char path[96];
+    size_t length;
+    snprintf(path, sizeof(path), "/proc/%ld/task/%ld/comm", (long)pid, (long)tid);
+    if (!read_text_file(path, comm, capacity)) return 0;
+    length = strlen(comm);
+    while (length && (comm[length - 1U] == '\n' || comm[length - 1U] == '\r'))
+        comm[--length] = '\0';
+    return length > 0U;
+}
+
+static unsigned int process_count_by_comm(const char *expected, pid_t *result)
+{
+    DIR *directory = opendir("/proc");
+    struct dirent *entry;
+    pid_t found = 0;
+    unsigned int matches = 0U;
+    if (!directory) return UINT_MAX;
+    while ((entry = readdir(directory)) != 0) {
+        pid_t pid;
+        char comm[64];
+        if (!numeric_name(entry->d_name, &pid) ||
+            !read_task_comm(pid, pid, comm, sizeof(comm)) ||
+            strcmp(comm, expected) != 0) continue;
+        found = pid;
+        ++matches;
+    }
+    closedir(directory);
+    if (result) *result = found;
+    return matches;
+}
+
+static int find_process_by_comm(const char *expected, pid_t *result)
+{
+    return process_count_by_comm(expected, result) == 1U;
+}
+
+static int process_threads_contract(
+    pid_t pid,
+    const char *expected_cpu,
+    int require_nice,
+    long expected_nice,
+    int require_rtapi_thread)
+{
+    char path[64];
+    DIR *directory;
+    struct dirent *entry;
+    unsigned int thread_count = 0U;
+    unsigned int realtime_count = 0U;
+    snprintf(path, sizeof(path), "/proc/%ld/task", (long)pid);
+    directory = opendir(path);
+    if (!directory) return 0;
+    while ((entry = readdir(directory)) != 0) {
+        pid_t tid;
+        char cpu[32];
+        char comm[64];
+        long nice_value = 0;
+        long rt_priority = 0;
+        long policy = 0;
+        if (!numeric_name(entry->d_name, &tid)) continue;
+        if (!read_task_cpu_list(pid, tid, cpu, sizeof(cpu)) ||
+            strcmp(cpu, expected_cpu) != 0 ||
+            !read_task_stat(pid, tid, 0, &nice_value, &rt_priority, &policy)) {
+            closedir(directory);
+            return 0;
+        }
+        if (require_nice && nice_value != expected_nice) {
+            closedir(directory);
+            return 0;
+        }
+        if (read_task_comm(pid, tid, comm, sizeof(comm)) &&
+            strncmp(comm, "rtapi_app:T", 11U) == 0) {
+            if (policy != 1 && policy != 2) {
+                closedir(directory);
+                return 0;
+            }
+            ++realtime_count;
+        }
+        ++thread_count;
+    }
+    closedir(directory);
+    return thread_count > 0U && (!require_rtapi_thread || realtime_count > 0U);
+}
+
+static int register_process(BackendReadinessState *state, pid_t pid)
+{
+    uint64_t start_ticks = 0U;
+    if (!state || state->registered_count >= V5_BACKEND_REGISTERED_PROCESS_CAP ||
+        !read_task_stat(pid, pid, &start_ticks, 0, 0, 0)) return 0;
+    state->registered[state->registered_count].pid = pid;
+    state->registered[state->registered_count].start_ticks = start_ticks;
+    ++state->registered_count;
+    return 1;
+}
+
+static const char *registered_processes_failure(const BackendReadinessState *state)
+{
+    size_t index;
+    if (!state || state->registered_count != V5_BACKEND_REGISTERED_PROCESS_CAP)
+        return "BACKEND_REVOKED_IDENTITY_COUNT";
+    for (index = 0U; index < state->registered_count; ++index) {
+        uint64_t current = 0U;
+        const BackendRegisteredProcess *record = &state->registered[index];
+        if (!read_task_stat(record->pid, record->pid, &current, 0, 0, 0)) {
+            static char code[V5_BACKEND_READINESS_CODE_CAP];
+            snprintf(code, sizeof(code), "BACKEND_REVOKED_PID_READ_%u_%ld",
+                     (unsigned int)index, (long)record->pid);
+            return code;
+        }
+        if (current != record->start_ticks) {
+            static char code[V5_BACKEND_READINESS_CODE_CAP];
+            snprintf(code, sizeof(code), "BACKEND_REVOKED_PID_REUSED_%u_%ld",
+                     (unsigned int)index, (long)record->pid);
+            return code;
+        }
+    }
+    return 0;
+}
+
+static int irq_affinity_contract(const char *label, const char *expected_cpu)
+{
+    FILE *stream = fopen("/proc/interrupts", "r");
+    char line[1024];
+    unsigned int found = 0U;
+    if (!stream) return 0;
+    while (fgets(line, sizeof(line), stream)) {
+        char *cursor;
+        char *end = 0;
+        long irq;
+        char path[96];
+        char actual[64];
+        size_t length;
+        if (!strstr(line, label)) continue;
+        cursor = line;
+        while (*cursor == ' ' || *cursor == '\t') ++cursor;
+        irq = strtol(cursor, &end, 10);
+        if (!end || end == cursor || *end != ':' || irq < 0) {
+            fclose(stream);
+            return 0;
+        }
+        snprintf(path, sizeof(path), "/proc/irq/%ld/smp_affinity_list", irq);
+        if (!read_text_file(path, actual, sizeof(actual))) {
+            fclose(stream);
+            return 0;
+        }
+        length = strcspn(actual, "\r\n");
+        actual[length] = '\0';
+        if (strcmp(actual, expected_cpu) != 0) {
+            fclose(stream);
+            return 0;
+        }
+        ++found;
+    }
+    fclose(stream);
+    return found > 0U;
+}
+
+static int queue_mask_contract(const char *iface, unsigned long expected)
+{
+    char pattern[160];
+    glob_t paths;
+    size_t index;
+    int result = 1;
+    snprintf(pattern, sizeof(pattern), "/sys/class/net/%s/queues/rx-*/rps_cpus", iface);
+    memset(&paths, 0, sizeof(paths));
+    if (glob(pattern, 0, 0, &paths) != 0 || paths.gl_pathc == 0U) {
+        globfree(&paths);
+        return 0;
+    }
+    for (index = 0U; index < paths.gl_pathc; ++index) {
+        char text[128];
+        char compact[128];
+        char *end = 0;
+        size_t source;
+        size_t target = 0U;
+        unsigned long actual;
+        if (!read_text_file(paths.gl_pathv[index], text, sizeof(text))) {
+            result = 0;
+            break;
+        }
+        for (source = 0U; text[source] && target + 1U < sizeof(compact); ++source) {
+            if (text[source] != ',' && text[source] != '\r' && text[source] != '\n' &&
+                text[source] != ' ' && text[source] != '\t')
+                compact[target++] = text[source];
+        }
+        compact[target] = '\0';
+        actual = strtoul(compact, &end, 16);
+        if (!target || !end || *end || actual != expected) {
+            result = 0;
+            break;
+        }
+    }
+    globfree(&paths);
+    return result;
+}
+
+static int task_group_contract(
+    const char *exact_name,
+    const char *prefix,
+    const char *expected_cpu,
+    int require_policy,
+    long expected_policy,
+    long expected_rt_priority,
+    unsigned int minimum,
+    unsigned int maximum)
+{
+    DIR *processes = opendir("/proc");
+    struct dirent *process_entry;
+    unsigned int matches = 0U;
+    if (!processes) return 0;
+    while ((process_entry = readdir(processes)) != 0) {
+        pid_t pid;
+        char task_path[64];
+        DIR *tasks;
+        struct dirent *task_entry;
+        if (!numeric_name(process_entry->d_name, &pid)) continue;
+        snprintf(task_path, sizeof(task_path), "/proc/%ld/task", (long)pid);
+        tasks = opendir(task_path);
+        if (!tasks) continue;
+        while ((task_entry = readdir(tasks)) != 0) {
+            pid_t tid;
+            char comm[64];
+            char cpu[32];
+            long rt_priority = 0;
+            long policy = 0;
+            int name_matches;
+            if (!numeric_name(task_entry->d_name, &tid) ||
+                !read_task_comm(pid, tid, comm, sizeof(comm))) continue;
+            name_matches = exact_name ? strcmp(comm, exact_name) == 0 :
+                (prefix && strncmp(comm, prefix, strlen(prefix)) == 0);
+            if (!name_matches) continue;
+            if (!read_task_cpu_list(pid, tid, cpu, sizeof(cpu)) ||
+                strcmp(cpu, expected_cpu) != 0 ||
+                !read_task_stat(pid, tid, 0, 0, &rt_priority, &policy) ||
+                (require_policy &&
+                 (policy != expected_policy || rt_priority != expected_rt_priority))) {
+                closedir(tasks);
+                closedir(processes);
+                return 0;
+            }
+            ++matches;
+        }
+        closedir(tasks);
+    }
+    closedir(processes);
+    return matches >= minimum && (!maximum || matches <= maximum);
+}
+
+static int backend_cpu_contract_capture(BackendReadinessState *state)
+{
+    static const char *const non_realtime[] = {
+        "linuxcncsvr", "milltask", "io", "linuxcncrsh"
+    };
+    pid_t pid;
+    size_t index;
+    if (!state) return 0;
+    state->registered_count = 0U;
+    if (!process_threads_contract(getpid(), "1", 1, -5, 0) ||
+        !register_process(state, getpid())) return 0;
+    for (index = 0U; index < sizeof(non_realtime) / sizeof(non_realtime[0]); ++index) {
+        if (!find_process_by_comm(non_realtime[index], &pid) ||
+            !process_threads_contract(pid, "1", 1, -5, 0) ||
+            !register_process(state, pid)) return 0;
+    }
+    if (!find_process_by_comm("rtapi_app", &pid) ||
+        !process_threads_contract(pid, "0", 0, 0, 1) ||
+        !register_process(state, pid)) return 0;
+    if (process_count_by_comm("irqbalance", 0) != 0U ||
+        !irq_affinity_contract("eth0", "1") ||
+        !irq_affinity_contract("eth1", "0") ||
+        !queue_mask_contract("eth0", 2UL) ||
+        !queue_mask_contract("eth1", 0UL) ||
+        !task_group_contract("ksoftirqd/0", 0, "0", 1, 1, 49, 1U, 1U) ||
+        !task_group_contract(0, "EtherCAT", "0", 0, 0, 0, 1U, 0U))
+        return 0;
+    return state->registered_count == V5_BACKEND_REGISTERED_PROCESS_CAP;
+}
+
+static uint32_t backend_lifecycle_generation(uint64_t owner_start_ticks)
+{
+    struct BackendLifecycleIdentity {
+        char boot_id[64];
+        char active_ini[192];
+        uint64_t owner_start_ticks;
+        uint32_t owner_pid;
+        uint32_t expected_slaves;
+        uint32_t expected_wkc;
+    } identity;
+    size_t length;
+    memset(&identity, 0, sizeof(identity));
+    if (!read_text_file(
+            "/proc/sys/kernel/random/boot_id",
+            identity.boot_id,
+            sizeof(identity.boot_id))) {
+        return 0U;
+    }
+    length = strcspn(identity.boot_id, "\r\n");
+    identity.boot_id[length] = '\0';
+    snprintf(identity.active_ini, sizeof(identity.active_ini), "%s", g_config.active_ini);
+    identity.owner_start_ticks = owner_start_ticks;
+    identity.owner_pid = (uint32_t)getpid();
+    identity.expected_slaves = g_config.expected_slaves;
+    identity.expected_wkc = g_config.expected_wkc;
+    {
+        uint32_t generation = fnv1a(&identity, sizeof(identity));
+        return generation ? generation : 1U;
+    }
+}
+
+static void backend_readiness_arm(BackendReadinessState *state)
+{
+    uint64_t now;
+    if (!state || state->armed) return;
+    state->armed = 1;
+    now = monotonic_ns();
+    if (!backend_cpu_contract_capture(state)) {
+        state->revoked = 1;
+        state->registered_count = 0U;
+        return;
+    }
+    state->cpu_contract_ready = 1;
+    state->cpu_contract_ready_ns = now;
+    state->last_identity_check_ns = now;
+}
+
+static int backend_runtime_actual_valid(const BackendReadinessState *state)
+{
+    return state && backend_contract_wired && backend_activated &&
+           backend_slaves_responding == g_config.expected_slaves &&
+           backend_all_op &&
+           backend_domain_wkc == g_config.expected_wkc &&
+           backend_domain_wc_complete && backend_dc_phased &&
+           backend_dc_time_valid && backend_dc_time_age_cycles == 0U &&
+           backend_dc_time_error_count == state->first_dc_errors;
+}
+
+static const char *backend_runtime_actual_failure(const BackendReadinessState *state)
+{
+    if (!state) return "BACKEND_REVOKED_STATE";
+    if (!backend_contract_wired) return "BACKEND_REVOKED_CONTRACT_UNWIRED";
+    if (!backend_activated) return "BACKEND_REVOKED_ACTIVATION";
+    if (backend_slaves_responding != g_config.expected_slaves)
+        return "BACKEND_REVOKED_SLAVES";
+    if (!backend_all_op) return "BACKEND_REVOKED_OP";
+    if (backend_domain_wkc != g_config.expected_wkc) return "BACKEND_REVOKED_WKC";
+    if (!backend_domain_wc_complete) return "BACKEND_REVOKED_WC_INCOMPLETE";
+    if (!backend_dc_phased) return "BACKEND_REVOKED_DC_PHASE";
+    if (!backend_dc_time_valid) return "BACKEND_REVOKED_DC_INVALID";
+    if (backend_dc_time_age_cycles != 0U) return "BACKEND_REVOKED_DC_STALE";
+    if (backend_dc_time_error_count != state->first_dc_errors)
+        return "BACKEND_REVOKED_DC_ERRORS";
+    return 0;
+}
+
+static void backend_readiness_revoke(
+    BackendReadinessState *state,
+    const char *code)
+{
+    if (!state || state->revoked) return;
+    state->revoked = 1;
+    snprintf(state->revoke_code, sizeof(state->revoke_code), "%s",
+             code ? code : "BACKEND_READINESS_REVOKED");
+    fprintf(stderr, "v5_native_hal_owner readiness revoked: %s\n",
+            state->revoke_code);
+}
+
+static void backend_readiness_tick(uint64_t now)
+{
+    BackendReadinessState *state = &g_backend_readiness;
+    uint32_t dc_seq = backend_dc_time_ok_seq;
+    uint32_t dc_errors = backend_dc_time_error_count;
+
+    if (state->armed && !state->revoked &&
+        (!state->last_identity_check_ns ||
+         now - state->last_identity_check_ns >= V5_BACKEND_IDENTITY_CHECK_NS)) {
+        state->last_identity_check_ns = now;
+        const char *failure = registered_processes_failure(state);
+        if (failure) backend_readiness_revoke(state, failure);
+    }
+
+    if (state->revoked) {
+        state->backend_data_ready = 0;
+        state->motion_backend_ready = 0;
+        return;
+    }
+
+    if (backend_contract_wired && backend_activated &&
+        backend_domain_wkc == g_config.expected_wkc &&
+        backend_domain_wc_complete && !state->first_full_wkc_ns) {
+        state->first_full_wkc_ns = now;
+    }
+
+    if (!state->motion_backend_ready && state->dc_fresh_pair_ready_ns &&
+        dc_errors != state->first_dc_errors) {
+        state->dc_fresh_pair_ready_ns = 0U;
+        state->first_dc_seen = 0;
+    }
+
+    if (!state->dc_fresh_pair_ready_ns && backend_contract_wired &&
+        backend_dc_time_valid && backend_dc_time_age_cycles == 0U && dc_seq) {
+        if (!state->first_dc_seen || dc_errors != state->first_dc_errors) {
+            state->first_dc_seen = 1;
+            state->first_dc_seq = dc_seq;
+            state->first_dc_errors = dc_errors;
+        } else if (dc_seq != state->first_dc_seq) {
+            state->dc_fresh_pair_ready_ns = now;
+        }
+    }
+
+    if (!state->backend_data_ready && state->armed &&
+        state->cpu_contract_ready && backend_contract_wired && backend_activated) {
+        state->backend_data_ready = 1;
+        state->backend_data_ready_ns = now;
+    }
+
+    if (!state->motion_backend_ready && state->backend_data_ready &&
+        state->first_full_wkc_ns && state->dc_fresh_pair_ready_ns &&
+        backend_runtime_actual_valid(state)) {
+        state->motion_backend_ready = 1;
+        state->backend_ready_published_ns = now;
+    } else if (state->backend_data_ready &&
+               (!backend_contract_wired || !backend_activated)) {
+        backend_readiness_revoke(state, backend_runtime_actual_failure(state));
+        state->backend_data_ready = 0;
+        state->motion_backend_ready = 0;
+    } else if (state->motion_backend_ready && !backend_runtime_actual_valid(state)) {
+        backend_readiness_revoke(state, backend_runtime_actual_failure(state));
+        state->backend_data_ready = 0;
+        state->motion_backend_ready = 0;
+    }
+}
+
+static void fill_backend_readiness_response(
+    const V5BackendReadinessRequest *request,
+    V5BackendReadinessResponse *response)
+{
+    const BackendReadinessState *state = &g_backend_readiness;
+    memset(response, 0, sizeof(*response));
+    response->magic = V5_BACKEND_READINESS_MAGIC;
+    response->version = V5_BACKEND_READINESS_VERSION;
+    response->size = (uint32_t)sizeof(*response);
+    response->operation = request->operation;
+    response->request_id = request->request_id;
+    response->owner_pid = (uint32_t)getpid();
+    response->owner_start_ticks = state->owner_start_ticks;
+    response->generation = state->lifecycle_generation;
+    response->armed = state->armed ? 1U : 0U;
+    response->backend_data_ready = state->backend_data_ready ? 1U : 0U;
+    response->motion_backend_ready = state->motion_backend_ready ? 1U : 0U;
+    response->revoked = state->revoked ? 1U : 0U;
+    response->cpu_contract_ready = state->cpu_contract_ready ? 1U : 0U;
+    response->expected_slaves = g_config.expected_slaves;
+    response->actual_slaves = backend_slaves_responding;
+    response->expected_wkc = g_config.expected_wkc;
+    response->actual_wkc = backend_domain_wkc;
+    response->wkc_complete = backend_domain_wc_complete ? 1U : 0U;
+    response->all_op = backend_all_op ? 1U : 0U;
+    response->dc_phased = backend_dc_phased ? 1U : 0U;
+    response->dc_time_valid = backend_dc_time_valid ? 1U : 0U;
+    response->dc_time_age_cycles = backend_dc_time_age_cycles;
+    response->dc_time_ok_seq = backend_dc_time_ok_seq;
+    response->dc_time_error_count = backend_dc_time_error_count;
+    response->cpu_contract_ready_ns = state->cpu_contract_ready_ns;
+    response->first_full_wkc_ns = state->first_full_wkc_ns;
+    response->dc_fresh_pair_ready_ns = state->dc_fresh_pair_ready_ns;
+    response->backend_data_ready_ns = state->backend_data_ready_ns;
+    response->backend_ready_published_ns = state->backend_ready_published_ns;
+    if (state->revoked) {
+        response->status = V5_BACKEND_READINESS_STATUS_REVOKED;
+        snprintf(response->code, sizeof(response->code), "%s",
+                 state->revoke_code[0] ? state->revoke_code : "BACKEND_READINESS_REVOKED");
+    } else if (!state->armed) {
+        response->status = V5_BACKEND_READINESS_STATUS_UNAVAILABLE;
+        snprintf(response->code, sizeof(response->code), "%s", "BACKEND_READINESS_NOT_ARMED");
+    } else {
+        response->status = V5_BACKEND_READINESS_STATUS_OK;
+        snprintf(response->code, sizeof(response->code), "%s",
+                 state->motion_backend_ready ? "BACKEND_MOTION_READY" :
+                 state->backend_data_ready ? "BACKEND_DATA_READY" :
+                 state->cpu_contract_ready ? "BACKEND_CPU_CONTRACT_READY" :
+                                             "BACKEND_READINESS_PENDING");
+    }
+}
+
+static void process_backend_readiness_request(
+    const V5BackendReadinessRequest *request,
+    V5BackendReadinessResponse *response)
+{
+    if (request->operation == V5_BACKEND_READINESS_OP_ARM) {
+        backend_readiness_arm(&g_backend_readiness);
+    } else if (request->operation != V5_BACKEND_READINESS_OP_STATUS) {
+        fill_backend_readiness_response(request, response);
+        response->status = V5_BACKEND_READINESS_STATUS_BAD_REQUEST;
+        snprintf(response->code, sizeof(response->code), "%s", "BACKEND_READINESS_BAD_REQUEST");
+        return;
+    }
+    backend_readiness_tick(monotonic_ns());
+    fill_backend_readiness_response(request, response);
+}
+
 static int write_full(int fd, const void *buffer, size_t size)
 {
     const unsigned char *cursor = (const unsigned char *)buffer;
@@ -709,6 +1365,7 @@ static void update_home_rtcp_latch(void)
 static void owner_tick(void)
 {
     uint64_t now = monotonic_ns();
+    backend_readiness_tick(now);
     if (!g_last_heartbeat_ns || now - g_last_heartbeat_ns >= 20000000ULL) {
         heartbeat = !heartbeat;
         g_last_heartbeat_ns = now;
@@ -939,6 +1596,23 @@ static double required_double(int argc, char **argv, const char *name)
     return value;
 }
 
+static uint32_t required_u32(int argc, char **argv, const char *name)
+{
+    const char *text = arg_value(argc, argv, name);
+    char *end = 0;
+    unsigned long value;
+    if (!text) {
+        fprintf(stderr, "v5_native_hal_owner missing %s\n", name);
+        exit(2);
+    }
+    value = strtoul(text, &end, 10);
+    if (!end || *end || !value || value > UINT32_MAX) {
+        fprintf(stderr, "v5_native_hal_owner invalid %s=%s\n", name, text);
+        exit(2);
+    }
+    return (uint32_t)value;
+}
+
 static double optional_double(int argc, char **argv, const char *name)
 {
     const char *text = arg_value(argc, argv, name);
@@ -970,11 +1644,23 @@ static void userinit(int argc, char **argv)
     const char *model = arg_value(argc, argv, "--model");
     const char *kins_module = arg_value(argc, argv, "--kins-module");
     const char *rtcp_default = arg_value(argc, argv, "--rtcp-default");
+    const char *active_ini = arg_value(argc, argv, "--active-ini");
     const V5NativeG53ModelBranch *branch;
     const V5NativeG53ModelBranch *resolved_branch;
     V5NativeG53GeometryInput geometry;
     unsigned int slot;
 
+    if (!active_ini || active_ini[0] != '/' || access(active_ini, R_OK) != 0) {
+        fprintf(stderr, "v5_native_hal_owner invalid --active-ini\n");
+        exit(2);
+    }
+    snprintf(g_config.active_ini, sizeof(g_config.active_ini), "%s", active_ini);
+    if (strcmp(g_config.active_ini, active_ini) != 0) {
+        fprintf(stderr, "v5_native_hal_owner --active-ini too long\n");
+        exit(2);
+    }
+    g_config.expected_slaves = required_u32(argc, argv, "--expected-slaves");
+    g_config.expected_wkc = required_u32(argc, argv, "--expected-wkc");
     branch = v5_native_g53_model_find(model);
     if (!v5_native_g53_model_branch_valid(branch) ||
         !kins_module || strcmp(kins_module, branch->kinematics_module) != 0) {
@@ -1030,7 +1716,7 @@ static void on_signal(int signo)
     g_stop = 1;
 }
 
-static int prepare_socket(void)
+static int prepare_socket(const char *path)
 {
     struct sockaddr_un address;
     int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
@@ -1039,7 +1725,12 @@ static int prepare_socket(void)
     }
     memset(&address, 0, sizeof(address));
     address.sun_family = AF_UNIX;
-    snprintf(address.sun_path, sizeof(address.sun_path), "%s", V5_NATIVE_HAL_OWNER_SOCKET_PATH);
+    if (!path || strlen(path) >= sizeof(address.sun_path)) {
+        close(fd);
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    snprintf(address.sun_path, sizeof(address.sun_path), "%s", path);
     unlink(address.sun_path);
     if (bind(fd, (const struct sockaddr *)&address, sizeof(address)) != 0 ||
         chmod(address.sun_path, 0660) != 0 || chown(address.sun_path, (uid_t)-1, g_product_gid) != 0 ||
@@ -1054,8 +1745,9 @@ static int prepare_socket(void)
 void user_mainloop(void)
 {
     struct group *group = getgrnam("petalinux");
-    struct pollfd poll_fd;
-    int server_fd;
+    struct pollfd poll_fds[2];
+    int native_server_fd;
+    int readiness_server_fd;
     if (!group || mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
         fprintf(stderr, "v5_native_hal_owner group/mlock initialization failed errno=%d\n", errno);
         return;
@@ -1076,6 +1768,18 @@ void user_mainloop(void)
     g_gcode_rearm_seen_low = 0;
     g_previous_gcode_request = rtcp_gcode_request ? 1 : 0;
     g_hal_ready_ns = monotonic_ns();
+    memset(&g_backend_readiness, 0, sizeof(g_backend_readiness));
+    if (!read_task_stat(
+            getpid(), getpid(), &g_backend_readiness.owner_start_ticks, 0, 0, 0)) {
+        fprintf(stderr, "v5_native_hal_owner owner identity unavailable\n");
+        return;
+    }
+    g_backend_readiness.lifecycle_generation =
+        backend_lifecycle_generation(g_backend_readiness.owner_start_ticks);
+    if (!g_backend_readiness.lifecycle_generation) {
+        fprintf(stderr, "v5_native_hal_owner lifecycle generation unavailable\n");
+        return;
+    }
     publish_display_metadata();
     home_table_mapping_valid = 0;
     home_table_map_gen = 0U;
@@ -1100,35 +1804,61 @@ void user_mainloop(void)
     kins_x_offset = g_config.kins.x_offset;
     kins_y_offset = g_config.kins.y_offset;
     kins_z_offset = g_config.kins.z_offset;
-    server_fd = prepare_socket();
-    if (server_fd < 0) {
+    native_server_fd = prepare_socket(V5_NATIVE_HAL_OWNER_SOCKET_PATH);
+    if (native_server_fd < 0) {
         fprintf(stderr, "v5_native_hal_owner socket initialization failed errno=%d\n", errno);
         return;
     }
-    poll_fd.fd = server_fd;
-    poll_fd.events = POLLIN;
+    readiness_server_fd = prepare_socket(V5_BACKEND_READINESS_SOCKET_PATH);
+    if (readiness_server_fd < 0) {
+        fprintf(stderr, "v5_native_hal_owner readiness socket initialization failed errno=%d\n", errno);
+        close(native_server_fd);
+        unlink(V5_NATIVE_HAL_OWNER_SOCKET_PATH);
+        return;
+    }
+    memset(poll_fds, 0, sizeof(poll_fds));
+    poll_fds[0].fd = native_server_fd;
+    poll_fds[0].events = POLLIN;
+    poll_fds[1].fd = readiness_server_fd;
+    poll_fds[1].events = POLLIN;
     while (!g_stop) {
         int ready;
+        unsigned int server_index;
         owner_tick();
-        ready = poll(&poll_fd, 1U, 2);
-        if (ready > 0 && (poll_fd.revents & POLLIN)) {
-            int client = accept(server_fd, 0, 0);
+        ready = poll(poll_fds, 2U, 2);
+        if (ready <= 0) continue;
+        for (server_index = 0U; server_index < 2U; ++server_index) {
+            int client;
+            if (!(poll_fds[server_index].revents & POLLIN)) continue;
+            client = accept(poll_fds[server_index].fd, 0, 0);
             if (client >= 0) {
                 int descriptor_flags = fcntl(client, F_GETFD);
                 struct timeval timeout = {0, 20000};
-                V5NativeHalOwnerRequest request;
-                V5NativeHalOwnerResponse response;
                 if (descriptor_flags < 0 || fcntl(client, F_SETFD, descriptor_flags | FD_CLOEXEC) != 0) {
                     close(client);
                     continue;
                 }
                 (void)setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-                if (read_full(client, &request, sizeof(request)) &&
-                    request.magic == V5_NATIVE_HAL_OWNER_MAGIC &&
-                    request.version == V5_NATIVE_HAL_OWNER_VERSION &&
-                    request.size == (uint32_t)sizeof(request)) {
-                    process_request(&request, &response);
-                    (void)write_full(client, &response, sizeof(response));
+                if (server_index == 0U) {
+                    V5NativeHalOwnerRequest request;
+                    V5NativeHalOwnerResponse response;
+                    if (read_full(client, &request, sizeof(request)) &&
+                        request.magic == V5_NATIVE_HAL_OWNER_MAGIC &&
+                        request.version == V5_NATIVE_HAL_OWNER_VERSION &&
+                        request.size == (uint32_t)sizeof(request)) {
+                        process_request(&request, &response);
+                        (void)write_full(client, &response, sizeof(response));
+                    }
+                } else {
+                    V5BackendReadinessRequest request;
+                    V5BackendReadinessResponse response;
+                    if (read_full(client, &request, sizeof(request)) &&
+                        request.magic == V5_BACKEND_READINESS_MAGIC &&
+                        request.version == V5_BACKEND_READINESS_VERSION &&
+                        request.size == (uint32_t)sizeof(request)) {
+                        process_backend_readiness_request(&request, &response);
+                        (void)write_full(client, &response, sizeof(response));
+                    }
                 }
                 close(client);
             }
@@ -1138,6 +1868,8 @@ void user_mainloop(void)
     safety_force = 1;
     usleep(5000U);
     publish_status();
-    close(server_fd);
+    close(native_server_fd);
+    close(readiness_server_fd);
     unlink(V5_NATIVE_HAL_OWNER_SOCKET_PATH);
+    unlink(V5_BACKEND_READINESS_SOCKET_PATH);
 }

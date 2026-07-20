@@ -239,25 +239,23 @@ def http_probe(host: str) -> dict[str, Any] | None:
 
 def terminal_complete(probe: dict[str, Any], info: dict[str, Any]) -> bool:
     ready = info.get("ready_metadata") or {}
-    queue = ready.get("cache_queue") or []
-    required_pages = ["main", "settings", "tool", "probe", "offset", "io", "network", "program", "mdi"]
-    cache_ok = len(queue) == len(required_pages)
-    observed_peak = 0
-    for index, item in enumerate(queue, 1):
-        observed_peak = max(observed_peak, int(item.get("cpu_pct_x100") or 0))
-        cache_ok = cache_ok and (
-            item.get("page") == required_pages[index - 1]
-            and int(item.get("completed") or 0) == index
-            and int(item.get("total") or 0) == len(required_pages)
-            and int(item.get("worker_id", -1)) == 0
-            and int(item.get("cache_valid") or 0) == 1
-            and int(item.get("invalidation_clean") or 0) == 1
-            and int(item.get("elapsed_us") or 0) > 0
-            and int(item.get("yield_us") or 0) > 0
-            and int(item.get("create_us") or 0) + int(item.get("prepare_us") or 0)
-                + int(item.get("yield_us") or 0) <= int(item.get("elapsed_us") or 0)
-            and int(item.get("peak_cpu_pct_x100") or -1) == observed_peak
-            and int(item.get("budget_bytes") or 0) == 31_948_800)
+    main_cache = ready.get("main_cache") or {}
+    cache_ok = (
+        ready.get("cache_policy") == "main_first_navigation_lazy_v1"
+        and int(ready.get("cache_page_count") or 0) == 1
+        and int(ready.get("cache_registered_page_count") or 0) == 9
+        and main_cache.get("page") == "main"
+        and int(main_cache.get("slot", -1)) == 0
+        and all(int(main_cache.get(key) or 0) == 1 for key in (
+            "create_ok", "apply_ok", "render_ok", "capture_ok",
+            "cache_valid", "invalidation_clean"))
+        and int(main_cache.get("elapsed_us") or 0) > 0
+        and int(main_cache.get("create_us") or 0) > 0
+        and int(main_cache.get("prepare_us") or 0) > 0
+        and int(main_cache.get("create_us") or 0)
+            + int(main_cache.get("prepare_us") or 0)
+            <= int(main_cache.get("elapsed_us") or 0)
+        and int(main_cache.get("budget_bytes") or 0) == 31_948_800)
     first = ready.get("first_frame") or {}
     rects = first.get("rects") or []
     full_blit = (first.get("x") == 0 and first.get("y") == 0
@@ -270,7 +268,6 @@ def terminal_complete(probe: dict[str, Any], info: dict[str, Any]) -> bool:
                  and int(ready.get("current_frame_id") or 0) >= int(first.get("frame_id") or 0))
     return (info.get("ui_ready") is True and full_blit
             and cache_ok
-            and int(ready.get("cache_page_count") or 0) == 9
             and int(ready.get("cache_budget_bytes") or 0) == 31_948_800
             and str(ready.get("boot_id") or "") == str(probe.get("boot_id") or "")
             and bool(str(ready.get("ui_instance_id") or ""))

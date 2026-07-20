@@ -670,8 +670,10 @@ static void execute_settings_axis_zero_live_apply(
 {
     V5NativeAxisZeroLiveResult result;
     char reject_reason[64];
+    char window_code[64];
     v5_native_axis_zero_live_result_init(&result);
     reject_reason[0] = '\0';
+    window_code[0] = '\0';
     if (!v5_command_gate_validate_envelope(
             frame, V5_COMMAND_GATE_IPC_OP_SETTINGS_AXIS_ZERO_LIVE_APPLY,
             reject_reason, sizeof(reject_reason)) ||
@@ -687,12 +689,13 @@ static void execute_settings_axis_zero_live_apply(
         return;
     }
     linuxcncrsh_lock();
-    if (v5_drive_write_window_blocks_kind(V5_COMMAND_START)) {
+    if (!v5_drive_write_window_check_owner(
+            frame->text_value, window_code, sizeof(window_code))) {
         linuxcncrsh_unlock();
         response->send_status = V5_COMMAND_GATE_SEND_INVALID;
         v5_command_gate_response_copy_text(
             response->readback_code, sizeof(response->readback_code),
-            "DRIVE_WRITE_WINDOW_ACTIVE");
+            window_code[0] ? window_code : "DRIVE_WRITE_WINDOW_OWNER_REQUIRED");
         return;
     }
     (void)v5_native_axis_zero_live_apply(

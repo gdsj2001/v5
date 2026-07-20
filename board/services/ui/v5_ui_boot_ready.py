@@ -1,32 +1,21 @@
 #!/usr/bin/env python3
 """Validate the off-screen page queue and publish the one-shot UI ready gate."""
 from __future__ import annotations
-import argparse, binascii, ctypes, errno, json, math, os, re, select, struct, tempfile, time, urllib.error, urllib.request, uuid
+import argparse, binascii, ctypes, errno, json, math, os, re, select, struct, subprocess, tempfile, time, urllib.error, urllib.request, uuid
 from pathlib import Path
 from v5_status_shm_reader import status_shm_payload_valid
-from v5_ui_cache_queue_contract import validate_queue_trace
-EXPECTED_QUEUE = (
-    "main",
-    "settings",
-    "tool",
-    "probe",
-    "offset",
-    "io",
-    "network",
-    "program",
-    "mdi",
-)
+from v5_ui_main_cache_contract import validate_main_cache_trace
+BOOT_CACHE_POLICY = "main_first_navigation_lazy_v1"
+REGISTERED_PAGE_COUNT = 9
 EXPECTED_CACHE_BUDGET_BYTES = 1024 * 600 * 4 * 13
-CACHE_LINE_RE = re.compile(
-    r"^V5_UI_CACHE_PREP page=(?P<page>[a-z]+) "
-    r"completed=(?P<completed>[0-9]+) total=(?P<total>[0-9]+) "
+MAIN_CACHE_LINE_RE = re.compile(
+    r"^V5_UI_MAIN_CACHE event=end page=(?P<page>[a-z]+) slot=(?P<slot>[0-9]+) "
+    r"create_ok=(?P<create_ok>[01]) apply_ok=(?P<apply_ok>[01]) "
+    r"render_ok=(?P<render_ok>[01]) capture_ok=(?P<capture_ok>[01]) "
+    r"cache_valid=(?P<cache_valid>[01]) invalidation_clean=(?P<invalidation_clean>[01]) "
     r"elapsed_us=(?P<elapsed>[0-9]+) "
     r"create_us=(?P<create>[0-9]+) prepare_us=(?P<prepare>[0-9]+) "
-    r"yield_us=(?P<yield_us>[0-9]+) "
     r"cpu_pct_x100=(?P<cpu_pct_x100>[0-9]+) "
-    r"peak_cpu_pct_x100=(?P<peak_cpu_pct_x100>[0-9]+) "
-    r"worker_id=(?P<worker_id>[0-9]+) cache_valid=(?P<cache_valid>[01]) "
-    r"invalidation_clean=(?P<invalidation_clean>[01]) "
     r"budget_bytes=(?P<budget>[0-9]+)$"
 )
 class ReadyError(RuntimeError): pass
@@ -496,59 +485,50 @@ def validate_final_publisher_barrier(snapshot_path, expected_ini,
         "baseline_markers": baseline_markers,
         "final_markers": final_markers,
     }
-def parse_cache_rows(text: str) -> list[dict]:
+def parse_main_cache(text: str) -> dict | None:
     rows: list[dict] = []
     for line in text.splitlines():
-        match = CACHE_LINE_RE.match(line.strip())
+        match = MAIN_CACHE_LINE_RE.match(line.strip())
         if not match:
             continue
         rows.append({
             "page": match.group("page"),
-            "completed": int(match.group("completed")),
-            "total": int(match.group("total")),
+            "slot": int(match.group("slot")),
+            "create_ok": int(match.group("create_ok")),
+            "apply_ok": int(match.group("apply_ok")),
+            "render_ok": int(match.group("render_ok")),
+            "capture_ok": int(match.group("capture_ok")),
             "elapsed_us": int(match.group("elapsed")),
             "create_us": int(match.group("create")),
             "prepare_us": int(match.group("prepare")),
-            "yield_us": int(match.group("yield_us")),
             "cpu_pct_x100": int(match.group("cpu_pct_x100")),
-            "peak_cpu_pct_x100": int(match.group("peak_cpu_pct_x100")),
-            "worker_id": int(match.group("worker_id")),
             "cache_valid": int(match.group("cache_valid")),
             "invalidation_clean": int(match.group("invalidation_clean")),
             "budget_bytes": int(match.group("budget")),
         })
-    return rows
-def validate_cache_rows(rows: list[dict]) -> None:
-    pages = tuple(row["page"] for row in rows)
-    observed_peak = 0
-    if pages != EXPECTED_QUEUE:
-        completed = len(rows)
-        failure_page = EXPECTED_QUEUE[completed] if completed < len(EXPECTED_QUEUE) else "queue_duplicate_or_extra"
+    if len(rows) > 1:
+        raise ReadyError(f"multiple Main cache completion rows found count={len(rows)}")
+    return rows[0] if rows else None
+def validate_main_cache(row: dict | None) -> None:
+    if not isinstance(row, dict):
+        raise ReadyError("Main cache completion row unavailable")
+    if row["page"] != "main" or row["slot"] != 0:
+        raise ReadyError(f"Main cache identity invalid row={row!r}")
+    for key in (
+        "create_ok", "apply_ok", "render_ok", "capture_ok",
+        "cache_valid", "invalidation_clean",
+    ):
+        if row[key] != 1:
+            raise ReadyError(f"Main cache incomplete key={key} row={row!r}")
+    if row["elapsed_us"] <= 0 or row["create_us"] <= 0 or row["prepare_us"] <= 0:
+        raise ReadyError(f"Main cache timing unavailable row={row!r}")
+    if row["create_us"] + row["prepare_us"] > row["elapsed_us"]:
+        raise ReadyError(f"Main cache timing counters exceed elapsed row={row!r}")
+    if row["budget_bytes"] != EXPECTED_CACHE_BUDGET_BYTES:
         raise ReadyError(
-            f"cache queue mismatch pages={pages!r} expected={EXPECTED_QUEUE!r} failure_page={failure_page}"
+            f"cache budget mismatch actual={row['budget_bytes']} "
+            f"expected={EXPECTED_CACHE_BUDGET_BYTES}"
         )
-    for index, row in enumerate(rows, 1):
-        if row["completed"] != index or row["total"] != len(EXPECTED_QUEUE):
-            raise ReadyError(f"cache queue counters invalid page={row['page']} row={row!r}")
-        if row["elapsed_us"] <= 0:
-            raise ReadyError(f"cache page elapsed time missing page={row['page']}")
-        if row["create_us"] + row["prepare_us"] + row["yield_us"] > row["elapsed_us"]:
-            raise ReadyError(f"cache page timing counters exceed elapsed page={row['page']} row={row!r}")
-        if row["yield_us"] <= 0 or row["worker_id"] != 0:
-            raise ReadyError(f"cache page was not serialized on worker 0 page={row['page']} row={row!r}")
-        if row["cache_valid"] != 1 or row["invalidation_clean"] != 1:
-            raise ReadyError(f"cache page retained dirty/incomplete state page={row['page']} row={row!r}")
-        observed_peak = max(observed_peak, row["cpu_pct_x100"])
-        if row["peak_cpu_pct_x100"] != observed_peak:
-            raise ReadyError(
-                f"cache CPU peak sequence invalid page={row['page']} "
-                f"actual={row['peak_cpu_pct_x100']} expected={observed_peak}"
-            )
-        if row["budget_bytes"] != EXPECTED_CACHE_BUDGET_BYTES:
-            raise ReadyError(
-                f"cache budget mismatch page={row['page']} actual={row['budget_bytes']} "
-                f"expected={EXPECTED_CACHE_BUDGET_BYTES}"
-            )
 def read_status_field(pid: int, field: str) -> str:
     try:
         lines = Path(f"/proc/{pid}/status").read_text(encoding="ascii", errors="replace").splitlines()
@@ -648,6 +628,41 @@ def publish_failure(path, owner_pid, owner_start_ticks, owner_role,
     )
     atomic_write_json(path, payload)
     return payload
+def require_backend_motion_ready(probe: Path) -> dict:
+    try:
+        completed = subprocess.run(
+            [str(probe), "--require", "motion"],
+            text=True,
+            capture_output=True,
+            timeout=1.0,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ReadyError(f"backend readiness query failed: {exc}") from exc
+    if completed.returncode != 0:
+        detail = (completed.stdout or completed.stderr).strip()
+        raise ReadyError(
+            f"motion backend readiness unavailable rc={completed.returncode} detail={detail}"
+        )
+    fields = {}
+    for item in completed.stdout.split():
+        if "=" in item:
+            key, value = item.split("=", 1)
+            fields[key] = value
+    try:
+        result = {
+            "generation": int(fields["generation"]),
+            "owner_pid": int(fields["owner_pid"]),
+            "owner_start_ticks": int(fields["owner_start_ticks"]),
+            "backend_ready_published_ns": int(fields["backend_ready_published"]),
+        }
+        motion_ready = int(fields["motion_ready"])
+        revoked = int(fields["revoked"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ReadyError("backend readiness response malformed") from exc
+    if (not all(result.values()) or motion_ready != 1 or revoked != 0):
+        raise ReadyError(f"motion backend readiness response invalid fields={fields!r}")
+    return result
 def build_ready_payload(
     ui_pid: int,
     ui_log: Path,
@@ -661,11 +676,11 @@ def build_ready_payload(
     except OSError as exc:
         raise ReadyError(f"cannot read UI boot log: {exc}") from exc
     try:
-        validate_queue_trace(text.splitlines())
+        validate_main_cache_trace(text.splitlines())
     except ValueError as exc:
-        raise ReadyError(f"cache queue evidence invalid: {exc}") from exc
-    rows = parse_cache_rows(text)
-    validate_cache_rows(rows)
+        raise ReadyError(f"Main cache evidence invalid: {exc}") from exc
+    main_cache = parse_main_cache(text)
+    validate_main_cache(main_cache)
     if "v5 UI remote framebuffer IPC ready:" not in text:
         raise ReadyError("UI process has not crossed the post-cache IPC-ready boundary")
     cpus_allowed = read_status_field(ui_pid, "Cpus_allowed_list")
@@ -695,11 +710,13 @@ def build_ready_payload(
         "cpus_allowed_list": cpus_allowed,
         "width": width,
         "height": height,
-        "cache_page_count": len(EXPECTED_QUEUE),
+        "cache_policy": BOOT_CACHE_POLICY,
+        "cache_page_count": 1,
+        "cache_registered_page_count": REGISTERED_PAGE_COUNT,
         "cache_slot_count": 13,
         "cache_budget_bytes": EXPECTED_CACHE_BUDGET_BYTES,
-        "cache_queue": rows,
-        "cache_peak_cpu_pct_x100": max(row["peak_cpu_pct_x100"] for row in rows),
+        "main_cache": main_cache,
+        "cache_peak_cpu_pct_x100": main_cache["cpu_pct_x100"],
         "first_frame": first_event,
         "current_frame_id": current_frame_id,
         "created_realtime_ns": time.time_ns(),
@@ -725,9 +742,11 @@ def wait_and_publish(args: argparse.Namespace) -> dict:
                 args.publisher_snapshot_path,
                 args.expected_ini,
             )
+            backend_ready = require_backend_motion_ready(args.backend_readiness_probe)
             if int(proc_start_ticks(args.ui_pid)) != int(payload["ui_start_ticks"]):
                 raise ReadyError(f"UI process identity changed before ready commit pid={args.ui_pid}")
             payload["publisher_barrier"] = publisher_barrier
+            payload["backend_ready"] = backend_ready
             atomic_write_json(args.ready_path, payload)
             return payload
         except FinalBarrierError:
@@ -735,21 +754,22 @@ def wait_and_publish(args: argparse.Namespace) -> dict:
         except (OSError, ReadyError, urllib.error.URLError) as exc:
             last_error = str(exc)
             time.sleep(0.05)
-    rows: list[dict] = []
+    main_cache = None
     try:
-        rows = parse_cache_rows(args.ui_log.read_text(encoding="utf-8", errors="replace"))
+        main_cache = parse_main_cache(args.ui_log.read_text(encoding="utf-8", errors="replace"))
     except OSError:
         pass
-    failure_page = EXPECTED_QUEUE[len(rows)] if len(rows) < len(EXPECTED_QUEUE) else "post_cache_ready"
+    failure_stage = "main_cache" if main_cache is None else "post_main_cache_ready"
     raise ReadyError(
-        f"UI ready timeout seconds={args.timeout:.1f} completed={len(rows)}/9 "
-        f"failure_page={failure_page} last_error={last_error}"
+        f"UI ready timeout seconds={args.timeout:.1f} failure_stage={failure_stage} "
+        f"last_error={last_error}"
     )
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Validate v5 UI boot cache queue and publish ui_ready metadata."); parser.add_argument("--pre-ui-inputs", action="store_true"); parser.add_argument("--publish-failure", action="store_true"); parser.add_argument("--expected-ini")
+    parser = argparse.ArgumentParser(description="Validate the v5 boot Main cache and publish ui_ready metadata."); parser.add_argument("--pre-ui-inputs", action="store_true"); parser.add_argument("--publish-failure", action="store_true"); parser.add_argument("--expected-ini")
     parser.add_argument("--ui-pid", type=int); parser.add_argument("--ui-log", type=Path)
     parser.add_argument("--ready-path", type=Path); parser.add_argument("--diagnostics-url")
     parser.add_argument("--publisher-snapshot-path", type=Path)
+    parser.add_argument("--backend-readiness-probe", type=Path)
     parser.add_argument("--startup-instance-id"); parser.add_argument("--failure-owner-pid", type=int)
     parser.add_argument("--failure-owner-start-ticks", type=int); parser.add_argument("--failure-owner-role")
     parser.add_argument("--failure-stage"); parser.add_argument("--failure-error")
@@ -784,7 +804,8 @@ def main() -> int:
             print("v5_ui_boot_inputs PASS " + json.dumps(result, sort_keys=True, separators=(",", ":")))
             return 0
         if not all((args.ui_pid, args.ui_log, args.ready_path, args.diagnostics_url,
-                    args.publisher_snapshot_path, args.expected_ini)):
+                    args.publisher_snapshot_path, args.expected_ini,
+                    args.backend_readiness_probe)):
             raise ReadyError("UI ready mode requires UI, diagnostics and publisher snapshot identity")
         payload = wait_and_publish(args)
     except ReadyError as exc:

@@ -14,11 +14,6 @@ int main(void)
     int root_b;
     int root_c;
     size_t bad_index = 99U;
-    V5UiPageCacheQueueEvidence evidence[3] = {
-        {0U, 0U, 0U, 0U, 1U, 1U, 1U, 1U, 1U, 1U, 1U},
-        {1U, 1U, 1U, 0U, 1U, 1U, 1U, 1U, 1U, 1U, 1U},
-        {2U, 2U, 2U, 0U, 1U, 1U, 1U, 1U, 1U, 1U, 1U}
-    };
     V5UiPageCacheRegistryEntry entries[3] = {
         {0U, 0U, "main", &root_a},
         {1U, 1U, "settings", &root_b},
@@ -54,6 +49,27 @@ int main(void)
     if (v5_ui_page_cache_registry_validate(entries, 3U, 3U, 4U, NULL)) {
         return 7;
     }
+    entries[2].name = "tool";
+    entries[1].root = NULL;
+    entries[2].root = NULL;
+    if (!v5_ui_page_cache_registry_validate_required_roots(
+            entries, 3U, 3U, 3U, 0x1U, &bad_index)) {
+        return 12;
+    }
+    if (v5_ui_page_cache_registry_validate_required_roots(
+            entries, 3U, 3U, 3U, 0x3U, &bad_index) || bad_index != 1U) {
+        return 13;
+    }
+    entries[1].root = &root_b;
+    if (!v5_ui_page_cache_registry_validate_required_roots(
+            entries, 3U, 3U, 3U, 0x3U, &bad_index)) {
+        return 14;
+    }
+    if (v5_ui_page_cache_registry_validate_required_roots(
+            entries, 3U, 3U, 3U, 0x8U, &bad_index)) {
+        return 15;
+    }
+    entries[2].root = &root_c;
     if (v5_ui_page_cache_affected_mask(2U, 0U, 1U, 0, 1, 1) != 0x3U) {
         return 8;
     }
@@ -111,24 +127,6 @@ int main(void)
     if (!v5_ui_page_cache_projection_required(1, 1, 0)) {
         return 22;
     }
-    if (!v5_ui_page_cache_queue_evidence_validate(evidence, 3U, 3U, 0U, &bad_index)) {
-        return 12;
-    }
-    evidence[1].worker_id = 1U;
-    if (v5_ui_page_cache_queue_evidence_validate(evidence, 3U, 3U, 0U, &bad_index) || bad_index != 1U) {
-        return 13;
-    }
-    evidence[1].worker_id = 0U;
-    evidence[1].yielded = 0U;
-    if (v5_ui_page_cache_queue_evidence_validate(evidence, 3U, 3U, 0U, &bad_index) || bad_index != 1U) {
-        return 14;
-    }
-    evidence[1].yielded = 1U;
-    evidence[1].invalidation_clean = 0U;
-    if (v5_ui_page_cache_queue_evidence_validate(evidence, 3U, 3U, 0U, &bad_index) || bad_index != 1U) {
-        return 15;
-    }
-
     puts("v5_ui_page_cache_registry_smoke PASS");
     return 0;
 }

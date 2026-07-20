@@ -225,6 +225,7 @@ int v5_ui_shell_refresh_once(void)
     int main_cache_changed = 0;
     int settings_cache_changed = 0;
     int settings_projection_changed = 0;
+    int settings_status_applied = 0;
     int overlay_active;
     unsigned int dirty_mask;
     unsigned int page;
@@ -313,6 +314,13 @@ int v5_ui_shell_refresh_once(void)
             shell_mark_page_cache_dirty((V5ShellPageKind)page);
         }
     }
+    if (overlay_active && g_v5_shell_current_page == V5_SHELL_PAGE_SETTINGS &&
+        (settings_projection_changed || settings_cache_changed)) {
+        (void)v5_settings_page_apply_status(
+            &g_v5_shell_settings_page,
+            &g_v5_shell_model.status_view);
+        settings_status_applied = 1;
+    }
 
     if (!overlay_active && flags != 0U) {
         if (g_v5_shell_current_page == V5_SHELL_PAGE_MAIN) {
@@ -326,8 +334,9 @@ int v5_ui_shell_refresh_once(void)
             (void)v5_settings_page_apply_status(&g_v5_shell_settings_page, &g_v5_shell_model.status_view);
         }
         lv_timer_handler();
-    } else if (overlay_active && (flags & V5_MAIN_PAGE_REFRESH_ESTOP) != 0U) {
-        /* The emergency button lives above the modal mask and remains live at 10 Hz. */
+    } else if (overlay_active &&
+               ((flags & V5_MAIN_PAGE_REFRESH_ESTOP) != 0U || settings_status_applied)) {
+        /* ESTOP and changed settings coordinates remain live above/below the modal mask. */
         lv_timer_handler();
     }
     /* The visible page has already been rendered into the canonical frame by

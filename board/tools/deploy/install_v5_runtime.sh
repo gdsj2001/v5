@@ -286,12 +286,13 @@ manifest_shm_abi_projection=0
 manifest_shm_abi_codec=0
 manifest_shm_abi_relay=0
 manifest_shm_abi_boot_ready=0
+manifest_shm_abi_main_cache_contract=0
 manifest_shm_abi_python_reader=0
 manifest_shm_abi_position_init=0
 manifest_shm_abi_wcs_init=0
 manifest_shm_abi_state_init=0
 manifest_shm_abi_ui_init=0
-manifest_shm_abi_required_rows=14
+manifest_shm_abi_required_rows=15
 manifest_ethercat_master=0
 manifest_ethercat_generic=0
 manifest_ethercat_lcec=0
@@ -391,6 +392,10 @@ while IFS="$tab" read -r scope_kind scope_source scope_destination scope_mode sc
     /usr/libexec/8ax/v5_ui_boot_ready.py)
       manifest_shm_abi_touched=1
       manifest_shm_abi_boot_ready=1
+      ;;
+    /usr/libexec/8ax/v5_ui_main_cache_contract.py)
+      manifest_shm_abi_touched=1
+      manifest_shm_abi_main_cache_contract=1
       ;;
     /usr/libexec/8ax/v5_status_shm_reader.py)
       manifest_shm_abi_touched=1
@@ -590,6 +595,7 @@ if [ "$manifest_shm_abi_ui_binary" -eq 1 ] &&
    [ "$manifest_shm_abi_codec" -eq 1 ] &&
    [ "$manifest_shm_abi_relay" -eq 1 ] &&
    [ "$manifest_shm_abi_boot_ready" -eq 1 ] &&
+   [ "$manifest_shm_abi_main_cache_contract" -eq 1 ] &&
    [ "$manifest_shm_abi_python_reader" -eq 1 ] &&
    [ "$manifest_shm_abi_position_init" -eq 1 ] &&
    [ "$manifest_shm_abi_wcs_init" -eq 1 ] &&
@@ -1163,7 +1169,7 @@ if [ "$apply" -eq 1 ] && [ "$manifest_ethercat_complete" -eq 1 ]; then
   /sbin/depmod -a
 fi
 
-enable_boot_service() {
+enable_auxiliary_boot_service() {
   name="$1"
   start_prio="$2"
   stop_prio="$3"
@@ -1182,6 +1188,27 @@ enable_boot_service() {
   done
 }
 
+disable_boot_service() {
+  name="$1"
+  for level in 0 1 2 3 4 5 6; do
+    dir="/etc/rc${level}.d"
+    [ -d "$dir" ] || continue
+    rm -f "$dir"/S??"$name" "$dir"/K??"$name"
+  done
+}
+
+enable_runtime_startup_boot_graph() {
+  [ -x /etc/init.d/v5-runtime-startup ] || {
+    echo "runtime startup orchestrator is missing" >&2
+    return 1
+  }
+  for service in v5-linuxcnc-command-gate v5-position-status-publisher \
+      v5-wcs-status-publisher v5-state-publisher v5-ui-relay v5-settings-actiond; do
+    disable_boot_service "$service"
+  done
+  enable_auxiliary_boot_service v5-runtime-startup 05 14
+}
+
 disable_unconditional_ethercat_autostart() {
   for level in 2 3 4 5; do
     dir="/etc/rc${level}.d"
@@ -1190,15 +1217,9 @@ disable_unconditional_ethercat_autostart() {
   done
 }
 
-enable_boot_services() {
-  enable_boot_service v5-linuxcnc-command-gate 05 19
-  enable_boot_service v5-position-status-publisher 06 18
-  enable_boot_service v5-wcs-status-publisher 06 17
-  enable_boot_service v5-state-publisher 07 16
-  enable_boot_service v5-ui-relay 08 15
-  enable_boot_service v5-settings-actiond 07 14
-  enable_boot_service v5-touch-diagnostics 97 13
-  enable_boot_service v5-remote-ssh 98 12
+enable_auxiliary_boot_services() {
+  enable_auxiliary_boot_service v5-touch-diagnostics 97 13
+  enable_auxiliary_boot_service v5-remote-ssh 98 12
 }
 
 apply_cpu_policy_after_install() {
@@ -1220,10 +1241,6 @@ if [ "$apply" -eq 1 ] && [ "$manifest_cpu_policy_command_gate" -eq 1 ]; then
 fi
 
 start_shm_abi_domain_after_install() {
-  enable_boot_service v5-position-status-publisher 06 18
-  enable_boot_service v5-wcs-status-publisher 06 17
-  enable_boot_service v5-state-publisher 07 16
-  enable_boot_service v5-ui-relay 08 15
   if ! pidof rtapi_app >/dev/null 2>&1; then
     [ -x /etc/init.d/v5-linuxcnc-command-gate ] || {
       echo "LinuxCNC command-gate init is missing before SHM domain recovery" >&2
@@ -1300,6 +1317,7 @@ cleanup_retired_runtime_files() {
   rm -f /usr/libexec/8ax/v5_rtcp_status_publisher.py
   rm -f /usr/libexec/8ax/v5_g53_geometry_memory_owner.py
   rm -f /usr/libexec/8ax/v5_native_safety_latch_owner.py
+  rm -f /usr/libexec/8ax/v5_ui_cache_queue_contract.py
   rm -f /usr/libexec/8ax/drive_profile/v5_bus_zero_resident_gate.py
   rm -f /etc/init.d/v5-rtcp-status-publisher
   rm -f /etc/init.d/v5-g53-geometry-memory-owner
@@ -1350,47 +1368,34 @@ PY
 }
 
 if [ "$apply" -eq 1 ]; then
+  enable_runtime_startup_boot_graph
   if [ "$restart_scope" = "gcode" ]; then
     rm -f /opt/8ax/v5/gcode/golden/cc.ngc
   elif [ "$restart_scope" = "ui" ]; then
-    enable_boot_service v5-ui-relay 08 15
+    rm -f /usr/libexec/8ax/v5_ui_cache_queue_contract.py
     /etc/init.d/v5-ui-relay restart
   elif [ "$restart_scope" = "shm_abi" ]; then
     start_shm_abi_domain_after_install
   elif [ "$restart_scope" = "state" ]; then
-    enable_boot_service v5-state-publisher 07 16
     /etc/init.d/v5-state-publisher restart
   elif [ "$restart_scope" = "actiond" ]; then
-    enable_boot_service v5-settings-actiond 07 14
     [ "$manifest_drive_profiles" -eq 0 ] || install_runtime_drive_profiles
     /etc/init.d/v5-settings-actiond restart
   elif [ "$restart_scope" = "command_gate" ]; then
-    enable_boot_service v5-linuxcnc-command-gate 05 19
     /etc/init.d/v5-linuxcnc-command-gate restart-native
   elif [ "$restart_scope" = "backend" ]; then
-    enable_boot_service v5-linuxcnc-command-gate 05 19
-    enable_boot_service v5-position-status-publisher 06 18
     /etc/init.d/v5-linuxcnc-command-gate start
     ensure_position_publisher_after_backend
     wait_publisher_actual_barrier
   elif [ "$restart_scope" = "ethercat" ]; then
-    enable_boot_service v5-linuxcnc-command-gate 05 19
-    enable_boot_service v5-position-status-publisher 06 18
     /etc/init.d/v5-linuxcnc-command-gate start
     ensure_position_publisher_after_backend
     wait_publisher_actual_barrier
   elif [ "$restart_scope" = "wcs" ]; then
-    enable_boot_service v5-position-status-publisher 06 18
-    enable_boot_service v5-wcs-status-publisher 06 17
     /etc/init.d/v5-position-status-publisher restart
     /etc/init.d/v5-wcs-status-publisher restart
     wait_publisher_actual_barrier
   elif [ "$restart_scope" = "cpu_policy" ]; then
-    enable_boot_service v5-linuxcnc-command-gate 05 19
-    enable_boot_service v5-position-status-publisher 06 18
-    enable_boot_service v5-wcs-status-publisher 06 17
-    enable_boot_service v5-state-publisher 07 16
-    enable_boot_service v5-ui-relay 08 15
     apply_cpu_policy_after_install
     /etc/init.d/v5-linuxcnc-command-gate restart-native
     /etc/init.d/v5-position-status-publisher restart
@@ -1398,11 +1403,6 @@ if [ "$apply" -eq 1 ]; then
     /etc/init.d/v5-state-publisher restart
     /etc/init.d/v5-ui-relay restart
   elif [ "$restart_scope" = "settings" ]; then
-    enable_boot_service v5-linuxcnc-command-gate 05 19
-    enable_boot_service v5-position-status-publisher 06 18
-    enable_boot_service v5-wcs-status-publisher 06 17
-    enable_boot_service v5-state-publisher 07 16
-    enable_boot_service v5-settings-actiond 07 14
     [ "$manifest_drive_profiles" -eq 0 ] || install_runtime_drive_profiles
     stop_position_publisher_before_backend
     /etc/init.d/v5-linuxcnc-command-gate restart
@@ -1412,7 +1412,7 @@ if [ "$apply" -eq 1 ]; then
     wait_publisher_actual_barrier
     /etc/init.d/v5-settings-actiond restart
   else
-    enable_boot_services
+    enable_auxiliary_boot_services
     cleanup_retired_runtime_files
     install_runtime_drive_profiles
     apply_cpu_policy_after_install

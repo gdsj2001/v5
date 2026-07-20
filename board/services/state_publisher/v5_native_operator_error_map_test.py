@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import re
+import tempfile
 
 from v5_native_operator_error_map import (
     ALIAS_PRESENTATION,
@@ -10,7 +11,9 @@ from v5_native_operator_error_map import (
     DISPLAY_TOP_STATUS,
     EXPECTED_SOURCE_COUNT,
     NativeOperatorErrorMap,
+    OPERATOR_ERROR_BLOCK_STRUCT,
     _PRINTF_TOKEN,
+    poll_operator_error_events,
     translate_internal_alias,
 )
 
@@ -92,6 +95,53 @@ def main() -> int:
     assert jog.matched and jog.display_mode == DISPLAY_TOP_STATUS
     jog_stopped = error_map.translate("Jog aborted by jog-stop-immediate")
     assert jog_stopped.matched and jog_stopped.display_mode == DISPLAY_LOG_ONLY
+    directional_limits = {
+        "Can't jog joint 2 further past max soft limit.": "关节2正向软限位：只能负向点动退出",
+        "Can't jog joint 2 further past min soft limit.": "关节2负向软限位：只能正向点动退出",
+        "Can't jog joint 3 further past max hard limit.": "关节3正向物理限位：只能负向点动退出",
+        "Can't jog joint 3 further past min hard limit.": "关节3负向物理限位：只能正向点动退出",
+        "Linear move on line 7 would exceed X's positive limit": "X轴正向软限位：只能负向点动退出",
+        "Linear move on line 7 would exceed joint 1's negative limit": "关节1负向软限位：只能正向点动退出",
+        "Exceeded POSITIVE soft limit (5.00000) on joint 4\n": "关节4正向软限位：只能负向点动退出",
+    }
+    for raw, expected_reason in directional_limits.items():
+        limit_message = error_map.translate(raw)
+        assert limit_message.matched, raw
+        assert limit_message.display_mode == DISPLAY_TOP_STATUS, raw
+        assert limit_message.reason_cn == expected_reason, (raw, limit_message.reason_cn)
+    both_hard_limits = error_map.translate("joint 1 on limit switch error")
+    assert both_hard_limits.matched
+    assert both_hard_limits.display_mode == DISPLAY_POPUP
+    assert "正负物理限位同时生效" in both_hard_limits.reason_cn
+    for raw in (
+        "On Soft Limit",
+        "can't do linear move with limits exceeded",
+        "invalid params in linear command",
+    ):
+        assert error_map.translate(raw).display_mode == DISPLAY_LOG_ONLY, raw
+
+    class FakeErrorChannel:
+        def __init__(self, events):
+            self.events = list(events)
+
+        def poll(self):
+            return self.events.pop(0) if self.events else None
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        status_path = str(Path(temp_dir) / "operator-error.bin")
+        generation, handled = poll_operator_error_events(
+            FakeErrorChannel([
+                (1, "Can't jog joint 2 further past max soft limit."),
+                (1, "On Soft Limit"),
+            ]),
+            {1},
+            error_map,
+            status_path,
+            0)
+        assert generation == 1 and handled == 2
+        unpacked = OPERATOR_ERROR_BLOCK_STRUCT.unpack(Path(status_path).read_bytes())
+        assert unpacked[5] == DISPLAY_TOP_STATUS
+        assert "关节2正向软限位" in unpacked[11].split(b"\0", 1)[0].decode("utf-8")
     redundant_plan_init = error_map.translate(
         "can't do that (EMC_TASK_PLAN_INIT) in auto mode with the interpreter waiting"
     )
