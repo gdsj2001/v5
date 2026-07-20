@@ -170,7 +170,7 @@ class VpsOtaAdminApiTest(unittest.TestCase):
         profile.write_text(
             json.dumps(
                 {
-                    "schema": "v3-driver-profile-map-v1",
+                    "schema": "v5-driver-profile-map-v1",
                     "map_scope": "private",
                     "profiles": [],
                 }

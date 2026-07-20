@@ -30,6 +30,7 @@ CACHE_LINE_RE = re.compile(
     r"budget_bytes=(?P<budget>[0-9]+)$"
 )
 class ReadyError(RuntimeError): pass
+class FinalBarrierError(ReadyError): pass
 BUS_INI = "/opt/8ax/v5/linuxcnc/ini/v5_bus.ini"; POSITION_PATH, WCS_PATH, MODAL_PATH, STATE_PATH = map(Path, ("/dev/shm/v5_native_position_status.bin", "/dev/shm/v5_native_wcs_status.bin", "/dev/shm/v5_native_modal_tool_status.bin", "/dev/shm/v3_status_shm"))
 BUS_STATUS_PATH = Path("/dev/shm/v5_native_bus_status.bin")
 POSITION_PID, POSITION_LOCK, WCS_PID, STATE_PID = map(Path, ("/run/8ax/v5_position_status_publisher.pid", "/run/8ax/v5_position_status_publisher.lock", "/run/8ax/v5_wcs_status_publisher.pid", "/run/8ax/v5_state_publisher.pid"))
@@ -43,12 +44,25 @@ STATE_TRAJECTORY_COUNT_OFFSET = 888
 STATE_SCENE_POINT_COUNT_OFFSET = 1056
 STATE_SCENE_SEGMENT_COUNT_OFFSET = 1060
 STATE_SCENE_MARKER_COUNT_OFFSET = 1064
+KERNEL_BOOT_ID_PATH = Path("/proc/sys/kernel/random/boot_id")
+INPUT_BARRIER_SCHEMA = "v5.ui_input_barrier.v1"
+FAILURE_SCHEMA = "v5.ui_failure.v1"
+PUBLISHER_OWNER_NAMES = ("position", "wcs", "state")
 def fnv32(raw):
     value = 2166136261
     for byte in raw:
         value = ((value ^ byte) * 16777619) & 0xFFFFFFFF
     return value
 def proc_start_ticks(pid): return Path(f"/proc/{pid}/stat").read_text(encoding="ascii").rsplit(")", 1)[1].split()[19]
+def read_kernel_boot_id(path=KERNEL_BOOT_ID_PATH):
+    raw = path.read_text(encoding="ascii").strip().lower()
+    try:
+        parsed = uuid.UUID(raw)
+    except (ValueError, AttributeError) as exc:
+        raise ReadyError(f"kernel boot_id invalid path={path} value={raw!r}") from exc
+    if str(parsed) != raw:
+        raise ReadyError(f"kernel boot_id is not canonical path={path} value={raw!r}")
+    return raw
 def proc_argv(pid):
     return [part.decode("utf-8", "strict") for part in
             Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0") if part]
@@ -142,6 +156,52 @@ def publisher_identities(cache=None, unique=False, expected_ini=""):
                            [expected], cache, unique, True):
             owners["state"] = pid
     return owners
+def identity_tokens(cache):
+    tokens = {}
+    for name in PUBLISHER_OWNER_NAMES:
+        raw = cache.get(name)
+        if raw is None or len(raw) < 3:
+            continue
+        token = {
+            "pid": int(raw[0]),
+            "start_ticks": int(raw[1]),
+            "argv": list(raw[2]),
+        }
+        if name == "position":
+            if len(raw) != 4:
+                raise ReadyError("Position owner identity token malformed")
+            token["writer_identity"] = int(raw[3])
+        elif len(raw) != 3:
+            raise ReadyError(f"{name} owner identity token malformed")
+        tokens[name] = token
+    return tokens
+def identity_cache_from_tokens(tokens):
+    if not isinstance(tokens, dict) or set(tokens) != set(PUBLISHER_OWNER_NAMES):
+        raise ReadyError("pre-UI publisher identity set incomplete")
+    cache = {}
+    for name in PUBLISHER_OWNER_NAMES:
+        token = tokens.get(name)
+        if not isinstance(token, dict) or not isinstance(token.get("argv"), list):
+            raise ReadyError(f"pre-UI {name} identity malformed")
+        try:
+            pid = int(token.get("pid") or 0)
+            start_ticks = int(token.get("start_ticks") or 0)
+        except (TypeError, ValueError) as exc:
+            raise ReadyError(f"pre-UI {name} identity malformed") from exc
+        argv = tuple(str(value) for value in token["argv"])
+        if pid <= 0 or start_ticks <= 0 or not argv:
+            raise ReadyError(f"pre-UI {name} identity invalid")
+        current = (pid, str(start_ticks), argv)
+        if name == "position":
+            try:
+                writer_identity = int(token.get("writer_identity") or 0)
+            except (TypeError, ValueError) as exc:
+                raise ReadyError("pre-UI Position writer identity malformed") from exc
+            if writer_identity <= 0:
+                raise ReadyError("pre-UI Position writer identity invalid")
+            current += (str(writer_identity),)
+        cache[name] = current
+    return cache
 def read_atomic(path, fmt, crc_index=-2, seq_offset=None):
     raw = path.read_bytes()
     if len(raw) != fmt.size:
@@ -354,13 +414,88 @@ def wait_pre_ui_inputs(timeout, checker=current_pre_ui_inputs,
                 markers, owners = checker(identities, True, expected_ini)
                 ready = len(owners) == 3 and all(markers.values()) and all(markers[name] > baseline[name] for name in markers)
             if ready:
-                return {"owners": owners, "markers": markers}
+                return {
+                    "owners": owners,
+                    "markers": markers,
+                    "owner_identities": identity_tokens(identities),
+                }
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise ReadyError("pre-UI actual barrier timeout")
             watcher.wait(max(1, int(remaining * 1000)))
     finally:
         watcher.close()
+def build_input_barrier_snapshot(result, expected_ini):
+    if expected_ini != BUS_INI:
+        raise ReadyError("pre-UI snapshot requires the canonical BUS INI")
+    if not isinstance(result, dict):
+        raise ReadyError("pre-UI barrier result malformed")
+    tokens = result.get("owner_identities")
+    identity_cache_from_tokens(tokens)
+    markers = result.get("markers")
+    if not isinstance(markers, dict) or set(markers) != {"position", "state", "wcs", "modal"}:
+        raise ReadyError("pre-UI publisher marker set incomplete")
+    try:
+        normalized_markers = {name: int(value or 0) for name, value in markers.items()}
+    except (TypeError, ValueError) as exc:
+        raise ReadyError("pre-UI publisher markers malformed") from exc
+    if not all(normalized_markers.values()):
+        raise ReadyError("pre-UI publisher markers unavailable")
+    return {
+        "schema": INPUT_BARRIER_SCHEMA,
+        "boot_id": read_kernel_boot_id(),
+        "expected_ini": expected_ini,
+        "owner_identities": tokens,
+        "markers": normalized_markers,
+        "created_monotonic_ns": time.monotonic_ns(),
+    }
+def read_input_barrier_snapshot(path, expected_ini):
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError) as exc:
+        raise ReadyError(f"cannot read pre-UI publisher snapshot path={path}") from exc
+    if (not isinstance(payload, dict) or payload.get("schema") != INPUT_BARRIER_SCHEMA or
+            payload.get("boot_id") != read_kernel_boot_id() or
+            payload.get("expected_ini") != expected_ini):
+        raise ReadyError("pre-UI publisher snapshot identity mismatch")
+    identity_cache_from_tokens(payload.get("owner_identities"))
+    markers = payload.get("markers")
+    if not isinstance(markers, dict) or set(markers) != {"position", "state", "wcs", "modal"}:
+        raise ReadyError("pre-UI publisher snapshot marker set incomplete")
+    return payload
+def validate_final_publisher_barrier(snapshot_path, expected_ini,
+                                     checker=current_pre_ui_inputs):
+    try:
+        snapshot = read_input_barrier_snapshot(snapshot_path, expected_ini)
+        identities = identity_cache_from_tokens(snapshot["owner_identities"])
+    except ReadyError as exc:
+        raise FinalBarrierError(str(exc)) from exc
+    try:
+        markers, owners = (checker(identities, True, expected_ini)
+                           if checker is current_pre_ui_inputs else checker(identities))
+    except ReadyError as exc:
+        if any(token in str(exc) for token in (
+                "owner changed", "PID/start mismatch", "unique owner mismatch",
+                "owner argv changed", "owner record mismatch")):
+            raise FinalBarrierError(str(exc)) from exc
+        raise
+    if set(owners) != set(PUBLISHER_OWNER_NAMES):
+        raise FinalBarrierError("final publisher owner set incomplete")
+    if not isinstance(markers, dict) or set(markers) != {"position", "state", "wcs", "modal"}:
+        raise FinalBarrierError("final publisher marker set incomplete")
+    try:
+        final_markers = {name: int(value or 0) for name, value in markers.items()}
+        baseline_markers = {name: int(value or 0) for name, value in snapshot["markers"].items()}
+    except (TypeError, ValueError) as exc:
+        raise ReadyError("final publisher markers malformed") from exc
+    if (not all(final_markers.values()) or
+            any(final_markers[name] < baseline_markers[name] for name in final_markers)):
+        raise FinalBarrierError("final publisher generation/freshness regressed")
+    return {
+        "owner_identities": identity_tokens(identities),
+        "baseline_markers": baseline_markers,
+        "final_markers": final_markers,
+    }
 def parse_cache_rows(text: str) -> list[dict]:
     rows: list[dict] = []
     for line in text.splitlines():
@@ -459,6 +594,60 @@ def atomic_write_json(path: Path, payload: dict) -> None:
             os.unlink(temp_name)
         except FileNotFoundError:
             pass
+def build_failure_payload(owner_pid, owner_start_ticks, owner_role,
+                          startup_instance_id, stage, error):
+    try:
+        owner_pid = int(owner_pid)
+        owner_start_ticks = int(owner_start_ticks)
+    except (TypeError, ValueError) as exc:
+        raise ReadyError("failure owner identity malformed") from exc
+    if owner_pid <= 0 or owner_start_ticks <= 0:
+        raise ReadyError("failure owner identity invalid")
+    try:
+        actual_start_ticks = int(proc_start_ticks(owner_pid))
+    except (OSError, ValueError, IndexError) as exc:
+        raise ReadyError(f"failure owner unavailable pid={owner_pid}") from exc
+    if actual_start_ticks != owner_start_ticks:
+        raise ReadyError(f"failure owner PID/start mismatch pid={owner_pid}")
+    try:
+        startup_instance_id = str(uuid.UUID(str(startup_instance_id))).lower()
+    except (ValueError, AttributeError) as exc:
+        raise ReadyError("failure startup instance identity invalid") from exc
+    if owner_role not in ("relay", "supervisor"):
+        raise ReadyError(f"failure owner role invalid role={owner_role!r}")
+    stage = str(stage or "").strip()
+    error = str(error or "").strip()
+    if not re.fullmatch(r"[a-z0-9_]{1,64}", stage):
+        raise ReadyError(f"failure stage invalid stage={stage!r}")
+    if not error:
+        raise ReadyError("failure error text invalid")
+    error = error[:512]
+    return {
+        "schema": FAILURE_SCHEMA,
+        "ready": False,
+        "failed": True,
+        "boot_id": read_kernel_boot_id(),
+        "startup_instance_id": startup_instance_id,
+        "owner_role": owner_role,
+        "owner_pid": owner_pid,
+        "owner_start_ticks": owner_start_ticks,
+        "stage": stage,
+        "error": error,
+        "created_realtime_ns": time.time_ns(),
+        "created_monotonic_ns": time.monotonic_ns(),
+    }
+def publish_failure(path, owner_pid, owner_start_ticks, owner_role,
+                    startup_instance_id, stage, error):
+    payload = build_failure_payload(
+        owner_pid,
+        owner_start_ticks,
+        owner_role,
+        startup_instance_id,
+        stage,
+        error,
+    )
+    atomic_write_json(path, payload)
+    return payload
 def build_ready_payload(
     ui_pid: int,
     ui_log: Path,
@@ -493,11 +682,16 @@ def build_ready_payload(
         )
     if diagnostics.get("ui_ready"):
         raise ReadyError("stale ready metadata was visible before this boot completed")
+    ui_start_ticks = int(proc_start_ticks(ui_pid))
+    if ui_start_ticks <= 0:
+        raise ReadyError(f"UI process start ticks invalid pid={ui_pid} value={ui_start_ticks}")
     return {
         "schema": "v5.ui_ready.v1",
         "ready": True,
-        "boot_id": str(uuid.uuid4()),
+        "boot_id": read_kernel_boot_id(),
+        "ui_instance_id": str(uuid.uuid4()),
         "ui_pid": ui_pid,
+        "ui_start_ticks": ui_start_ticks,
         "cpus_allowed_list": cpus_allowed,
         "width": width,
         "height": height,
@@ -527,8 +721,17 @@ def wait_and_publish(args: argparse.Namespace) -> dict:
                 args.height,
                 args.require_cpu_list,
             )
+            publisher_barrier = validate_final_publisher_barrier(
+                args.publisher_snapshot_path,
+                args.expected_ini,
+            )
+            if int(proc_start_ticks(args.ui_pid)) != int(payload["ui_start_ticks"]):
+                raise ReadyError(f"UI process identity changed before ready commit pid={args.ui_pid}")
+            payload["publisher_barrier"] = publisher_barrier
             atomic_write_json(args.ready_path, payload)
             return payload
+        except FinalBarrierError:
+            raise
         except (OSError, ReadyError, urllib.error.URLError) as exc:
             last_error = str(exc)
             time.sleep(0.05)
@@ -543,26 +746,69 @@ def wait_and_publish(args: argparse.Namespace) -> dict:
         f"failure_page={failure_page} last_error={last_error}"
     )
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Validate v5 UI boot cache queue and publish ui_ready metadata."); parser.add_argument("--pre-ui-inputs", action="store_true"); parser.add_argument("--expected-ini")
+    parser = argparse.ArgumentParser(description="Validate v5 UI boot cache queue and publish ui_ready metadata."); parser.add_argument("--pre-ui-inputs", action="store_true"); parser.add_argument("--publish-failure", action="store_true"); parser.add_argument("--expected-ini")
     parser.add_argument("--ui-pid", type=int); parser.add_argument("--ui-log", type=Path)
     parser.add_argument("--ready-path", type=Path); parser.add_argument("--diagnostics-url")
+    parser.add_argument("--publisher-snapshot-path", type=Path)
+    parser.add_argument("--startup-instance-id"); parser.add_argument("--failure-owner-pid", type=int)
+    parser.add_argument("--failure-owner-start-ticks", type=int); parser.add_argument("--failure-owner-role")
+    parser.add_argument("--failure-stage"); parser.add_argument("--failure-error")
     parser.add_argument("--timeout", type=float, default=30.0); parser.add_argument("--width", type=int, default=1024)
     parser.add_argument("--height", type=int, default=600); parser.add_argument("--require-cpu-list", default="1"); args = parser.parse_args()
     try:
+        if args.publish_failure:
+            if not all((args.ready_path, args.startup_instance_id,
+                        args.failure_owner_pid, args.failure_owner_start_ticks,
+                        args.failure_owner_role, args.failure_stage, args.failure_error)):
+                raise ReadyError("failure mode requires ready path, startup and owner identity, stage and error")
+            failure = publish_failure(
+                args.ready_path,
+                args.failure_owner_pid,
+                args.failure_owner_start_ticks,
+                args.failure_owner_role,
+                args.startup_instance_id,
+                args.failure_stage,
+                args.failure_error,
+            )
+            print("v5_ui_boot_failure PASS " + json.dumps(failure, sort_keys=True, separators=(",", ":")))
+            return 0
         if args.pre_ui_inputs:
             if args.expected_ini != BUS_INI: raise ReadyError("pre-UI inputs require the canonical BUS INI")
             result = wait_pre_ui_inputs(args.timeout, expected_ini=args.expected_ini)
+            if args.publisher_snapshot_path is None:
+                raise ReadyError("pre-UI inputs require publisher snapshot path")
+            atomic_write_json(
+                args.publisher_snapshot_path,
+                build_input_barrier_snapshot(result, args.expected_ini),
+            )
             print("v5_ui_boot_inputs PASS " + json.dumps(result, sort_keys=True, separators=(",", ":")))
             return 0
-        if not all((args.ui_pid, args.ui_log, args.ready_path, args.diagnostics_url)):
-            raise ReadyError("UI ready mode requires ui-pid/ui-log/ready-path/diagnostics-url")
+        if not all((args.ui_pid, args.ui_log, args.ready_path, args.diagnostics_url,
+                    args.publisher_snapshot_path, args.expected_ini)):
+            raise ReadyError("UI ready mode requires UI, diagnostics and publisher snapshot identity")
         payload = wait_and_publish(args)
     except ReadyError as exc:
+        if all((args.ready_path, args.startup_instance_id,
+                args.failure_owner_pid, args.failure_owner_start_ticks,
+                args.failure_owner_role, args.failure_stage)):
+            try:
+                publish_failure(
+                    args.ready_path,
+                    args.failure_owner_pid,
+                    args.failure_owner_start_ticks,
+                    args.failure_owner_role,
+                    args.startup_instance_id,
+                    args.failure_stage,
+                    str(exc),
+                )
+            except ReadyError as failure_exc:
+                print(f"v5_ui_boot_failure FAIL {failure_exc}", file=os.sys.stderr)
         print(f"v5_ui_boot_ready FAIL {exc}", file=os.sys.stderr)
         return 1
     print(
         "v5_ui_boot_ready PASS "
-        f"boot_id={payload['boot_id']} ui_pid={payload['ui_pid']} "
+        f"boot_id={payload['boot_id']} ui_instance_id={payload['ui_instance_id']} "
+        f"ui_pid={payload['ui_pid']} ui_start_ticks={payload['ui_start_ticks']} "
         f"frame_id={payload['current_frame_id']} cache_budget_bytes={payload['cache_budget_bytes']}",
         flush=True,
     )

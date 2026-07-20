@@ -351,13 +351,15 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         ROOT / "petalinux" / "project-spec" / "meta-user" / "recipes-apps" /
         "linuxcnc-ethercat" / "files" / "0002-v5-dc-reference-health-pins.patch"
     )
-    lcec_activation_patch = (
+    lcec_initf_patch = (
         ROOT / "petalinux" / "project-spec" / "meta-user" / "recipes-apps" /
-        "linuxcnc-ethercat" / "files" / "0003-v5-defer-master-activation-to-first-read.patch"
+        "linuxcnc-ethercat" / "files" / "0003-v5-require-initf-master-activation.patch"
     )
-    lcec_ready_patch = (
+    retired_lcec_patches = (
         ROOT / "petalinux" / "project-spec" / "meta-user" / "recipes-apps" /
-        "linuxcnc-ethercat" / "files" / "0004-v5-resident-runtime-ready-pin.patch"
+        "linuxcnc-ethercat" / "files" / "0003-v5-defer-master-activation-to-first-read.patch",
+        ROOT / "petalinux" / "project-spec" / "meta-user" / "recipes-apps" /
+        "linuxcnc-ethercat" / "files" / "0004-v5-resident-runtime-ready-pin.patch",
     )
     lcec_recipe = (
         ROOT / "petalinux" / "project-spec" / "meta-user" / "recipes-apps" /
@@ -389,12 +391,21 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         "v5_position_status_publisher.py"
     )
     bus_ini = ROOT / "linuxcnc" / "ini" / "v5_bus.ini"
+    bus_hal = ROOT / "linuxcnc" / "hal" / "v5_bus_2ms.hal"
+    linuxcnc_initf_sources = (
+        ROOT.parent / "linuxcnc" / "src" / "hal" / "hal_lib.c",
+        ROOT.parent / "linuxcnc" / "src" / "hal" / "utils" / "halcmd.c",
+        ROOT.parent / "linuxcnc" / "src" / "hal" / "utils" / "halcmd_commands.cc",
+        ROOT.parent / "linuxcnc" / "src" / "hal" / "utils" / "halcmd_commands.h",
+    )
     motion_private = ROOT.parent / "linuxcnc" / "src" / "emc" / "motion" / "mot_priv.h"
     motion_export = ROOT.parent / "linuxcnc" / "src" / "emc" / "motion" / "motion.c"
     motion_control = ROOT.parent / "linuxcnc" / "src" / "emc" / "motion" / "control.c"
     relay_producer = ROOT / "services" / "ui" / "v5_remote_ui_shared_payload.py"
     deploy_manifest = ROOT / "config" / "deploy" / "v5_runtime_deploy_manifest.tsv"
     runtime_installer = ROOT / "tools" / "deploy" / "install_v5_runtime.sh"
+    net_init = net_core.with_name("S99v5-net")
+    net_cpu_policy = net_core.with_name("v5_net_cpu_policy.sh")
     usb_wifi_apply = net_core.with_name("v5_usb_wifi_apply.sh")
     probe = ROOT / "services" / "command_gate" / "v5_linuxcncrsh_probe.c"
     if not init.exists():
@@ -410,10 +421,11 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         not backend_lifecycle.exists()
         or not ethercat_recipe.exists()
         or not lcec_health_patch.exists()
-        or not lcec_activation_patch.exists()
-        or not lcec_ready_patch.exists()
+        or not lcec_initf_patch.exists()
         or not board_runtime_policy.exists()
         or not net_core.exists()
+        or not net_init.exists()
+        or not net_cpu_policy.exists()
         or not usb_wifi_apply.exists()
         or not relay_producer.exists()
         or not deploy_manifest.exists()
@@ -421,10 +433,12 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         or not position_publisher_init.exists()
         or not position_publisher.exists()
         or not bus_ini.exists()
+        or not bus_hal.exists()
         or not motion_private.exists()
         or not motion_export.exists()
         or not motion_control.exists()
         or any(not path.exists() for path in publisher_inits)
+        or any(not path.exists() for path in linuxcnc_initf_sources)
     ):
         print("CPU_ISOLATION_OWNER_MISSING", file=sys.stderr)
         return 1
@@ -434,8 +448,6 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         "linuxcnc_realtime_affinity_ok",
         "linuxcnc_privileged_helpers_ok",
         "linuxcnc_realtime_scheduler_ok",
-        "RTAPI_CPU_NUMBER=0",
-        "RTAPI_CPU_NUMBER='$RTAPI_CPU_NUMBER' RTAPI_FIFO_PATH=",
         "/usr/bin/linuxcnc_module_helper",
         "rtapi_app:T*",
         "policy=$(awk '{print $41; exit}' \"$task/stat\"",
@@ -504,101 +516,138 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
     for token in (
         "linuxcnc_realtime_scheduler_ok",
         "LinuxCNC RTAPI servo thread remained outside the realtime scheduler",
-        "timeout 1 halcmd getp lcec.0.runtime-ready",
-        "start_position_hal_consumer_before_ready",
-        "/etc/init.d/v5-position-status-publisher",
-        "position_consumer_attempted=0",
-        "position_consumer_ready=0",
-        "Position Publisher failed to attach before EtherCAT readiness",
+        "configured_ethercat_slave_count",
+        "ethercat_transport_scanned",
+    "wait_ethercat_transport_scanned",
+    "EtherCAT transport scan incomplete; refusing LinuxCNC/lcec activation",
+    'if (($1 + 0) != (seen - 1)) bad = 1',
+    'if ($3 != "PREOP") bad = 1',
+    'if ($4 == "E") bad = 1',
+        "ethercat_master_active",
+        "ethercat_domain_wkc_ready",
+        "ethercat_reference_clock_healthy",
+        "halcmd getp lcec.0.dc-time-valid",
+        "halcmd getp lcec.0.dc-time-age-cycles",
+        "halcmd getp lcec.0.dc-time-ok-seq",
+        "halcmd getp lcec.0.dc-time-error-count",
     ):
         if token not in lifecycle_text:
             print(f"LINUXCNC_RTAPI_SCHEDULER_READINESS_MISSING: {token}", file=sys.stderr)
             rc = 1
-    if "ethercat domains" in lifecycle_text:
-        print("ETHERCAT_WKC_CLI_POLLING_SURVIVOR", file=sys.stderr)
+    transport_wait_index = text.find("wait_ethercat_transport_scanned || return 1")
+    backend_start_index = text.find('su petalinux -c "cd /opt/8ax/v5/linuxcnc/ini')
+    if (transport_wait_index < 0 or backend_start_index < 0 or
+            transport_wait_index > backend_start_index):
+        print("ETHERCAT_TRANSPORT_SCAN_BEFORE_LINUXCNC_MISSING", file=sys.stderr)
         rc = 1
+    for forbidden in (
+        "lcec.0.runtime-ready",
+        "start_position_hal_consumer_before_ready",
+        "position_consumer_attempted",
+        "position_consumer_ready",
+    ):
+        if forbidden in lifecycle_text:
+            print(f"ETHERCAT_RETIRED_READINESS_SURVIVOR: {forbidden}", file=sys.stderr)
+            rc = 1
     if "halcmd" in ui_init_text:
         print("UI_BOOT_HAL_ATTACH_SURVIVOR", file=sys.stderr)
-        rc = 1
-    ready_start = lifecycle_text.find("ethercat_backend_ready() {")
-    ready_end = lifecycle_text.find("\n}\n", ready_start)
-    ready_block = lifecycle_text[ready_start:ready_end] if ready_start >= 0 and ready_end > ready_start else ""
-    if (not ready_block or ready_block.count("halcmd getp") != 1 or
-            any(token in ready_block for token in
-                ("ethercat master", "ethercat slaves", "ethercat domains"))):
-        print("ETHERCAT_RUNTIME_READY_HOT_POLLING_SURVIVOR", file=sys.stderr)
         rc = 1
     wait_start = lifecycle_text.find("wait_linuxcnc_backend_ready() {")
     wait_end = lifecycle_text.find("\n}\n", wait_start)
     wait_block = lifecycle_text[wait_start:wait_end] if wait_start >= 0 and wait_end > wait_start else ""
     if (not wait_block or
-            wait_block.find("start_position_hal_consumer_before_ready") < 0 or
-            wait_block.find("position_consumer_ready=1") < 0 or
             wait_block.find('ethercat_backend_ready && return 0') < 0 or
-            wait_block.find("position_consumer_ready=1") >
+            wait_block.find("set_linuxcnc_realtime_affinity") < 0 or
+            wait_block.find("set_linuxcnc_realtime_affinity") >
             wait_block.find('ethercat_backend_ready && return 0')):
-        print("ETHERCAT_POSITION_CONSUMER_PRE_READY_ORDER_MISSING", file=sys.stderr)
+        print("ETHERCAT_STABLE_AFFINITY_BEFORE_READY_ORDER_MISSING", file=sys.stderr)
         rc = 1
     lcec_health_text = lcec_health_patch.read_text(encoding="utf-8", errors="strict")
     for token in (
+        "dc-time-valid",
+        "dc-time-ok-seq",
+        "dc-time-age-cycles",
+        "dc-time-error-count",
+        "ecrt_master_reference_clock_time",
+    ):
+        if token not in lcec_health_text:
+            print(f"ETHERCAT_DC_HEALTH_PIN_MISSING: {token}", file=sys.stderr)
+            rc = 1
+    for forbidden in (
         "domain-working-counter",
         "domain-wc-complete",
         "domain-wc-ok-seq",
         "domain-wc-error-count",
         "ecrt_domain_state(master->domain, &master->ds)",
     ):
-        if token not in lcec_health_text:
-            print(f"ETHERCAT_RESIDENT_WKC_PIN_MISSING: {token}", file=sys.stderr)
+        if forbidden in lcec_health_text:
+            print(f"ETHERCAT_RETIRED_RESIDENT_WKC_SURVIVOR: {forbidden}", file=sys.stderr)
             rc = 1
-    lcec_activation_text = lcec_activation_patch.read_text(
-        encoding="utf-8", errors="strict")
-    for token in (
-        "first resident read",
-        "lcec_activate_master(master)",
-        "master->rt_activated = 1",
-        "master->activation_failed = 1",
-        "Activation is owned only by the first resident read",
-    ):
-        if token not in lcec_activation_text:
-            print(f"ETHERCAT_FIRST_READ_ACTIVATION_MISSING: {token}", file=sys.stderr)
-            rc = 1
-    lcec_activation_added = "\n".join(
-        line[1:] for line in lcec_activation_text.splitlines()
-        if line.startswith("+") and not line.startswith("+++")
-    )
-    for forbidden in (
-        "hal_init_funct_to_thread",
-        "initf_supported",
-        "forgot_warned",
-        "Falling back to inline activation",
-    ):
-        if forbidden in lcec_activation_added:
-            print(f"ETHERCAT_ACTIVATION_FALLBACK_SURVIVOR: {forbidden}", file=sys.stderr)
-            rc = 1
-    lcec_ready_text = lcec_ready_patch.read_text(
-        encoding="utf-8", errors="strict")
-    for token in (
-        "LCEC_RUNTIME_READY_STABLE_CYCLES 100U",
-        '"%s.runtime-ready"',
-        '"%s.runtime-ready-generation"',
-        "master->configured_slave_count > 0",
-        "*(hal_data->domain_wc_complete)",
-        "*(hal_data->dc_time_valid)",
-        "master->runtime_ready_stable_cycles = 0",
-    ):
-        if token not in lcec_ready_text:
-            print(f"ETHERCAT_RESIDENT_RUNTIME_READY_MISSING: {token}", file=sys.stderr)
+    for retired_patch in retired_lcec_patches:
+        if retired_patch.exists():
+            print(
+                f"ETHERCAT_RETIRED_STARTUP_PATCH_SURVIVOR: {retired_patch.relative_to(ROOT)}",
+                file=sys.stderr,
+            )
             rc = 1
     lcec_recipe_text = lcec_recipe.read_text(encoding="utf-8", errors="strict")
-    if "file://0003-v5-defer-master-activation-to-first-read.patch" not in lcec_recipe_text:
-        print("ETHERCAT_FIRST_READ_ACTIVATION_PATCH_MISSING", file=sys.stderr)
-        rc = 1
-    if "file://0004-v5-resident-runtime-ready-pin.patch" not in lcec_recipe_text:
-        print("ETHERCAT_RESIDENT_RUNTIME_READY_PATCH_MISSING", file=sys.stderr)
-        rc = 1
-    for forbidden in ("initf_supported = 0", "module-load activation"):
+    for token in (
+        "file://0002-v5-dc-reference-health-pins.patch",
+        "file://0003-v5-require-initf-master-activation.patch",
+    ):
+        if token not in lcec_recipe_text:
+            print(f"ETHERCAT_INITF_ACTIVATION_MISSING: {token}", file=sys.stderr)
+            rc = 1
+    for forbidden in (
+        "file://0003-v5-defer-master-activation-to-first-read.patch",
+        "file://0004-v5-resident-runtime-ready-pin.patch",
+        "initf_supported = 0",
+        "using lcec module-load activation",
+    ):
         if forbidden in lcec_recipe_text:
-            print(f"ETHERCAT_RECIPE_LOAD_ACTIVATION_SURVIVOR: {forbidden}", file=sys.stderr)
+            print(f"ETHERCAT_RETIRED_STARTUP_PATCH_REFERENCE: {forbidden}", file=sys.stderr)
+            rc = 1
+    lcec_initf_text = lcec_initf_patch.read_text(encoding="utf-8", errors="strict")
+    lcec_initf_added = "\n".join(
+        line[1:] for line in lcec_initf_text.splitlines()
+        if line.startswith("+") and not line.startswith("+++")
+    )
+    for token in (
+        "V5 initf special-cycle activation complete",
+        "activation_failed",
+        "initf_missing_warned",
+        "cyclic EtherCAT I/O remains blocked",
+    ):
+        if token not in lcec_initf_added:
+            print(f"ETHERCAT_INITF_FAIL_CLOSED_TOKEN_MISSING: {token}", file=sys.stderr)
+            rc = 1
+    for forbidden in (
+        "initf_supported",
+        "Falling back to inline activation",
+    ):
+        if forbidden in lcec_initf_added:
+            print(f"ETHERCAT_INITF_FALLBACK_SURVIVOR: {forbidden}", file=sys.stderr)
+            rc = 1
+    bus_hal_text = bus_hal.read_text(encoding="utf-8", errors="strict")
+    load_pos = bus_hal_text.find("loadrt lcec")
+    initf_pos = bus_hal_text.find("initf lcec.activate servo-thread")
+    read_pos = bus_hal_text.find("addf lcec.read-all servo-thread")
+    if load_pos < 0 or initf_pos <= load_pos or read_pos <= initf_pos:
+        print("ETHERCAT_INITF_HAL_ORDER_MISSING", file=sys.stderr)
+        rc = 1
+    linuxcnc_initf_text = "\n".join(
+        path.read_text(encoding="utf-8", errors="strict")
+        for path in linuxcnc_initf_sources
+    )
+    for token in (
+        "hal_init_funct_to_thread",
+        "init_funct_list",
+        "rtapi_task_self_resync",
+        '"initf"',
+        "do_initf_cmd",
+    ):
+        if token not in linuxcnc_initf_text:
+            print(f"LINUXCNC_INITF_SOURCE_TOKEN_MISSING: {token}", file=sys.stderr)
             rc = 1
     ethercat_recipe_text = ethercat_recipe.read_text(encoding="utf-8", errors="strict")
     if 'INITSCRIPT_PARAMS_${PN} = "stop 10 0 6 ."' not in ethercat_recipe_text:
@@ -696,10 +745,46 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         "/proc/irq/$irq/smp_affinity_list",
         "rps_cpus",
         "xps_cpus",
+        "start_dropbear_cpu1",
+        "set_ethercat_softirq_priority",
+        '. /usr/local/sbin/v5_net_cpu_policy.sh',
     )
     for token in required_net:
         if token not in net_text:
             print(f"NETWORK_CPU_ISOLATION_OWNER_MISSING: {net_core.relative_to(ROOT)} lacks {token}", file=sys.stderr)
+            rc = 1
+    net_cpu_policy_text = net_cpu_policy.read_text(encoding="utf-8", errors="strict")
+    for token in (
+        "dropbear_cpu1_affinity_ok",
+        "enforce_dropbear_cpu1_affinity",
+        '/usr/bin/taskset -c 1 "$DROPBEAR_BIN"',
+        '/usr/bin/taskset -a -pc 1 "$v5_dropbear_pid"',
+        "dropbear stopped because CPU1 affinity could not be guaranteed",
+        "ETHERCAT_SOFTIRQ_PRIORITY=49",
+        '/usr/bin/chrt -f -p "$ETHERCAT_SOFTIRQ_PRIORITY"',
+        'v5_softirq_policy=$(awk \'{print $41}\'',
+        'v5_softirq_priority=$(awk \'{print $40}\'',
+    ):
+        if token not in net_cpu_policy_text:
+            print(
+                f"NETWORK_CPU_POLICY_MODULE_MISSING: {net_cpu_policy.relative_to(ROOT)} lacks {token}",
+                file=sys.stderr,
+            )
+            rc = 1
+    net_init_text = net_init.read_text(encoding="utf-8", errors="strict")
+    required_net_init = (
+        "bind_network_init_to_cpu1() {",
+        'done <"/proc/$$/status"',
+        '[ "$cpu_list" = "1" ] && return 0',
+        'exec /usr/bin/taskset -c 1 "$0" "$@"',
+        'bind_network_init_to_cpu1 "$@" || exit 1',
+    )
+    for token in required_net_init:
+        if token not in net_init_text:
+            print(
+                f"NETWORK_INIT_CPU1_REEXEC_MISSING: {net_init.relative_to(ROOT)} lacks {token}",
+                file=sys.stderr,
+            )
             rc = 1
     if "apply_network_cpu_isolation" not in usb_wifi_apply.read_text(encoding="utf-8", errors="ignore"):
         print("USB_WIFI_CPU_ISOLATION_OWNER_MISSING", file=sys.stderr)
@@ -717,6 +802,21 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
                     file=sys.stderr,
                 )
                 rc = 1
+    wcs_init_text = publisher_inits[1].read_text(encoding="utf-8", errors="strict")
+    for token in (
+        "LINUXCNC_RUNTIME_USER=${V5_LINUXCNC_RUNTIME_USER:-petalinux}",
+        'TOOL_MMAP_PATH=$LINUXCNC_PY_HOME/.tool.mmap',
+        "require_tool_mmap() {",
+        '[ ! -f "$TOOL_MMAP_PATH" ]',
+        '[ ! -r "$TOOL_MMAP_PATH" ]',
+        '[ ! -w "$TOOL_MMAP_PATH" ]',
+    ):
+        if token not in wcs_init_text:
+            print(f"WCS_TOOL_MMAP_OWNER_GATE_MISSING: {token}", file=sys.stderr)
+            rc = 1
+    if '$1 == "root"' in wcs_init_text or "V5_LINUXCNC_PY_HOME" in wcs_init_text:
+        print("WCS_ROOT_OR_OVERRIDE_HOME_SURVIVOR", file=sys.stderr)
+        rc = 1
     position_init_text = position_publisher_init.read_text(
         encoding="utf-8", errors="ignore")
     if not position_status_writer_identity_bound(position_init_text):
@@ -784,6 +884,12 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
     for token in (
         'PROC_ROOT = "/proc"',
         'PROC_LOCKS_PATH = "/proc/locks"',
+        'CMDLINE_PATH = "/proc/cmdline"',
+        'ISOLATED_CPU_PATH = "/sys/devices/system/cpu/isolated"',
+        "def audit_kernel_boot_cpu_layout() -> int:",
+        "if isolcpus_tokens:",
+        'print("OK_KERNEL_BOOT_CPU_LAYOUT isolcpus=absent isolated=empty")',
+        "rc |= audit_kernel_boot_cpu_layout()",
         'POSITION_LOCK_PATH = "/run/8ax/v5_position_status_publisher.lock"',
         'POSITION_BLOCK_PATH = "/dev/shm/v5_native_position_status.bin"',
         "read_position_owner_record(pidfile)",
@@ -846,6 +952,8 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         "services/ui/v5_remote_ui_dirty_geometry.py\t/usr/libexec/8ax/v5_remote_ui_dirty_geometry.py\t0644",
         "services/ui/v5_status_shm_reader.py\t/usr/libexec/8ax/v5_status_shm_reader.py\t0644",
         "petalinux/project-spec/meta-user/recipes-apps/v5-base-overlay/files/network/v5_net_core.sh\t/usr/local/sbin/v5_net_core.sh\t0644",
+        "petalinux/project-spec/meta-user/recipes-apps/v5-base-overlay/files/network/v5_net_cpu_policy.sh\t/usr/local/sbin/v5_net_cpu_policy.sh\t0644",
+        "petalinux/project-spec/meta-user/recipes-apps/v5-base-overlay/files/network/S99v5-net\t/etc/init.d/S99v5-net\t0755",
         "petalinux/project-spec/meta-user/recipes-apps/v5-base-overlay/files/network/v5_usb_wifi_apply.sh\t/usr/local/sbin/v5_usb_wifi_apply.sh\t0755",
     )
     for row in required_cpu_policy_rows:
@@ -872,13 +980,29 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         if manifest_text.splitlines().count(row) != 1:
             print(f"SHM_ABI_ATOMIC_DEPLOY_ROW_INVALID: {row}", file=sys.stderr)
             rc = 1
+    required_ethercat_rows = (
+        "kernel_module\tbuild/ethercat/ec_master.ko\t/lib/modules/5.4.0-rt7-rt1-xilinx-v2020.2/ethercat/master/ec_master.ko\t0644",
+        "kernel_module\tbuild/ethercat/ec_generic.ko\t/lib/modules/5.4.0-rt7-rt1-xilinx-v2020.2/ethercat/devices/ec_generic.ko\t0644",
+        "binary\tbuild/ethercat/lcec.so\t/usr/lib/linuxcnc/modules/lcec.so\t0644",
+        "module\tservices/command_gate/v5_ethercat_backend_lifecycle.sh\t/usr/libexec/8ax/v5_ethercat_backend_lifecycle.sh\t0644",
+    )
+    for row in required_ethercat_rows:
+        if manifest_text.splitlines().count(row) != 1:
+            print(f"ETHERCAT_ATOMIC_DEPLOY_ROW_INVALID: {row}", file=sys.stderr)
+            rc = 1
     installer_text = runtime_installer.read_text(encoding="utf-8", errors="ignore")
     required_cpu_policy_installer = (
         "manifest_cpu_policy_only=1",
+        "manifest_cpu_policy_net_module=0",
+        "manifest_cpu_policy_net_module=1",
+        "manifest_cpu_policy_net_init=0",
+        "manifest_cpu_policy_net_init=1",
         "manifest_cpu_policy_position=0",
         "restart_scope=cpu_policy",
         'LOG=/run/8ax/v5_cpu_policy.log',
+        "apply_cpu_policy_after_install()",
         "apply_network_cpu_isolation",
+        "enforce_dropbear_cpu1_affinity",
         "/etc/init.d/v5-linuxcnc-command-gate restart-native",
         "/etc/init.d/v5-position-status-publisher restart",
         "/etc/init.d/v5-wcs-status-publisher restart",
@@ -902,12 +1026,17 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         "manifest_shm_abi_required_rows=14",
         "SHM ABI deploy requires the complete Position/State/UI atomic bundle",
         "manifest_ethercat_required_rows=4",
+        "manifest_ethercat_touched=0",
         "manifest_ethercat_lcec=0",
         "manifest_ethercat_lifecycle=0",
         "binary:build/ethercat/lcec.so:0644",
         "module:services/command_gate/v5_ethercat_backend_lifecycle.sh:0644",
-        "LinuxCNC realtime owner remained active before lcec replacement",
+        "EtherCAT deploy requires the complete ec_master/ec_generic/lcec/lifecycle atomic bundle",
+        "LinuxCNC/Command Gate process remained active before atomic replacement",
         "EtherCAT restart scope requires exactly the registered ec_master/ec_generic/lcec/lifecycle bundle",
+        'if [ "$apply" -eq 1 ] && [ "$manifest_ethercat_complete" -eq 1 ]; then',
+        "stop_ethercat_modules_before_install",
+        "depmod -a",
         "restart_scope=shm_abi",
         "stop_shm_abi_domain_before_install",
         "wait_position_shm_abi_readback",
@@ -921,6 +1050,19 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
     for token in required_cpu_policy_installer:
         if token not in installer_text:
             print(f"CPU_POLICY_DEPLOY_SCOPE_MISSING: {token}", file=sys.stderr)
+            rc = 1
+    required_native_protocol_installer = (
+        "manifest_native_protocol_command_gate=0",
+        "manifest_native_protocol_command_gate=1",
+        "Command Gate native protocol deploy requires the LinuxCNC native owner/router bundle",
+        "LinuxCNC native owner/router deploy requires the Command Gate native protocol client",
+        "$linuxcnc_package_root/usr/bin/v5_native_hal_owner",
+        "$linuxcnc_package_root/usr/lib/linuxcnc/modules/v5_bus_axis_router.so",
+        "LinuxCNC deploy bundle is missing native protocol owner",
+    )
+    for token in required_native_protocol_installer:
+        if token not in installer_text:
+            print(f"NATIVE_PROTOCOL_ATOMIC_DEPLOY_MISSING: {token}", file=sys.stderr)
             rc = 1
     ensure_start = installer_text.find("ensure_position_publisher_after_backend() {")
     ensure_end = installer_text.find("\n}\n", ensure_start)
@@ -947,6 +1089,15 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
     if not cpu_scope or "/etc/init.d/v5-linuxcnc-command-gate restart\n" in cpu_scope:
         print("CPU_POLICY_SCOPE_RESTARTS_LINUXCNC_BACKEND", file=sys.stderr)
         rc = 1
+    all_scope_start = installer_text.find("    enable_boot_services\n")
+    all_cpu_policy_index = installer_text.find(
+        "    apply_cpu_policy_after_install\n", all_scope_start)
+    all_backend_index = installer_text.find(
+        "    /etc/init.d/v5-linuxcnc-command-gate restart\n", all_scope_start)
+    if (all_scope_start < 0 or all_cpu_policy_index < 0 or all_backend_index < 0 or
+            all_cpu_policy_index > all_backend_index):
+        print("ALL_SCOPE_CPU_POLICY_BEFORE_BACKEND_MISSING", file=sys.stderr)
+        rc = 1
     barrier_call = "\n    wait_publisher_actual_barrier\n"
     if installer_text.count(barrier_call) != 4:
         print("PUBLISHER_ACTUAL_BARRIER_CALL_COUNT_INVALID", file=sys.stderr)
@@ -957,9 +1108,10 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
     for token in (
         "wait_publisher_actual_barrier()",
         "PUBLISHER_ACTUAL_BARRIER=/usr/libexec/8ax/v5_ui_boot_ready.py",
+        "PUBLISHER_SNAPSHOT_PATH=/run/8ax_v5_product_ui/ui_input_barrier.json",
         "active_ini=conflict",
         "publisher actual barrier rejects disabled Pulse runtime mode",
-        '--pre-ui-inputs --expected-ini "$expected_ini" --timeout 120',
+        '--publisher-snapshot-path "$PUBLISHER_SNAPSHOT_PATH"',
     ):
         if token not in installer_text:
             print(f"PUBLISHER_ACTUAL_BARRIER_CONTRACT_MISSING: {token}", file=sys.stderr)
@@ -1631,6 +1783,15 @@ def check_linuxcnc_source_rebuild_policy() -> int:
     ):
         if required not in recipe:
             print(f"LINUXCNC_REBUILD_EXTERNAL_SOURCE_GATE_MISSING: {required}", file=sys.stderr)
+            return 1
+    build_text = build_path.read_text(encoding="utf-8", errors="strict")
+    for required in (
+        'if [ "$build_mode" = focused ]; then',
+        "run_petalinux_overlay prepare-target-only",
+        "run_petalinux_overlay prepare",
+    ):
+        if required not in build_text:
+            print(f"LINUXCNC_FOCUSED_OVERLAY_GATE_MISSING: {required}", file=sys.stderr)
             return 1
     for forbidden in (
         "git://",
@@ -2475,6 +2636,7 @@ def check_product_runtime_closure_policy() -> int:
     closure_path = ROOT / "tools" / "deploy" / "verify_v5_product_source_closure.py"
     file_manifest_path = ROOT / "tools" / "deploy" / "v5_product_file_manifest.py"
     write_sd_path = ROOT / "tools" / "petalinux" / "write_v5_sd_card.sh"
+    update_sd_path = ROOT / "tools" / "petalinux" / "update_v5_sd_from_qspi_recovery.sh"
     acceptance_path = ROOT / "tools" / "deploy" / "run_v5_board_acceptance.sh"
     installer_path = ROOT / "tools" / "deploy" / "install_v5_runtime.sh"
     required_paths = (
@@ -2483,6 +2645,7 @@ def check_product_runtime_closure_policy() -> int:
         closure_path,
         file_manifest_path,
         write_sd_path,
+        update_sd_path,
         acceptance_path,
         installer_path,
     )
@@ -2514,8 +2677,14 @@ def check_product_runtime_closure_policy() -> int:
             print(f"PRODUCT_RUNTIME_DESTINATION_DUPLICATE: {destination}", file=sys.stderr)
             return 1
         destinations.add(destination)
-        if kind == "binary":
+        if kind == "binary" and source.startswith("build/board/app/"):
             binary_targets.append(Path(source).name)
+        elif kind == "binary" and source != "build/ethercat/lcec.so":
+            print(
+                f"PRODUCT_RUNTIME_BINARY_OWNER_UNREGISTERED: {source}",
+                file=sys.stderr,
+            )
+            return 1
     if not binary_targets or len(binary_targets) != len(set(binary_targets)):
         print("PRODUCT_RUNTIME_BINARY_TARGETS_INVALID", file=sys.stderr)
         return 1
@@ -2548,9 +2717,27 @@ def check_product_runtime_closure_policy() -> int:
         "enable_service v5-position-status-publisher 06 18",
         'rm -f "$rootfs_stage/etc/rc${level}.d"/S??ethercat',
         "schema=v5-sd-card-build-v2",
+        "--boot-script-only",
+        "V5_SD_BOOT_SCRIPT_STAGE_OK",
+        "build_and_verify_boot_script",
     ):
         if token not in write_sd:
             print(f"PRODUCT_RUNTIME_SD_GATE_MISSING: {token}", file=sys.stderr)
+            return 1
+    update_sd = update_sd_path.read_text(encoding="utf-8", errors="strict")
+    for token in (
+        "--boot-script-sha256",
+        "V5_QSPI_BOOT_SCRIPT_INPUT_OK",
+        "V5_QSPI_BOOT_SCRIPT_UPDATE_OK",
+        'rootfs=untouched',
+        'mount -t vfat -o rw "$boot_partition" "$boot_mount"',
+        'mv -f "$boot_mount/boot.scr.new" "$boot_mount/boot.scr"',
+        "if product_isolcpus:",
+        "product bootargs must not isolate the ARM boot CPU",
+        "QSPI recovery bootargs must not isolate a CPU",
+    ):
+        if token not in update_sd:
+            print(f"PRODUCT_FOCUSED_BOOT_UPDATE_GATE_MISSING: {token}", file=sys.stderr)
             return 1
     acceptance = acceptance_path.read_text(encoding="utf-8", errors="strict")
     for token in (

@@ -233,11 +233,6 @@ class HalBusStatusAccess:
         for joint in range(BUS_JOINT_COUNT):
             suffix = f'{joint:02d}'
             self._register(
-                f'joint_{joint}_valid', f'bus-j{joint}-mapping-valid',
-                f'v5-native-hal-owner.home-config-valid-{suffix}',
-                f'v5-home-j{joint}-config-valid', hal_module.HAL_BIT,
-                signal_info, bind_source)
-            self._register(
                 f'joint_{joint}_generation', f'bus-j{joint}-mapping-generation',
                 f'v5-native-hal-owner.home-mapping-generation-{suffix}',
                 f'v5-home-j{joint}-generation', hal_module.HAL_U32,
@@ -303,7 +298,6 @@ class HalBusStatusAccess:
                 entries.append({'valid': False})
                 continue
             if (
-                    not bool(self._value(f'joint_{joint}_valid')) or
                     int(self._value(
                         f'joint_{joint}_generation')) != table_generation):
                 raise RuntimeError('native_bus_status_joint_mapping_invalid')

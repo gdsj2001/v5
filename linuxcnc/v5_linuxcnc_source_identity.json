@@ -10,12 +10,15 @@
     "tree": "cbadbb8d029aefe7a8d0e3218885aaa59798337b"
   },
   "v5_source_tree": "c1f4c53315c8e614fafbe48992afa91e8aef8014",
-  "content_sha256": "a0fcdd7f10de0fbc0fb662a6aca8652325d11141d1cbc6e829b36700f8ecbaab",
+  "content_sha256": "4be3f089c463988850374dcfac91a1ea193ad20a98b60193242bfe53029f419a",
   "implementation": "in_tree",
   "changed_files": [
     "scripts/linuxcnc.in",
     "src/Makefile",
     "src/configure.ac",
+    "src/hal/hal.h",
+    "src/hal/hal_lib.c",
+    "src/hal/hal_priv.h",
     "src/emc/ini/iniaxis.cc",
     "src/emc/ini/inijoint.cc",
     "src/emc/kinematics/kinematics.h",
@@ -55,7 +58,22 @@
     "src/hal/user_comps/v5_native_g53_model_types.h",
     "src/hal/user_comps/v5_native_hal_owner.comp",
     "src/hal/user_comps/v5_native_hal_owner_protocol.h",
-    "src/hal/utils/Submakefile"
+    "src/hal/utils/Submakefile",
+    "src/hal/utils/halcmd.c",
+    "src/hal/utils/halcmd_commands.cc",
+    "src/hal/utils/halcmd_commands.h",
+    "src/libnml/nml/nml_srv.cc",
+    "src/libnml/nml/nml_srv_lifecycle.hh",
+    "src/rtapi/rtai_rtapi.c",
+    "src/rtapi/rtapi.h",
+    "src/rtapi/rtapi_uspace.hh",
+    "src/rtapi/uspace_rtai.cc",
+    "src/rtapi/uspace_rtapi_app.cc",
+    "src/rtapi/uspace_xenomai.cc",
+    "tests/nml-local-only-server/expected",
+    "tests/nml-local-only-server/nml_local_only_lifecycle_smoke.cc",
+    "tests/nml-local-only-server/test.sh",
+    "tests/hal-initf-lifecycle/test_source_contract.py"
   ],
   "migration_provenance": {
     "retired_patch": "board/linuxcnc/patches/0001-v5-native-rotary-nearest-target.patch",
@@ -75,6 +93,19 @@
     "src/configure.ac": [
       "--enable-v5-headless-runtime",
       "V5_HEADLESS_RUNTIME"
+    ],
+    "src/hal/hal.h": [
+      "hal_init_funct_to_thread"
+    ],
+    "src/hal/hal_lib.c": [
+      "thread->init_funct_list",
+      "return -EEXIST;",
+      "rtapi_task_self_resync();",
+      "EXPORT_SYMBOL(hal_init_funct_to_thread);"
+    ],
+    "src/hal/hal_priv.h": [
+      "hal_list_t init_funct_list",
+      "int init_done"
     ],
     "src/emc/ini/iniaxis.cc": [
       "if (limit == 0.0)",
@@ -278,6 +309,58 @@
     ],
     "src/hal/utils/Submakefile": [
       "ifeq ($(V5_HEADLESS_RUNTIME),1)"
+    ],
+    "src/hal/utils/halcmd.c": [
+      "{\"initf\",   FUNCT(do_initf_cmd),   A_TWO | A_PLUS }"
+    ],
+    "src/hal/utils/halcmd_commands.cc": [
+      "hal_init_funct_to_thread(func, thread, position)",
+      "init cycle already executed"
+    ],
+    "src/hal/utils/halcmd_commands.h": [
+      "extern int do_initf_cmd"
+    ],
+    "src/libnml/nml/nml_srv.cc": [
+      "nml_server_set_is_local_only",
+      "wait_for_nml_server_shutdown();",
+      "NML_Default_Super_Server->spawn_all_servers();"
+    ],
+    "src/libnml/nml/nml_srv_lifecycle.hh": [
+      "nml_server_set_is_local_only",
+      "nml_server_wait_until_shutdown"
+    ],
+    "src/rtapi/rtai_rtapi.c": [
+      "EXPORT_SYMBOL(rtapi_task_self_resync);"
+    ],
+    "src/rtapi/rtapi.h": [
+      "extern void rtapi_task_self_resync(void);"
+    ],
+    "src/rtapi/rtapi_uspace.hh": [
+      "virtual void task_self_resync() = 0;"
+    ],
+    "src/rtapi/uspace_rtai.cc": [
+      "task schedule resync is not supported on RTAI"
+    ],
+    "src/rtapi/uspace_rtapi_app.cc": [
+      "void Posix::task_self_resync()",
+      "App().task_self_resync();"
+    ],
+    "src/rtapi/uspace_xenomai.cc": [
+      "clock_gettime(CLOCK_MONOTONIC, &task->nextstart);"
+    ],
+    "tests/nml-local-only-server/expected": [
+      "NML_LOCAL_ONLY_LIFECYCLE_OK"
+    ],
+    "tests/nml-local-only-server/nml_local_only_lifecycle_smoke.cc": [
+      "run_local_only_parent(5, 0)",
+      "run_local_only_parent(5, 1)"
+    ],
+    "tests/nml-local-only-server/test.sh": [
+      "nml_local_only_lifecycle_smoke.cc",
+      "NML_LOCAL_ONLY_LIFECYCLE_OK"
+    ],
+    "tests/hal-initf-lifecycle/test_source_contract.py": [
+      "HAL_INITF_LIFECYCLE_SOURCE_CONTRACT_OK"
     ]
   },
   "forbidden_tokens": {

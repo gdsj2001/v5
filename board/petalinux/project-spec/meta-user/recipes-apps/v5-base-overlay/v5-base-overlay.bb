@@ -7,6 +7,7 @@ SRC_URI = " \
     file://init/S20v5-sd-mount-policy \
     file://network/S99v5-net \
     file://network/v5_net_core.sh \
+    file://network/v5_net_cpu_policy.sh \
     file://network/v5_wifi_core.sh \
     file://network/v5_usb_wifi_apply.sh \
     file://network/rtl8188eufw.bin \
@@ -25,6 +26,7 @@ do_install() {
 
     install -d ${D}/usr/local/sbin
     install -m 0644 ${WORKDIR}/network/v5_net_core.sh ${D}/usr/local/sbin/v5_net_core.sh
+    install -m 0644 ${WORKDIR}/network/v5_net_cpu_policy.sh ${D}/usr/local/sbin/v5_net_cpu_policy.sh
     install -m 0644 ${WORKDIR}/network/v5_wifi_core.sh ${D}/usr/local/sbin/v5_wifi_core.sh
     install -m 0755 ${WORKDIR}/network/v5_usb_wifi_apply.sh ${D}/usr/local/sbin/v5_usb_wifi_apply.sh
 
@@ -46,6 +48,7 @@ FILES_${PN} += " \
     ${sysconfdir}/init.d/S20v5-sd-mount-policy \
     ${sysconfdir}/init.d/S99v5-net \
     /usr/local/sbin/v5_net_core.sh \
+    /usr/local/sbin/v5_net_cpu_policy.sh \
     /usr/local/sbin/v5_wifi_core.sh \
     /usr/local/sbin/v5_usb_wifi_apply.sh \
     /lib/firmware/rtlwifi/rtl8188eufw.bin \

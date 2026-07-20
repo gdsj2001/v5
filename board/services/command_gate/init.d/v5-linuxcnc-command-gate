@@ -1,13 +1,29 @@
 #!/bin/sh
 set -eu
 
+bind_service_init_to_cpu1() {
+  cpu_list=
+  while read -r key value rest; do
+    if [ "$key" = "Cpus_allowed_list:" ]; then
+      cpu_list=${value:-}
+      break
+    fi
+  done <"/proc/$$/status"
+  [ "$cpu_list" = "1" ] && return 0
+  [ -x /usr/bin/taskset ] || {
+    echo "taskset missing; Command Gate init cannot exclude CPU0" >&2
+    return 1
+  }
+  exec /usr/bin/taskset -c 1 "$0" "$@"
+}
+bind_service_init_to_cpu1 "$@"
+
 LD_BIND_NOW=1
 export LD_BIND_NOW
 ulimit -l unlimited 2>/dev/null || true
 
 RUN_DIR=/run/8ax
 RTAPI_FIFO_PATH=$RUN_DIR/v5_rtapi_fifo
-RTAPI_CPU_NUMBER=0
 REQUESTED_MODE_FILE=${V5_REQUESTED_MODE_FILE:-/opt/8ax/v5/config/settings/self_parameter_table.tsv}
 BUS_LINUXCNC_INI=/opt/8ax/v5/linuxcnc/ini/v5_bus.ini
 PULSE_LINUXCNC_INI=/opt/8ax/v5/linuxcnc/ini/v5_pulse.ini
@@ -32,6 +48,7 @@ MANAGEMENT_IFACE=eth0
 ETHERCAT_IFACE=eth1
 ETHERCAT_CONFIG=/opt/8ax/v5/linuxcnc/hal/ethercat-conf-2ms.xml
 ETHERCAT_LIFECYCLE_LIB=${V5_ETHERCAT_LIFECYCLE_LIB:-/usr/libexec/8ax/v5_ethercat_backend_lifecycle.sh}
+ETHERCAT_ATTACH_FAULT_BASELINE=/run/v5_ethercat_attach_fault_baseline
 
 read_requested_driver_mode() {
   [ -r "$REQUESTED_MODE_FILE" ] || {
@@ -119,8 +136,10 @@ prepare_selected_transport() {
           echo "EtherCAT init owner missing" >&2
           return 1
         }
-        /etc/init.d/ethercat start
+        /etc/init.d/ethercat start || return 1
       fi
+      wait_ethercat_transport_scanned || return 1
+      capture_ethercat_attach_fault_baseline || return 1
       ;;
     pulse)
       if ethercat master >/dev/null 2>&1; then
@@ -147,7 +166,7 @@ if [ "${1:-}" = requested-mode ]; then
 fi
 
 runtime_prepare() {
-  mkdir -p "$RUN_DIR" /run/8ax_v5_product_ui /opt/8ax/v5/linuxcnc/var "$NC_PATH" /opt/8ax/v5/linuxcnc/remap_subs
+  mkdir -p "$RUN_DIR" /run/8ax_v5_product_ui /opt/8ax/v5/linuxcnc/var "$NC_PATH" /opt/8ax/v5/linuxcnc/remap_subs || return 1
   chown petalinux:petalinux "$RUN_DIR" /run/8ax_v5_product_ui 2>/dev/null || true
   chown -R petalinux:petalinux /opt/8ax/v5/linuxcnc/var "$NC_PATH" /opt/8ax/v5/linuxcnc/remap_subs 2>/dev/null || true
 }
@@ -367,12 +386,32 @@ network_iface_rps_ok() {
   [ "$found" = "1" ]
 }
 
+ethercat_softirq_priority_ok() {
+  found=0
+  for comm in /proc/[0-9]*/task/[0-9]*/comm; do
+    [ -r "$comm" ] || continue
+    [ "$(cat "$comm" 2>/dev/null || true)" = "ksoftirqd/0" ] || continue
+    found=$((found + 1))
+    task=${comm%/comm}
+    tid=${task##*/}
+    policy=$(awk '{print $41}' "/proc/$tid/stat" 2>/dev/null || true)
+    priority=$(awk '{print $40}' "/proc/$tid/stat" 2>/dev/null || true)
+    cpus=$(awk -F: '/^Cpus_allowed_list:/ {gsub(/[ \t]/, "", $2); print $2}' \
+      "/proc/$tid/status" 2>/dev/null || true)
+    [ "$policy" = "1" ] || return 1
+    [ "$priority" = "49" ] || return 1
+    [ "$cpus" = "0" ] || return 1
+  done
+  [ "$found" -eq 1 ]
+}
+
 network_cpu_isolation_ok() {
   pidof irqbalance >/dev/null 2>&1 && return 1
   network_iface_irq_affinity_ok "$MANAGEMENT_IFACE" 1 || return 1
   network_iface_rps_ok "$MANAGEMENT_IFACE" 2 || return 1
   network_iface_irq_affinity_ok "$ETHERCAT_IFACE" 0 || return 1
   network_iface_rps_ok "$ETHERCAT_IFACE" 0 || return 1
+  ethercat_softirq_priority_ok || return 1
 }
 
 ethercat_kernel_threads() {
@@ -469,6 +508,15 @@ set_linuxcnc_realtime_affinity() {
   linuxcnc_realtime_affinity_ok
 }
 
+backend_runtime_contract_ok() {
+  network_cpu_isolation_ok &&
+    linuxcnc_realtime_affinity_ok &&
+    linuxcnc_realtime_scheduler_ok &&
+    linuxcnc_non_realtime_affinity_ok &&
+    linuxcnc_non_realtime_priority_ok &&
+    ethercat_backend_ready
+}
+
 command_gate_pids() {
   for cmdline in /proc/[0-9]*/cmdline; do
     [ -r "$cmdline" ] || continue
@@ -514,8 +562,17 @@ stop_gate() {
 }
 
 stop_backend() {
-  su petalinux -c "RTAPI_FIFO_PATH='$RTAPI_FIFO_PATH' TCLLIBPATH=/usr/lib/tcltk /usr/bin/linuxcnc -r -k" >/dev/null 2>&1 || true
   halcmd stop >/dev/null 2>&1 || true
+  if ethercat master >/dev/null 2>&1; then
+    quiesce_ethercat_slaves_before_release || {
+      echo "EtherCAT slaves did not reach clean PREOP before master release" >&2
+      return 1
+    }
+  elif backend_residue_running; then
+    echo "EtherCAT master state is unreadable; refusing backend release without clean PREOP proof" >&2
+    return 1
+  fi
+  su petalinux -c "RTAPI_FIFO_PATH='$RTAPI_FIFO_PATH' TCLLIBPATH=/usr/lib/tcltk /usr/bin/linuxcnc -r -k" >/dev/null 2>&1 || true
   halcmd unload all >/dev/null 2>&1 || true
   killall axis linuxcncsvr milltask io rtapi_app 2>/dev/null || true
   i=0
@@ -531,16 +588,16 @@ stop_backend() {
   done
   rm -f "$LINUXCNC_PID"
   ethercat_backend_stopped || return 1
+  rm -f "$ETHERCAT_ATTACH_FAULT_BASELINE"
 }
 
 start_backend() {
   select_requested_backend || return 1
-  prepare_selected_transport || return 1
   [ "$REQUESTED_DRIVER_MODE" = bus ] || {
     echo "Pulse runtime backend is not available in the current product contract" >&2
     return 1
   }
-  runtime_prepare
+  runtime_prepare || return 1
   linuxcnc_privileged_helpers_ok || {
     echo "LinuxCNC privileged helpers must be root:root 4755; refusing backend start" >&2
     return 1
@@ -550,47 +607,56 @@ start_backend() {
     return 1
   }
   if backend_running; then
-    if linuxcnc_realtime_affinity_ok &&
-       linuxcnc_realtime_scheduler_ok &&
-       ethercat_backend_ready; then
+    if backend_runtime_contract_ok; then
       echo "LinuxCNC and EtherCAT backend already ready"
       return 0
     fi
-    echo "LinuxCNC processes exist but EtherCAT/DC is not ready; rebuilding backend once" >&2
-    stop_backend
+    echo "LinuxCNC processes exist but the complete runtime contract is not ready; rebuilding backend once" >&2
+    stop_gate || return 1
+    stop_backend || return 1
   fi
-  set_management_process_affinity
   if backend_residue_running; then
-    stop_backend
+    stop_gate || return 1
+    stop_backend || return 1
   fi
   if backend_residue_running; then
     echo "LinuxCNC backend residue remained before native status reset" >&2
     return 1
   fi
+  prepare_selected_transport || return 1
+  set_management_process_affinity
   rm -f \
     /dev/shm/v5_native_safety_latch.bin \
     /dev/shm/v5_native_rtcp_status.bin \
-    /dev/shm/v5_native_g53_geometry_status.bin
-  : >"$LINUXCNC_LOG"
+    /dev/shm/v5_native_g53_geometry_status.bin || return 1
+  : >"$LINUXCNC_LOG" || return 1
   chown petalinux:petalinux "$LINUXCNC_LOG" 2>/dev/null || true
-  su petalinux -c "cd /opt/8ax/v5/linuxcnc/ini && RTAPI_CPU_NUMBER='$RTAPI_CPU_NUMBER' RTAPI_FIFO_PATH='$RTAPI_FIFO_PATH' TCLLIBPATH=/usr/lib/tcltk /usr/bin/linuxcnc -r '$LINUXCNC_INI' >>'$LINUXCNC_LOG' 2>&1" &
-  echo "$!" >"$LINUXCNC_PID"
-  if wait_linuxcnc_backend_ready; then
+  su petalinux -c "cd /opt/8ax/v5/linuxcnc/ini && RTAPI_FIFO_PATH='$RTAPI_FIFO_PATH' TCLLIBPATH=/usr/lib/tcltk /usr/bin/linuxcnc -r '$LINUXCNC_INI' >>'$LINUXCNC_LOG' 2>&1" &
+  linuxcnc_launcher_pid=$!
+  if ! printf '%s\n' "$linuxcnc_launcher_pid" >"$LINUXCNC_PID"; then
+    kill "$linuxcnc_launcher_pid" 2>/dev/null || true
+    return 1
+  fi
+  if wait_linuxcnc_backend_ready && backend_runtime_contract_ok; then
     echo "RTAPI and EtherCAT realtime paths pinned to CPU0; LinuxCNC non-realtime motion paths protected on CPU1"
-    echo "LinuxCNC backend transport ready; configured slaves responding, domain WKC complete, DC reference clock healthy"
+    echo "LinuxCNC backend transport ready; all slaves OP, domain WKC complete, DC reference clock healthy"
     return 0
   fi
-  echo "LinuxCNC backend failed readiness: process/affinity/realtime-scheduler/slaves/WKC/DC proof incomplete" >&2
+  echo "LinuxCNC backend failed readiness: complete CPU/affinity/realtime-scheduler/OP/WKC/DC runtime contract incomplete" >&2
   tail -n 80 "$LINUXCNC_LOG" 2>/dev/null || true
   stop_backend || true
   return 1
 }
 
 start_native_gate() {
-  stop_native_gate
-  : >"$COMMAND_GATE_LOG"
+  stop_native_gate || return 1
+  : >"$COMMAND_GATE_LOG" || return 1
   setsid /usr/libexec/8ax/v5_command_gate_server --socket "$COMMAND_GATE_SOCKET" --host 127.0.0.1 --port "$LINUXCNCRSH_PORT" --password "$LINUXCNCRSH_CONNECTPW" --timeout-ms 1000 --ini "$LINUXCNC_INI" --settings-project-root "$SETTINGS_PROJECT_ROOT" --settings-runtime "$SETTINGS_RUNTIME" --pulse-contract "$PULSE_CONTRACT" >>"$COMMAND_GATE_LOG" 2>&1 &
-  echo "$!" >"$COMMAND_GATE_PID"
+  command_gate_pid=$!
+  if ! printf '%s\n' "$command_gate_pid" >"$COMMAND_GATE_PID"; then
+    kill "$command_gate_pid" 2>/dev/null || true
+    return 1
+  fi
   i=0
   while [ "$i" -lt 40 ]; do
     if native_gate_running; then
@@ -614,7 +680,8 @@ start_gate() {
   while [ "$i" -lt 40 ]; do
     pid=$(pidof linuxcncrsh 2>/dev/null || true)
     if [ -n "$pid" ]; then
-      echo "$pid" | awk '{print $1}' >"$LINUXCNCRSH_PID"
+      first_pid=$(printf '%s\n' "$pid" | awk '{print $1}') || return 1
+      printf '%s\n' "$first_pid" >"$LINUXCNCRSH_PID" || return 1
       if /usr/libexec/8ax/v5_linuxcncrsh_probe --host 127.0.0.1 --port "$LINUXCNCRSH_PORT" --password "$LINUXCNCRSH_CONNECTPW" --timeout-ms 1000 >/tmp/v5_linuxcncrsh_init_probe.out 2>&1; then
         echo "linuxcncrsh running pid=$(cat "$LINUXCNCRSH_PID") port=$LINUXCNCRSH_PORT"
         return 0
@@ -629,11 +696,44 @@ start_gate() {
   return 1
 }
 
+rollback_runtime_start() {
+  rollback_rc=0
+  stop_gate || rollback_rc=1
+  stop_backend || rollback_rc=1
+  if native_gate_running || gate_running || backend_residue_running; then
+    echo "LinuxCNC runtime start rollback left an active layer" >&2
+    rollback_rc=1
+  fi
+  return "$rollback_rc"
+}
+
+start_runtime_transaction() {
+  if ! start_backend; then
+    echo "LinuxCNC runtime transaction failed at backend; rolling back" >&2
+    rollback_runtime_start || echo "LinuxCNC runtime rollback incomplete" >&2
+    return 1
+  fi
+  if ! start_gate; then
+    echo "LinuxCNC runtime transaction failed at linuxcncrsh; rolling back" >&2
+    rollback_runtime_start || echo "LinuxCNC runtime rollback incomplete" >&2
+    return 1
+  fi
+  if ! start_native_gate; then
+    echo "LinuxCNC runtime transaction failed at native Command Gate; rolling back" >&2
+    rollback_runtime_start || echo "LinuxCNC runtime rollback incomplete" >&2
+    return 1
+  fi
+  if ! backend_runtime_contract_ok || ! gate_running || ! native_gate_running; then
+    echo "LinuxCNC runtime transaction lost its final contract; rolling back" >&2
+    rollback_runtime_start || echo "LinuxCNC runtime rollback incomplete" >&2
+    return 1
+  fi
+  return 0
+}
+
 case "${1:-}" in
   start)
-    start_backend
-    start_gate
-    start_native_gate
+    start_runtime_transaction
     ;;
   stop)
     select_running_backend_for_stop >/dev/null 2>&1 || true
@@ -644,9 +744,7 @@ case "${1:-}" in
     select_running_backend_for_stop >/dev/null 2>&1 || true
     stop_gate
     stop_backend
-    start_backend
-    start_gate
-    start_native_gate
+    start_runtime_transaction
     ;;
   restart-native)
     select_requested_backend
@@ -654,27 +752,26 @@ case "${1:-}" in
       echo "native gate restart requires the active BUS backend in the current product contract" >&2
       exit 1
     }
-    ethercat_backend_ready || {
-      echo "LinuxCNC/EtherCAT backend is not ready; refusing native-gate-only restart" >&2
+    network_cpu_isolation_ok || {
+      echo "Network CPU isolation readback invalid; refusing native-gate-only restart" >&2
+      exit 1
+    }
+    backend_runtime_contract_ok || {
+      echo "LinuxCNC/EtherCAT complete runtime contract is not ready; refusing native-gate-only restart" >&2
       exit 1
     }
     gate_running || {
       echo "linuxcncrsh gate is not running; refusing native-gate-only restart" >&2
       exit 1
     }
-    network_cpu_isolation_ok || {
-      echo "Network CPU isolation readback invalid; refusing native-gate-only restart" >&2
-      exit 1
-    }
-    set_linuxcnc_non_realtime_affinity
-    set_linuxcnc_non_realtime_priority
     stop_native_gate
     start_native_gate
+    backend_runtime_contract_ok && gate_running && native_gate_running
     ;;
   status)
     select_requested_backend >/dev/null
     [ "$REQUESTED_DRIVER_MODE" = bus ]
-    ethercat_backend_ready && gate_running && native_gate_running
+    backend_runtime_contract_ok && gate_running && native_gate_running
     ;;
   requested-mode)
     read_requested_driver_mode

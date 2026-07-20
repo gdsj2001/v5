@@ -940,6 +940,20 @@ int rtapi_task_self(void)
     return -EINVAL;
 }
 
+void rtapi_task_self_resync(void)
+{
+    static int warned;
+
+    /* RTAI does not retain the periodic release point in the RTAPI task
+       data, so there is no safe portable way to re-anchor the calling task.
+       The primary initf consumer runs on the uspace backend. */
+    if (!warned) {
+        warned = 1;
+        rtapi_print_msg(RTAPI_MSG_WARN,
+            "RTAPI: task schedule resync is not supported on RTAI\n");
+    }
+}
+
 /***********************************************************************
 *                  SHARED MEMORY RELATED FUNCTIONS                     *
 ************************************************************************/
@@ -1727,6 +1741,7 @@ EXPORT_SYMBOL(rtapi_wait);
 EXPORT_SYMBOL(rtapi_task_resume);
 EXPORT_SYMBOL(rtapi_task_pause);
 EXPORT_SYMBOL(rtapi_task_self);
+EXPORT_SYMBOL(rtapi_task_self_resync);
 EXPORT_SYMBOL(rtapi_shmem_new);
 EXPORT_SYMBOL(rtapi_shmem_delete);
 EXPORT_SYMBOL(rtapi_shmem_getptr);

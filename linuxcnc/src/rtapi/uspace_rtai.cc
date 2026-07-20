@@ -153,6 +153,16 @@ struct RtaiApp : RtapiApp {
         return task->id;
     }
 
+    void task_self_resync() {
+        /* RTAI has no stored per-task release point to re-anchor safely. */
+        static bool warned = false;
+        if (!warned) {
+            warned = true;
+            rtapi_print_msg(RTAPI_MSG_WARN,
+                "RTAPI: task schedule resync is not supported on RTAI\n");
+        }
+    }
+
     static pthread_once_t key_once;
     static pthread_key_t key;
     static void init_key(void) {

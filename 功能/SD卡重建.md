@@ -3,11 +3,11 @@
 <!-- AI_FAST_READ_BEGIN -->
 owner_reqs: [REQ-SD-REBUILD-RUNBOOK]
 read_when: [SD卡重建, 空白SD, BOOT.BIN, image.ub, boot.scr, rootfs, 制卡, QSPI更新SD, 写后回读, 冷启动]
-truth: [Windows输入门禁 -> VM增量生成一次current镜像 -> 直接写整卡或QSPI更新现有分区 -> 全量回读 -> SD冷启动验收]
+truth: [普通重建按Windows输入门禁 -> VM增量生成一次current镜像 -> 直接写整卡或QSPI更新现有分区 -> 全量回读 -> SD冷启动验收；仅canonical bootargs变化且SD双分区健康时，允许VM从唯一boot.cmd生成并校验单个boot.scr，再由QSPI focused updater原子替换并回读该文件，rootfs保持不变]
 forbidden: [猜测SD设备名, 写VM系统盘, 先stage-only再直接apply造成重复组装, clean kernel或清sstate/tmp/downloads, VM联网补源码, 只替换image.ub或DTB, QSPI冒充产品系统, 未冷启动声明board_verified]
-readback: [source identity, Vivado与PetaLinux硬件输入hash, V5_LINUXCNC_BUILD_OK, V5_SD_CARD_READY或V5_QSPI_SD_UPDATE_OK, boot文件hash, rootfs全文件manifest, root=/dev/mmcblk0p2, 产品运行与真实触摸]
+readback: [source identity, Vivado与PetaLinux硬件输入hash, V5_LINUXCNC_BUILD_OK, V5_SD_CARD_READY或V5_QSPI_SD_UPDATE_OK；focused bootargs更新另需V5_SD_BOOT_SCRIPT_STAGE_OK与V5_QSPI_BOOT_SCRIPT_UPDATE_OK, boot文件hash, rootfs全文件manifest或focused模式下rootfs未挂载/未写证明, root=/dev/mmcblk0p2, 产品运行与真实触摸]
 impact: [Windows canonical源码, VM_BUILD_ROOT, PetaLinux current产物, SD boot与rootfs分区, QSPI恢复通道, 板端冷启动]
-acceptance: [所有命令零退出, 写后全量回读通过, SD冷启动来自mmcblk0p2, 产品服务通过, 物理屏与真实触摸通过]
+acceptance: [所有命令零退出, 普通重建写后全量回读通过；focused bootargs更新必须证明输入boot.scr的U-Boot header/data CRC、唯一产品/recovery bootargs语义、写后SHA-256及rootfs零写入, SD冷启动来自mmcblk0p2, 产品服务通过, 物理屏与真实触摸通过]
 detail_sections: [#sd-operation-choice, #sd-windows-check, #sd-build-current, #sd-direct-write, #sd-qspi-update, #sd-cold-boot, #sd-offline-cert]
 <!-- AI_FAST_READ_END -->
 
@@ -20,6 +20,7 @@ detail_sections: [#sd-operation-choice, #sd-windows-check, #sd-build-current, #s
 | --- | --- |
 | 空白 SD、分区损坏、需要重新分区，或 SD 可以接到 VM | 按第 4 节直接写整卡 |
 | SD 留在板内，且 `/dev/mmcblk0p1`、`/dev/mmcblk0p2` 已存在 | 按第 5 节从 QSPI 更新 boot 和 rootfs |
+| 只有 canonical `boot.cmd.default.ext4` 的 bootargs 发生变化，SD 双分区健康且 rootfs 不应变化 | 按第 5 节的 focused boot-script 路径，只更新并回读 `/dev/mmcblk0p1:/boot.scr` |
 | 正式证明断网灾难恢复能力 | 按第 7 节在全新环境执行 |
 
 普通重建使用现有 `/root/v5-build` 缓存，不删除 kernel、BitBake `tmp`、sstate、downloads 或唯一 source projection。QSPI updater 不创建分区；目标 SD 缺少两个分区时必须改用直接写整卡。
@@ -114,7 +115,31 @@ VM_BUILD_ROOT=/root/v5-build \
 <a id="sd-qspi-update"></a>
 ## 5. SD 留在板内：通过 QSPI 更新
 
-先在 VM 生成一次 staging payload：
+只有 `boot.cmd.default.ext4` 的 bootargs 改动、rootfs 与其它 boot artifact 均不应变化时，先在 VM 生成 focused boot script：
+
+```sh
+VM_BUILD_ROOT=/root/v5-build \
+  sh /mnt/v5-source/board/tools/petalinux/write_v5_sd_card.sh --boot-script-only
+BOOT_SCRIPT=/root/v5-build/sd-card/boot-only/boot.scr
+BOOT_SCRIPT_SHA256=$(sha256sum "$BOOT_SCRIPT" | awk '{print $1}')
+```
+
+必须看到 `V5_SD_BOOT_SCRIPT_STAGE_OK`。随后按本节相同方式切到 QSPI，仅传入该 artifact 与 canonical updater：
+
+```sh
+ssh re-board "grep -qw 'v5.recovery=qspi' /proc/cmdline && mkdir -p /run/v5_test_tools"
+scp "$BOOT_SCRIPT" \
+  /mnt/v5-source/board/tools/petalinux/update_v5_sd_from_qspi_recovery.sh \
+  re-board:/run/v5_test_tools/
+ssh re-board "sh /run/v5_test_tools/update_v5_sd_from_qspi_recovery.sh \
+  --boot-script /run/v5_test_tools/boot.scr \
+  --boot-script-sha256 '$BOOT_SCRIPT_SHA256' \
+  --device /dev/mmcblk0 --apply"
+```
+
+focused updater 必须在写入前验证 U-Boot legacy image header/data CRC、产品与 QSPI recovery 各自只有一条 bootargs 且都不含 `isolcpus=`，只挂载 FAT boot 分区并原子替换 `boot.scr`，写后按 SHA-256 回读；不得挂载或写 rootfs。只有看到 `V5_QSPI_BOOT_SCRIPT_UPDATE_OK` 才能冷启动验收。该入口不得用于 `image.ub`、DTB、BOOT.BIN、rootfs、kernel、模块或产品服务变化；这些变化继续走下面的完整 payload 路径。
+
+需要更新完整 boot 和 rootfs 时，先在 VM 生成一次 staging payload：
 
 ```sh
 VM_BUILD_ROOT=/root/v5-build \

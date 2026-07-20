@@ -35,16 +35,22 @@ RETIRED_STATUS_PATHS="/run/8ax_v5_product_ui/v3_native_wcs_status.bin /run/8ax_v
 INTERVAL_MS=${V5_WCS_STATUS_INTERVAL_MS:-200}
 NON_MICROKERNEL_NICE=10
 PYTHONPATH=/usr/lib/python3/dist-packages${PYTHONPATH:+:$PYTHONPATH}
-LINUXCNC_PY_HOME=${V5_LINUXCNC_PY_HOME:-}
-if [ -z "$LINUXCNC_PY_HOME" ]; then
-  LINUXCNC_PY_HOME=$(awk -F: '$1 == "root" {print $6}' /etc/passwd 2>/dev/null || true)
-fi
+LINUXCNC_RUNTIME_USER=${V5_LINUXCNC_RUNTIME_USER:-petalinux}
+LINUXCNC_PY_HOME=$(awk -F: -v user="$LINUXCNC_RUNTIME_USER" '$1 == user {print $6}' /etc/passwd 2>/dev/null || true)
 if [ -z "$LINUXCNC_PY_HOME" ] || [ ! -d "$LINUXCNC_PY_HOME" ]; then
-  echo "v5 publisher missing root home for LinuxCNC Python: $LINUXCNC_PY_HOME" >&2
+  echo "v5 publisher missing LinuxCNC runtime home user=$LINUXCNC_RUNTIME_USER home=$LINUXCNC_PY_HOME" >&2
   exit 1
 fi
+TOOL_MMAP_PATH=$LINUXCNC_PY_HOME/.tool.mmap
 HOME=$LINUXCNC_PY_HOME
 export PYTHONPATH HOME
+
+require_tool_mmap() {
+  if [ ! -f "$TOOL_MMAP_PATH" ] || [ ! -r "$TOOL_MMAP_PATH" ] || [ ! -w "$TOOL_MMAP_PATH" ]; then
+    echo "v5 publisher LinuxCNC tool mmap unavailable user=$LINUXCNC_RUNTIME_USER path=$TOOL_MMAP_PATH" >&2
+    return 1
+  fi
+}
 
 process_start_ticks() {
   stat_line=$(cat "/proc/$1/stat" 2>/dev/null) || return 1
@@ -74,6 +80,7 @@ start_service() {
   fi
   test -x "$DAEMON"
   test -r "$OPERATOR_ERROR_MAP"
+  require_tool_mmap
   command -v taskset >/dev/null 2>&1
   command -v nice >/dev/null 2>&1
   mkdir -p /run/8ax /run/8ax_v5_product_ui
@@ -83,7 +90,7 @@ start_service() {
   pid=$!
   pid_start=$(process_start_ticks "$pid") || { kill "$pid" 2>/dev/null || true; return 1; }
   printf '%s %s\n' "$pid" "$pid_start" >"$PIDFILE"
-  echo "v5_wcs_status_publisher spawned pid=$pid start_ticks=$pid_start path=$STATUS_PATH modal_tool_path=$MODAL_TOOL_PATH operator_error_path=$OPERATOR_ERROR_PATH interval_ms=$INTERVAL_MS home=$LINUXCNC_PY_HOME"
+  echo "v5_wcs_status_publisher spawned pid=$pid start_ticks=$pid_start path=$STATUS_PATH modal_tool_path=$MODAL_TOOL_PATH operator_error_path=$OPERATOR_ERROR_PATH interval_ms=$INTERVAL_MS home=$LINUXCNC_PY_HOME tool_mmap=$TOOL_MMAP_PATH"
 }
 
 stop_service() {

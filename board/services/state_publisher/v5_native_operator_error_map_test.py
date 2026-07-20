@@ -110,6 +110,18 @@ def main() -> int:
     assert internal.matched and "旋转轴" in internal.reason_cn
     native_parameter = error_map.translate("Named hal parameter #<axis> not found")
     assert native_parameter.matched and "底层控制" not in native_parameter.reason_cn
+    realtime_delay = error_map.translate(
+        "Unexpected realtime delay on task 0 with period 2000000\n"
+        "This Message will only display once per session.\n"
+        "Run the Latency Test and resolve before continuing.\n"
+    )
+    assert realtime_delay.matched
+    assert realtime_delay.source_id == "RTAPI_FMT_095C0B454AF3"
+    assert realtime_delay.display_mode == DISPLAY_POPUP
+    assert realtime_delay.title_cn == "控制周期异常"
+    assert "2000000纳秒" in realtime_delay.reason_cn
+    assert "task 0" not in realtime_delay.reason_cn
+    assert "保持急停" in realtime_delay.next_cn
     unknown = error_map.translate("LinuxCNC private process /internal/path failed")
     assert not unknown.matched
     assert unknown.display_mode == DISPLAY_POPUP

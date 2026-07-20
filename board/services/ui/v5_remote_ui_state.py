@@ -8,6 +8,7 @@ import os
 import select
 import threading
 import time
+import uuid
 from collections import deque
 from pathlib import Path
 
@@ -38,8 +39,29 @@ def flock(fd: int, operation: int) -> None:
         if error_number != errno.EINTR:
             raise OSError(error_number, os.strerror(error_number))
 
+def canonical_uuid(value: object) -> str | None:
+    text = str(value or "").strip().lower()
+    try:
+        parsed = uuid.UUID(text)
+    except (ValueError, AttributeError):
+        return None
+    return text if str(parsed) == text else None
+
+def process_start_ticks(proc_root: Path, pid: int) -> int:
+    raw = (proc_root / str(pid) / "stat").read_text(encoding="ascii")
+    tail = raw.rsplit(")", 1)
+    if len(tail) != 2:
+        raise ValueError(f"invalid process stat pid={pid}")
+    fields = tail[1].split()
+    if len(fields) <= 19:
+        raise ValueError(f"short process stat pid={pid}")
+    return int(fields[19])
+
 class FrameState:
-    def __init__(self, run_dir: Path, width: int, height: int, ready_path: Path | None = None):
+    def __init__(self, run_dir: Path, width: int, height: int,
+                 ready_path: Path | None = None, *, proc_root: Path = Path("/proc"),
+                 boot_id_path: Path = Path("/proc/sys/kernel/random/boot_id"),
+                 process_pid: int | None = None):
         self.run_dir = run_dir
         self.width = width
         self.height = height
@@ -96,8 +118,13 @@ class FrameState:
         self._framebuffer_fd: int | None = None
         self._framebuffer_key: tuple[int, int, int] | None = None
         self._ready_path = ready_path or (run_dir / "ui_ready.json")
+        self._proc_root = proc_root
+        self._boot_id_path = boot_id_path
+        self._process_pid = os.getpid() if process_pid is None else int(process_pid)
         self._ready_lock = threading.Lock()
         self._ready_metadata: dict | None = None
+        self._ready_file_key: tuple[int, int, int, int] | None = None
+        self._system_boot_id: str | None = None
         self._dirty_geometry = DirtyGeometryNormalizer(width, height, self.mark_metric)
 
     @property
@@ -116,28 +143,159 @@ class FrameState:
     def ready_path(self) -> Path:
         return self._ready_path
 
-    def ready_metadata(self) -> dict | None:
+    def _clear_ready_metadata(self) -> None:
         with self._ready_lock:
-            if self._ready_metadata is not None:
-                return dict(self._ready_metadata)
+            self._ready_metadata = None
+            self._ready_file_key = None
+
+    def _current_boot_id(self) -> str | None:
+        if self._system_boot_id is None:
+            try:
+                self._system_boot_id = canonical_uuid(
+                    self._boot_id_path.read_text(encoding="ascii"))
+            except OSError:
+                return None
+        return self._system_boot_id
+
+    def _ready_identity_valid(self, payload: dict) -> bool:
         try:
-            payload = json.loads(self.ready_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError, TypeError):
-            return None
-        if not isinstance(payload, dict) or payload.get("schema") != "v5.ui_ready.v1" or payload.get("ready") is not True:
-            return None
-        try:
-            metadata_frame_id = int(payload.get("current_frame_id") or 0)
+            boot_id = canonical_uuid(payload.get("boot_id"))
+            ui_instance_id = canonical_uuid(payload.get("ui_instance_id"))
+            ui_pid = int(payload.get("ui_pid") or 0)
+            ui_start_ticks = int(payload.get("ui_start_ticks") or 0)
         except (TypeError, ValueError):
+            return False
+        if (boot_id is None or boot_id != self._current_boot_id() or
+                ui_instance_id is None or ui_pid <= 0 or ui_start_ticks <= 0 or
+                not self._publisher_barrier_valid(payload.get("publisher_barrier"))):
+            return False
+        try:
+            return process_start_ticks(self._proc_root, ui_pid) == ui_start_ticks
+        except (OSError, ValueError):
+            return False
+
+    @staticmethod
+    def _publisher_barrier_valid(barrier: object) -> bool:
+        if not isinstance(barrier, dict):
+            return False
+        identities = barrier.get("owner_identities")
+        baseline = barrier.get("baseline_markers")
+        final = barrier.get("final_markers")
+        if (not isinstance(identities, dict) or
+                set(identities) != {"position", "wcs", "state"} or
+                not isinstance(baseline, dict) or
+                not isinstance(final, dict) or
+                set(baseline) != {"position", "state", "wcs", "modal"} or
+                set(final) != set(baseline)):
+            return False
+        try:
+            for name, token in identities.items():
+                if (not isinstance(token, dict) or int(token.get("pid") or 0) <= 0 or
+                        int(token.get("start_ticks") or 0) <= 0 or
+                        not isinstance(token.get("argv"), list) or not token["argv"]):
+                    return False
+                if name == "position" and int(token.get("writer_identity") or 0) <= 0:
+                    return False
+            baseline_values = {name: int(value or 0) for name, value in baseline.items()}
+            final_values = {name: int(value or 0) for name, value in final.items()}
+        except (TypeError, ValueError):
+            return False
+        return (all(baseline_values.values()) and all(final_values.values()) and
+                all(final_values[name] >= baseline_values[name] for name in final_values))
+
+    def _failure_identity_valid(self, payload: dict) -> bool:
+        try:
+            boot_id = canonical_uuid(payload.get("boot_id"))
+            startup_instance_id = canonical_uuid(payload.get("startup_instance_id"))
+            owner_pid = int(payload.get("owner_pid") or 0)
+            owner_start_ticks = int(payload.get("owner_start_ticks") or 0)
+        except (TypeError, ValueError):
+            return False
+        owner_role = payload.get("owner_role")
+        if (boot_id is None or boot_id != self._current_boot_id() or
+                startup_instance_id is None or
+                owner_role not in ("relay", "supervisor") or
+                (owner_role == "relay" and owner_pid != self._process_pid) or
+                owner_pid <= 0 or owner_start_ticks <= 0 or
+                not str(payload.get("stage") or "").strip() or
+                not str(payload.get("error") or "").strip()):
+            return False
+        try:
+            return process_start_ticks(self._proc_root, owner_pid) == owner_start_ticks
+        except (OSError, ValueError):
+            return False
+
+    @staticmethod
+    def _file_key(stat_result: os.stat_result) -> tuple[int, int, int, int]:
+        return (int(stat_result.st_dev), int(stat_result.st_ino),
+                int(stat_result.st_size), int(stat_result.st_mtime_ns))
+
+    def _lifecycle_metadata(self) -> dict | None:
+        payload: dict | None = None
+        key: tuple[int, int, int, int] | None = None
+        for _attempt in range(2):
+            try:
+                with self.ready_path.open("r", encoding="utf-8") as stream:
+                    key = self._file_key(os.fstat(stream.fileno()))
+                    with self._ready_lock:
+                        if self._ready_file_key == key and self._ready_metadata is not None:
+                            payload = dict(self._ready_metadata)
+                        else:
+                            loaded = json.load(stream)
+                            payload = dict(loaded) if isinstance(loaded, dict) else None
+                if self._file_key(self.ready_path.stat()) == key:
+                    break
+            except (OSError, ValueError, TypeError):
+                self._clear_ready_metadata()
+                return None
+        else:
+            self._clear_ready_metadata()
             return None
-        with self.condition:
-            current_frame_id = int(self.frame_id)
-        if metadata_frame_id <= 0 or current_frame_id < metadata_frame_id:
+        if payload is None:
+            self._clear_ready_metadata()
+            return None
+        if payload.get("schema") == "v5.ui_ready.v1":
+            if payload.get("ready") is not True or not self._ready_identity_valid(payload):
+                self._clear_ready_metadata()
+                return None
+            try:
+                metadata_frame_id = int(payload.get("current_frame_id") or 0)
+            except (TypeError, ValueError):
+                self._clear_ready_metadata()
+                return None
+            with self.condition:
+                current_frame_id = int(self.frame_id)
+            if metadata_frame_id <= 0 or current_frame_id < metadata_frame_id:
+                self._clear_ready_metadata()
+                return None
+        elif payload.get("schema") == "v5.ui_failure.v1":
+            if (payload.get("ready") is not False or payload.get("failed") is not True or
+                    not self._failure_identity_valid(payload)):
+                self._clear_ready_metadata()
+                return None
+        else:
+            self._clear_ready_metadata()
             return None
         with self._ready_lock:
-            if self._ready_metadata is None:
-                self._ready_metadata = dict(payload)
+            self._ready_metadata = dict(payload)
+            self._ready_file_key = key
             return dict(self._ready_metadata)
+
+    def lifecycle_snapshot(self) -> tuple[str, dict | None]:
+        payload = self._lifecycle_metadata()
+        if payload is None:
+            return "booting", None
+        if payload.get("schema") == "v5.ui_ready.v1":
+            return "ready", payload
+        return "failed", payload
+
+    def ready_metadata(self) -> dict | None:
+        status, payload = self.lifecycle_snapshot()
+        return payload if status == "ready" else None
+
+    def failure_metadata(self) -> dict | None:
+        status, payload = self.lifecycle_snapshot()
+        return payload if status == "failed" else None
 
     def ui_ready(self) -> bool:
         return self.ready_metadata() is not None

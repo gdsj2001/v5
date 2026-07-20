@@ -1,8 +1,8 @@
 # schema=v5.native_operator_error_map.v1
-# source_count=555
+# source_count=556
 # interpreter_fixed_count=197
 # dynamic_format_count=358
-# inventory_sha256=10ea2746943af0d98cf709cfe1f550006440169637322e6f639cfc32be517962
+# inventory_sha256=0ba0c29826e96f54f574a8db9c6319d29f79c08082cacf170ea8bf4163e7b175
 source_id	origin	native_pattern_json	reason_cn_json	handling_group
 INTERPRETER_FMT_005BB8FB0122	CHKS:rs274ngc/interp_convert.cc	"G%d requires D word to be a whole number"	"G%d 要求D字是一个整数"	PROGRAM_SYNTAX
 INTERPRETER_FMT_02A7A101691E	CHKS:rs274ngc/interp_convert.cc	"Q word with M19 requires a value > 0"	"Q字与M19需要值> 0"	PROGRAM_SYNTAX
@@ -559,3 +559,4 @@ TASK_FMT_F3575460BE30	emcOperatorError:task/emctaskmain.cc	"can't do that (%s) i
 TASK_FMT_F726C8893629	emcOperatorError:task/taskclass.cc	"return_int(%s): expected int return value, got '%s' (%s)"	"扩展调用%s应返回整数，但返回值类型无效"	PROGRAM_FLOW
 TASK_FMT_FAAF0C0B1DE5	emcOperatorError:task/taskclass.cc	"emcPluginCall: Python plugin not initialized"	"扩展指令功能尚未初始化"	INTERNAL
 TASK_FMT_FDE4F4799AC6	emcOperatorError:task/backtrace.cc	"%s (pid %d) died on signal %d, backtrace stored in %s"	"控制任务%s（进程%d）因信号%d异常退出，诊断记录位于%s"	INTERNAL
+RTAPI_FMT_095C0B454AF3	rtapi_print_msg:rtapi/uspace_rtapi_app.cc	"Unexpected realtime delay on task %d with period %ld\nThis Message will only display once per session.\nRun the Latency Test and resolve before continuing.\n"	"控制周期未能按%2$ld纳秒设定节拍及时执行，当前实时性不可信"	CONTROL_REALTIME

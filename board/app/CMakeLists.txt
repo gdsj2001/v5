@@ -911,8 +911,10 @@ target_compile_definitions(v5_lvgl_shell PRIVATE
 target_link_libraries(v5_lvgl_shell PRIVATE lvgl v5_button_visuals v5_lvgl_clock v5_status_shm_projection v5_microkernel_contract v5_program_commands v5_command_gate_client Threads::Threads m)
 
 # The deploy manifest is the single product-runtime inventory.  Derive the
-# aggregate ARM build target from every binary row so build, deploy and SD-card
-# assembly cannot maintain separate executable lists.
+# aggregate ARM build target from every board/app binary row so build, deploy
+# and SD-card assembly cannot maintain separate executable lists. Recipe-owned
+# binaries (currently EtherCAT lcec.so) remain in the same deploy inventory but
+# are built by their canonical PetaLinux recipe rather than this CMake project.
 set(V5_RUNTIME_DEPLOY_MANIFEST
     "${CMAKE_CURRENT_SOURCE_DIR}/../config/deploy/v5_runtime_deploy_manifest.tsv"
 )
@@ -936,13 +938,19 @@ foreach(V5_RUNTIME_DEPLOY_ROW IN LISTS V5_RUNTIME_DEPLOY_ROWS)
     list(GET V5_RUNTIME_DEPLOY_FIELDS 0 V5_RUNTIME_DEPLOY_KIND)
     if(V5_RUNTIME_DEPLOY_KIND STREQUAL "binary")
         list(GET V5_RUNTIME_DEPLOY_FIELDS 1 V5_RUNTIME_DEPLOY_SOURCE)
-        get_filename_component(V5_RUNTIME_DEPLOY_TARGET "${V5_RUNTIME_DEPLOY_SOURCE}" NAME)
-        if(NOT TARGET "${V5_RUNTIME_DEPLOY_TARGET}")
+        if(V5_RUNTIME_DEPLOY_SOURCE MATCHES "^build/board/app/")
+            get_filename_component(V5_RUNTIME_DEPLOY_TARGET "${V5_RUNTIME_DEPLOY_SOURCE}" NAME)
+            if(NOT TARGET "${V5_RUNTIME_DEPLOY_TARGET}")
+                message(FATAL_ERROR
+                    "Deploy manifest board/app binary has no CMake target: ${V5_RUNTIME_DEPLOY_TARGET}"
+                )
+            endif()
+            list(APPEND V5_PRODUCT_RUNTIME_TARGETS "${V5_RUNTIME_DEPLOY_TARGET}")
+        elseif(NOT V5_RUNTIME_DEPLOY_SOURCE STREQUAL "build/ethercat/lcec.so")
             message(FATAL_ERROR
-                "Deploy manifest binary has no CMake target: ${V5_RUNTIME_DEPLOY_TARGET}"
+                "Deploy manifest binary has no registered build owner: ${V5_RUNTIME_DEPLOY_SOURCE}"
             )
         endif()
-        list(APPEND V5_PRODUCT_RUNTIME_TARGETS "${V5_RUNTIME_DEPLOY_TARGET}")
     endif()
 endforeach()
 

@@ -17,6 +17,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import uuid
 from pathlib import Path
 
 
@@ -463,6 +464,7 @@ print(json.dumps({
     "returncode": proc.returncode,
     "output_tail": output.splitlines()[-30:],
     "before_boot_id": before_ready.get("boot_id") if isinstance(before_ready, dict) else None,
+    "before_ui_instance_id": before_ready.get("ui_instance_id") if isinstance(before_ready, dict) else None,
     "ready": ready,
     "sample_count": len(pre_ready_target),
     "cpu_window_count": len(cpu_windows),
@@ -535,21 +537,26 @@ def diagnostics(args: argparse.Namespace) -> dict:
     return http_json(args, "/remote/diagnostics")
 
 
-def wait_ready(args: argparse.Namespace, previous_boot_id: str | None = None, timeout: float = 180.0) -> dict:
+def wait_ready(args: argparse.Namespace, previous_ui_instance_id: str | None = None,
+               timeout: float = 180.0) -> dict:
     deadline = time.monotonic() + timeout
     last_error = "not_checked"
     while time.monotonic() < deadline:
         try:
             info = http_json(args, "/remote/info", timeout=1.0)
             ready = info.get("ready_metadata")
-            if isinstance(ready, dict) and ready.get("ready") and ready.get("boot_id") != previous_boot_id:
+            if (isinstance(ready, dict) and ready.get("ready") and
+                    ready.get("ui_instance_id") != previous_ui_instance_id):
                 validate_ready_metadata(ready)
                 return ready
             last_error = f"stale_or_missing_ready:{ready!r}"
         except (OSError, urllib.error.URLError, AcceptanceError) as exc:
             last_error = str(exc)
         time.sleep(0.2)
-    raise AcceptanceError(f"UI ready timeout previous_boot_id={previous_boot_id!r} last_error={last_error}")
+    raise AcceptanceError(
+        f"UI ready timeout previous_ui_instance_id={previous_ui_instance_id!r} "
+        f"last_error={last_error}"
+    )
 
 
 def validate_ready_metadata(ready: dict) -> None:
@@ -562,6 +569,24 @@ def validate_ready_metadata(ready: dict) -> None:
         raise AcceptanceError(f"cache queue mismatch: {queue}")
     if ready.get("cpus_allowed_list") != "1":
         raise AcceptanceError(f"UI startup affinity is not CPU1: {ready.get('cpus_allowed_list')!r}")
+    for field in ("boot_id", "ui_instance_id"):
+        value = str(ready.get(field) or "").strip().lower()
+        try:
+            canonical = str(uuid.UUID(value))
+        except (ValueError, AttributeError) as exc:
+            raise AcceptanceError(f"ready metadata {field} is invalid: {value!r}") from exc
+        if value != canonical:
+            raise AcceptanceError(f"ready metadata {field} is not canonical: {value!r}")
+    try:
+        ui_pid = int(ready.get("ui_pid") or 0)
+        ui_start_ticks = int(ready.get("ui_start_ticks") or 0)
+    except (TypeError, ValueError) as exc:
+        raise AcceptanceError("ready metadata UI process identity is not numeric") from exc
+    if ui_pid <= 0 or ui_start_ticks <= 0:
+        raise AcceptanceError(
+            f"ready metadata UI process identity is invalid pid={ready.get('ui_pid')!r} "
+            f"start_ticks={ready.get('ui_start_ticks')!r}"
+        )
     first = ready.get("first_frame")
     if not isinstance(first, dict) or tuple(int(first.get(key, -1)) for key in ("x", "y", "w", "h")) != FULL_RECT:
         raise AcceptanceError(f"formal first frame is not a full main blit: {first}")
@@ -1011,6 +1036,18 @@ def run_startup_acceptance(args: argparse.Namespace) -> dict:
     if not isinstance(ready, dict):
         raise AcceptanceError(f"startup monitor returned no ready metadata: {result}")
     validate_ready_metadata(ready)
+    before_boot_id = str(result.get("before_boot_id") or "")
+    before_ui_instance_id = str(result.get("before_ui_instance_id") or "")
+    if not before_boot_id or before_boot_id != str(ready["boot_id"]):
+        raise AcceptanceError(
+            f"UI service restart crossed kernel boot boundary before={before_boot_id!r} "
+            f"after={ready.get('boot_id')!r}"
+        )
+    if (not before_ui_instance_id or
+            before_ui_instance_id == str(ready["ui_instance_id"])):
+        raise AcceptanceError(
+            f"UI service restart retained stale instance id={before_ui_instance_id!r}"
+        )
     queue_trace = result.get("ui_cache_queue_trace")
     if not isinstance(queue_trace, list) or not all(isinstance(line, str) for line in queue_trace):
         raise AcceptanceError(f"startup monitor returned no cache queue trace: {queue_trace!r}")
@@ -1156,6 +1193,7 @@ def run_cycle(args: argparse.Namespace, cycle: int, ready: dict) -> tuple[dict, 
     cycle_result = {
         "cycle": cycle,
         "boot_id": str(ready["boot_id"]),
+        "ui_instance_id": str(ready["ui_instance_id"]),
         "ui_pid": int(baseline["pid"]),
         "memory_baseline": baseline,
         "memory_settled": settled,
@@ -1171,20 +1209,24 @@ def run_cycle(args: argparse.Namespace, cycle: int, ready: dict) -> tuple[dict, 
 
 def run_final_restart(args: argparse.Namespace, ready: dict) -> dict:
     previous_boot_id = str(ready["boot_id"])
+    previous_ui_instance_id = str(ready["ui_instance_id"])
     previous_pid = int(ready["ui_pid"])
     remote_input = RemoteInput(args.relay_host, args.port, args.cycles + 1)
     try:
         receipt = remote_input.click(SETTINGS_SAVE_RESTART)
     finally:
         remote_input.close()
-    next_ready = wait_ready(args, previous_boot_id, timeout=args.restart_timeout)
+    next_ready = wait_ready(
+        args, previous_ui_instance_id, timeout=args.restart_timeout)
     if int(next_ready.get("ui_pid") or 0) == previous_pid:
         raise AcceptanceError(f"final save/restart retained the old UI PID={previous_pid}")
     return {
         "previous_boot_id": previous_boot_id,
+        "previous_ui_instance_id": previous_ui_instance_id,
         "previous_ui_pid": previous_pid,
         "release_seq": int(receipt["release_seq"]),
         "next_boot_id": str(next_ready["boot_id"]),
+        "next_ui_instance_id": str(next_ready["ui_instance_id"]),
         "next_ui_pid": int(next_ready["ui_pid"]),
     }
 
@@ -1218,9 +1260,14 @@ def verify_cross_cycle_memory(cycles: list[dict]) -> dict:
         raise AcceptanceError(f"same-process memory acceptance requires at least 10 cycles, got {len(cycles)}")
     cycle_pids = {int(item.get("ui_pid") or 0) for item in cycles}
     boot_ids = {str(item.get("boot_id") or "") for item in cycles}
-    if len(cycle_pids) != 1 or 0 in cycle_pids or len(boot_ids) != 1 or "" in boot_ids:
+    ui_instance_ids = {str(item.get("ui_instance_id") or "") for item in cycles}
+    if (len(cycle_pids) != 1 or 0 in cycle_pids or
+            len(boot_ids) != 1 or "" in boot_ids or
+            len(ui_instance_ids) != 1 or "" in ui_instance_ids):
         raise AcceptanceError(
-            f"10-round memory evidence crossed process/boot boundary pids={sorted(cycle_pids)} boot_ids={sorted(boot_ids)}"
+            f"10-round memory evidence crossed process/boot boundary "
+            f"pids={sorted(cycle_pids)} boot_ids={sorted(boot_ids)} "
+            f"ui_instance_ids={sorted(ui_instance_ids)}"
         )
     expected_pid = next(iter(cycle_pids))
     for item in cycles:
@@ -1230,7 +1277,12 @@ def verify_cross_cycle_memory(cycles: list[dict]) -> dict:
                 f"cycle memory samples crossed PID cycle={item.get('cycle')} "
                 f"expected={expected_pid} actual={sorted(sample_pids)}"
             )
-    evidence = {"ui_pid": expected_pid, "boot_id": next(iter(boot_ids)), "fields": {}}
+    evidence = {
+        "ui_pid": expected_pid,
+        "boot_id": next(iter(boot_ids)),
+        "ui_instance_id": next(iter(ui_instance_ids)),
+        "fields": {},
+    }
     for field in ("vmrss_kib", "vmlck_kib", "global_locked_kib"):
         values = [int(item["memory_settled"][field]) for item in cycles]
         tolerance = GLOBAL_LOCKED_TOLERANCE_KIB if field == "global_locked_kib" else MEMORY_TOLERANCE_KIB
@@ -1302,6 +1354,7 @@ def sample_memory_cycles(values: list[int], pid: int = 77) -> list[dict]:
         cycles.append({
             "cycle": index,
             "boot_id": "same-boot",
+            "ui_instance_id": "same-ui-instance",
             "ui_pid": pid,
             "memory_settled": dict(sample),
             "memory_samples": [dict(sample)],
@@ -1313,6 +1366,10 @@ def self_test() -> int:
     ready = {
         "schema": "v5.ui_ready.v1",
         "ready": True,
+        "boot_id": "11111111-1111-4111-8111-111111111111",
+        "ui_instance_id": "22222222-2222-4222-8222-222222222222",
+        "ui_pid": 77,
+        "ui_start_ticks": 12345,
         "cache_budget_bytes": EXPECTED_CACHE_BUDGET_BYTES,
         "cache_queue": [{"page": page} for page in EXPECTED_QUEUE],
         "cpus_allowed_list": "1",
@@ -1327,8 +1384,18 @@ def self_test() -> int:
         "current_frame_id": 2,
     }
     validate_ready_metadata(ready)
+    for field, value in (("boot_id", "not-a-uuid"), ("ui_instance_id", ""),
+                         ("ui_start_ticks", 0)):
+        invalid_ready = dict(ready, **{field: value})
+        try:
+            validate_ready_metadata(invalid_ready)
+        except AcceptanceError:
+            pass
+        else:
+            raise AssertionError(f"invalid ready identity accepted field={field}")
     validate_queue_trace(self_test_lines())
     compile(REMOTE_RESTART_MONITOR, "REMOTE_RESTART_MONITOR", "exec")
+    assert '"before_ui_instance_id"' in REMOTE_RESTART_MONITOR
     assert '"cpu_window_count"' in REMOTE_RESTART_MONITOR
     assert '"cpu1_peak_percent"' in REMOTE_RESTART_MONITOR
     assert '"cpu1_sustained_ge95_windows"' in REMOTE_RESTART_MONITOR
@@ -1427,6 +1494,11 @@ def self_test() -> int:
     changed_pid[-1]["memory_samples"][0]["pid"] = 88
     expect_acceptance_error(
         "memory_pid_change", lambda: verify_cross_cycle_memory(changed_pid)
+    )
+    changed_instance = sample_memory_cycles([1000] * 10)
+    changed_instance[-1]["ui_instance_id"] = "different-ui-instance"
+    expect_acceptance_error(
+        "memory_ui_instance_change", lambda: verify_cross_cycle_memory(changed_instance)
     )
     valid_cpu = {
         "cpu_lists": ["1"],

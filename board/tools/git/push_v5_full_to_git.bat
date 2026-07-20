@@ -7,6 +7,7 @@ set "REMOTE=origin"
 set "BRANCH=main"
 set "GIT_PAGER=cat"
 set "CHECK_ONLY=0"
+set "V5_GIT_ALLOWED_NEW_ROOT="
 
 if /i "%~1"=="--check-only" (
     set "CHECK_ONLY=1"
@@ -57,9 +58,10 @@ if errorlevel 1 (
     goto :fail
 )
 
-echo [2/10] Staging canonical source only...
-echo Temporary files, caches, logs, evidence and process outputs are excluded.
-git add -A -- . || goto :fail
+echo [2/10] Sanitizing root outputs and staging canonical source...
+echo Unregistered root files are preserved under repo_ignored before staging.
+call :stage_snapshot
+if errorlevel 1 goto :fail
 
 rem .gitignore owns the normal Git range. Deletions are intentionally allowed
 rem here so previously tracked process/proof output can leave Git once. Any
@@ -67,14 +69,14 @@ rem added, copied, modified, renamed or type-changed forbidden output fails.
 rem A new file directly under the repository root also fails unless it is
 rem explicitly registered in the owner document and in allowedNewRoot below.
 powershell -NoProfile -Command ^
-    "$specs=@(':(top)repo_ignored/**',':(glob)**/repo_ignored/**',':(glob)**/__pycache__/**',':(glob)**/.pytest_cache/**',':(glob)**/node_modules/**',':(glob)**/Testing/Temporary/**',':(glob)**/artifacts/**',':(glob)**/evidence/**',':(glob)**/evidence_*/**',':(glob)**/*_evidence/**',':(glob)**/*evidence*/**',':(glob)**/graphify-out/**',':(top)build/**',':(top)build-*/**',':(glob)**/CMakeFiles/**',':(glob)**/.Xil/**',':(glob)**/*.tmp',':(glob)**/*.temp',':(glob)**/*.log',':(glob)**/*.gcda',':(glob)**/*.gcno',':(glob)**/*.profraw',':(glob)**/*.profdata',':(glob)**/*.dmp',':(top)-e',':(top)event',':(top)pclk',':(top)restart_required',':(top)rtcp_force_off',':(top)source_path',':(top)commandNum',':(top)trajectory',':(top)trajectory_line',':(top)wait',':(top)wait()');" ^
+    "$specs=@(':(top)repo_ignored/**',':(glob)**/repo_ignored/**',':(glob)**/__pycache__/**',':(glob)**/.pytest_cache/**',':(glob)**/node_modules/**',':(glob)**/Testing/Temporary/**',':(glob)**/artifacts/**',':(glob)**/evidence/**',':(glob)**/evidence_*/**',':(glob)**/*_evidence/**',':(glob)**/*evidence*/**',':(glob)**/graphify-out/**',':(top)build/**',':(top)build-*/**',':(top)board/build/**',':(glob)**/CMakeFiles/**',':(glob)**/.Xil/**',':(glob)**/*.tmp',':(glob)**/*.temp',':(glob)**/*.log',':(glob)**/*.gcda',':(glob)**/*.gcno',':(glob)**/*.profraw',':(glob)**/*.profdata',':(glob)**/*.dmp',':(top)-e',':(top)event',':(top)pclk',':(top)restart_required',':(top)rtcp_force_off',':(top)source_path',':(top)commandNum',':(top)trajectory',':(top)trajectory_line',':(top)wait',':(top)wait()');" ^
     "$forbidden=@(& git -c core.quotepath=false diff --cached --name-only --diff-filter=ACMRTUXB -- $specs);" ^
     "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE };" ^
     "$rootAdded=@(& git -c core.quotepath=false diff --cached --name-only --diff-filter=A --);" ^
     "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE };" ^
     "$remoteRoot=@(& git -c core.quotepath=false ls-tree --name-only '%REMOTE%/%BRANCH%' --);" ^
     "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE };" ^
-    "$allowedNewRoot=@();" ^
+    "$allowedNewRoot=@($env:V5_GIT_ALLOWED_NEW_ROOT -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) });" ^
     "$unexpectedRoot=@($rootAdded | Where-Object { $_ -and $_ -notmatch '[\\/]' -and $remoteRoot -notcontains $_ -and $allowedNewRoot -notcontains $_ });" ^
     "$blocked=@($forbidden + $unexpectedRoot | Sort-Object -Unique);" ^
     "if ($blocked.Count -gt 0) { Write-Host 'ERROR: Temporary/process output or an unregistered root path is staged:'; $blocked | ForEach-Object { Write-Host ('  ' + $_) }; Write-Host 'Delete/move temporary output to repo_ignored, or register a real root owner before pushing.'; exit 3 }"
@@ -156,6 +158,19 @@ echo HEAD: %LOCAL_HEAD%
 echo.
 pause
 exit /b 0
+
+:stage_snapshot
+for /l %%A in (1,1,3) do (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0prepare_v5_git_snapshot.ps1" -Repository "%REPO%" -BaselineRef "%REMOTE%/%BRANCH%"
+    if errorlevel 1 exit /b 1
+
+    git add -A -- .
+    if not errorlevel 1 exit /b 0
+
+    if %%A LSS 3 echo WARNING: staging attempt %%A failed; rerunning the root preflight before retry.
+)
+echo ERROR: Staging failed after three sanitized attempts.
+exit /b 1
 
 :fail
 echo.

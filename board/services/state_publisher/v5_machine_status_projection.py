@@ -172,8 +172,6 @@ class NativeRotaryDisplayProjection:
             if not (active_mask & (1 << joint)):
                 continue
             suffix = f'{joint:02d}'
-            if not bool(self._get(f'v5-native-hal-owner.home-config-valid-{suffix}')):
-                raise RuntimeError('native_rotary_projection_joint_config_invalid')
             if int(self._get(f'v5-native-hal-owner.home-mapping-generation-{suffix}')) != generation:
                 raise RuntimeError('native_rotary_projection_generation_mismatch')
             axis_code = int(self._get(f'v5-native-hal-owner.home-axis-code-{suffix}'))

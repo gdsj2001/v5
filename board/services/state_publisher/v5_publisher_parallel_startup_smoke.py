@@ -61,9 +61,30 @@ def audit_sources(texts: dict[str, str]) -> None:
     wcs = texts[str(INIT_FILES[1])] + texts[str(STATE_ROOT / "v5_wcs_status_publisher.py")]
     for token in RETIRED:
         assert token not in wcs, f"WCS_EVENT_RESURRECTED:{token}"
+    for token in (
+        "LINUXCNC_RUNTIME_USER=${V5_LINUXCNC_RUNTIME_USER:-petalinux}",
+        'TOOL_MMAP_PATH=$LINUXCNC_PY_HOME/.tool.mmap',
+        "require_tool_mmap() {",
+        '[ ! -f "$TOOL_MMAP_PATH" ]',
+        '[ ! -r "$TOOL_MMAP_PATH" ]',
+        '[ ! -w "$TOOL_MMAP_PATH" ]',
+    ):
+        assert token in wcs, f"WCS_TOOL_MMAP_OWNER_GATE_MISSING:{token}"
+    assert '$1 == "root"' not in wcs, "WCS_ROOT_HOME_RESURRECTED"
     assert not (STATE_ROOT / "v5_wcs_startup_smoke.py").exists(), "WCS_EVENT_SMOKE_RESURRECTED"
     relay = texts[str(UI_ROOT / "init.d/v5-ui-relay")]
-    assert '"$BOOT_READY" --pre-ui-inputs --expected-ini "$expected_ini" --timeout 120' in relay, "UI_BARRIER_NOT_CANONICAL"
+    assert '"$BOOT_READY" --pre-ui-inputs --expected-ini "$expected_ini"' in relay, "UI_BARRIER_NOT_CANONICAL"
+    assert relay.count('--publisher-snapshot-path "$PUBLISHER_SNAPSHOT_PATH"') == 2, "UI_FINAL_PUBLISHER_SNAPSHOT_GATE_MISSING"
+    assert '--expected-ini "$PROJECT_ROOT/linuxcnc/ini/v5_bus.ini"' in relay, "UI_FINAL_EXPECTED_INI_GATE_MISSING"
+    for token in (
+        "process_identity_matches() {",
+        'process_has_exact_arg "$identity_pid" "$identity_expected_arg"',
+        '"$RELAY_STARTFILE" "$RELAY_DAEMON"',
+        '"$UI_STARTFILE" "$UI_DAEMON"',
+        "--failure-owner-start-ticks",
+        "--failure-stage ui_ready_handshake",
+    ):
+        assert token in relay, f"UI_LIFECYCLE_IDENTITY_GATE_MISSING:{token}"
     assert "time.sleep(0.1)" not in relay, "UI_STATUS_POLL_RESURRECTED"
     start = start_body(relay)
     assert start.index("wait_boot_inputs_ready") < start.index('"$UI_DAEMON" --serve'), "UI_SPAWNED_BEFORE_ACTUAL_BARRIER"
@@ -84,6 +105,8 @@ def audit_sources(texts: dict[str, str]) -> None:
     assert "ctypes.CDLL(None, use_errno=True).flock" in boot, "LIBC_FLOCK_GATE_MISSING"
     assert 'if ready and checker is current_pre_ui_inputs' in boot, "FINAL_UNIQUE_RECHECK_MISSING"
     assert "publisher_identities(cache, unique, expected_ini)" in boot, "EXPECTED_INI_CHAIN_MISSING"
+    assert "validate_final_publisher_barrier(" in boot, "FINAL_PUBLISHER_BARRIER_MISSING"
+    assert '"schema": FAILURE_SCHEMA' in boot, "STRUCTURED_UI_FAILURE_MISSING"
 
 
 class FakeWatcher:
@@ -184,6 +207,108 @@ def behavior_smoke(boot) -> None:
             raise AssertionError("FAIL_CLOSED_EVENT_MISSING:" + marker)
 
 
+def final_barrier_smoke(boot) -> None:
+    boot_id = "11111111-1111-4111-8111-111111111111"
+    identities = {
+        "position": {
+            "pid": 11,
+            "start_ticks": 101,
+            "argv": ["position"],
+            "writer_identity": 77,
+        },
+        "wcs": {"pid": 12, "start_ticks": 102, "argv": ["wcs"]},
+        "state": {"pid": 13, "start_ticks": 103, "argv": ["state"]},
+    }
+    baseline = {"position": 5, "state": 6, "wcs": 7, "modal": 8}
+    result = {
+        "owners": {"position": 11, "wcs": 12, "state": 13},
+        "markers": baseline,
+        "owner_identities": identities,
+    }
+    original_boot_id = boot.read_kernel_boot_id
+    boot.read_kernel_boot_id = lambda path=boot.KERNEL_BOOT_ID_PATH: boot_id
+    try:
+        with tempfile.TemporaryDirectory() as directory:
+            snapshot_path = Path(directory) / "publisher_snapshot.json"
+            snapshot = boot.build_input_barrier_snapshot(result, boot.BUS_INI)
+            boot.atomic_write_json(snapshot_path, snapshot)
+
+            def current(cache):
+                assert cache == {
+                    "position": (11, "101", ("position",), "77"),
+                    "wcs": (12, "102", ("wcs",)),
+                    "state": (13, "103", ("state",)),
+                }
+                return ({"position": 9, "state": 10, "wcs": 11, "modal": 12},
+                        {"position": 11, "wcs": 12, "state": 13})
+
+            barrier = boot.validate_final_publisher_barrier(
+                snapshot_path, boot.BUS_INI, checker=current)
+            assert barrier["baseline_markers"] == baseline
+            assert barrier["final_markers"]["state"] == 10
+            assert barrier["owner_identities"] == identities
+
+            def regressed(_cache):
+                return ({"position": 4, "state": 10, "wcs": 11, "modal": 12},
+                        {"position": 11, "wcs": 12, "state": 13})
+
+            try:
+                boot.validate_final_publisher_barrier(
+                    snapshot_path, boot.BUS_INI, checker=regressed)
+            except boot.ReadyError as exc:
+                assert "regressed" in str(exc)
+            else:
+                raise AssertionError("FINAL_PUBLISHER_GENERATION_REGRESSION_ACCEPTED")
+
+            def changed(_cache):
+                raise boot.ReadyError("position owner changed during barrier")
+
+            try:
+                boot.validate_final_publisher_barrier(
+                    snapshot_path, boot.BUS_INI, checker=changed)
+            except boot.ReadyError as exc:
+                assert "owner changed" in str(exc)
+            else:
+                raise AssertionError("FINAL_PUBLISHER_IDENTITY_CHANGE_ACCEPTED")
+    finally:
+        boot.read_kernel_boot_id = original_boot_id
+
+
+def failure_payload_smoke(boot) -> None:
+    original_start_ticks = boot.proc_start_ticks
+    original_boot_id = boot.read_kernel_boot_id
+    boot.proc_start_ticks = lambda pid: "500" if pid == 42 else "0"
+    boot.read_kernel_boot_id = lambda path=boot.KERNEL_BOOT_ID_PATH: "11111111-1111-4111-8111-111111111111"
+    try:
+        payload = boot.build_failure_payload(
+            42,
+            500,
+            "relay",
+            "22222222-2222-4222-8222-222222222222",
+            "ui_ready_handshake",
+            "cache queue failed",
+        )
+        assert payload["schema"] == boot.FAILURE_SCHEMA
+        assert payload["ready"] is False and payload["failed"] is True
+        assert payload["owner_pid"] == 42 and payload["owner_start_ticks"] == 500
+        try:
+            boot.build_failure_payload(
+                42,
+                501,
+                "relay",
+                "22222222-2222-4222-8222-222222222222",
+                "ui_ready_handshake",
+                "cache queue failed",
+            )
+        except boot.ReadyError as exc:
+            assert "PID/start mismatch" in str(exc)
+        else:
+            raise AssertionError("UI_FAILURE_PID_REUSE_ACCEPTED")
+    finally:
+        boot.proc_start_ticks = original_start_ticks
+        boot.read_kernel_boot_id = original_boot_id
+
+
 def with_fnv_crc(boot, fmt, values, crc_index, suffix):
     values[crc_index] = 0
     raw = fmt.pack(*values)
@@ -261,8 +386,13 @@ def block_validation_smoke(boot) -> None:
             struct.pack_into("<5d", state, 160, *([0.001] * 5))
             struct.pack_into("<5d", state, 200, *([0.0] * 5))
             struct.pack_into("<5B", state, 240, *([3] * 5))
+            struct.pack_into("<Q", state, 976, 1)
+            struct.pack_into("<Q", state, 1008, 1)
+            struct.pack_into("<Q", state, 1016, 1)
             struct.pack_into("<Q", state, 1024, 1)
+            struct.pack_into("<Q", state, 1040, 1)
             struct.pack_into("<I", state, 1052, 1)
+            struct.pack_into("<I", state, 1084, 3)
             crc = binascii.crc32(state[:24]); crc = binascii.crc32(state[32:], crc) & 0xFFFFFFFF
             struct.pack_into("<I", state, 28, crc)
             boot.STATE_PATH.write_bytes(state)
@@ -342,7 +472,8 @@ def block_validation_smoke(boot) -> None:
                     struct.pack_into("<I", bad_count, 28, crc)
                     boot.read_state_seqlock = lambda _path, raw=bytes(bad_count): raw
                     try: boot.current_pre_ui_inputs()
-                    except boot.ReadyError as exc: assert "counts" in str(exc), name
+                    except boot.ReadyError as exc:
+                        assert "contract" in str(exc) or "counts" in str(exc), name
                     else: raise AssertionError(f"STATE_{name.upper()}_COUNT_FALSE_READY")
             finally: boot.read_state_seqlock = stable_reader
             boot.STATE_PATH.write_bytes(state)
@@ -456,6 +587,8 @@ def main() -> int:
     audit_sources(texts)
     boot = load_boot_module()
     behavior_smoke(boot)
+    final_barrier_smoke(boot)
+    failure_payload_smoke(boot)
     position_lock_smoke(boot)
     block_validation_smoke(boot)
     posix_inotify_smoke(boot)

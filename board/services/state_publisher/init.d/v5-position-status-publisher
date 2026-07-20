@@ -74,7 +74,13 @@ bus_block_matches_owner() {
   command -v python3 >/dev/null 2>&1 || return 1
   python3 - "$BUS_STATUS_PATH" "$OWNER_WRITER" <<'PY'
 import sys
+import time
 from v5_wcs_status_codec import (
+    BUS_JOINT_COUNT,
+    BUS_JOINT_SLAVE_OP,
+    BUS_MASTER_ALL_OP,
+    BUS_MASTER_LINK_UP,
+    BUS_MASTER_STATE_OP,
     BUS_STATUS_CRC_OFFSET,
     BUS_STATUS_MAGIC,
     BUS_STATUS_STRUCT,
@@ -87,15 +93,46 @@ try:
     values = BUS_STATUS_STRUCT.unpack(payload)
 except (OSError, ValueError, TypeError):
     raise SystemExit(1)
+legal_master_flags = (
+    BUS_MASTER_LINK_UP | BUS_MASTER_STATE_OP | BUS_MASTER_ALL_OP)
 if (len(payload) != BUS_STATUS_STRUCT.size or
         values[0] != BUS_STATUS_MAGIC or
         values[1] != BUS_STATUS_VERSION or
         values[2] != BUS_STATUS_STRUCT.size or
+        values[3] not in (0, 1) or
         not values[4] or values[4] & 1 or
         values[5] != int(sys.argv[2]) or
+        values[8] & ~legal_master_flags or
+        values[9] > BUS_JOINT_COUNT or
+        values[10] != BUS_JOINT_COUNT or
         values[11] == 0 or
-        values[-2] != crc32_like(payload[:BUS_STATUS_CRC_OFFSET])):
+        values[12] <= 0 or
+        time.monotonic_ns() < values[12] or
+        time.monotonic_ns() - values[12] > 1_000_000_000 or
+        values[-2] != crc32_like(payload[:BUS_STATUS_CRC_OFFSET]) or
+        values[-1] != 0):
     raise SystemExit(1)
+entries = [values[13 + index * 5:18 + index * 5]
+           for index in range(BUS_JOINT_COUNT)]
+if not values[3]:
+    if (any(values[index] for index in (6, 7, 8, 9)) or
+            any(any(entry) for entry in entries)):
+        raise SystemExit(1)
+else:
+    active_limit = (1 << BUS_JOINT_COUNT) - 1
+    if not values[6] or values[7] != active_limit:
+        raise SystemExit(1)
+    seen_axes = set()
+    seen_slaves = set()
+    for entry in entries:
+        valid, axis_code, slave_position, flags, statusword = entry
+        if (valid != 1 or axis_code not in map(ord, 'XYZABC') or
+                slave_position >= BUS_JOINT_COUNT or
+                flags & ~BUS_JOINT_SLAVE_OP or statusword > 0xffff or
+                axis_code in seen_axes or slave_position in seen_slaves):
+            raise SystemExit(1)
+        seen_axes.add(axis_code)
+        seen_slaves.add(slave_position)
 PY
 }
 

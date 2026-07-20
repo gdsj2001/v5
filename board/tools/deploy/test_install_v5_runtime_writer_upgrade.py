@@ -192,16 +192,21 @@ def main() -> int:
     assert len(manifest_rows) == len(required_destinations)
     assert {line.split('\t')[2] for line in manifest_rows} == set(required_destinations)
 
-    def run_manifest_scan(rows) -> subprocess.CompletedProcess:
+    def run_manifest_scan(
+            rows, linuxcnc_bundle_enabled: int = 0) -> subprocess.CompletedProcess:
         with tempfile.TemporaryDirectory() as directory:
             manifest_path = Path(directory) / 'manifest.tsv'
-            manifest_path.write_text('\n'.join(rows) + '\n', encoding='utf-8')
+            manifest_path.write_bytes(('\n'.join(rows) + '\n').encode('utf-8'))
             script = (
                 'tab=$(printf "\\t")\n'
+                'uname() { printf "%s\\n" "5.4.0-rt7-rt1-xilinx-v2020.2"; }\n'
                 f'manifest="{manifest_path.as_posix()}"\n'
+                f'linuxcnc_bundle_enabled={linuxcnc_bundle_enabled}\n'
                 f'{scanner}\n'
                 'echo "ABI_COMPLETE=$manifest_shm_abi_complete '
-                'ABI_TOUCHED=$manifest_shm_abi_touched"\n'
+                'ABI_TOUCHED=$manifest_shm_abi_touched '
+                'EC_COMPLETE=$manifest_ethercat_complete '
+                'EC_TOUCHED=$manifest_ethercat_touched"\n'
             )
             script_path = Path(directory) / 'manifest-scan.sh'
             script_path.write_text(script, encoding='utf-8')
@@ -223,6 +228,87 @@ def main() -> int:
         incomplete = run_manifest_scan(incomplete_rows)
         assert incomplete.returncode == 8, (destination, incomplete.stderr)
         assert b'complete Position/State/UI atomic bundle' in incomplete.stderr
+
+    ethercat_destinations = (
+        '/lib/modules/5.4.0-rt7-rt1-xilinx-v2020.2/ethercat/master/ec_master.ko',
+        '/lib/modules/5.4.0-rt7-rt1-xilinx-v2020.2/ethercat/devices/ec_generic.ko',
+        '/usr/lib/linuxcnc/modules/lcec.so',
+        '/usr/libexec/8ax/v5_ethercat_backend_lifecycle.sh',
+    )
+    ethercat_rows = [
+        line for line in manifest.splitlines()
+        if line and not line.startswith('#') and
+        line.split('\t')[2] in ethercat_destinations
+    ]
+    assert len(ethercat_rows) == 4
+    ethercat_complete = run_manifest_scan(ethercat_rows)
+    assert ethercat_complete.returncode == 0, ethercat_complete.stderr
+    assert b'EC_COMPLETE=1 EC_TOUCHED=1' in ethercat_complete.stdout
+    mixed_complete = run_manifest_scan(
+        ethercat_rows + ['gcode\tgcode/golden/cc-ac.ngc\t'
+                         '/opt/8ax/v5/gcode/golden/cc-ac.ngc\t0644'])
+    assert mixed_complete.returncode == 0, mixed_complete.stderr
+    assert b'EC_COMPLETE=1 EC_TOUCHED=1' in mixed_complete.stdout
+    for destination in ethercat_destinations:
+        incomplete_rows = [
+            row for row in ethercat_rows if row.split('\t')[2] != destination]
+        incomplete = run_manifest_scan(incomplete_rows)
+        assert incomplete.returncode == 8, (destination, incomplete.stderr)
+        assert b'complete ec_master/ec_generic/lcec/lifecycle atomic bundle' in incomplete.stderr
+
+    # The versioned native owner protocol is one atomic deployment domain:
+    # neither the Command Gate client nor the LinuxCNC owner/router bundle may
+    # be rolled out without the other side.
+    command_gate_row = (
+        'binary\tbuild/board/app/v5_command_gate_server\t'
+        '/usr/libexec/8ax/v5_command_gate_server\t0755')
+    assert manifest.splitlines().count(command_gate_row) == 1
+    gate_without_owner = run_manifest_scan([command_gate_row])
+    assert gate_without_owner.returncode == 8, gate_without_owner.stderr
+    assert b'requires the LinuxCNC native owner/router bundle' in gate_without_owner.stderr
+    owner_without_gate = run_manifest_scan([], linuxcnc_bundle_enabled=1)
+    assert owner_without_gate.returncode == 8, owner_without_gate.stderr
+    assert b'requires the Command Gate native protocol client' in owner_without_gate.stderr
+    atomic_native_protocol = run_manifest_scan(
+        [command_gate_row], linuxcnc_bundle_enabled=1)
+    assert atomic_native_protocol.returncode == 0, atomic_native_protocol.stderr
+    unregistered_gate = run_manifest_scan([
+        command_gate_row.replace(
+            'build/board/app/v5_command_gate_server',
+            'build/board/app/stale_v5_command_gate_server')
+    ], linuxcnc_bundle_enabled=1)
+    assert unregistered_gate.returncode == 6, unregistered_gate.stderr
+    assert b'registered ARM artifact and mode 0755' in unregistered_gate.stderr
+    linuxcnc_bundle_verifier = section(
+        text, 'verify_linuxcnc_deploy_bundle() {',
+        '\ninstall_linuxcnc_deploy_bundle() {')
+    for required_owner in (
+        '$linuxcnc_package_root/usr/bin/v5_native_hal_owner',
+        '$linuxcnc_package_root/usr/lib/linuxcnc/modules/v5_bus_axis_router.so',
+        'LinuxCNC deploy bundle is missing native protocol owner',
+    ):
+        assert required_owner in linuxcnc_bundle_verifier, required_owner
+
+    ethercat_stop = text.index(
+        'if [ "$apply" -eq 1 ] && [ "$manifest_ethercat_complete" -eq 1 ]; then\n'
+        '  stop_ethercat_modules_before_install')
+    ethercat_stop_function = section(
+        text, 'stop_ethercat_modules_before_install() {',
+        '\nensure_position_publisher_after_backend() {')
+    assert 'if ! /etc/init.d/v5-linuxcnc-command-gate stop; then' in ethercat_stop_function
+    assert 'continuing verified idempotent teardown' in ethercat_stop_function
+    assert 'for process in rtapi_app linuxcncsvr milltask io linuxcncrsh v5_command_gate_server' in ethercat_stop_function
+    assert ethercat_stop_function.count(
+        "grep -Eq '^(ec_master|ec_generic)[[:space:]]' /proc/modules") == 2
+    install_loop_index = text.index(
+        'while IFS="$tab" read -r kind source destination mode extra; do',
+        ethercat_stop)
+    depmod_index = text.index(
+        'if [ "$apply" -eq 1 ] && [ "$manifest_ethercat_complete" -eq 1 ]; then\n'
+        '  [ -x /sbin/depmod ] || {', install_loop_index)
+    assert ethercat_stop < install_loop_index < depmod_index
+    assert '/sbin/depmod -a' in text[depmod_index:depmod_index + 300]
+    assert '\n  depmod -a\n' not in text
 
     atomic_stop = section(
         text, 'stop_shm_abi_domain_before_install() {',
@@ -274,6 +360,7 @@ def main() -> int:
             script = f'''PROC_ROOT="{proc_root.as_posix()}"
 RUNTIME_PROJECT_ROOT=/opt/8ax/v5
 PUBLISHER_ACTUAL_BARRIER="{barrier_exe.as_posix()}"
+PUBLISHER_SNAPSHOT_PATH="{(root / 'ui_input_barrier.json').as_posix()}"
 {actual_barrier}
 wait_publisher_actual_barrier
 '''
@@ -284,7 +371,9 @@ wait_publisher_actual_barrier
         assert run_barrier().returncode == 0
         assert barrier_log.read_text(encoding='utf-8').strip() == (
             '--pre-ui-inputs --expected-ini '
-            '/opt/8ax/v5/linuxcnc/ini/v5_bus.ini --timeout 120')
+            '/opt/8ax/v5/linuxcnc/ini/v5_bus.ini '
+            '--publisher-snapshot-path ' +
+            (root / 'ui_input_barrier.json').as_posix() + ' --timeout 120')
         pulse_cmdline = proc_root / '202' / 'cmdline'
         pulse_cmdline.parent.mkdir(parents=True)
         pulse_cmdline.write_bytes(

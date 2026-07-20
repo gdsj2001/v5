@@ -37,6 +37,7 @@ node_modules/
 # directories named build and bin which must remain inside the Git range.
 /build/
 /build-*/
+/board/build/
 /cmake-build-*/
 /out/
 /dist/

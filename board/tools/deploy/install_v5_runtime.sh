@@ -22,6 +22,7 @@ restart_scope=all
 PROC_ROOT=/proc
 RUNTIME_PROJECT_ROOT=/opt/8ax/v5
 PUBLISHER_ACTUAL_BARRIER=/usr/libexec/8ax/v5_ui_boot_ready.py
+PUBLISHER_SNAPSHOT_PATH=/run/8ax_v5_product_ui/ui_input_barrier.json
 
 if [ "${2:-}" = "--apply" ]; then
   apply=1
@@ -40,6 +41,8 @@ verify_linuxcnc_deploy_bundle() {
   embedded_allowlist="$linuxcnc_package_root/usr/share/v5-native/linuxcnc-runtime-allowlist.tsv"
   runtime_hashes="$linuxcnc_package_root/usr/share/v5-native/linuxcnc-runtime-files.sha256"
   linuxcnc_rtapi_app="$linuxcnc_package_root/usr/bin/rtapi_app"
+  linuxcnc_native_hal_owner="$linuxcnc_package_root/usr/bin/v5_native_hal_owner"
+  linuxcnc_bus_axis_router="$linuxcnc_package_root/usr/lib/linuxcnc/modules/v5_bus_axis_router.so"
   [ -d "$linuxcnc_package_root" ] || {
     echo "missing LinuxCNC deploy bundle: $linuxcnc_package_root" >&2
     exit 7
@@ -58,6 +61,14 @@ verify_linuxcnc_deploy_bundle() {
     echo "LinuxCNC deploy bundle rtapi_app must retain setuid mode 4755" >&2
     exit 7
   }
+  for required_native_protocol_owner in \
+    "$linuxcnc_native_hal_owner" \
+    "$linuxcnc_bus_axis_router"; do
+    [ -f "$required_native_protocol_owner" ] || {
+      echo "LinuxCNC deploy bundle is missing native protocol owner: $required_native_protocol_owner" >&2
+      exit 7
+    }
+  done
 
   expected="${TMPDIR:-/tmp}/v5_linuxcnc_expected.$$"
   actual="${TMPDIR:-/tmp}/v5_linuxcnc_actual.$$"
@@ -244,12 +255,15 @@ manifest_state_only=1
 manifest_actiond_only=1
 manifest_settings_only=1
 manifest_command_gate_only=1
+manifest_native_protocol_command_gate=0
 manifest_wcs_only=1
 manifest_backend_only=1
 manifest_ethercat_only=1
 manifest_gcode_only=1
 manifest_cpu_policy_only=1
 manifest_cpu_policy_net_core=0
+manifest_cpu_policy_net_module=0
+manifest_cpu_policy_net_init=0
 manifest_cpu_policy_usb_wifi=0
 manifest_cpu_policy_relay_payload=0
 manifest_cpu_policy_command_gate=0
@@ -282,6 +296,7 @@ manifest_ethercat_master=0
 manifest_ethercat_generic=0
 manifest_ethercat_lcec=0
 manifest_ethercat_lifecycle=0
+manifest_ethercat_touched=0
 manifest_ethercat_complete=0
 manifest_ethercat_required_rows=4
 ethercat_master_destination="/lib/modules/$(uname -r)/ethercat/master/ec_master.ko"
@@ -293,12 +308,23 @@ while IFS="$tab" read -r scope_kind scope_source scope_destination scope_mode sc
   esac
   manifest_row_count=$((manifest_row_count + 1))
   case "$scope_destination" in
+    /usr/libexec/8ax/v5_command_gate_server)
+      [ "$scope_kind:$scope_source:$scope_mode" = \
+        "binary:build/board/app/v5_command_gate_server:0755" ] || {
+        echo "Command Gate native protocol client requires the registered ARM artifact and mode 0755" >&2
+        exit 6
+      }
+      manifest_native_protocol_command_gate=1
+      ;;
+  esac
+  case "$scope_destination" in
     "$ethercat_master_destination")
       [ "$scope_kind:$scope_source:$scope_mode" = \
         "kernel_module:build/ethercat/ec_master.ko:0644" ] || {
         echo "EtherCAT master module requires the registered ARM artifact and mode 0644" >&2
         exit 6
       }
+      manifest_ethercat_touched=1
       manifest_ethercat_master=1
       ;;
     "$ethercat_generic_destination")
@@ -307,6 +333,7 @@ while IFS="$tab" read -r scope_kind scope_source scope_destination scope_mode sc
         echo "EtherCAT generic module requires the registered ARM artifact and mode 0644" >&2
         exit 6
       }
+      manifest_ethercat_touched=1
       manifest_ethercat_generic=1
       ;;
     /usr/lib/linuxcnc/modules/lcec.so)
@@ -315,6 +342,7 @@ while IFS="$tab" read -r scope_kind scope_source scope_destination scope_mode sc
         echo "EtherCAT lcec module requires the registered ARM artifact and mode 0644" >&2
         exit 6
       }
+      manifest_ethercat_touched=1
       manifest_ethercat_lcec=1
       ;;
     /usr/libexec/8ax/v5_ethercat_backend_lifecycle.sh)
@@ -323,6 +351,7 @@ while IFS="$tab" read -r scope_kind scope_source scope_destination scope_mode sc
         echo "EtherCAT lifecycle requires the registered source and mode 0644" >&2
         exit 6
       }
+      manifest_ethercat_touched=1
       manifest_ethercat_lifecycle=1
       ;;
     *)
@@ -383,6 +412,12 @@ while IFS="$tab" read -r scope_kind scope_source scope_destination scope_mode sc
   case "$scope_destination" in
     /usr/local/sbin/v5_net_core.sh)
       manifest_cpu_policy_net_core=1
+      ;;
+    /usr/local/sbin/v5_net_cpu_policy.sh)
+      manifest_cpu_policy_net_module=1
+      ;;
+    /etc/init.d/S99v5-net)
+      manifest_cpu_policy_net_init=1
       ;;
     /usr/local/sbin/v5_usb_wifi_apply.sh)
       manifest_cpu_policy_usb_wifi=1
@@ -523,13 +558,27 @@ while IFS="$tab" read -r scope_kind scope_source scope_destination scope_mode sc
   esac
 done < "$manifest"
 
-if [ "$manifest_row_count" -eq "$manifest_ethercat_required_rows" ] &&
-   [ "$manifest_ethercat_only" -eq 1 ] &&
-   [ "$manifest_ethercat_master" -eq 1 ] &&
+if [ "$manifest_native_protocol_command_gate" -eq 1 ] &&
+   [ "$linuxcnc_bundle_enabled" -ne 1 ]; then
+  echo "Command Gate native protocol deploy requires the LinuxCNC native owner/router bundle" >&2
+  exit 8
+fi
+if [ "$linuxcnc_bundle_enabled" -eq 1 ] &&
+   [ "$manifest_native_protocol_command_gate" -ne 1 ]; then
+  echo "LinuxCNC native owner/router deploy requires the Command Gate native protocol client" >&2
+  exit 8
+fi
+
+if [ "$manifest_ethercat_master" -eq 1 ] &&
    [ "$manifest_ethercat_generic" -eq 1 ] &&
    [ "$manifest_ethercat_lcec" -eq 1 ] &&
    [ "$manifest_ethercat_lifecycle" -eq 1 ]; then
   manifest_ethercat_complete=1
+fi
+if [ "$manifest_ethercat_touched" -eq 1 ] &&
+   [ "$manifest_ethercat_complete" -ne 1 ]; then
+  echo "EtherCAT deploy requires the complete ec_master/ec_generic/lcec/lifecycle atomic bundle" >&2
+  exit 8
 fi
 
 if [ "$manifest_shm_abi_ui_binary" -eq 1 ] &&
@@ -585,6 +634,8 @@ case "$restart_scope_requested" in
          [ "$manifest_backend_only" -eq 1 ]; then
       restart_scope=backend
     elif [ "$linuxcnc_bundle_enabled" -eq 0 ] &&
+         [ "$manifest_row_count" -eq "$manifest_ethercat_required_rows" ] &&
+         [ "$manifest_ethercat_only" -eq 1 ] &&
          [ "$manifest_ethercat_complete" -eq 1 ]; then
       restart_scope=ethercat
     elif [ "$linuxcnc_bundle_enabled" -eq 0 ] &&
@@ -595,6 +646,8 @@ case "$restart_scope_requested" in
          [ "$manifest_row_count" -gt 0 ] &&
          [ "$manifest_cpu_policy_only" -eq 1 ] &&
          [ "$manifest_cpu_policy_net_core" -eq 1 ] &&
+         [ "$manifest_cpu_policy_net_module" -eq 1 ] &&
+         [ "$manifest_cpu_policy_net_init" -eq 1 ] &&
          [ "$manifest_cpu_policy_usb_wifi" -eq 1 ] &&
          [ "$manifest_cpu_policy_relay_payload" -eq 1 ] &&
          [ "$manifest_cpu_policy_command_gate" -eq 1 ] &&
@@ -674,6 +727,8 @@ case "$restart_scope_requested" in
     ;;
   ethercat)
     if [ "$linuxcnc_bundle_enabled" -ne 0 ] ||
+       [ "$manifest_row_count" -ne "$manifest_ethercat_required_rows" ] ||
+       [ "$manifest_ethercat_only" -ne 1 ] ||
        [ "$manifest_ethercat_complete" -ne 1 ]; then
       echo "EtherCAT restart scope requires exactly the registered ec_master/ec_generic/lcec/lifecycle bundle" >&2
       exit 8
@@ -694,6 +749,8 @@ case "$restart_scope_requested" in
        [ "$manifest_row_count" -eq 0 ] ||
        [ "$manifest_cpu_policy_only" -ne 1 ] ||
        [ "$manifest_cpu_policy_net_core" -ne 1 ] ||
+       [ "$manifest_cpu_policy_net_module" -ne 1 ] ||
+       [ "$manifest_cpu_policy_net_init" -ne 1 ] ||
        [ "$manifest_cpu_policy_usb_wifi" -ne 1 ] ||
        [ "$manifest_cpu_policy_relay_payload" -ne 1 ] ||
        [ "$manifest_cpu_policy_command_gate" -ne 1 ] ||
@@ -723,7 +780,7 @@ case "$restart_scope_requested" in
     exit 8
     ;;
 esac
-echo "V5_RUNTIME_RESTART_SCOPE scope=$restart_scope rows=$manifest_row_count shm_abi_touched=$manifest_shm_abi_touched shm_abi_complete=$manifest_shm_abi_complete ethercat_complete=$manifest_ethercat_complete gcode_only=$manifest_gcode_only ui_only=$manifest_ui_only state_only=$manifest_state_only actiond_only=$manifest_actiond_only command_gate_only=$manifest_command_gate_only backend_only=$manifest_backend_only wcs_only=$manifest_wcs_only cpu_policy_only=$manifest_cpu_policy_only settings_only=$manifest_settings_only"
+echo "V5_RUNTIME_RESTART_SCOPE scope=$restart_scope rows=$manifest_row_count shm_abi_touched=$manifest_shm_abi_touched shm_abi_complete=$manifest_shm_abi_complete ethercat_touched=$manifest_ethercat_touched ethercat_complete=$manifest_ethercat_complete gcode_only=$manifest_gcode_only ui_only=$manifest_ui_only state_only=$manifest_state_only actiond_only=$manifest_actiond_only command_gate_only=$manifest_command_gate_only backend_only=$manifest_backend_only wcs_only=$manifest_wcs_only cpu_policy_only=$manifest_cpu_policy_only settings_only=$manifest_settings_only"
 
 stop_position_publisher_before_backend() {
   if [ -x /etc/init.d/v5-position-status-publisher ]; then
@@ -741,11 +798,19 @@ stop_ethercat_modules_before_install() {
     return 1
   }
   stop_position_publisher_before_backend
-  /etc/init.d/v5-linuxcnc-command-gate stop
-  if pidof rtapi_app >/dev/null 2>&1; then
-    echo "LinuxCNC realtime owner remained active before lcec replacement" >&2
-    return 1
+  if ! /etc/init.d/v5-linuxcnc-command-gate stop; then
+    if grep -Eq '^(ec_master|ec_generic)[[:space:]]' /proc/modules; then
+      echo "Command Gate stop failed while EtherCAT modules remained loaded" >&2
+      return 1
+    fi
+    echo "Command Gate stop reported failure after the backend was already unloaded; continuing verified idempotent teardown"
   fi
+  for process in rtapi_app linuxcncsvr milltask io linuxcncrsh v5_command_gate_server; do
+    if pidof "$process" >/dev/null 2>&1; then
+      echo "LinuxCNC/Command Gate process remained active before atomic replacement: $process" >&2
+      return 1
+    fi
+  done
   /etc/init.d/ethercat stop
   if grep -Eq '^(ec_master|ec_generic)[[:space:]]' /proc/modules; then
     echo "EtherCAT kernel modules remained loaded before atomic replacement" >&2
@@ -801,7 +866,9 @@ wait_publisher_actual_barrier() {
     return 1
   }
   "$PUBLISHER_ACTUAL_BARRIER" \
-    --pre-ui-inputs --expected-ini "$expected_ini" --timeout 120
+    --pre-ui-inputs --expected-ini "$expected_ini" \
+    --publisher-snapshot-path "$PUBLISHER_SNAPSHOT_PATH" \
+    --timeout 120
 }
 
 writer_pid_matches_path() {
@@ -1022,24 +1089,6 @@ fi
 
 if [ "$apply" -eq 1 ] && [ "$linuxcnc_bundle_enabled" -eq 1 ]; then
   verify_linuxcnc_deploy_bundle
-  [ -x /etc/init.d/v5-linuxcnc-command-gate ] || {
-    echo "LinuxCNC command-gate init is missing before deploy" >&2
-    exit 7
-  }
-  stop_position_publisher_before_backend
-  /etc/init.d/v5-linuxcnc-command-gate stop
-  install_linuxcnc_deploy_bundle
-fi
-if [ "$apply" -eq 1 ] && [ "$restart_scope" = "backend" ]; then
-  [ -x /etc/init.d/v5-linuxcnc-command-gate ] || {
-    echo "LinuxCNC command-gate init is missing before backend module deploy" >&2
-    exit 7
-  }
-  stop_position_publisher_before_backend
-  /etc/init.d/v5-linuxcnc-command-gate stop
-fi
-if [ "$apply" -eq 1 ] && [ "$restart_scope" = "ethercat" ]; then
-  stop_ethercat_modules_before_install
 fi
 if [ "$apply" -eq 1 ]; then
   if [ "$manifest_shm_abi_complete" -eq 1 ]; then
@@ -1047,6 +1096,20 @@ if [ "$apply" -eq 1 ]; then
   else
     stop_affected_writers_before_install
   fi
+fi
+if [ "$apply" -eq 1 ] && [ "$manifest_ethercat_complete" -eq 1 ]; then
+  stop_ethercat_modules_before_install
+elif [ "$apply" -eq 1 ] &&
+     { [ "$linuxcnc_bundle_enabled" -eq 1 ] || [ "$restart_scope" = "backend" ]; }; then
+  [ -x /etc/init.d/v5-linuxcnc-command-gate ] || {
+    echo "LinuxCNC command-gate init is missing before deploy" >&2
+    exit 7
+  }
+  stop_position_publisher_before_backend
+  /etc/init.d/v5-linuxcnc-command-gate stop
+fi
+if [ "$apply" -eq 1 ] && [ "$linuxcnc_bundle_enabled" -eq 1 ]; then
+  install_linuxcnc_deploy_bundle
 fi
 while IFS="$tab" read -r kind source destination mode extra; do
   case "$kind" in
@@ -1092,6 +1155,13 @@ while IFS="$tab" read -r kind source destination mode extra; do
     install -m "$mode" "$source_path" "$destination"
   fi
 done < "$manifest"
+if [ "$apply" -eq 1 ] && [ "$manifest_ethercat_complete" -eq 1 ]; then
+  [ -x /sbin/depmod ] || {
+    echo "required module dependency tool is missing: /sbin/depmod" >&2
+    exit 7
+  }
+  /sbin/depmod -a
+fi
 
 enable_boot_service() {
   name="$1"
@@ -1129,6 +1199,20 @@ enable_boot_services() {
   enable_boot_service v5-settings-actiond 07 14
   enable_boot_service v5-touch-diagnostics 97 13
   enable_boot_service v5-remote-ssh 98 12
+}
+
+apply_cpu_policy_after_install() {
+  [ "$manifest_cpu_policy_net_core" -eq 1 ] &&
+    [ "$manifest_cpu_policy_net_module" -eq 1 ] &&
+    [ "$manifest_cpu_policy_net_init" -eq 1 ] || {
+      echo "installed CPU policy is incomplete" >&2
+      return 1
+    }
+  /usr/bin/taskset -c 1 /bin/sh -c '
+    LOG=/run/8ax/v5_cpu_policy.log
+    . /usr/local/sbin/v5_net_core.sh
+    apply_network_cpu_isolation && enforce_dropbear_cpu1_affinity
+  '
 }
 
 if [ "$apply" -eq 1 ] && [ "$manifest_cpu_policy_command_gate" -eq 1 ]; then
@@ -1307,11 +1391,7 @@ if [ "$apply" -eq 1 ]; then
     enable_boot_service v5-wcs-status-publisher 06 17
     enable_boot_service v5-state-publisher 07 16
     enable_boot_service v5-ui-relay 08 15
-    (
-      LOG=/run/8ax/v5_cpu_policy.log
-      . /usr/local/sbin/v5_net_core.sh
-      apply_network_cpu_isolation
-    )
+    apply_cpu_policy_after_install
     /etc/init.d/v5-linuxcnc-command-gate restart-native
     /etc/init.d/v5-position-status-publisher restart
     /etc/init.d/v5-wcs-status-publisher restart
@@ -1335,6 +1415,7 @@ if [ "$apply" -eq 1 ]; then
     enable_boot_services
     cleanup_retired_runtime_files
     install_runtime_drive_profiles
+    apply_cpu_policy_after_install
     /etc/init.d/v5-linuxcnc-command-gate restart
     if [ "$manifest_shm_abi_complete" -eq 1 ]; then
       start_shm_abi_domain_after_install

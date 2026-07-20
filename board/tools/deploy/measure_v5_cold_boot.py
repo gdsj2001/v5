@@ -103,14 +103,41 @@ def post_ready_ethercat_errors(
         serial_lines: list[tuple[float, str]]) -> list[dict[str, Any]]:
     ready_seen = False
     failures: list[dict[str, Any]] = []
-    markers = ("Working counter changed to 0/", "datagrams TIMED OUT!",
-               "datagrams UNMATCHED!")
+    markers = ("Working counter changed to 0/", "SKIPPED", "TIMED OUT",
+               "UNMATCHED", "Unexpected realtime delay", "4AE322B9D742")
     for stamp_s, line in serial_lines:
         if "LinuxCNC backend transport ready;" in line:
             ready_seen = True
             continue
         if ready_seen and any(marker in line for marker in markers):
             failures.append({"stamp_s": stamp_s, "line": line})
+    return failures
+
+
+def startup_forbidden_errors(
+        serial_lines: list[tuple[float, str]]) -> list[dict[str, Any]]:
+    """Reject whole-boot realtime faults and post-ready EtherCAT loss.
+
+    WKC convergence and transient datagrams are allowed before the canonical
+    backend-ready boundary.  Realtime deadline faults and their operator
+    reference are never allowed anywhere in the captured cold-boot window.
+    """
+    ready_seen = False
+    failures: list[dict[str, Any]] = []
+    whole_boot_markers = ("Unexpected realtime delay", "4AE322B9D742")
+    post_ready_markers = ("Working counter changed to 0/", "SKIPPED",
+                          "TIMED OUT", "UNMATCHED")
+    for stamp_s, line in serial_lines:
+        if "LinuxCNC backend transport ready;" in line:
+            ready_seen = True
+            continue
+        scope = None
+        if any(marker in line for marker in whole_boot_markers):
+            scope = "whole_boot"
+        elif ready_seen and any(marker in line for marker in post_ready_markers):
+            scope = "post_backend_ready"
+        if scope:
+            failures.append({"stamp_s": stamp_s, "scope": scope, "line": line})
     return failures
 
 
@@ -147,6 +174,8 @@ except Exception: out["command_gate_ready"]=False
 try:
  ui_log=open("/run/8ax/v5_ui_boot.log",encoding="utf-8",errors="replace").read()
  ui_pid=int(os.environ["V5_EXPECT_UI_PID"]); ui_argv=[arg for arg in open("/proc/%d/cmdline"%ui_pid,"rb").read().split(b"\0") if arg]; touch_real=os.path.realpath("/dev/input/by-path/z20-touchscreen")
+ ui_stat=open("/proc/%d/stat"%ui_pid,encoding="ascii").read(); out["ui_start_ticks"]=int(ui_stat.rsplit(")",1)[1].split()[19])
+ ui_ready=json.load(open("/run/8ax_v5_product_ui/ui_ready.json",encoding="utf-8")); out["ui_instance_id"]=str(ui_ready.get("ui_instance_id") or ""); out["ui_pid"]=ui_pid
  held=any(os.path.realpath("/proc/%d/fd/%s"%(ui_pid,fd))==touch_real for fd in os.listdir("/proc/%d/fd"%ui_pid))
  out["touch_registered"]=("v5 touch input enabled device=/dev/input/by-path/z20-touchscreen" in ui_log and ui_argv==[b"/usr/libexec/8ax/v5_lvgl_shell",b"--serve"] and stat.S_ISCHR(os.stat(touch_real).st_mode) and held)
 except OSError: out["touch_registered"]=False
@@ -243,6 +272,13 @@ def terminal_complete(probe: dict[str, Any], info: dict[str, Any]) -> bool:
             and cache_ok
             and int(ready.get("cache_page_count") or 0) == 9
             and int(ready.get("cache_budget_bytes") or 0) == 31_948_800
+            and str(ready.get("boot_id") or "") == str(probe.get("boot_id") or "")
+            and bool(str(ready.get("ui_instance_id") or ""))
+            and str(ready.get("ui_instance_id") or "") == str(probe.get("ui_instance_id") or "")
+            and int(ready.get("ui_pid") or 0) > 0
+            and int(ready.get("ui_pid") or 0) == int(probe.get("ui_pid") or 0)
+            and int(ready.get("ui_start_ticks") or 0) > 0
+            and int(ready.get("ui_start_ticks") or 0) == int(probe.get("ui_start_ticks") or 0)
             and probe.get("ethercat_health") is True
             and probe.get("command_gate_ready") is True
             and probe.get("touch_registered") is True
@@ -470,6 +506,7 @@ def persist_cycle_evidence(cycle_dir: Path, state: dict[str, Any]) -> list[str]:
         "log_fetch": state.get("log_fetch"),
         "log_fetch_errors": state.get("log_fetch_errors") or [],
         "stage_parse_error": state.get("stage_parse_error"),
+        "startup_forbidden_errors": state.get("startup_forbidden_errors") or [],
         "post_ready_ethercat_errors": state.get("post_ready_ethercat_errors") or [],
         "evidence_write_errors": previous_errors + errors,
     }
@@ -503,6 +540,7 @@ def measure_cycle(index: int, out_dir: Path, relay_port: str, console_port: str,
         "log_fetch": None,
         "log_fetch_errors": [],
         "stage_parse_error": None,
+        "startup_forbidden_errors": [],
         "post_ready_ethercat_errors": [],
         "evidence_write_errors": [],
     }
@@ -604,8 +642,11 @@ def measure_cycle(index: int, out_dir: Path, relay_port: str, console_port: str,
         time.sleep(1.0)
         state["post_ready_ethercat_errors"] = post_ready_ethercat_errors(
             state["serial_lines"])
-        if state["post_ready_ethercat_errors"]:
-            raise RuntimeError("EtherCAT WKC/datagram loss occurred after backend ready")
+        state["startup_forbidden_errors"] = startup_forbidden_errors(
+            state["serial_lines"])
+        if state["startup_forbidden_errors"]:
+            raise RuntimeError(
+                "realtime startup fault or post-ready EtherCAT loss occurred")
         state["ok"] = True
     except BaseException as exc:
         caught = exc

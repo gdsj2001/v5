@@ -24,12 +24,17 @@ module	services/ui/v5_remote_ui_state.py	/usr/libexec/8ax/v5_remote_ui_state.py	
 module	services/ui/v5_remote_ui_support.py	/usr/libexec/8ax/v5_remote_ui_support.py	0644
 module	services/ui/v5_status_shm_reader.py	/usr/libexec/8ax/v5_status_shm_reader.py	0644
 module	petalinux/project-spec/meta-user/recipes-apps/v5-base-overlay/files/network/v5_net_core.sh	/usr/local/sbin/v5_net_core.sh	0644
+module	petalinux/project-spec/meta-user/recipes-apps/v5-base-overlay/files/network/v5_net_cpu_policy.sh	/usr/local/sbin/v5_net_cpu_policy.sh	0644
+init	petalinux/project-spec/meta-user/recipes-apps/v5-base-overlay/files/network/S99v5-net	/etc/init.d/S99v5-net	0755
 script	petalinux/project-spec/meta-user/recipes-apps/v5-base-overlay/files/network/v5_usb_wifi_apply.sh	/usr/local/sbin/v5_usb_wifi_apply.sh	0755
 init	services/state_publisher/init.d/v5-wcs-status-publisher	/etc/init.d/v5-wcs-status-publisher	0755
 init	services/state_publisher/init.d/v5-position-status-publisher	/etc/init.d/v5-position-status-publisher	0755
 init	services/state_publisher/init.d/v5-state-publisher	/etc/init.d/v5-state-publisher	0755
 init	services/command_gate/init.d/v5-linuxcnc-command-gate	/etc/init.d/v5-linuxcnc-command-gate	0755
 module	services/command_gate/v5_ethercat_backend_lifecycle.sh	/usr/libexec/8ax/v5_ethercat_backend_lifecycle.sh	0644
+kernel_module	build/ethercat/ec_master.ko	/lib/modules/5.4.0-rt7-rt1-xilinx-v2020.2/ethercat/master/ec_master.ko	0644
+kernel_module	build/ethercat/ec_generic.ko	/lib/modules/5.4.0-rt7-rt1-xilinx-v2020.2/ethercat/devices/ec_generic.ko	0644
+binary	build/ethercat/lcec.so	/usr/lib/linuxcnc/modules/lcec.so	0644
 init	services/ui/init.d/v5-ui-relay	/etc/init.d/v5-ui-relay	0755
 init	services/ui/init.d/v5-touch-diagnostics	/etc/init.d/v5-touch-diagnostics	0755
 linuxcnc	linuxcnc/ini/v5_pulse.ini	/opt/8ax/v5/linuxcnc/ini/v5_pulse.ini	0644

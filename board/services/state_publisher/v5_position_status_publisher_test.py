@@ -217,7 +217,6 @@ def check_bus_status_uses_committed_axis_mapping_once() -> None:
     set_value('master_all_op', 1)
     set_value('slaves_responding', 5)
     for joint, axis in enumerate('XYZBC'):
-        set_value(f'joint_{joint}_valid', 1)
         set_value(f'joint_{joint}_generation', 23)
         set_value(f'joint_{joint}_axis_code', ord(axis))
         set_value(f'joint_{joint}_slave_position', joint)
@@ -838,6 +837,35 @@ def check_init_requires_matching_canonical_writer_identity() -> None:
         match = subprocess.run(
             ['sh', '-c', command], env=environment, check=False)
         assert match.returncode == 0
+
+        # A committed-mapping failure is a semantic unavailable sample, not a
+        # dead Position owner.  It must remain inspectable so the UI can open
+        # the axis/slave repair path while motion stays fail-closed elsewhere.
+        bus_path.write_bytes(codec.pack_bus_status(
+            None, 2, 17, 2, time.monotonic_ns()))
+        unavailable = subprocess.run(
+            ['sh', '-c', command], env=environment, check=False)
+        assert unavailable.returncode == 0
+
+        malformed_snapshot = {
+            'valid': True,
+            'mapping_generation': 3,
+            'active_mask': 0x1f,
+            'master_flags': codec.BUS_MASTER_LINK_UP,
+            'slaves_responding': 5,
+            'entries': [{
+                'valid': True,
+                'axis_code': ord(axis),
+                'slave_position': 0,
+                'flags': 0,
+                'statusword': 0,
+            } for axis in 'XYZBC'],
+        }
+        bus_path.write_bytes(codec.pack_bus_status(
+            malformed_snapshot, 4, 17, 3, time.monotonic_ns()))
+        malformed = subprocess.run(
+            ['sh', '-c', command], env=environment, check=False)
+        assert malformed.returncode != 0
 
 
 def check_runtime_policy_rejects_writer_identity_unbinding() -> None:

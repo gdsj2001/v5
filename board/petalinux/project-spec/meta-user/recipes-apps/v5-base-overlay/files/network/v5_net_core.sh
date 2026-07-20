@@ -1,6 +1,5 @@
 #!/bin/sh
 PATH=/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin
-
 : "${NETMASK:=255.255.255.0}"
 : "${MODE_FILE:=/etc/v5/network_mode}"
 : "${WPA_CONF:=/home/petalinux/.config/6x-cnc/usb_wifi/wpa_supplicant.conf}"
@@ -135,6 +134,7 @@ apply_network_cpu_isolation() {
     set_iface_queue_masks "$ethercat_iface" 0 1 || return 1
     set_iface_irq_affinity "$management_iface" 1 1 || return 1
     set_iface_queue_masks "$management_iface" 2 2 || return 1
+    set_ethercat_softirq_priority || return 1
     if [ -n "${WIFI_SELECTED:-}" ] && iface_exists "$WIFI_SELECTED"; then
         set_iface_irq_affinity "$WIFI_SELECTED" 1 0 || return 1
         set_iface_queue_masks "$WIFI_SELECTED" 2 2 || return 1
@@ -324,8 +324,14 @@ start_ssh_backend() {
         auto)
             if [ -n "${DROPBEAR_BIN:-}" ] && [ -x "${DROPBEAR_BIN:-}" ]; then
                 if ! pidof dropbear >/dev/null 2>&1; then
-                    "$DROPBEAR_BIN" -r /etc/dropbear/dropbear_rsa_host_key -p 22 -B || true
+                    if ! start_dropbear_cpu1; then
+                        stop_dropbear_after_affinity_failure
+                        return 1
+                    fi
                     log "auto ssh backend -> dropbear"
+                elif ! enforce_dropbear_cpu1_affinity; then
+                    stop_dropbear_after_affinity_failure
+                    return 1
                 fi
             elif have_cmd systemctl; then
                 systemctl start --no-block ssh.service >/dev/null 2>&1 || systemctl start --no-block sshd.service >/dev/null 2>&1 || true
@@ -334,8 +340,14 @@ start_ssh_backend() {
             ;;
         dropbear)
             if [ -n "${DROPBEAR_BIN:-}" ] && ! pidof dropbear >/dev/null 2>&1; then
-                "$DROPBEAR_BIN" -r /etc/dropbear/dropbear_rsa_host_key -p 22 -B || true
+                if ! start_dropbear_cpu1; then
+                    stop_dropbear_after_affinity_failure
+                    return 1
+                fi
                 log "dropbear start requested"
+            elif [ -n "${DROPBEAR_BIN:-}" ] && ! enforce_dropbear_cpu1_affinity; then
+                stop_dropbear_after_affinity_failure
+                return 1
             fi
             ;;
         systemd:ssh.service|systemd:sshd.service)
@@ -465,6 +477,7 @@ configure_wired() {
     fi
 }
 
+. /usr/local/sbin/v5_net_cpu_policy.sh
 . /usr/local/sbin/v5_wifi_core.sh
 
 v5_net_apply() {

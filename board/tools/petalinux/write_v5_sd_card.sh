@@ -6,6 +6,7 @@ build_root=${VM_BUILD_ROOT:-$HOME/v5-build}
 device=
 apply=0
 stage_only=0
+boot_script_only=0
 boot_mount=
 root_mount=
 
@@ -15,7 +16,7 @@ fail() {
 }
 
 usage() {
-    echo "usage: $0 (--device /dev/<removable-disk> [--apply] | --stage-only)" >&2
+    echo "usage: $0 (--device /dev/<removable-disk> [--apply] | --stage-only | --boot-script-only)" >&2
     exit 2
 }
 
@@ -46,28 +47,40 @@ while [ "$#" -gt 0 ]; do
             stage_only=1
             shift
             ;;
+        --boot-script-only)
+            boot_script_only=1
+            shift
+            ;;
         *)
             usage
             ;;
     esac
 done
 
-if [ "$stage_only" -eq 1 ]; then
+if [ "$boot_script_only" -eq 1 ]; then
+    [ "$stage_only" -eq 0 ] && [ -z "$device" ] && [ "$apply" -eq 0 ] || usage
+elif [ "$stage_only" -eq 1 ]; then
     [ -z "$device" ] && [ "$apply" -eq 0 ] || usage
 else
     [ -n "$device" ] || usage
 fi
 [ "$(id -u)" -eq 0 ] || fail "root is required"
 
-for command_name in \
-    awk blockdev cmake dumpimage e2fsck file find findmnt git grep install \
-    lsblk mkfs.ext4 mkimage mount mountpoint partprobe python3 readelf readlink \
-    sfdisk sha256sum sort tar udevadm umount wc wipefs
+if [ "$boot_script_only" -eq 1 ]; then
+    required_commands="awk dumpimage findmnt grep install mkimage python3 readlink rm sed sha256sum"
+else
+    required_commands="awk blockdev cmake dumpimage e2fsck file find findmnt git grep install \
+lsblk mkfs.ext4 mkimage mount mountpoint partprobe python3 readelf readlink \
+sed sfdisk sha256sum sort tar udevadm umount wc wipefs"
+fi
+for command_name in $required_commands
 do
     command -v "$command_name" >/dev/null 2>&1 || fail "missing command: $command_name"
 done
 
-if command -v mkfs.vfat >/dev/null 2>&1; then
+if [ "$boot_script_only" -eq 1 ]; then
+    mkfs_vfat=
+elif command -v mkfs.vfat >/dev/null 2>&1; then
     mkfs_vfat=mkfs.vfat
 elif command -v mkfs.fat >/dev/null 2>&1; then
     mkfs_vfat=mkfs.fat
@@ -76,12 +89,14 @@ else
 fi
 
 bootgen_cmd=${BOOTGEN:-}
-if [ -z "$bootgen_cmd" ] && [ -n "${PETALINUX:-}" ]; then
+if [ "$boot_script_only" -eq 0 ] && [ -z "$bootgen_cmd" ] && [ -n "${PETALINUX:-}" ]; then
     candidate=$PETALINUX/components/yocto/buildtools/sysroots/x86_64-petalinux-linux/usr/bin/bootgen
     [ -x "$candidate" ] && bootgen_cmd=$candidate
 fi
-[ -n "$bootgen_cmd" ] && [ -x "$bootgen_cmd" ] || \
-    fail "bootgen is unavailable; source the PetaLinux settings or set BOOTGEN"
+if [ "$boot_script_only" -eq 0 ]; then
+    [ -n "$bootgen_cmd" ] && [ -x "$bootgen_cmd" ] || \
+        fail "bootgen is unavailable; source the PetaLinux settings or set BOOTGEN"
+fi
 
 [ -d "$source_mount/board" ] || fail "Windows source mount is missing: $source_mount"
 mount_type=$(findmnt -n -o FSTYPE -T "$source_mount/board")
@@ -95,7 +110,7 @@ case ",$mount_options," in
     *) fail "source mount is not read-only: $mount_options" ;;
 esac
 
-if [ "$stage_only" -eq 1 ]; then
+if [ "$stage_only" -eq 1 ] || [ "$boot_script_only" -eq 1 ]; then
     device=stage-only
     device_bytes=0
     removable=not-applicable
@@ -135,12 +150,85 @@ linuxcnc_verify=$board_root/tools/linuxcnc/verify_v5_linuxcnc_source.py
 product_closure_verify=$board_root/tools/deploy/verify_v5_product_source_closure.py
 product_file_manifest_tool=$board_root/tools/deploy/v5_product_file_manifest.py
 
-[ -r "$deploy_manifest" ] || fail "deploy manifest is missing"
 [ -r "$boot_template" ] || fail "ext4 boot owner is missing"
+[ -r "$peta_verify" ] || fail "PetaLinux verifier is missing"
+
+build_and_verify_boot_script() {
+    boot_output=$1
+    install -d "$boot_output"
+    sed \
+        -e 's#@@PRE_BOOTENV@@##g' \
+        -e 's#@@KERNEL_BOOTCMD@@#bootm#g' \
+        -e 's#@@KERNEL_LOAD_ADDRESS@@#0x00200000#g' \
+        -e 's#@@DEVICETREE_ADDRESS@@#0x00100000#g' \
+        -e 's#@@KERNEL_IMAGE@@#uImage#g' \
+        -e 's#@@QSPI_KERNEL_IMAGE@@#image.ub#g' \
+        -e 's#@@NAND_KERNEL_IMAGE@@#image.ub#g' \
+        -e 's#@@QSPI_FIT_IMAGE_LOAD_ADDRESS@@#0x10000000#g' \
+        -e 's#@@FIT_IMAGE_LOAD_ADDRESS@@#0x10000000#g' \
+        -e 's#@@QSPI_KERNEL_OFFSET@@#0x1000000#g' \
+        -e 's#@@NAND_KERNEL_OFFSET@@#0x1000000#g' \
+        -e 's#@@QSPI_KERNEL_SIZE@@#0x500000#g' \
+        -e 's#@@NAND_KERNEL_SIZE@@#0x3200000#g' \
+        -e 's#@@QSPI_FIT_IMAGE_SIZE@@#0xF00000#g' \
+        -e 's#@@NAND_FIT_IMAGE_LOAD_ADDRESS@@#0x10000000#g' \
+        -e 's#@@NAND_FIT_IMAGE_SIZE@@#0x6400000#g' \
+        -e 's#@@FIT_IMAGE@@#image.ub#g' \
+        "$boot_template" >"$boot_output/boot.cmd"
+    if grep -q '@@' "$boot_output/boot.cmd"; then
+        fail "boot command still contains unresolved placeholders"
+    fi
+    mkimage -C none -A arm -T script -d \
+        "$boot_output/boot.cmd" "$boot_output/boot.scr"
+    dumpimage -p 0 -o "$boot_output/boot.readback.cmd" \
+        "$boot_output/boot.scr" >/dev/null
+
+    product_count=$(grep -a -c 'root=/dev/mmcblk0p2' \
+        "$boot_output/boot.readback.cmd" || true)
+    [ "$product_count" -eq 1 ] || \
+        fail "product boot script must contain exactly one bootargs line"
+    product_bootargs=$(grep -a 'root=/dev/mmcblk0p2' "$boot_output/boot.readback.cmd")
+    for token in $product_bootargs; do
+        case "$token" in
+            isolcpus=*) fail "product boot script must not isolate the ARM boot CPU" ;;
+        esac
+    done
+
+    recovery_count=$(grep -a -c 'root=/dev/mmcblk1p1' \
+        "$boot_output/boot.readback.cmd" || true)
+    [ "$recovery_count" -eq 1 ] || \
+        fail "QSPI recovery boot script must contain exactly one bootargs line"
+    recovery_bootargs=$(grep -a 'root=/dev/mmcblk1p1' "$boot_output/boot.readback.cmd")
+    for token in $recovery_bootargs; do
+        case "$token" in
+            isolcpus=*) fail "QSPI recovery boot script must not isolate a CPU" ;;
+        esac
+    done
+    if grep -a -q 'bootm ramdisk\|root=/dev/ram0' "$boot_output/boot.readback.cmd"; then
+        fail "retired initrd boot path survived"
+    fi
+}
+
+python3 "$peta_verify" --project-root "$project_root" --source-root "$peta_root"
+if [ "$boot_script_only" -eq 1 ]; then
+    build_root_resolved=$(readlink -m "$build_root")
+    [ "$build_root_resolved" = /root/v5-build ] || \
+        fail "unsafe focused build root: $build_root_resolved"
+    boot_stage=$build_root_resolved/sd-card/boot-only
+    [ "$boot_stage" = /root/v5-build/sd-card/boot-only ] || \
+        fail "unsafe focused boot stage: $boot_stage"
+    rm -rf "$boot_stage"
+    build_and_verify_boot_script "$boot_stage"
+    boot_script_sha256=$(sha256sum "$boot_stage/boot.scr" | awk '{print $1}')
+    printf '%s  %s\n' "$boot_script_sha256" boot.scr >"$boot_stage/boot.scr.sha256"
+    echo "V5_SD_BOOT_SCRIPT_STAGE_OK boot=$boot_stage/boot.scr sha256=$boot_script_sha256"
+    exit 0
+fi
+
+[ -r "$deploy_manifest" ] || fail "deploy manifest is missing"
 [ -r "$bitstream" ] || fail "hardware bitstream is missing"
 [ -r "$product_closure_verify" ] || fail "product source closure verifier is missing"
 [ -r "$product_file_manifest_tool" ] || fail "product file manifest tool is missing"
-python3 "$peta_verify" --project-root "$project_root" --source-root "$peta_root"
 python3 "$linuxcnc_verify" \
     --project-root "$project_root" \
     --source-root "$project_root/linuxcnc" \
@@ -373,35 +461,7 @@ if dumpimage -l "$boot_stage/image.ub" | grep -q 'RAMDisk Image'; then
     fail "product FIT unexpectedly contains a ramdisk"
 fi
 
-sed \
-    -e 's#@@PRE_BOOTENV@@##g' \
-    -e 's#@@KERNEL_BOOTCMD@@#bootm#g' \
-    -e 's#@@KERNEL_LOAD_ADDRESS@@#0x00200000#g' \
-    -e 's#@@DEVICETREE_ADDRESS@@#0x00100000#g' \
-    -e 's#@@KERNEL_IMAGE@@#uImage#g' \
-    -e 's#@@QSPI_KERNEL_IMAGE@@#image.ub#g' \
-    -e 's#@@NAND_KERNEL_IMAGE@@#image.ub#g' \
-    -e 's#@@QSPI_FIT_IMAGE_LOAD_ADDRESS@@#0x10000000#g' \
-    -e 's#@@FIT_IMAGE_LOAD_ADDRESS@@#0x10000000#g' \
-    -e 's#@@QSPI_KERNEL_OFFSET@@#0x1000000#g' \
-    -e 's#@@NAND_KERNEL_OFFSET@@#0x1000000#g' \
-    -e 's#@@QSPI_KERNEL_SIZE@@#0x500000#g' \
-    -e 's#@@NAND_KERNEL_SIZE@@#0x3200000#g' \
-    -e 's#@@QSPI_FIT_IMAGE_SIZE@@#0xF00000#g' \
-    -e 's#@@NAND_FIT_IMAGE_LOAD_ADDRESS@@#0x10000000#g' \
-    -e 's#@@NAND_FIT_IMAGE_SIZE@@#0x6400000#g' \
-    -e 's#@@FIT_IMAGE@@#image.ub#g' \
-    "$boot_template" >"$boot_stage/boot.cmd"
-if grep -q '@@' "$boot_stage/boot.cmd"; then
-    fail "boot command still contains unresolved placeholders"
-fi
-mkimage -C none -A arm -T script -d "$boot_stage/boot.cmd" "$boot_stage/boot.scr"
-dumpimage -p 0 -o "$boot_stage/boot.readback.cmd" "$boot_stage/boot.scr" >/dev/null
-grep -q 'root=/dev/mmcblk0p2 rw rootwait' "$boot_stage/boot.readback.cmd" || \
-    fail "boot script rootfs readback failed"
-if grep -q 'bootm ramdisk\|root=/dev/ram0' "$boot_stage/boot.readback.cmd"; then
-    fail "retired initrd boot path survived"
-fi
+build_and_verify_boot_script "$boot_stage"
 
 cat >"$boot_stage/boot.bif" <<EOF
 the_ROM_image:

@@ -59,7 +59,7 @@ class RouterModel:
         generation: int,
         mapping: list[int],
         zeros: list[int],
-        valid: list[bool],
+        mapping_records_valid: list[bool],
     ) -> bool:
         if not self.table_valid:
             self.last_seen = 0
@@ -69,7 +69,7 @@ class RouterModel:
         self.last_seen = commit
         if (
             generation == 0
-            or not all(valid)
+            or not all(mapping_records_valid)
             or sorted(mapping) != list(range(5))
             or len(zeros) != 5
             or any(value < -(1 << 31) or value >= (1 << 31) for value in zeros)
@@ -225,6 +225,8 @@ def main() -> int:
     require(router, "option singleton yes;")
     require(router, "rejected-commit-seq")
     require(router, "last_seen_commit_seq")
+    if "joint-config-valid" in router:
+        raise AssertionError("BUS router still depends on Home readiness")
     require(router, "joint-zero-counts-##[5]")
     require(router, "v5_bus_router_sub_offset")
     require(router, "v5_bus_router_add_offset")
@@ -235,7 +237,8 @@ def main() -> int:
     require(owner, "home_status_consistent")
     require(owner, "selected = home_failed_joint;")
     require(owner, "response->home_current_mask = home_failure_current_mask")
-    require(protocol, "#define V5_NATIVE_HAL_OWNER_VERSION 6u")
+    require(protocol, "#define V5_NATIVE_HAL_OWNER_VERSION 7u")
+    require(protocol, "V5_NATIVE_HOME_CONFIG_HOME_READY")
     require(command_ipc, "#define V5_COMMAND_GATE_IPC_VERSION 5u")
     require(command_ipc, "V5_COMMAND_GATE_IPC_OP_PROBE_AXIS_SLAVE_MAPPING = 6")
     require(command_server, "load_axis_slave_mapping_status();")
@@ -248,6 +251,23 @@ def main() -> int:
     require(hal, "v5-bus-axis-router.joint-zero-counts-00")
     require(hal, "v5-native-hal-owner.home-rtcp-ack-transaction")
     require(hal, "motion.v5-bus-home-failed-joint")
+    require(owner, "home_config_valid(joint) = g_home_stage[joint].home_ready ? 1 : 0;")
+    require(command_server, "project_native_bus_mapping(")
+    require(command_server, "records[axis->status_slot].home_ready = axis->bus_zero_evidence_known ? 1 : 0;")
+    projection_failure = command_server.split(
+        "if (g_axis_slave_mapping_applicable && g_axis_slave_mapping_valid &&", 1
+    )[1].split("if (!v5_linuxcncrsh_gate_preconnect", 1)[0]
+    for token in (
+        "g_axis_slave_mapping_status_available = 1;",
+        "g_axis_slave_mapping_valid = 0;",
+        "g_axis_slave_mapping_generation = 0U;",
+        '"NATIVE_BUS_MAPPING_PROJECTION_FAILED"',
+    ):
+        require(projection_failure, token)
+    if projection_failure.index("g_axis_slave_mapping_valid = 0;") > projection_failure.index(
+        "BUS motion remains fail-closed"
+    ):
+        raise AssertionError("BUS mapping projection failure publishes stale valid state")
     require(home_adapter, "progress.current_axis_mask = status->home_current_mask;")
     require(home_adapter, "status->home_axis_code_by_joint[joint]")
     require(home_adapter, 'case 21U: return "ALL_HOME_PLAN_STALE";')
@@ -398,6 +418,14 @@ def main() -> int:
         raise AssertionError("successful Home must still clear the G-code wrapped turn offset")
 
     model = RouterModel()
+    # Missing Home readiness is represented outside the router.  The mapping
+    # record still commits with a neutral offset so BUS semantic actual remains
+    # available for the repair UI.
+    mapping_only = RouterModel()
+    assert mapping_only.publish(
+        1, 76, [0, 1, 2, 3, 4], [0, 0, 0, 0, 0], [True] * 5
+    )
+    assert mapping_only.generation == 76
     zeros = [1000, 2000, 3000, 4000, 5000]
     assert model.publish(1, 77, [0, 1, 2, 3, 4], zeros, [True] * 5)
     targets, actuals = model.route(

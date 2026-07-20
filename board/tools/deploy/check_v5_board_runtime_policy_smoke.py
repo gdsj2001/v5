@@ -185,8 +185,62 @@ def real_proc_locks_smoke(namespace):
             print(f"V5_BOARD_RUNTIME_REAL_PROC_LOCKS_OK pid={owner}")
 
 
+def expect_boot_cpu_layout_case(
+        namespace, cmdline: str, isolated: str, marker: str, expected_rc: int):
+    with tempfile.TemporaryDirectory(prefix="v5-boot-isolation-") as raw_root:
+        root = Path(raw_root)
+        cmdline_path = root / "cmdline"
+        isolated_path = root / "isolated"
+        cmdline_path.write_text(cmdline + "\n", encoding="ascii")
+        isolated_path.write_text(isolated + "\n", encoding="ascii")
+        namespace["CMDLINE_PATH"] = str(cmdline_path)
+        namespace["ISOLATED_CPU_PATH"] = str(isolated_path)
+        stdout = StringIO()
+        stderr = StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            rc = namespace["audit_kernel_boot_cpu_layout"]()
+        output = stdout.getvalue() + stderr.getvalue()
+        assert rc == expected_rc, output
+        assert marker in output, (marker, output)
+
+
 def main() -> int:
     namespace, remote_source = load_remote_namespace()
+    expect_boot_cpu_layout_case(
+        namespace,
+        "console=ttyPS0,115200 root=/dev/mmcblk0p2",
+        "",
+        "OK_KERNEL_BOOT_CPU_LAYOUT isolcpus=absent isolated=empty",
+        0,
+    )
+    expect_boot_cpu_layout_case(
+        namespace,
+        "console=ttyPS0,115200 root=/dev/mmcblk0p2 isolcpus=0",
+        "",
+        "isolcpus_tokens=['isolcpus=0']",
+        1,
+    )
+    expect_boot_cpu_layout_case(
+        namespace,
+        "console=ttyPS0,115200 root=/dev/mmcblk0p2 isolcpus=1",
+        "1",
+        "isolcpus_tokens=['isolcpus=1']",
+        1,
+    )
+    expect_boot_cpu_layout_case(
+        namespace,
+        "console=ttyPS0,115200 root=/dev/mmcblk0p2 isolcpus=0 isolcpus=0",
+        "0",
+        "isolcpus_tokens=['isolcpus=0', 'isolcpus=0']",
+        1,
+    )
+    expect_boot_cpu_layout_case(
+        namespace,
+        "console=ttyPS0,115200 root=/dev/mmcblk0p2",
+        "1",
+        "isolated=1 expected=<empty>",
+        1,
+    )
     expect_case(namespace, lambda fixture: None, "OK_POSITION_IDENTITY", 0)
     expect_case(namespace, lambda fixture: fixture.pidfile.unlink(), "owner_record=pidfile_missing")
     expect_case(namespace, lambda fixture: fixture.write_owner_record("4242 broken 7\n"), "owner_record=pidfile_fields")

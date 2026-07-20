@@ -289,6 +289,52 @@ def check_refresh_commit_boundary() -> int:
     return 0
 
 
+def check_startup_lifecycle_sources() -> int:
+    source_path = Path(__file__).resolve().parents[2] / "app" / "src" / "v5_lvgl_remote_display.c"
+    source = source_path.read_text(encoding="utf-8")
+    bootstrap_source = source_path.with_name("v5_ui_shell_bootstrap.c").read_text(encoding="utf-8")
+    relay_source = Path(__file__).with_name("v5_remote_ui_relay.py").read_text(encoding="utf-8")
+    init_source = Path(__file__).with_name("init.d").joinpath("v5-ui-relay").read_text(encoding="utf-8")
+    framebuffer_fail_closed = (
+        "static int init_framebuffer(unsigned int width, unsigned int height)",
+        "if (!init_framebuffer(width, height))",
+        "v5 physical framebuffer claim failed: framebuffer unavailable",
+        "!g_physical_framebuffer_claimed || !g_fb || g_fb_fd < 0",
+    )
+    if any(token not in source for token in framebuffer_fail_closed):
+        print("physical framebuffer startup is not fail-closed")
+        return 95
+    bootstrap_ready_gate = (
+        "stage=initial_status_apply",
+        "all_page_caches_ready && main_page_created && main_page_applied",
+        "(!g_v5_shell_remote_display_active || status_refresh_ok)",
+    )
+    if any(token not in bootstrap_source for token in bootstrap_ready_gate):
+        print("UI bootstrap ready omitted initial status/main-page application")
+        return 96
+    relay_lifecycle_gate = (
+        "startup_status, lifecycle_metadata = self.state.lifecycle_snapshot()",
+        '"error": "ui_startup_failed" if startup_status == "failed" else "ui_not_ready"',
+        '"ready_metadata": self._request_ready_metadata',
+        "request_ready_identity_is_current",
+    )
+    if any(token not in relay_source for token in relay_lifecycle_gate):
+        print("relay lifecycle snapshot/TOCTOU gate is incomplete")
+        return 97
+    init_identity_gate = (
+        "process_identity_matches() {",
+        "RELAY_STARTFILE=/run/8ax/v5_ui_relay.start_ticks",
+        "UI_STARTFILE=/run/8ax/v5_ui_shell.start_ticks",
+        "publish_startup_failure() {",
+        "--failure-owner-start-ticks",
+        "publisher_barrier",
+    )
+    if any(token not in init_source for token in init_identity_gate):
+        print("UI init PID-reuse/failure lifecycle gate is incomplete")
+        return 98
+    return 0
+
+
 def check_full_frame_waits_for_commit(root: Path) -> int:
     if os.name != "posix":
         return 0
@@ -1149,6 +1195,168 @@ def check_shared_payload_producer() -> int:
     return 0
 
 
+def write_fake_process_stat(proc_root: Path, pid: int, start_ticks: int) -> None:
+    process_root = proc_root / str(pid)
+    process_root.mkdir(parents=True, exist_ok=True)
+    process_root.joinpath("stat").write_text(
+        f"{pid} (v5_lvgl_shell) " +
+        " ".join(["S"] + ["0"] * 18 + [str(start_ticks)]) + "\n",
+        encoding="ascii",
+    )
+
+
+def check_ready_identity_cache(relay_module, root: Path) -> int:
+    proc_root = root / "proc"
+    boot_id_path = proc_root / "sys/kernel/random/boot_id"
+    boot_id = "11111111-1111-4111-8111-111111111111"
+    ui_pid = 4242
+    relay_pid = 4343
+    ui_start_ticks = 98765
+    boot_id_path.parent.mkdir(parents=True, exist_ok=True)
+    boot_id_path.write_text(boot_id + "\n", encoding="ascii")
+    write_fake_process_stat(proc_root, ui_pid, ui_start_ticks)
+    publisher_barrier = {
+        "owner_identities": {
+            "position": {"pid": 101, "start_ticks": 1001, "argv": ["position"], "writer_identity": 5001},
+            "wcs": {"pid": 102, "start_ticks": 1002, "argv": ["wcs"]},
+            "state": {"pid": 103, "start_ticks": 1003, "argv": ["state"]},
+        },
+        "baseline_markers": {"position": 10, "state": 11, "wcs": 12, "modal": 13},
+        "final_markers": {"position": 20, "state": 21, "wcs": 22, "modal": 23},
+    }
+    ready_state = relay_module.FrameState(
+        root / "ready", 4, 4, proc_root=proc_root, boot_id_path=boot_id_path,
+        process_pid=relay_pid)
+    if ready_state.ui_ready():
+        print("ready gate opened without metadata")
+        return 14
+    ready_state.publish_dirty(
+        {"frame_id": 2, "base_frame_id": 1, "x": 0, "y": 0, "w": 4, "h": 4})
+    ready_state.ready_path.parent.mkdir(parents=True, exist_ok=True)
+    ready_state.ready_path.write_text(json.dumps({
+        "schema": "v5.ui_ready.v1",
+        "ready": True,
+        "boot_id": boot_id,
+        "ui_instance_id": "22222222-2222-4222-8222-222222222222",
+        "ui_pid": ui_pid,
+        "ui_start_ticks": ui_start_ticks,
+        "current_frame_id": 2,
+        "publisher_barrier": publisher_barrier,
+    }), encoding="utf-8")
+    if not ready_state.ui_ready() or ready_state.first_dirty_event() != {
+        "frame_id": 2,
+        "base_frame_id": 1,
+        "x": 0,
+        "y": 0,
+        "w": 4,
+        "h": 4,
+    }:
+        print("ready gate did not bind to the formal first frame")
+        return 15
+    missing_barrier = ready_state.ready_path.with_suffix(".missing-barrier")
+    missing_barrier.write_text(json.dumps({
+        "schema": "v5.ui_ready.v1",
+        "ready": True,
+        "boot_id": boot_id,
+        "ui_instance_id": "22222222-2222-4222-8222-222222222222",
+        "ui_pid": ui_pid,
+        "ui_start_ticks": ui_start_ticks,
+        "current_frame_id": 2,
+    }), encoding="utf-8")
+    os.replace(missing_barrier, ready_state.ready_path)
+    if ready_state.ui_ready():
+        print("ready gate accepted metadata without final publisher barrier")
+        return 71
+    replacement_pid = relay_pid
+    replacement_start_ticks = 99876
+    write_fake_process_stat(proc_root, replacement_pid, replacement_start_ticks)
+    replacement = ready_state.ready_path.with_suffix(".new")
+    replacement.write_text(json.dumps({
+        "schema": "v5.ui_ready.v1",
+        "ready": True,
+        "boot_id": boot_id,
+        "ui_instance_id": "33333333-3333-4333-8333-333333333333",
+        "ui_pid": replacement_pid,
+        "ui_start_ticks": replacement_start_ticks,
+        "current_frame_id": 2,
+        "publisher_barrier": publisher_barrier,
+    }), encoding="utf-8")
+    os.replace(replacement, ready_state.ready_path)
+    replaced_metadata = ready_state.ready_metadata()
+    if (not replaced_metadata or
+            replaced_metadata.get("ui_instance_id") !=
+            "33333333-3333-4333-8333-333333333333"):
+        print("ready metadata cache survived atomic identity replacement", replaced_metadata)
+        return 65
+    replacement.write_text(json.dumps({
+        "schema": "v5.ui_ready.v1",
+        "ready": True,
+        "boot_id": "44444444-4444-4444-8444-444444444444",
+        "ui_instance_id": "55555555-5555-4555-8555-555555555555",
+        "ui_pid": replacement_pid,
+        "ui_start_ticks": replacement_start_ticks,
+        "current_frame_id": 2,
+        "publisher_barrier": publisher_barrier,
+    }), encoding="utf-8")
+    os.replace(replacement, ready_state.ready_path)
+    if ready_state.ui_ready():
+        print("ready gate accepted metadata from another kernel boot")
+        return 66
+    replacement.write_text(json.dumps({
+        "schema": "v5.ui_ready.v1",
+        "ready": True,
+        "boot_id": boot_id,
+        "ui_instance_id": "66666666-6666-4666-8666-666666666666",
+        "ui_pid": replacement_pid,
+        "ui_start_ticks": replacement_start_ticks + 1,
+        "current_frame_id": 2,
+        "publisher_barrier": publisher_barrier,
+    }), encoding="utf-8")
+    os.replace(replacement, ready_state.ready_path)
+    if ready_state.ui_ready():
+        print("ready gate accepted reused PID with mismatched start ticks")
+        return 67
+    failure = {
+        "schema": "v5.ui_failure.v1",
+        "ready": False,
+        "failed": True,
+        "boot_id": boot_id,
+        "startup_instance_id": "77777777-7777-4777-8777-777777777777",
+        "owner_role": "relay",
+        "owner_pid": replacement_pid,
+        "owner_start_ticks": replacement_start_ticks,
+        "stage": "ui_ready_handshake",
+        "error": "cache queue failed",
+        "created_realtime_ns": 1,
+        "created_monotonic_ns": 1,
+    }
+    replacement.write_text(json.dumps(failure), encoding="utf-8")
+    os.replace(replacement, ready_state.ready_path)
+    lifecycle_status, lifecycle_metadata = ready_state.lifecycle_snapshot()
+    if (lifecycle_status != "failed" or lifecycle_metadata != failure or
+            ready_state.ui_ready() or ready_state.failure_metadata() != failure):
+        print("structured lifecycle failure was not exposed atomically")
+        return 68
+    response = {}
+    handler = object.__new__(relay_module.RemoteRelayHandler)
+    handler.path = "/remote/info"
+    handler.server = type("FailureServer", (), {"state": ready_state})()
+    handler.check_peer = lambda: True
+    handler.write_json = lambda status, body: response.update(status=status, body=body)
+    handler.do_GET()
+    if (response.get("status") != 503 or
+            response.get("body", {}).get("error") != "ui_startup_failed" or
+            response.get("body", {}).get("failure_metadata") != failure):
+        print("remote info did not return the structured startup failure", response)
+        return 70
+    replacement.write_text(json.dumps({**failure, "owner_start_ticks": replacement_start_ticks + 1}), encoding="utf-8")
+    os.replace(replacement, ready_state.ready_path)
+    if ready_state.lifecycle_snapshot() != ("booting", None):
+        print("failure metadata accepted a reused owner PID")
+        return 69
+    return 0
+
+
 def main() -> int:
     global relay
     relay = import_relay_for_smoke()
@@ -1165,6 +1373,9 @@ def main() -> int:
         return 27
 
     rc = check_stream_receive_loop()
+    if rc != 0:
+        return rc
+    rc = check_startup_lifecycle_sources()
     if rc != 0:
         return rc
 
@@ -1344,26 +1555,9 @@ def main() -> int:
         if not invalid or not invalid.get("stream_reset") or invalid.get("reason") != "invalid_dirty_event":
             print("invalid dirty geometry did not request a stream restart", invalid)
             return 64
-        ready_state = relay.FrameState(Path(tmp) / "ready", 4, 4)
-        if ready_state.ui_ready():
-            print("ready gate opened without metadata")
-            return 14
-        ready_state.publish_dirty({"frame_id": 2, "base_frame_id": 1, "x": 0, "y": 0, "w": 4, "h": 4})
-        ready_state.ready_path.parent.mkdir(parents=True, exist_ok=True)
-        ready_state.ready_path.write_text(
-            json.dumps({"schema": "v5.ui_ready.v1", "ready": True, "current_frame_id": 2}),
-            encoding="utf-8",
-        )
-        if not ready_state.ui_ready() or ready_state.first_dirty_event() != {
-            "frame_id": 2,
-            "base_frame_id": 1,
-            "x": 0,
-            "y": 0,
-            "w": 4,
-            "h": 4,
-        }:
-            print("ready gate did not bind to the formal first frame")
-            return 15
+        rc = check_ready_identity_cache(relay, Path(tmp) / "ready_identity")
+        if rc != 0:
+            return rc
         del bounded_payload
         del prepared_bounded
         del payload
@@ -1375,6 +1569,18 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--startup-lifecycle-only"]:
+        lifecycle_rc = check_startup_lifecycle_sources()
+        if lifecycle_rc == 0:
+            print("v5 UI startup lifecycle source contract: fail-closed identity binding ok")
+        raise SystemExit(lifecycle_rc)
+    if sys.argv[1:] == ["--ready-identity-only"]:
+        ready_relay = import_relay_for_smoke()
+        with tempfile.TemporaryDirectory(prefix="v5_remote_ready_identity_") as temporary:
+            ready_rc = check_ready_identity_cache(ready_relay, Path(temporary))
+        if ready_rc == 0:
+            print("v5 remote ui ready identity: kernel/process/cache binding ok")
+        raise SystemExit(ready_rc)
     if sys.argv[1:] == ["--shared-producer-only"]:
         producer_rc = check_shared_payload_producer()
         if producer_rc == 0:

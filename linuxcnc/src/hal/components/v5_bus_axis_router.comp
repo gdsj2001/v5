@@ -4,11 +4,12 @@ option singleton yes;
 
 description """
 Routes five logical LinuxCNC joints to five physical EtherCAT slots from the
-  resident clean-restart mapping.  The same table owns each joint's saved
-  physical zero count: feedback is continuously translated into zero-relative
-  LinuxCNC counts and commands are continuously translated back to physical
-  counts.  A complete table is staged in HAL pins and a single non-zero commit
-  sequence atomically latches it in one servo cycle.
+  resident clean-restart mapping.  Mapping commit is independent of Home
+  readiness: a missing physical-zero proof cannot suppress the committed
+  axis/slave actual.  The same atomic record carries a bounded zero offset when
+  available; Home readiness is validated separately by the native Home owner.
+  A complete table is staged in HAL pins and a single non-zero commit sequence
+  atomically latches it in one servo cycle.
 Incomplete, duplicate, out-of-range, zero-generation, mixed-generation, or
 non-advancing commits cannot replace the last complete committed table.  An
 explicit canonical validity withdrawal fails closed in the same servo cycle.
@@ -16,8 +17,6 @@ Schedule read after lcec.read and before cia402.read; schedule write after
 cia402.write and before lcec.write.
 """;
 
-pin in bit joint-config-valid-##[5]
-    "True only when this logical joint mapping came from the resident owner";
 pin in u32 joint-slave-position-##[5]
     "Physical slave position (0..4) selected for this logical joint";
 pin in u32 joint-mapping-generation-##[5]
@@ -269,15 +268,9 @@ FUNCTION(read) {
             hal_u32_t joint_bit = 1u << joint;
             int expected_active = (candidate_mask & joint_bit) != 0;
 
-            if (!expected_active) {
-                if (joint_config_valid(joint)) {
-                    candidate_valid = 0;
-                }
-                continue;
-            }
+            if (!expected_active) continue;
 
-            if (!joint_config_valid(joint) ||
-                joint_mapping_generation(joint) != candidate_generation ||
+            if (joint_mapping_generation(joint) != candidate_generation ||
                 joint_slave_position(joint) >= V5_BUS_AXIS_ROUTER_JOINTS ||
                 !v5_bus_router_exact_s32(
                     joint_zero_counts(joint), &candidate_zero_for_joint[joint])) {

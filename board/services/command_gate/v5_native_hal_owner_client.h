@@ -20,6 +20,7 @@ typedef struct V5NativeHomeConfigRecord {
     unsigned int mapping_generation;
     unsigned int expected_active_mask;
     unsigned int commit_seq;
+    int home_ready;
     double zero_counts;
     double counts_per_unit;
 } V5NativeHomeConfigRecord;

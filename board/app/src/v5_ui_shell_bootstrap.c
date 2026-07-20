@@ -110,6 +110,15 @@ static int v5_ui_shell_bootstrap_common(
     if (!page_registry_ready) {
         return 1;
     }
+    if (g_v5_shell_remote_display_active &&
+        (!status_refresh_ok || !main_page_created || !main_page_applied)) {
+        fprintf(stderr,
+                "V5_UI_BOOT event=fail stage=initial_status_apply status_refresh=%d main_page=%d applied=%d\n",
+                status_refresh_ok,
+                main_page_created,
+                main_page_applied);
+        return 1;
+    }
     if (g_v5_shell_remote_display_active) {
         lv_disp_t *disp = lv_obj_get_disp(g_v5_shell_shell_pages[V5_SHELL_PAGE_MAIN]);
         if (!shell_show_page_objects_for_cache_blit(V5_SHELL_PAGE_MAIN) ||
@@ -160,7 +169,9 @@ static int v5_ui_shell_bootstrap_common(
         main_page_created,
         main_page_applied);
     g_v5_shell_ui_ready =
-        g_v5_shell_model.lvgl_initialized && page_registry_ready && all_page_caches_ready;
+        g_v5_shell_model.lvgl_initialized && page_registry_ready &&
+        all_page_caches_ready && main_page_created && main_page_applied &&
+        (!g_v5_shell_remote_display_active || status_refresh_ok);
     if (g_v5_shell_ui_ready && main_page_created) {
         v5_main_page_set_command_execution_enabled(&g_v5_shell_main_page, 1);
         (void)shell_refresh_axis_slave_mapping_status(1);

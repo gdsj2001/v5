@@ -15,7 +15,7 @@ from typing import Any
 from vps_private_binding import validate_private_device_binding
 
 
-DRIVE_PROFILE_SCHEMA = "v3-driver-profile-map-v1"
+DRIVE_PROFILE_SCHEMA = "v5-driver-profile-map-v1"
 SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 VPS_ID_RE = re.compile(r"^[0-9]{6}$")
 

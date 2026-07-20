@@ -38,6 +38,7 @@ say() { printf '%s\n' "$*"; }
 record_fail() { say "FAIL $*"; fail=1; }
 record_warn() { say "WARN $*"; warn=1; }
 record_ok() { say "OK $*"; }
+manifest_ethercat_artifact_seen=0
 
 remote_check() {
   if [ -z "$board_ssh" ]; then
@@ -59,6 +60,47 @@ manifest_source_path() {
   esac
 }
 
+check_ethercat_artifact_identity() {
+  identity="$repo_root/build/ethercat/v5_ethercat_artifact_identity.txt"
+  identity_fail=0
+  if [ ! -r "$identity" ]; then
+    record_fail "missing EtherCAT artifact identity: $identity"
+    return
+  fi
+  grep -Fqx 'schema=v5-ethercat-artifact-identity-v1' "$identity" || {
+    record_fail "invalid EtherCAT artifact identity schema: $identity"
+    return
+  }
+  for artifact in ec_master.ko ec_generic.ko lcec.so; do
+    artifact_path="$repo_root/build/ethercat/$artifact"
+    expected=$(sed -n "s/^$artifact=//p" "$identity")
+    actual=$(sha256sum "$artifact_path" 2>/dev/null | awk '{print $1}')
+    if [ -z "$expected" ] || [ "$actual" != "$expected" ]; then
+      record_fail "EtherCAT artifact identity mismatch: $artifact"
+      identity_fail=1
+    fi
+  done
+  petalinux_owner="$repo_root/petalinux/v5_petalinux_source_identity.json"
+  linuxcnc_owner="$repo_root/../linuxcnc/v5_linuxcnc_source_identity.json"
+  if [ ! -r "$petalinux_owner" ] || [ ! -r "$linuxcnc_owner" ]; then
+    record_fail "EtherCAT artifact source identity owner is missing"
+    return
+  fi
+  expected_petalinux=$(sed -n 's/^petalinux_content_sha256=//p' "$identity")
+  expected_linuxcnc=$(sed -n 's/^linuxcnc_content_sha256=//p' "$identity")
+  actual_petalinux=$(awk -F'"' '/"content_sha256"/ {print $4; exit}' "$petalinux_owner")
+  actual_linuxcnc=$(awk -F'"' '/"content_sha256"/ {print $4; exit}' "$linuxcnc_owner")
+  if [ -z "$actual_petalinux" ] || [ "$actual_petalinux" != "$expected_petalinux" ]; then
+    record_fail "EtherCAT artifact PetaLinux source identity is stale"
+    identity_fail=1
+  fi
+  if [ -z "$actual_linuxcnc" ] || [ "$actual_linuxcnc" != "$expected_linuxcnc" ]; then
+    record_fail "EtherCAT artifact LinuxCNC source identity is stale"
+    identity_fail=1
+  fi
+  [ "$identity_fail" -ne 0 ] || record_ok "EtherCAT artifact identity $identity"
+}
+
 check_source_manifest() {
   tab=$(printf '\t')
   while IFS="$tab" read -r kind source destination mode extra; do
@@ -70,14 +112,36 @@ check_source_manifest() {
       continue
     fi
     source_path="$(manifest_source_path "$kind" "$source")"
+    case "$source" in
+      build/ethercat/*) manifest_ethercat_artifact_seen=1 ;;
+    esac
     if [ -e "$source_path" ]; then
-      if [ "$kind" = "binary" ]; then
+      if [ "$kind" = "binary" ] || [ "$kind" = "kernel_module" ]; then
         if ! file "$source_path" | grep -q 'ELF 32-bit.*ARM'; then
           record_fail "non-ARM deploy binary: $source_path"
           continue
         fi
+      fi
+      if [ "$kind" = "binary" ]; then
         if ! readelf -h "$source_path" | grep -q 'hard-float ABI'; then
           record_fail "deploy binary is not ARM hard-float ABI: $source_path"
+          continue
+        fi
+      fi
+      if [ "$kind" = "kernel_module" ]; then
+        case "$destination" in
+          /lib/modules/*/*)
+            kernel_release=${destination#/lib/modules/}
+            kernel_release=${kernel_release%%/*}
+            ;;
+          *)
+            record_fail "kernel module destination is outside the versioned module tree: $destination"
+            continue
+            ;;
+        esac
+        if ! readelf -p .modinfo "$source_path" 2>/dev/null |
+             grep -Fq "vermagic=$kernel_release"; then
+          record_fail "kernel module vermagic does not match destination kernel $kernel_release: $source_path"
           continue
         fi
       fi
@@ -86,6 +150,9 @@ check_source_manifest() {
       record_fail "missing source $source_path"
     fi
   done < "$manifest"
+  if [ "$manifest_ethercat_artifact_seen" -eq 1 ]; then
+    check_ethercat_artifact_identity
+  fi
 }
 
 check_remote_target() {

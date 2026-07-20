@@ -28,9 +28,12 @@ RELAY_DAEMON=/usr/libexec/8ax/v5_remote_ui_relay.py
 BOOT_READY=/usr/libexec/8ax/v5_ui_boot_ready.py
 PIDFILE=/run/8ax/v5_ui_relay.pid
 UI_PIDFILE=/run/8ax/v5_ui_shell.pid
+RELAY_STARTFILE=/run/8ax/v5_ui_relay.start_ticks
+UI_STARTFILE=/run/8ax/v5_ui_shell.start_ticks
 LOGFILE=/run/8ax/v5_ui_relay.log
 UI_BOOT_LOG=/run/8ax/v5_ui_boot.log
 UI_READY_PATH=/run/8ax_v5_product_ui/ui_ready.json
+PUBLISHER_SNAPSHOT_PATH=/run/8ax_v5_product_ui/ui_input_barrier.json
 PORT=${V5_UI_REMOTE_PORT:-18080}
 REMOTE_BIND=${V5_UI_REMOTE_BIND:-0.0.0.0}
 REMOTE_ALLOW_CIDRS=${V5_UI_REMOTE_ALLOW_CIDRS:-127.0.0.1/32,192.168.1.0/24}
@@ -47,36 +50,95 @@ boot_stage() {
 }
 
 read_pidfile() {
-  file="$1"
-  [ -r "$file" ] || return 1
-  pid=$(cat "$file" 2>/dev/null || true)
-  [ -n "$pid" ] || return 1
-  printf '%s\n' "$pid"
+  read_pidfile_path="$1"
+  [ -r "$read_pidfile_path" ] || return 1
+  read_pidfile_value=$(cat "$read_pidfile_path" 2>/dev/null || true)
+  case "$read_pidfile_value" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  [ "$read_pidfile_value" -gt 0 ] || return 1
+  printf '%s\n' "$read_pidfile_value"
+}
+
+process_start_ticks() {
+  process_start_pid="$1"
+  [ -r "/proc/$process_start_pid/stat" ] || return 1
+  process_start_value=$(sed -n 's/^.*) //p' "/proc/$process_start_pid/stat" 2>/dev/null | awk '{print $20}')
+  case "$process_start_value" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  [ "$process_start_value" -gt 0 ] || return 1
+  printf '%s\n' "$process_start_value"
+}
+
+read_startfile() {
+  read_startfile_path="$1"
+  [ -r "$read_startfile_path" ] || return 1
+  read_startfile_value=$(cat "$read_startfile_path" 2>/dev/null || true)
+  case "$read_startfile_value" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  [ "$read_startfile_value" -gt 0 ] || return 1
+  printf '%s\n' "$read_startfile_value"
+}
+
+process_has_exact_arg() {
+  process_arg_pid="$1"
+  process_arg_expected="$2"
+  [ -r "/proc/$process_arg_pid/cmdline" ] || return 1
+  tr '\000' '\n' <"/proc/$process_arg_pid/cmdline" 2>/dev/null | grep -F -x -q "$process_arg_expected"
+}
+
+record_process_identity() {
+  record_identity_pid="$1"
+  record_identity_path="$2"
+  record_identity_ticks=$(process_start_ticks "$record_identity_pid") || return 1
+  printf '%s\n' "$record_identity_ticks" >"$record_identity_path"
+}
+
+process_identity_matches() {
+  identity_pidfile="$1"
+  identity_startfile="$2"
+  identity_expected_arg="$3"
+  identity_pid=$(read_pidfile "$identity_pidfile" 2>/dev/null || true)
+  identity_expected_start=$(read_startfile "$identity_startfile" 2>/dev/null || true)
+  [ -n "$identity_pid" ] && [ -n "$identity_expected_start" ] || return 1
+  pid_running "$identity_pid" || return 1
+  identity_actual_start=$(process_start_ticks "$identity_pid" 2>/dev/null || true)
+  [ "$identity_actual_start" = "$identity_expected_start" ] || return 1
+  process_has_exact_arg "$identity_pid" "$identity_expected_arg"
 }
 
 pid_running() {
-  pid="$1"
-  [ -n "$pid" ] || return 1
-  kill -0 "$pid" 2>/dev/null
+  pid_running_value="$1"
+  [ -n "$pid_running_value" ] || return 1
+  kill -0 "$pid_running_value" 2>/dev/null
 }
 
 is_ui_running() {
-  pid=$(read_pidfile "$UI_PIDFILE" 2>/dev/null || true)
-  pid_running "$pid"
+  process_identity_matches "$UI_PIDFILE" "$UI_STARTFILE" "$UI_DAEMON"
 }
 
 is_relay_running() {
-  pid=$(read_pidfile "$PIDFILE" 2>/dev/null || true)
-  pid_running "$pid"
+  process_identity_matches "$PIDFILE" "$RELAY_STARTFILE" "$RELAY_DAEMON"
 }
 
 is_ui_ready() {
+  is_ui_running || return 1
   pid=$(read_pidfile "$UI_PIDFILE" 2>/dev/null || true)
   [ -n "$pid" ] || return 1
+  boot_id=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null || true)
+  [ -n "$boot_id" ] || return 1
+  ui_start_ticks=$(read_startfile "$UI_STARTFILE" 2>/dev/null || true)
+  [ -n "$ui_start_ticks" ] || return 1
   [ -s "$UI_READY_PATH" ] || return 1
   grep -q '"schema":"v5.ui_ready.v1"' "$UI_READY_PATH" &&
     grep -q '"ready":true' "$UI_READY_PATH" &&
-    grep -q "\"ui_pid\":$pid" "$UI_READY_PATH"
+    grep -q "\"boot_id\":\"$boot_id\"" "$UI_READY_PATH" &&
+    grep -q '"ui_instance_id":"[0-9a-f]\{8\}-[0-9a-f]\{4\}-[0-9a-f]\{4\}-[0-9a-f]\{4\}-[0-9a-f]\{12\}"' "$UI_READY_PATH" &&
+    grep -q "\"ui_pid\":$pid" "$UI_READY_PATH" &&
+    grep -q "\"ui_start_ticks\":$ui_start_ticks" "$UI_READY_PATH" &&
+    grep -q '"publisher_barrier":{' "$UI_READY_PATH"
 }
 
 is_running() {
@@ -168,7 +230,9 @@ wait_boot_inputs_ready() {
   test -s "$PROJECT_ROOT/config/settings/drive_parameter_table.tsv"
   python3 -c 'import json,sys; p=json.load(open(sys.argv[1])); raise SystemExit(0 if p.get("loaded") and int(p.get("profile_count") or 0)>0 and int(p.get("map_file_count") or 0)>0 else 1)' \
     /run/8ax_v5_drive/drive_profile_resident_snapshot.json
-  "$BOOT_READY" --pre-ui-inputs --expected-ini "$expected_ini" --timeout 120 >>"$LOGFILE" 2>&1
+  "$BOOT_READY" --pre-ui-inputs --expected-ini "$expected_ini" \
+    --publisher-snapshot-path "$PUBLISHER_SNAPSHOT_PATH" \
+    --timeout 120 >>"$LOGFILE" 2>&1
 }
 
 stale_service_pids() {
@@ -210,11 +274,36 @@ stop_stale_processes() {
   }
 }
 
+publish_startup_failure() {
+  stage="$1"
+  error="$2"
+  owner_role=supervisor
+  owner_pid=$$
+  owner_start=$(process_start_ticks "$$") || return 1
+  if is_relay_running; then
+    owner_role=relay
+    owner_pid=$(read_pidfile "$PIDFILE")
+    owner_start=$(read_startfile "$RELAY_STARTFILE")
+  fi
+  "$BOOT_READY" --publish-failure \
+    --ready-path "$UI_READY_PATH" \
+    --startup-instance-id "$STARTUP_INSTANCE_ID" \
+    --failure-owner-role "$owner_role" \
+    --failure-owner-pid "$owner_pid" \
+    --failure-owner-start-ticks "$owner_start" \
+    --failure-stage "$stage" \
+    --failure-error "$error" >>"$LOGFILE" 2>&1
+}
+
+stop_ui_only() {
+  stop_pidfile "$UI_PIDFILE" "$UI_STARTFILE" "$UI_DAEMON" "v5_ui_shell" >/dev/null 2>&1 || true
+}
+
 
 
 start_service() {
   if is_running; then
-    echo "v5_ui_relay already running relay_pid=$(cat "$PIDFILE") ui_pid=$(cat "$UI_PIDFILE") port=$PORT project_root=$PROJECT_ROOT"
+    echo "v5_ui_relay already running relay_pid=$(read_pidfile "$PIDFILE") ui_pid=$(read_pidfile "$UI_PIDFILE") port=$PORT project_root=$PROJECT_ROOT"
     return 0
   fi
   test -x "$UI_DAEMON"
@@ -226,18 +315,28 @@ start_service() {
   command -v renice >/dev/null 2>&1
   mkdir -p /run/8ax
   mkdir -p /run/8ax_v5_product_ui
-  rm -f "$PIDFILE" "$UI_PIDFILE"
+  STARTUP_INSTANCE_ID=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || true)
+  [ -n "$STARTUP_INSTANCE_ID" ] || {
+    echo "v5_ui_relay cannot allocate startup instance identity" >&2
+    return 1
+  }
+  rm -f "$PIDFILE" "$UI_PIDFILE" "$RELAY_STARTFILE" "$UI_STARTFILE"
   stop_stale_processes
   : >"$LOGFILE"
   : >"$UI_BOOT_LOG"
   boot_stage ui_service_start
   rm -f "$UI_READY_PATH" \
+    "$PUBLISHER_SNAPSHOT_PATH" \
     /run/8ax_v5_product_ui/remote_framebuffer.bgra \
     /run/8ax_v5_product_ui/remote_dirty \
     /run/8ax_v5_product_ui/remote_input
   build_profile_snapshot
   boot_stage profile_snapshot_ready
-  wait_boot_inputs_ready
+  if ! wait_boot_inputs_ready; then
+    echo "v5_ui_relay publisher actual barrier failed" >&2
+    publish_startup_failure boot_inputs_ready "publisher actual barrier failed" || true
+    return 1
+  fi
   boot_stage boot_inputs_ready
   set_display_irq_affinity
 
@@ -248,6 +347,12 @@ start_service() {
       --allow-cidrs "$REMOTE_ALLOW_CIDRS" --width "$REMOTE_WIDTH" --height "$REMOTE_HEIGHT" \
       --ready-path "$UI_READY_PATH" --program-root "$PROJECT_ROOT/gcode/golden" >>"$LOGFILE" 2>&1 &
   echo "$!" >"$PIDFILE"
+  if ! record_process_identity "$(read_pidfile "$PIDFILE")" "$RELAY_STARTFILE"; then
+    echo "v5_remote_ui_relay process identity unavailable" >&2
+    publish_startup_failure remote_relay_spawn "relay process identity unavailable" || true
+    stop_stale_processes
+    return 1
+  fi
   i=0
   while [ "$i" -lt 50 ]; do
     if is_relay_running && [ -p /run/8ax_v5_product_ui/remote_dirty ] && \
@@ -260,7 +365,10 @@ start_service() {
   if ! is_relay_running || [ ! -p /run/8ax_v5_product_ui/remote_dirty ]; then
     echo "v5_remote_ui_relay failed to establish pre-ready dirty reader" >&2
     tail -n 40 "$LOGFILE" 2>/dev/null || true
-    stop_service >/dev/null 2>&1 || true
+    publish_startup_failure remote_relay_ready "relay pre-ready dirty reader unavailable" || true
+    if ! is_relay_running; then
+      stop_stale_processes
+    fi
     return 1
   fi
   boot_stage remote_relay_ready
@@ -268,12 +376,19 @@ start_service() {
   V5_PROJECT_ROOT="$PROJECT_ROOT" V5_UI_REMOTE_INPUT="$REMOTE_INPUT" \
     setsid taskset -c 1 nice -n "$UI_INPUT_NICE" "$UI_DAEMON" --serve >>"$UI_BOOT_LOG" 2>&1 &
   echo "$!" >"$UI_PIDFILE"
+  if ! record_process_identity "$(read_pidfile "$UI_PIDFILE")" "$UI_STARTFILE"; then
+    echo "v5_ui_shell process identity unavailable" >&2
+    publish_startup_failure ui_process_spawned "UI process identity unavailable" || true
+    stop_ui_only
+    return 1
+  fi
   boot_stage ui_process_spawned
   sleep 0.1
   if ! is_ui_running; then
     echo "v5_ui_shell failed to start" >&2
     tail -n 40 "$UI_BOOT_LOG" 2>/dev/null || true
-    stop_service >/dev/null 2>&1 || true
+    publish_startup_failure ui_process_spawned "UI process exited before cache preparation" || true
+    stop_ui_only
     return 1
   fi
 
@@ -281,65 +396,79 @@ start_service() {
       --ui-pid "$(cat "$UI_PIDFILE")" \
       --ui-log "$UI_BOOT_LOG" \
       --ready-path "$UI_READY_PATH" \
+      --publisher-snapshot-path "$PUBLISHER_SNAPSHOT_PATH" \
+      --expected-ini "$PROJECT_ROOT/linuxcnc/ini/v5_bus.ini" \
       --diagnostics-url "http://127.0.0.1:$PORT/remote/diagnostics" \
+      --startup-instance-id "$STARTUP_INSTANCE_ID" \
+      --failure-owner-role relay \
+      --failure-owner-pid "$(read_pidfile "$PIDFILE")" \
+      --failure-owner-start-ticks "$(read_startfile "$RELAY_STARTFILE")" \
+      --failure-stage ui_ready_handshake \
       --width "$REMOTE_WIDTH" \
       --height "$REMOTE_HEIGHT" \
       --require-cpu-list 1 >>"$LOGFILE" 2>&1; then
     echo "v5 UI cache/first-frame ready handshake failed" >&2
     tail -n 80 "$UI_BOOT_LOG" "$LOGFILE" 2>/dev/null || true
-    stop_service >/dev/null 2>&1 || true
+    stop_ui_only
+    rm -f "$PUBLISHER_SNAPSHOT_PATH"
     return 1
   fi
   if ! wget -q -O /tmp/v5_ui_ready_info.json "http://127.0.0.1:$PORT/remote/info"; then
     echo "v5 remote UI remained gated after ready metadata" >&2
-    stop_service >/dev/null 2>&1 || true
+    publish_startup_failure remote_info_ready "relay rejected committed UI ready identity" || true
+    stop_ui_only
+    rm -f "$PUBLISHER_SNAPSHOT_PATH"
     return 1
   fi
+  rm -f "$PUBLISHER_SNAPSHOT_PATH"
   boot_stage ui_ready
-  set_non_microkernel_affinity "$(cat "$UI_PIDFILE")"
-  set_non_microkernel_affinity "$(cat "$PIDFILE")"
+  set_non_microkernel_affinity "$(read_pidfile "$UI_PIDFILE")"
+  set_non_microkernel_affinity "$(read_pidfile "$PIDFILE")"
   set_display_irq_affinity
-  echo "v5_ui_relay started relay_pid=$(cat "$PIDFILE") ui_pid=$(cat "$UI_PIDFILE") port=$PORT bind=$REMOTE_BIND allow_cidrs=$REMOTE_ALLOW_CIDRS remote_input=$REMOTE_INPUT project_root=$PROJECT_ROOT ready=$UI_READY_PATH"
+  echo "v5_ui_relay started relay_pid=$(read_pidfile "$PIDFILE") ui_pid=$(read_pidfile "$UI_PIDFILE") port=$PORT bind=$REMOTE_BIND allow_cidrs=$REMOTE_ALLOW_CIDRS remote_input=$REMOTE_INPUT project_root=$PROJECT_ROOT ready=$UI_READY_PATH"
   return 0
 }
 
 stop_pidfile() {
   file="$1"
-  label="$2"
+  startfile="$2"
+  expected_arg="$3"
+  label="$4"
   pid=$(read_pidfile "$file" 2>/dev/null || true)
-  if ! pid_running "$pid"; then
-    rm -f "$file"
+  if ! process_identity_matches "$file" "$startfile" "$expected_arg"; then
+    rm -f "$file" "$startfile"
     return 0
   fi
   kill "$pid" 2>/dev/null || true
   i=0
-  while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 50 ]; do
+  while process_identity_matches "$file" "$startfile" "$expected_arg" && [ "$i" -lt 50 ]; do
     i=$((i + 1))
     sleep 0.1
   done
-  if kill -0 "$pid" 2>/dev/null; then
+  if process_identity_matches "$file" "$startfile" "$expected_arg"; then
     kill -KILL "$pid" 2>/dev/null || true
     sleep 0.2
   fi
-  if kill -0 "$pid" 2>/dev/null; then
+  if process_identity_matches "$file" "$startfile" "$expected_arg"; then
     echo "$label did not stop pid=$pid" >&2
     return 1
   fi
-  rm -f "$file"
+  rm -f "$file" "$startfile"
   echo "$label stopped pid=$pid"
 }
 
 stop_service() {
   if ! is_ui_running && ! is_relay_running; then
-    rm -f "$PIDFILE" "$UI_PIDFILE" "$UI_READY_PATH"
+    rm -f "$PIDFILE" "$UI_PIDFILE" "$RELAY_STARTFILE" "$UI_STARTFILE" \
+      "$UI_READY_PATH" "$PUBLISHER_SNAPSHOT_PATH"
     stop_stale_processes
     echo "v5_ui_relay not running"
     return 0
   fi
-  stop_pidfile "$PIDFILE" "v5_remote_ui_relay"
-  stop_pidfile "$UI_PIDFILE" "v5_ui_shell"
+  stop_pidfile "$PIDFILE" "$RELAY_STARTFILE" "$RELAY_DAEMON" "v5_remote_ui_relay"
+  stop_pidfile "$UI_PIDFILE" "$UI_STARTFILE" "$UI_DAEMON" "v5_ui_shell"
   stop_stale_processes
-  rm -f "$UI_READY_PATH"
+  rm -f "$UI_READY_PATH" "$PUBLISHER_SNAPSHOT_PATH"
 }
 
 case "${1:-}" in
@@ -348,7 +477,11 @@ case "${1:-}" in
   restart) stop_service; start_service ;;
   status)
     if is_running; then
-      echo "v5_ui_relay running relay_pid=$(cat "$PIDFILE") ui_pid=$(cat "$UI_PIDFILE") port=$PORT bind=$REMOTE_BIND allow_cidrs=$REMOTE_ALLOW_CIDRS remote_input=$REMOTE_INPUT project_root=$PROJECT_ROOT ready=$UI_READY_PATH"
+      echo "v5_ui_relay running relay_pid=$(read_pidfile "$PIDFILE") ui_pid=$(read_pidfile "$UI_PIDFILE") port=$PORT bind=$REMOTE_BIND allow_cidrs=$REMOTE_ALLOW_CIDRS remote_input=$REMOTE_INPUT project_root=$PROJECT_ROOT ready=$UI_READY_PATH"
+    elif [ -s "$UI_READY_PATH" ] && grep -q '"schema":"v5.ui_failure.v1"' "$UI_READY_PATH" && \
+         grep -q "\"boot_id\":\"$(cat /proc/sys/kernel/random/boot_id 2>/dev/null || true)\"" "$UI_READY_PATH"; then
+      echo "v5_ui_relay failed failure_state=$UI_READY_PATH"
+      exit 1
     else
       echo "v5_ui_relay not running"
       exit 1

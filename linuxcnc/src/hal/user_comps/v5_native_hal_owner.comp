@@ -139,6 +139,7 @@ typedef struct OwnerConfig {
 
 typedef struct HomeConfigRecord {
     uint32_t active;
+    uint32_t home_ready;
     uint32_t status_slot;
     uint32_t axis_code;
     uint32_t slave_position;
@@ -278,7 +279,7 @@ static int home_config_request_valid(const V5NativeHalOwnerRequest *request)
            home_axis_code_valid(request->axis_code) &&
            isfinite(request->home_zero_counts) &&
            isfinite(request->home_counts_per_unit) &&
-           request->home_counts_per_unit != 0.0;
+           request->home_counts_per_unit > 0.0;
 }
 
 static int home_config_staged_table_valid(void)
@@ -301,7 +302,7 @@ static int home_config_staged_table_valid(void)
             record->mapping_generation != g_home_stage_mapping_generation ||
             !home_axis_code_valid(record->axis_code) ||
             !isfinite(record->zero_counts) ||
-            !isfinite(record->counts_per_unit) || record->counts_per_unit == 0.0) {
+            !isfinite(record->counts_per_unit) || record->counts_per_unit <= 0.0) {
             return 0;
         }
         axis_bit = 1U << (record->axis_code - (unsigned int)'A');
@@ -338,7 +339,7 @@ static void home_config_publish_staged_table(void)
     home_table_map_gen = g_home_stage_mapping_generation;
     home_table_active_mask = g_home_stage_expected_active_mask;
     for (joint = 0U; joint < V5_NATIVE_HOME_JOINT_COUNT; ++joint) {
-        home_config_valid(joint) = 1;
+        home_config_valid(joint) = g_home_stage[joint].home_ready ? 1 : 0;
     }
     home_table_mapping_valid = 1;
     __sync_synchronize();
@@ -370,6 +371,8 @@ static int home_config_stage_request(const V5NativeHalOwnerRequest *request)
     }
     record = &g_home_stage[request->target];
     record->active = 1U;
+    record->home_ready =
+        (request->flags & V5_NATIVE_HOME_CONFIG_HOME_READY) ? 1U : 0U;
     record->status_slot = request->home_status_slot;
     record->axis_code = request->axis_code;
     record->slave_position = request->home_slave_position;

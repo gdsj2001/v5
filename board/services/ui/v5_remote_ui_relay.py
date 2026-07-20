@@ -127,13 +127,21 @@ class RemoteRelayHandler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path.startswith("/remote/") and not self.check_peer():
             return
-        if parsed.path.startswith("/remote/") and remote_path_requires_ui(parsed.path) and not self.state.ui_ready():
-            self.write_json(503, {
-                "ok": False,
-                "error": "ui_not_ready",
-                "ready_path": str(self.state.ready_path),
-            })
-            return
+        self._request_ready_metadata = None
+        if parsed.path.startswith("/remote/") and remote_path_requires_ui(parsed.path):
+            startup_status, lifecycle_metadata = self.state.lifecycle_snapshot()
+            if startup_status != "ready":
+                body = {
+                    "ok": False,
+                    "error": "ui_startup_failed" if startup_status == "failed" else "ui_not_ready",
+                    "startup_status": startup_status,
+                    "ready_path": str(self.state.ready_path),
+                }
+                if startup_status == "failed":
+                    body["failure_metadata"] = lifecycle_metadata
+                self.write_json(503, body)
+                return
+            self._request_ready_metadata = lifecycle_metadata
         if parsed.path == "/remote/info":
             self.handle_info()
         elif parsed.path == "/remote/frame/full":
@@ -143,12 +151,14 @@ class RemoteRelayHandler(BaseHTTPRequestHandler):
         elif parsed.path == "/remote/input" and self.is_ws_request():
             self.handle_input()
         elif parsed.path == "/remote/diagnostics":
-            ready_metadata = self.state.ready_metadata()
+            startup_status, lifecycle_metadata = self.state.lifecycle_snapshot()
             self.write_json(200, {
                 "schema": "re.v5.remote_diagnostics.v1",
                 "protocol_version": PROTOCOL_VERSION,
-                "ui_ready": ready_metadata is not None,
-                "ready_metadata": ready_metadata,
+                "startup_status": startup_status,
+                "ui_ready": startup_status == "ready",
+                "ready_metadata": lifecycle_metadata if startup_status == "ready" else None,
+                "failure_metadata": lifecycle_metadata if startup_status == "failed" else None,
                 "framebuffer": str(self.state.framebuffer_path),
                 "dirty_fifo": str(self.state.dirty_fifo_path),
                 "input_fifo": str(self.state.input_fifo_path),
@@ -189,7 +199,8 @@ class RemoteRelayHandler(BaseHTTPRequestHandler):
         self.write_json(200, {
             "protocol_version": PROTOCOL_VERSION,
             "ui_ready": True,
-            "ready_metadata": self.state.ready_metadata(),
+            "startup_status": "ready",
+            "ready_metadata": self._request_ready_metadata,
             "frame_id": self.state.frame_id,
             "width": self.state.width,
             "height": self.state.height,
@@ -270,6 +281,9 @@ class RemoteRelayHandler(BaseHTTPRequestHandler):
         })
 
     def handle_full_frame(self) -> None:
+        if not self.request_ready_identity_is_current():
+            self.write_json(503, {"ok": False, "error": "ui_identity_changed"})
+            return
         frame = self.state.full_frame()
         if frame is None:
             self.write_json(503, {"ok": False, "error": "remote_framebuffer_unavailable"})
@@ -281,6 +295,9 @@ class RemoteRelayHandler(BaseHTTPRequestHandler):
         self.write_frame_envelope(meta_bytes, payload)
 
     def handle_stream(self) -> None:
+        if not self.request_ready_identity_is_current():
+            self.write_json(503, {"ok": False, "error": "ui_identity_changed"})
+            return
         if not self.accept_websocket():
             return
         self.state.mark_metric("stream_sessions")
@@ -316,6 +333,9 @@ class RemoteRelayHandler(BaseHTTPRequestHandler):
             )
             stream_receiver.start()
             while not stream_stop.is_set():
+                if not self.request_ready_identity_is_current():
+                    self.state.mark_metric("stream_runtime_resets")
+                    return
                 delivery = self.server.payload_producer.wait_after(last_sent,
                     STREAM_IDLE_PING_SECONDS,
                     cancel_event=stream_stop,
@@ -392,6 +412,9 @@ class RemoteRelayHandler(BaseHTTPRequestHandler):
             self.state.decrement_metric_floor("stream_active_sessions")
 
     def handle_input(self) -> None:
+        if not self.request_ready_identity_is_current():
+            self.write_json(503, {"ok": False, "error": "ui_identity_changed"})
+            return
         if not self.accept_websocket():
             return
         self.state.mark_metric("input_sessions")
@@ -401,6 +424,8 @@ class RemoteRelayHandler(BaseHTTPRequestHandler):
         sock = self.connection
         try:
             while True:
+                if not self.request_ready_identity_is_current():
+                    return
                 opcode, payload = recv_ws_frame(sock)
                 frame_action = input_ws_frame_action(opcode)
                 if frame_action == "close":
@@ -456,6 +481,16 @@ class RemoteRelayHandler(BaseHTTPRequestHandler):
                 os.close(fd)
         except OSError:
             return False
+
+    def request_ready_identity_is_current(self) -> bool:
+        expected = getattr(self, "_request_ready_metadata", None)
+        if not isinstance(expected, dict):
+            return False
+        current = self.state.ready_metadata()
+        if current is None:
+            return False
+        keys = ("boot_id", "ui_instance_id", "ui_pid", "ui_start_ticks")
+        return all(current.get(key) == expected.get(key) for key in keys)
 
     def send_ack(self, sock: socket.socket, msg_type: str, session_id: str, seq: int, phase: str, accepted: bool, reason: str | None) -> None:
         if msg_type == "pointer_ack":

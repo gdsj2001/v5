@@ -48,7 +48,7 @@ check_remote_test "v5_position_status_publisher installed executable" 'test -x /
 check_remote_test "position polling cadence installed module" 'test -r /usr/libexec/8ax/v5_polling_cadence.py'
 check_remote_test "remote dirty geometry installed module" 'test -r /usr/libexec/8ax/v5_remote_ui_dirty_geometry.py'
 check_remote_test "native operator error mapper installed" 'test -r /usr/libexec/8ax/v5_native_operator_error_map.py'
-check_remote_test "native operator error complete map installed" 'test -r /opt/8ax/v5/config/ui/v5_native_operator_error_map.tsv && test "$(grep -vc "^#" /opt/8ax/v5/config/ui/v5_native_operator_error_map.tsv)" -eq 556'
+check_remote_test "native operator error complete map installed" 'test -r /opt/8ax/v5/config/ui/v5_native_operator_error_map.tsv && test "$(grep -vc "^#" /opt/8ax/v5/config/ui/v5_native_operator_error_map.tsv)" -eq 557'
 check_remote_test "v5_touch_diagnostics installed executable" 'test -x /usr/libexec/8ax/v5_touch_diagnostics'
 check_remote_test "v5_linuxcncrsh_probe installed executable" 'test -x /usr/libexec/8ax/v5_linuxcncrsh_probe'
 check_remote_test "v5_command_gate_server installed executable" 'test -x /usr/libexec/8ax/v5_command_gate_server'

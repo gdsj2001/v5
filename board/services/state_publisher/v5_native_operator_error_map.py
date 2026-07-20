@@ -14,8 +14,8 @@ from dataclasses import dataclass
 from typing import Iterable, List, Pattern, Tuple
 
 
-EXPECTED_SOURCE_COUNT = 555
-EXPECTED_INVENTORY_SHA256 = "10ea2746943af0d98cf709cfe1f550006440169637322e6f639cfc32be517962"
+EXPECTED_SOURCE_COUNT = 556
+EXPECTED_INVENTORY_SHA256 = "0ba0c29826e96f54f574a8db9c6319d29f79c08082cacf170ea8bf4163e7b175"
 OPERATOR_ERROR_MAGIC = 0x564F4552
 OPERATOR_ERROR_VERSION = 2
 OPERATOR_ERROR_PREFIX_STRUCT = struct.Struct('<IIIIIIQQ64s24s96s384s256s')
@@ -45,6 +45,7 @@ GROUP_PRESENTATION = {
     "SPINDLE": ("主轴动作失败", "停止程序，检查主轴使能、定向、速度和反馈后重新执行"),
     "TOOL": ("刀具或刀补错误", "检查刀号、刀具参数、刀补模式和当前平面，修正后重新运行"),
     "CONFIG": ("系统配置错误", "保持机器停止，由维护人员检查对应配置并完成重启和回读确认"),
+    "CONTROL_REALTIME": ("控制周期异常", "保持急停并重新启动；若再次出现，联系维护人员检查实时负载和总线状态"),
     "INTERNAL": ("控制系统内部错误", "停止当前运行并保留程序名和行号，联系维护人员处理"),
     "USER_PROGRAM": ("用户程序报告错误", "按用户程序给出的原因修改程序或现场条件后重新运行"),
     "PASSTHROUGH": ("控制系统报告错误", "停止当前动作并重新执行一次；若再次出现，联系维护人员"),

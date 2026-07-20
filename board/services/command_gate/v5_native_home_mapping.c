@@ -172,6 +172,13 @@ int v5_native_home_runtime_owner_load_bus(
         snprintf(code, code_cap, "%s", "BUS_HOME_SETTINGS_RUNTIME_REQUIRED");
         return 0;
     }
+    for (i = 0U; i < V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT; ++i) {
+        V5NativeMotionAxisParameters *axis = &parameters->axes[i];
+        axis->bus_zero_evidence_known = 0;
+        axis->bus_zero_counts = 0.0;
+        axis->bus_counts_per_unit = 0.0;
+        axis->bus_home_reference = 0.0;
+    }
     json = v5_settings_apply_read_text_file_limited(settings_runtime_json_path);
     if (!json) {
         snprintf(code, code_cap, "%s", "BUS_HOME_SETTINGS_RUNTIME_UNAVAILABLE");
@@ -185,7 +192,6 @@ int v5_native_home_runtime_owner_load_bus(
         if (!axis->active) {
             continue;
         }
-        axis->bus_zero_evidence_known = 0;
         if (!v5_native_home_zero_evidence_for_slave(
                 json, parameters, axis->slave_position, &evidence)) {
             free(json);

@@ -10,6 +10,7 @@ import v5_drive_axis_model as axis_model
 import v5_drive_bus_contract as contract
 import v5_drive_bus_context as context
 import v5_drive_runtime_store as runtime_store
+import v5_settings_action_runtime as action_runtime
 
 
 def write_text(path: Path, text: str) -> None:
@@ -159,20 +160,78 @@ def main() -> int:
         if runtime_store.saved_zero_counts(final_y) != 1000.0:
             print("same-axis update overwrote the other axis", final_runtime)
             return 15
+        old_snapshot = {
+            "generated_at": "old-generation",
+            "profile_count": 1,
+            "map_file_count": 1,
+            "profiles": [{"profile_id": "old-private", "map_source": "private"}],
+            "maps": [],
+        }
+        new_snapshot = {
+            "generated_at": "new-generation",
+            "profile_count": 1,
+            "map_file_count": 1,
+            "profiles": [{"profile_id": "new-public", "map_source": "public"}],
+            "maps": [{"scope": "public", "ok": True, "profile_count": 1}],
+        }
+        context.resident_snapshot_cache = old_snapshot
+        action_runtime.v5_drive_profile_resident_snapshot.DEFAULT_OUT = contract.RESIDENT_SNAPSHOT
+        write_text(contract.RESIDENT_SNAPSHOT, json.dumps(new_snapshot))
+        parent_result_path = root / "run/server_download_result.json"
+        reconciled = action_runtime.reconcile_worker_result_in_parent(
+            "drive_profile_server_download",
+            {"result_path": str(parent_result_path)},
+            {
+                "ok": True,
+                "code": "SERVER_DOWNLOAD_OK",
+                "resident_snapshot_refresh": {
+                    "ok": True,
+                    "generated_at": "new-generation",
+                    "profile_count": 1,
+                },
+            },
+        )
+        committed = action.read_resident_snapshot()
+        if (not reconciled.get("ok") or
+                not reconciled.get("parent_resident_snapshot_commit", {}).get("parent_cache_committed") or
+                committed.get("profiles", [{}])[0].get("profile_id") != "new-public"):
+            print("server download worker snapshot was not committed into parent cache", reconciled, committed)
+            return 16
+        persisted_parent = json.loads(parent_result_path.read_text(encoding="utf-8"))
+        if not persisted_parent.get("parent_resident_snapshot_commit", {}).get("parent_cache_committed"):
+            print("parent cache commit was not persisted in the action result", persisted_parent)
+            return 17
+        mismatched = action_runtime.reconcile_worker_result_in_parent(
+            "drive_profile_server_download",
+            {"result_path": str(parent_result_path)},
+            {
+                "ok": True,
+                "code": "SERVER_DOWNLOAD_OK",
+                "resident_snapshot_refresh": {
+                    "ok": True,
+                    "generated_at": "unexpected-generation",
+                    "profile_count": 1,
+                },
+            },
+        )
+        if (mismatched.get("ok") or
+                mismatched.get("code") != "SERVER_DOWNLOAD_PARENT_RESIDENT_COMMIT_FAILED"):
+            print("mismatched worker snapshot identity did not fail closed", mismatched)
+            return 18
         contract.SETTINGS_RUNTIME_JSON.unlink()
         failed = action.preload_resident_state()
         if failed.get("ok") or context.resident_preload_active:
             print("failed preload left resident latch active", failed)
-            return 16
+            return 19
         try:
             action.load_settings_runtime()
         except contract.DriveActionError as exc:
             if exc.code != "SETTINGS_RUNTIME_RESIDENT_NOT_PRELOADED":
                 print("failed preload returned unexpected guarded-owner code", exc.code)
-                return 17
+                return 20
         else:
             print("failed preload did not keep guarded owner fail-closed")
-            return 18
+            return 21
     print("v5 drive bus action cache smoke: preload lifecycle and cache invalidation ok")
     return 0
 

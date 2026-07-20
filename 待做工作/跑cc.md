@@ -26,25 +26,20 @@
 1. 部署完成后用 MCP 抓屏/鼠标进入设置页，只点击一次 `设置驱动`；等待同一 `run_id` 的 `DRIVE_SET_OK + write_verified_readback`，按本次 fresh scan/轴—从站绑定核对全部目标的 mode/egear/statusword/error_code、全过程无报警且按钮松手退出黄色。
 2. 点击右上角 `保存并重启`，等待 canonical clean restart；回读全部当前目标轴—从站绑定、mode/egear/statusword/error_code、LinuxCNC/HAL/EtherCAT 比例链和 PDO/axis binding。缺项时停止，设置驱动不在后续每轮重复执行。
 3. 确认 MCP 抓屏/鼠标能力可用且当前页面正确，板端为 fresh `estop_active=true / machine_enabled=false`；启动编码器反馈采样并记录 active model、`mcs/cmd_mcs/velocity/seq/valid_mask` 和当前模型旋转轴的 raw/count-domain 基线。
-4. 连续执行至少三轮；每轮开始前确认仍是同一部署 identity，并严格执行以下步骤，每次只做一个动作、动作后先看 fresh frame/readback：
-   1. 点击 `取消急停`，只在 fresh native `estop_active=false && machine_enabled=true` 后继续。
-   2. 选择 `机械全轴` 并点击 `回零`；确认新的 native Home transaction、真实编码器位移、RTCP force-off actual、各轴到位和 fresh `all_homed`。Home 未成功不得打开程序。
-   3. 点击 `打开程序`；按 fresh native active model 在程序页第一次点击 `cc-ac.ngc` 或 `cc-bc.ngc` 完成选中，第二次点击同一行完成打开；回主页面核对程序名、runtime identity 和原始 hash。
-   4. 点击 `启动`，持续采样编码器反馈；1 秒后点击 `急停`，在 owner 时限内确认 native 急停 actual、运动停止和按钮切换为 `取消急停`。
-   5. 点击 `取消急停`，确认 latch 清除和 machine enable actual；再次选择 `机械全轴` 并点击 `回零`，确认新的 transaction 和当前模型旋转轴最近等效零到位。
-   6. 点击 `急停` 收尾，确认 `estop_active=true && machine_enabled=false`，保存本轮最终 live frame 和 native/encoder evidence。
-5. 任一步失败只修第一条真实失败层并从本轮安全边界重测；不得重复点击、direct UDS/linuxcncrsh、固定延时兜底或复用旧 result。三轮通过后才进入 `功能/自动闭环测试方式.md` 的完整设置页 A-G 与 model-matched Golden Motion。
+4. 先完成一次 `取消急停 -> 机械全轴回零 -> 打开程序 -> 选择并打开 active model 对应程序`：Home 必须有新的 native transaction、真实编码器位移、RTCP force-off actual、各轴到位和 fresh `all_homed`；程序页第一次点击模型匹配行完成选中，第二次点击同一行完成打开，并在主页核对程序名、runtime identity 和原始 hash。
+5. 在同一 program identity 和有效 `all_homed` 上连续执行至少三轮 `启动 -> 1 秒后急停`。每轮 Start 都持续采样编码器反馈并取得新运动；每次急停都在 owner 时限内确认 native 安全 actual、运动停止、clean generation、队列清空，同时保留 program identity、刀路和 homed。轮间只点击一次 `取消急停`，确认 fresh latch 清除和 machine enable actual 后继续；不重新 Home、不重新打开程序。最后一轮急停后保持 `estop_active=true && machine_enabled=false`。
+6. `功能/自动闭环测试方式.md` 的完整设置页 A-G 必须在任何三轮 Golden Motion 之前闭合；完成 model switch、人工从站下拉覆盖、保存并 clean restart 及 fresh readback 后，才按本节执行 model-matched 三轮。任一步失败只修第一条真实失败层并从安全边界重测；不得重复点击、direct UDS/linuxcncrsh、固定延时兜底或复用旧 result。
 
 ## 通过标准
 
 - 所有 AI UI 输入均有 MCP 板端抓屏取得的点击前/后 fresh frame。
 - 模型匹配的 `cc-ac.ngc` / `cc-bc.ngc` 是通过真实程序页面先选中、再第二次点击同一行打开，不是直接写入路径或 direct command。
 - clean restart 后保持 ESTOP / Machine Off；每次 UI `取消急停` 都由 fresh native latch 与 machine-enable actual 证明恢复，按钮显示与 actual 一致。
-- 设置驱动和 clean restart 后的全部轴—从站/驱动/比例链 readback 合格；连续三轮中的第一次 Home、程序启动后的 1 秒运动、急停停止、取消急停后的第二次 Home 均有独立 fresh transaction 和编码器证据。
+- 设置驱动和 clean restart 后的全部轴—从站/驱动/比例链 readback 合格；一次 Home/Program Open 取得 fresh transaction/identity，连续三轮中的每次 1 秒运动和急停停止均有独立编码器/native 证据，且轮间保留 homed、program identity 与刀路。
 - 程序中的旋转轴目标必须由编码器反馈证明走最近等效角；若采样显示当前模型旋转轴向 raw 机器 0 长距离回转，则测试失败。
-- 两次 `回零` 必须由编码器反馈证明按 360 度最短角差回到等效零；`359.999`、`-0.001` 这类等效零只能在编码器/native 实际到位且最短角差在容差内时判定通过。
+- 前置 `回零` 必须由编码器反馈证明按 360 度最短角差回到等效零；`359.999`、`-0.001` 这类等效零只能在编码器/native 实际到位且最短角差在容差内时判定通过。
 - 急停后底层安全状态确认生效；取消急停后底层 latch 清除并恢复 machine enable actual。
-- 最终回零完成后，X/Y/Z/A/C 编码器反馈处于回零完成状态；A/C 按 360 度等效零判定。
+- 最终急停后保持同一 program identity、刀路和 valid `all_homed`；当前模型旋转轴在三轮运动中的连续相位和急停停止均由编码器反馈证明。
 
 ## 阻塞条件
 

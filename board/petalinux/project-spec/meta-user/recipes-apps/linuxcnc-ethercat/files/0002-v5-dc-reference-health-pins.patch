@@ -1,38 +1,23 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: V5 Project <v5@example.invalid>
 Date: Wed, 15 Jul 2026 20:21:00 +0800
-Subject: [PATCH] v5: export resident Domain WKC and DC health
+Subject: [PATCH] v5: export fresh DC reference clock health
 
 The existing dc-phased pin describes the local application phase controller;
 with a positive refClockSyncCycles it can be true even when the fresh DC
-reference-clock ioctl is failing. The lifecycle also shells out to the
-EtherCAT CLI for every WKC readiness poll even though lcec already processes
-the Domain state in the resident 2 ms cycle.
-
-Export both native results so lifecycle and operator owners can distinguish
-phase/freshness and prove a continuously complete Domain without repeated
-diagnostic processes or transient CLI samples.
+reference-clock ioctl is failing. Export the result of the cyclic native
+read itself so lifecycle and operator owners can distinguish phase from
+freshness without parsing realtime stderr.
 ---
- src/lcec.h      |  9 +++++++++
- src/lcec_main.c | 46 +++++++++++++++++++++++++++++++++++++++++++++-
- 2 files changed, 54 insertions(+), 1 deletion(-)
+ src/lcec.h      |  4 ++++
+ src/lcec_main.c | 23 ++++++++++++++++++++++-
+ 2 files changed, 26 insertions(+), 1 deletion(-)
 
 diff --git a/src/lcec.h b/src/lcec.h
 index 89a19774b..9042ad449 100644
 --- a/src/lcec.h
 +++ b/src/lcec.h
-@@ -180,6 +180,10 @@ typedef struct lcec_master_data {
-   hal_bit_t *state_op;
-   hal_bit_t *link_up;
-   hal_bit_t *all_op;
-+  hal_u32_t *domain_working_counter; // Current ecrt Domain working counter
-+  hal_bit_t *domain_wc_complete;     // Current ecrt Domain WC state is COMPLETE
-+  hal_u32_t *domain_wc_ok_seq;       // Increments for every complete resident cycle
-+  hal_u32_t *domain_wc_error_count;  // Total incomplete resident cycles
- #ifdef RTAPI_TASK_PLL_SUPPORT
-   hal_s32_t *pll_err;
-   hal_s32_t *pll_out;
-@@ -189,6 +193,10 @@ typedef struct lcec_master_data {
+@@ -189,6 +189,10 @@ typedef struct lcec_master_data {
    hal_u32_t dc_phase_max_err;
    hal_s32_t *app_phase;            // Our execution phase in local cycle (ns, real-time)
    hal_bit_t *dc_phased;           // PLL lock status indicator
@@ -43,29 +28,10 @@ index 89a19774b..9042ad449 100644
    hal_s32_t *phase_jitter_out;     // Output: measured app_phase jitter amplitude (ns)
    hal_s32_t *drift_mode;            // Input: 0=simple, 1=manual
    hal_s32_t *pll_drift;            // Input: debug offset added to PLL correction (ns)
-@@ -235,6 +243,7 @@ typedef struct lcec_master {
-   int sync_to_ref_clock;
-   long long state_update_timer;
-   ec_master_state_t ms;
-+  ec_domain_state_t ds;
-   int activated;                    // Flag: master has been activated (0=not yet, 1=activated)
-   int initf_activated;              // Flag: activation happened via initf path (clean RT-context); when set, BANG-BANG PLL trim is skipped because app_phase was born stable
-   int forgot_warned;                // One-shot guard for the "user forgot initf lcec.activate" warning in lcec_write_master
 diff --git a/src/lcec_main.c b/src/lcec_main.c
 index 44fbc9c73..92729e7a7 100644
 --- a/src/lcec_main.c
 +++ b/src/lcec_main.c
-@@ -56,6 +56,10 @@ static const lcec_pindesc_t master_global_pins[] = {
-     {HAL_BIT, HAL_OUT, offsetof(lcec_master_data_t, state_op), "%s.state-op"},
-     {HAL_BIT, HAL_OUT, offsetof(lcec_master_data_t, link_up), "%s.link-up"},
-     {HAL_BIT, HAL_OUT, offsetof(lcec_master_data_t, all_op), "%s.all-op"},
-+    {HAL_U32, HAL_OUT, offsetof(lcec_master_data_t, domain_working_counter), "%s.domain-working-counter"},
-+    {HAL_BIT, HAL_OUT, offsetof(lcec_master_data_t, domain_wc_complete), "%s.domain-wc-complete"},
-+    {HAL_U32, HAL_OUT, offsetof(lcec_master_data_t, domain_wc_ok_seq), "%s.domain-wc-ok-seq"},
-+    {HAL_U32, HAL_OUT, offsetof(lcec_master_data_t, domain_wc_error_count), "%s.domain-wc-error-count"},
-     {HAL_TYPE_UNSPECIFIED, HAL_DIR_UNSPECIFIED, -1, NULL},
- };
- 
 @@ -65,6 +65,10 @@ static const lcec_pindesc_t master_pins[] = {
      {HAL_U32, HAL_OUT, offsetof(lcec_master_data_t, pll_reset_cnt), "%s.pll-reset-count"},
      {HAL_S32, HAL_OUT, offsetof(lcec_master_data_t, app_phase), "%s.app-phase"},
@@ -77,14 +43,8 @@ index 44fbc9c73..92729e7a7 100644
      {HAL_S32, HAL_OUT, offsetof(lcec_master_data_t, phase_jitter_out), "%s.phase-jitter"},
      {HAL_S32, HAL_IN, offsetof(lcec_master_data_t, drift_mode), "%s.drift-mode"},
      {HAL_S32, HAL_IN, offsetof(lcec_master_data_t, pll_drift), "%s.pll-drift"},
-@@ -1123,6 +1131,16 @@ static int lcec_activate_master(lcec_master_t *master) {
+@@ -1123,6 +1127,10 @@ static int lcec_activate_master(lcec_master_t *master) {
    
-+  *(master->hal_data->domain_working_counter) = 0;
-+  *(master->hal_data->domain_wc_complete) = 0;
-+  *(master->hal_data->domain_wc_ok_seq) = 0;
-+  *(master->hal_data->domain_wc_error_count) = 0;
-+  memset(&master->ds, 0, sizeof(master->ds));
-+
  #ifdef RTAPI_TASK_PLL_SUPPORT
    master->dc_time_valid_last = 0;
 +  *(master->hal_data->dc_time_valid) = 0;
@@ -94,27 +54,7 @@ index 44fbc9c73..92729e7a7 100644
    master->dc_ref = 0;
    if (!master->sync_to_ref_clock) {
      long long rtapi_now = rtapi_get_time();
-@@ -1200,6 +1218,19 @@ void lcec_read_master(void *arg, long period) {
-   rtapi_mutex_get(&master->mutex);
-   ecrt_master_receive(master->master);
-   ecrt_domain_process(master->domain);
-+  ecrt_domain_state(master->domain, &master->ds);
-+  *(master->hal_data->domain_working_counter) = master->ds.working_counter;
-+  if (master->ds.wc_state == EC_WC_COMPLETE) {
-+    *(master->hal_data->domain_wc_complete) = 1;
-+    if (*(master->hal_data->domain_wc_ok_seq) != UINT32_MAX) {
-+      (*(master->hal_data->domain_wc_ok_seq))++;
-+    }
-+  } else {
-+    *(master->hal_data->domain_wc_complete) = 0;
-+    if (*(master->hal_data->domain_wc_error_count) != UINT32_MAX) {
-+      (*(master->hal_data->domain_wc_error_count))++;
-+    }
-+  }
-   if (check_states) {
-     ecrt_master_state(master->master, &master->ms);
-   }
-@@ -1303,6 +1334,20 @@ void lcec_write_master(void *arg, long period) {
+@@ -1303,6 +1311,20 @@ void lcec_write_master(void *arg, long period) {
  #ifdef RTAPI_TASK_PLL_SUPPORT
    uint32_t dc_time = 0;
    int dc_time_valid = (ecrt_master_reference_clock_time(master->master, &dc_time) == 0);
@@ -135,7 +75,7 @@ index 44fbc9c73..92729e7a7 100644
  #endif
  
    // sync ref clock to master
-@@ -1324,7 +1369,6 @@ void lcec_write_master(void *arg, long period) {
+@@ -1324,7 +1346,6 @@ void lcec_write_master(void *arg, long period) {
  #ifdef RTAPI_TASK_PLL_SUPPORT
    // BANG-BANG controller for master thread PLL sync
    // this part is done after ecrt_master_send() to reduce jitter

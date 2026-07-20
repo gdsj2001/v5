@@ -157,6 +157,24 @@ def check_bc_mapping_projects_b_and_c() -> None:
     assert mcs[3] == 0.0 and mcs[4] == 0.0
 
 
+def check_mapping_projection_is_independent_of_home_zero_ready() -> None:
+    values = projection_values()
+    for joint in range(5):
+        values[
+            f'v5-native-hal-owner.home-config-valid-{joint:02d}'
+        ] = False
+    hal = FakeHal(values)
+    projection = NativeRotaryDisplayProjection(hal)
+    mcs, cmd = projection.project(
+        [0.0, 0.0, 0.0, 0.0, -18000.0],
+        [0.0, 0.0, 0.0, 0.0, -18000.0])
+    assert mcs[3:] == [0.0, 0.0]
+    assert cmd[3:] == [0.0, 0.0]
+    for joint in range(5):
+        assert hal.read_count(
+            f'v5-native-hal-owner.home-config-valid-{joint:02d}') == 0
+
+
 def check_display_metadata_comes_from_active_model_scale() -> None:
     values = projection_values()
     values['v5-native-hal-owner.display-unit-per-count-01'] = 0.0005
@@ -353,6 +371,7 @@ def main() -> int:
     check_fractional_command_phase_is_not_truncated()
     check_actual_projects_without_command_input()
     check_bc_mapping_projects_b_and_c()
+    check_mapping_projection_is_independent_of_home_zero_ready()
     check_display_metadata_comes_from_active_model_scale()
     check_invalid_native_mapping_fails_closed()
     check_unconfigured_zero_table_keeps_native_display_available()

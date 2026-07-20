@@ -196,6 +196,7 @@ int v5_native_hal_owner_stage_home_joint(
     request.request_id = next_request_id();
     request.target = wire_target;
     request.flags = (record->active ? V5_NATIVE_HOME_CONFIG_ACTIVE : 0U) |
+                    (record->home_ready ? V5_NATIVE_HOME_CONFIG_HOME_READY : 0U) |
                     (commit ? V5_NATIVE_HOME_CONFIG_COMMIT : 0U);
     request.home_status_slot = record->status_slot;
     request.axis_code = record->axis_code;

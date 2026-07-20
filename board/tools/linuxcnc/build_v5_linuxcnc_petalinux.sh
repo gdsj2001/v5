@@ -270,7 +270,11 @@ mkdir -p "$downloads_root"
 chown "$build_user":"$(id -gn "$build_user")" "$downloads_root"
 run_petalinux_overlay clean >/dev/null
 petalinux_overlay_active=1
-run_petalinux_overlay prepare
+if [ "$build_mode" = focused ]; then
+    run_petalinux_overlay prepare-target-only
+else
+    run_petalinux_overlay prepare
+fi
 petalinux_root=$(CDPATH= cd -- "$petalinux_root" && pwd)
 if [ ! -f "$petalinux_root/project-spec/configs/config" ]; then
     echo "prepared PetaLinux overlay is incomplete: $petalinux_root" >&2

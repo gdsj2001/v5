@@ -101,29 +101,55 @@ static int read_fb_mode(unsigned int *width, unsigned int *height)
     return 1;
 }
 
-static void init_framebuffer(unsigned int *width, unsigned int *height)
+static int init_framebuffer(unsigned int width, unsigned int height)
 {
     const char *path = getenv("V5_UI_FRAMEBUFFER");
+    size_t minimum_stride;
     if (!path || !path[0]) {
         path = "/dev/fb0";
     }
     if (strcmp(path, "off") == 0) {
-        return;
+        fprintf(stderr, "v5 physical framebuffer disabled; refusing UI ready\n");
+        return 0;
     }
     if (!read_fb_mode(&g_fb_width, &g_fb_height) ||
         !read_u32_file(V5_FB_STRIDE_PATH, &g_fb_stride) ||
         !read_u32_file(V5_FB_BPP_PATH, &g_fb_bpp)) {
-        return;
+        fprintf(stderr, "v5 physical framebuffer metadata unavailable\n");
+        return 0;
     }
-    if (g_fb_width == 0U || g_fb_height == 0U || g_fb_width > V5_UI_MAX_WIDTH || g_fb_height > V5_UI_MAX_HEIGHT) {
-        return;
+    if (g_fb_width != width || g_fb_height != height ||
+        g_fb_width == 0U || g_fb_height == 0U ||
+        g_fb_width > V5_UI_MAX_WIDTH || g_fb_height > V5_UI_MAX_HEIGHT) {
+        fprintf(stderr,
+                "v5 physical framebuffer mode mismatch actual=%ux%u expected=%ux%u\n",
+                g_fb_width,
+                g_fb_height,
+                width,
+                height);
+        return 0;
     }
     if (g_fb_bpp != 16U && g_fb_bpp != 24U && g_fb_bpp != 32U) {
-        return;
+        fprintf(stderr, "v5 physical framebuffer bpp unsupported actual=%u\n", g_fb_bpp);
+        return 0;
+    }
+    minimum_stride = (size_t)g_fb_width * (size_t)(g_fb_bpp / 8U);
+    if ((size_t)g_fb_stride < minimum_stride ||
+        (size_t)g_fb_height > SIZE_MAX / (size_t)g_fb_stride) {
+        fprintf(stderr,
+                "v5 physical framebuffer stride invalid stride=%u minimum=%zu height=%u\n",
+                g_fb_stride,
+                minimum_stride,
+                g_fb_height);
+        return 0;
     }
     g_fb_fd = open(path, O_RDWR | O_CLOEXEC);
     if (g_fb_fd < 0) {
-        return;
+        fprintf(stderr,
+                "v5 physical framebuffer open failed path=%s errno=%d\n",
+                path,
+                errno);
+        return 0;
     }
     g_fb_size = (size_t)g_fb_stride * g_fb_height;
     g_fb = (unsigned char *)mmap(0, g_fb_size, PROT_READ | PROT_WRITE, MAP_SHARED, g_fb_fd, 0);
@@ -131,10 +157,14 @@ static void init_framebuffer(unsigned int *width, unsigned int *height)
         close(g_fb_fd);
         g_fb_fd = -1;
         g_fb = 0;
-        return;
+        fprintf(stderr,
+                "v5 physical framebuffer mmap failed path=%s size=%zu errno=%d\n",
+                path,
+                g_fb_size,
+                errno);
+        return 0;
     }
-    *width = g_fb_width;
-    *height = g_fb_height;
+    return 1;
 }
 
 static int ensure_remote_run_dir(void)
@@ -498,8 +528,10 @@ int v5_lvgl_remote_display_setup(unsigned int width, unsigned int height)
     if (g_display_ready) {
         return 1;
     }
-    init_framebuffer(&width, &height);
     if (width == 0U || height == 0U || width > V5_UI_MAX_WIDTH || height > V5_UI_MAX_HEIGHT) {
+        return 0;
+    }
+    if (!init_framebuffer(width, height)) {
         return 0;
     }
     g_width = width;
@@ -527,7 +559,8 @@ int v5_lvgl_remote_display_claim_physical_framebuffer(void)
 {
     int tty_fd;
     if (!g_fb || g_fb_fd < 0) {
-        return 1;
+        fprintf(stderr, "v5 physical framebuffer claim failed: framebuffer unavailable\n");
+        return 0;
     }
     if (g_physical_framebuffer_claimed) {
         return 1;
@@ -594,7 +627,8 @@ int v5_lvgl_remote_display_publish_current_frame(void)
 {
     size_t frame_size;
     unsigned long long base_frame_id;
-    if (!g_display_ready || g_output_suppressed) {
+    if (!g_display_ready || g_output_suppressed ||
+        !g_physical_framebuffer_claimed || !g_fb || g_fb_fd < 0) {
         return 0;
     }
     frame_size = remote_frame_size();

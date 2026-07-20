@@ -32,6 +32,7 @@ extern "C" {
 #include "nmlmsg.hh"
 #include "cms.hh"
 #include "nml_srv.hh"
+#include "nml_srv_lifecycle.hh"
 #include "rem_msg.hh"		// struct REMOTE_READ_REQUEST
 #include "rcs_print.hh"		// rcs_print_error()
 #include "timer.hh"		// esleep()
@@ -508,6 +509,36 @@ static void catch_control_C2(int sig)
     nml_control_C_caught = 1;
 }
 
+static int count_nml_servers_with_remote_ports(
+    NML_SUPER_SERVER *super_server)
+{
+    int remote_server_count = 0;
+    NML_SERVER *server;
+
+    if (NULL == super_server || NULL == super_server->servers) {
+	return 0;
+    }
+
+    server = (NML_SERVER *) super_server->servers->get_head();
+    while (NULL != server) {
+	if (NULL != server->remote_port) {
+	    remote_server_count++;
+	}
+	server = (NML_SERVER *) super_server->servers->get_next();
+    }
+    return remote_server_count;
+}
+
+static void wait_for_nml_server_shutdown()
+{
+    nml_control_C_caught = 0;
+    signal(SIGINT, catch_control_C2);
+    signal(SIGTERM, catch_control_C2);
+    nml_server_wait_until_shutdown(&nml_control_C_caught, esleep);
+    NML_Default_Super_Server->kill_all_servers();
+    nml_cleanup();
+}
+
 void run_nml_server_exit(int i)
 {
     rcs_exit(i);
@@ -525,6 +556,14 @@ void run_nml_servers()
 	    if (NML_Default_Super_Server->unspawned_servers <= 0) {
 		rcs_print_error
 		    ("run_nml_servers(): No buffers without servers already spawned for them.\n");
+		return;
+	    }
+	    if (nml_server_set_is_local_only(
+		    NML_Default_Super_Server->servers->list_size,
+		    count_nml_servers_with_remote_ports(
+			NML_Default_Super_Server))) {
+		wait_for_nml_server_shutdown();
+		run_nml_server_exit(0);
 		return;
 	    }
 	    if (NML_Default_Super_Server->unspawned_servers == 1) {
@@ -555,15 +594,10 @@ void run_nml_servers()
 		    run_nml_server_exit(-1);
 		}
 	    } else {
-		nml_control_C_caught = 0;
 		NML_Default_Super_Server->spawn_all_servers();
-		signal(SIGINT, catch_control_C2);
-		signal(SIGTERM, catch_control_C2);
-		while (!nml_control_C_caught)
-		    esleep(1.0);
-		NML_Default_Super_Server->kill_all_servers();
-		nml_cleanup();
+		wait_for_nml_server_shutdown();
 		run_nml_server_exit(0);
+		return;
 	    }
 	} else {
 	    rcs_print_error

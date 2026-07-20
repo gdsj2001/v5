@@ -465,6 +465,27 @@ def validate_contract(project_root, source_root):
             "falling back to normal FIT boot",
         ),
     )
+    boot_script = (
+        source_root
+        / "project-spec/meta-user/recipes-bsp/u-boot/u-boot-zynq-scr/boot.cmd.default.ext4"
+    ).read_text(encoding="utf-8", errors="strict")
+    product_bootargs = [
+        line for line in boot_script.splitlines()
+        if line.lstrip().startswith("setenv bootargs ") and "root=/dev/mmcblk0p2" in line
+    ]
+    recovery_bootargs = [
+        line for line in boot_script.splitlines()
+        if line.lstrip().startswith("setenv bootargs ") and "root=/dev/mmcblk1p1" in line
+    ]
+    product_isolcpus = (
+        [token for token in product_bootargs[0].split() if token.startswith("isolcpus=")]
+        if len(product_bootargs) == 1 else []
+    )
+    if len(product_bootargs) != 1 or product_isolcpus:
+        fail("V5 product SD bootargs must not isolate the ARM boot CPU")
+    if len(recovery_bootargs) != 1 or any(
+            token.startswith("isolcpus=") for token in recovery_bootargs[0].split()):
+        fail("V5 QSPI recovery bootargs must not isolate a CPU")
     require_tokens(
         source_root,
         "project-spec/meta-user/recipes-bsp/device-tree/files/system-top.dts",
@@ -476,6 +497,8 @@ def validate_contract(project_root, source_root):
             'label = "image.ub"',
             "reg = <0x1000000 0xf00000>",
             "xlnx,no-vblank-irq",
+            "clocks = <0x1 0x1f 0x1 0x1f 0x1 0xe>;",
+            'clock-names = "pclk", "hclk", "tx_clk";',
         ),
         (
             "partition@0xD20000",

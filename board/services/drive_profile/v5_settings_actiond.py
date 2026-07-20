@@ -27,6 +27,7 @@ from v5_settings_action_runtime import (
     execute_action,
     get_last_status,
     now_utc,
+    reconcile_worker_result_in_parent,
     set_last_status,
     v5_drive_bus_action,
 )
@@ -179,6 +180,7 @@ def monitor_action(pid: int, read_fd: int, action: str, run_id: str,
                 "wait_status": wait_status,
                 "axis": axis_hint,
             }
+        result = reconcile_worker_result_in_parent(action, spec, result)
         terminal_state = "success" if bool(result.get("ok")) else "failed"
     window_abort = cleanup_failed_drive_write_window(action, run_id, bool(result.get("ok")))
     if window_abort is not None:

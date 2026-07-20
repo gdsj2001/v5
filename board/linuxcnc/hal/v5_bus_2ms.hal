@@ -57,6 +57,10 @@ loadusr -Wn v5_native_hal_owner /usr/bin/v5_native_hal_owner \
     --g53-c-y=[RTCP]G53_C_Y
 loadrt lcec
 
+# Activate master/domain in LinuxCNC's dedicated one-shot realtime init cycle.
+# The normal 2 ms function list starts only after the RT task deadline resync.
+initf lcec.activate servo-thread
+
 # Physical feedback is routed before logical cia402 read; logical commands are
 # routed after cia402 write and before the physical EtherCAT write.
 addf lcec.read-all servo-thread
@@ -174,35 +178,35 @@ net v5-router-active-mask v5-bus-axis-router.latched-active-mask => v5-native-ha
 net v5-router-commit v5-bus-axis-router.latched-commit-seq => v5-native-hal-owner.home-router-commit-seq motion.v5-bus-home-router-commit-seq
 net v5-router-rejected-commit v5-bus-axis-router.rejected-commit-seq => v5-native-hal-owner.home-router-reject-seq
 
-net v5-home-j0-config-valid v5-native-hal-owner.home-config-valid-00 => v5-bus-axis-router.joint-config-valid-00 joint.0.v5-bus-home-config-valid
+net v5-home-j0-config-valid v5-native-hal-owner.home-config-valid-00 => joint.0.v5-bus-home-config-valid
 net v5-home-j0-status-slot v5-native-hal-owner.home-status-slot-00 => joint.0.v5-bus-home-status-slot
 net v5-home-j0-axis-code v5-native-hal-owner.home-axis-code-00 => v5-bus-axis-router.joint-axis-code-00 joint.0.v5-bus-home-axis-code
 net v5-home-j0-slave v5-native-hal-owner.home-slave-position-00 => v5-bus-axis-router.joint-slave-position-00 joint.0.v5-bus-home-slave-position
 net v5-home-j0-generation v5-native-hal-owner.home-mapping-generation-00 => v5-bus-axis-router.joint-mapping-generation-00 joint.0.v5-bus-home-mapping-generation
 net v5-home-j0-zero v5-native-hal-owner.home-zero-counts-00 => v5-bus-axis-router.joint-zero-counts-00
 net v5-home-j0-scale v5-native-hal-owner.home-counts-per-unit-00 => joint.0.v5-bus-home-counts-per-unit
-net v5-home-j1-config-valid v5-native-hal-owner.home-config-valid-01 => v5-bus-axis-router.joint-config-valid-01 joint.1.v5-bus-home-config-valid
+net v5-home-j1-config-valid v5-native-hal-owner.home-config-valid-01 => joint.1.v5-bus-home-config-valid
 net v5-home-j1-status-slot v5-native-hal-owner.home-status-slot-01 => joint.1.v5-bus-home-status-slot
 net v5-home-j1-axis-code v5-native-hal-owner.home-axis-code-01 => v5-bus-axis-router.joint-axis-code-01 joint.1.v5-bus-home-axis-code
 net v5-home-j1-slave v5-native-hal-owner.home-slave-position-01 => v5-bus-axis-router.joint-slave-position-01 joint.1.v5-bus-home-slave-position
 net v5-home-j1-generation v5-native-hal-owner.home-mapping-generation-01 => v5-bus-axis-router.joint-mapping-generation-01 joint.1.v5-bus-home-mapping-generation
 net v5-home-j1-zero v5-native-hal-owner.home-zero-counts-01 => v5-bus-axis-router.joint-zero-counts-01
 net v5-home-j1-scale v5-native-hal-owner.home-counts-per-unit-01 => joint.1.v5-bus-home-counts-per-unit
-net v5-home-j2-config-valid v5-native-hal-owner.home-config-valid-02 => v5-bus-axis-router.joint-config-valid-02 joint.2.v5-bus-home-config-valid
+net v5-home-j2-config-valid v5-native-hal-owner.home-config-valid-02 => joint.2.v5-bus-home-config-valid
 net v5-home-j2-status-slot v5-native-hal-owner.home-status-slot-02 => joint.2.v5-bus-home-status-slot
 net v5-home-j2-axis-code v5-native-hal-owner.home-axis-code-02 => v5-bus-axis-router.joint-axis-code-02 joint.2.v5-bus-home-axis-code
 net v5-home-j2-slave v5-native-hal-owner.home-slave-position-02 => v5-bus-axis-router.joint-slave-position-02 joint.2.v5-bus-home-slave-position
 net v5-home-j2-generation v5-native-hal-owner.home-mapping-generation-02 => v5-bus-axis-router.joint-mapping-generation-02 joint.2.v5-bus-home-mapping-generation
 net v5-home-j2-zero v5-native-hal-owner.home-zero-counts-02 => v5-bus-axis-router.joint-zero-counts-02
 net v5-home-j2-scale v5-native-hal-owner.home-counts-per-unit-02 => joint.2.v5-bus-home-counts-per-unit
-net v5-home-j3-config-valid v5-native-hal-owner.home-config-valid-03 => v5-bus-axis-router.joint-config-valid-03 joint.3.v5-bus-home-config-valid
+net v5-home-j3-config-valid v5-native-hal-owner.home-config-valid-03 => joint.3.v5-bus-home-config-valid
 net v5-home-j3-status-slot v5-native-hal-owner.home-status-slot-03 => joint.3.v5-bus-home-status-slot
 net v5-home-j3-axis-code v5-native-hal-owner.home-axis-code-03 => v5-bus-axis-router.joint-axis-code-03 joint.3.v5-bus-home-axis-code
 net v5-home-j3-slave v5-native-hal-owner.home-slave-position-03 => v5-bus-axis-router.joint-slave-position-03 joint.3.v5-bus-home-slave-position
 net v5-home-j3-generation v5-native-hal-owner.home-mapping-generation-03 => v5-bus-axis-router.joint-mapping-generation-03 joint.3.v5-bus-home-mapping-generation
 net v5-home-j3-zero v5-native-hal-owner.home-zero-counts-03 => v5-bus-axis-router.joint-zero-counts-03
 net v5-home-j3-scale v5-native-hal-owner.home-counts-per-unit-03 => joint.3.v5-bus-home-counts-per-unit
-net v5-home-j4-config-valid v5-native-hal-owner.home-config-valid-04 => v5-bus-axis-router.joint-config-valid-04 joint.4.v5-bus-home-config-valid
+net v5-home-j4-config-valid v5-native-hal-owner.home-config-valid-04 => joint.4.v5-bus-home-config-valid
 net v5-home-j4-status-slot v5-native-hal-owner.home-status-slot-04 => joint.4.v5-bus-home-status-slot
 net v5-home-j4-axis-code v5-native-hal-owner.home-axis-code-04 => v5-bus-axis-router.joint-axis-code-04 joint.4.v5-bus-home-axis-code
 net v5-home-j4-slave v5-native-hal-owner.home-slave-position-04 => v5-bus-axis-router.joint-slave-position-04 joint.4.v5-bus-home-slave-position

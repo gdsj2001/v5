@@ -169,6 +169,58 @@ def refresh_drive_profile_resident_snapshot() -> Dict[str, Any]:
             "out": str(v5_drive_profile_resident_snapshot.DEFAULT_OUT),
         }
 
+def commit_drive_profile_resident_snapshot_in_parent(
+        worker_result: Dict[str, Any]) -> Dict[str, Any]:
+    """Commit the worker-produced snapshot into actiond's long-lived cache."""
+    try:
+        snapshot_path = v5_drive_profile_resident_snapshot.DEFAULT_OUT
+        snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+        if not isinstance(snapshot, dict):
+            raise ValueError("snapshot_not_object")
+        expected = worker_result.get("resident_snapshot_refresh")
+        if not isinstance(expected, dict) or not expected.get("ok"):
+            raise ValueError("worker_refresh_identity_missing")
+        expected_generation = str(expected.get("generated_at") or "")
+        actual_generation = str(snapshot.get("generated_at") or "")
+        expected_profiles = int(expected.get("profile_count") or 0)
+        profiles = snapshot.get("profiles")
+        actual_profiles = len(profiles) if isinstance(profiles, list) else 0
+        if (not expected_generation or actual_generation != expected_generation or
+                actual_profiles != expected_profiles):
+            raise ValueError(
+                "worker_refresh_identity_mismatch expected=%s/%d actual=%s/%d" % (
+                    expected_generation, expected_profiles,
+                    actual_generation, actual_profiles))
+        committed = v5_drive_bus_action.replace_resident_snapshot(snapshot)
+        committed["parent_cache_committed"] = True
+        committed["snapshot_path"] = str(snapshot_path)
+        return committed
+    except Exception as exc:
+        return {
+            "ok": False,
+            "code": "DRIVE_PROFILE_PARENT_RESIDENT_COMMIT_FAILED",
+            "detail": "%s: %s" % (type(exc).__name__, exc),
+            "snapshot_path": str(v5_drive_profile_resident_snapshot.DEFAULT_OUT),
+        }
+
+
+def reconcile_worker_result_in_parent(
+        action: str, spec: Dict[str, Any], worker_result: Dict[str, Any]) -> Dict[str, Any]:
+    result = dict(worker_result)
+    if action != "drive_profile_server_download" or not result.get("ok"):
+        return result
+    parent_commit = commit_drive_profile_resident_snapshot_in_parent(result)
+    result["parent_resident_snapshot_commit"] = parent_commit
+    if not parent_commit.get("ok"):
+        result["download_ok_before_parent_resident_commit"] = True
+        result["ok"] = False
+        result["code"] = "SERVER_DOWNLOAD_PARENT_RESIDENT_COMMIT_FAILED"
+        result["message_cn"] = "服务器下载已完成，但设置动作常驻 profile 快照提交失败，后续驱动动作已 fail-closed。"
+        result["display_message_cn"] = result["message_cn"]
+    write_json(Path(str(spec.get("result_path", RUN_DIR / "settings_action_result.json"))), result)
+    return result
+
+
 def run_auth_action(action: str, spec: Dict[str, Any]) -> Dict[str, Any]:
     auth_action = str(spec.get("auth_action", ""))
     request: Dict[str, Any] = {"action": action}

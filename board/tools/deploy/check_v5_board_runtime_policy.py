@@ -39,6 +39,8 @@ PIDFILES = {
 
 PROC_ROOT = "/proc"
 PROC_LOCKS_PATH = "/proc/locks"
+CMDLINE_PATH = "/proc/cmdline"
+ISOLATED_CPU_PATH = "/sys/devices/system/cpu/isolated"
 POSITION_LOCK_PATH = "/run/8ax/v5_position_status_publisher.lock"
 POSITION_BLOCK_PATH = "/dev/shm/v5_native_position_status.bin"
 POSITION_DAEMON_PATH = "/usr/libexec/8ax/v5_position_status_publisher.py"
@@ -243,6 +245,16 @@ def read_sched_policy(pid: int) -> int:
         tail = stat_line[stat_line.rfind(")") + 2 :].split()
         if len(tail) >= 39:
             return int(tail[38])
+    except Exception:
+        pass
+    return -1
+
+def read_rt_priority(pid: int) -> int:
+    try:
+        stat_line = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8", errors="ignore")
+        tail = stat_line[stat_line.rfind(")") + 2 :].split()
+        if len(tail) >= 38:
+            return int(tail[37])
     except Exception:
         pass
     return -1
@@ -907,6 +919,33 @@ def audit_linuxcnc_non_realtime_scheduling() -> int:
                 print(f"OK_LINUXCNC_NON_RT_CPU1 name={name} pid={pid} nice=-5")
     return rc
 
+def audit_kernel_boot_cpu_layout() -> int:
+    try:
+        cmdline = Path(CMDLINE_PATH).read_text(
+            encoding="ascii", errors="strict").strip().split()
+        isolated = Path(ISOLATED_CPU_PATH).read_text(
+            encoding="ascii", errors="strict").strip()
+    except (OSError, UnicodeError) as exc:
+        print(f"FAIL kernel_boot_cpu_layout: readback={exc}", file=sys.stderr)
+        return 1
+    isolcpus_tokens = [token for token in cmdline if token.startswith("isolcpus=")]
+    if isolcpus_tokens:
+        print(
+            f"FAIL kernel_boot_cpu_layout: isolcpus_tokens={isolcpus_tokens} "
+            "expected=[]",
+            file=sys.stderr,
+        )
+        return 1
+    if isolated:
+        print(
+            f"FAIL kernel_boot_cpu_layout: isolated={isolated} expected=<empty>",
+            file=sys.stderr,
+        )
+        return 1
+    print("OK_KERNEL_BOOT_CPU_LAYOUT isolcpus=absent isolated=empty")
+    return 0
+
+
 def normalize_cpu_mask(text: str) -> int:
     compact = text.strip().replace(",", "")
     return int(compact or "0", 16)
@@ -951,8 +990,50 @@ def audit_network_cpu_isolation() -> int:
     if pids_by_executable_name("irqbalance"):
         print("FAIL network_cpu_isolation: irqbalance is active", file=sys.stderr)
         rc = 1
+    softirq_records = []
+    for comm in Path(PROC_ROOT).glob("[0-9]*/task/[0-9]*/comm"):
+        try:
+            if comm.read_text(encoding="ascii").strip() != "ksoftirqd/0":
+                continue
+            tid = int(comm.parent.name)
+            softirq_records.append(
+                (tid, read_status_field(tid, "Cpus_allowed_list"),
+                 read_sched_policy(tid), read_rt_priority(tid)))
+        except (OSError, ValueError):
+            continue
+    if len(softirq_records) != 1 or softirq_records[0][1:] != ("0", 1, 49):
+        print(
+            f"FAIL network_cpu_isolation: ksoftirqd0={softirq_records} "
+            "expected=one CPU0/SCHED_FIFO/49 thread",
+            file=sys.stderr,
+        )
+        rc = 1
     if rc == 0:
-        print("OK_NETWORK_CPU_ISOLATION eth0=CPU1 eth1=CPU0")
+        print("OK_NETWORK_CPU_ISOLATION eth0=CPU1 eth1=CPU0 ksoftirqd0=FIFO49")
+    return rc
+
+def audit_management_daemon_cpu_isolation() -> int:
+    rc = 0
+    dropbear_pids = pids_by_executable_name("dropbear")
+    if not dropbear_pids:
+        print("FAIL management_daemon_cpu_isolation: dropbear=missing", file=sys.stderr)
+        return 1
+    for pid in dropbear_pids:
+        try:
+            cpus = read_status_field(pid, "Cpus_allowed_list")
+            policy = read_sched_policy(pid)
+            task_records = read_task_records(pid)
+        except OSError:
+            continue
+        if cpus != "1" or policy != 0 or any(record[3] != 0 for record in task_records):
+            print(
+                f"FAIL management_daemon_cpu_isolation: name=dropbear pid={pid} "
+                f"cpus={cpus} policy={policy} tasks={task_records} expected=CPU1/SCHED_OTHER",
+                file=sys.stderr,
+            )
+            rc = 1
+    if rc == 0:
+        print(f"OK_MANAGEMENT_DAEMON_CPU_ISOLATION dropbear_pids={dropbear_pids} cpu=1")
     return rc
 
 rc = 0
@@ -1020,7 +1101,9 @@ for name, pidfile in PIDFILES.items():
 rc |= audit_linuxcnc_privileged_helpers()
 rc |= audit_linuxcnc_rtapi_affinity()
 rc |= audit_linuxcnc_non_realtime_scheduling()
+rc |= audit_kernel_boot_cpu_layout()
 rc |= audit_network_cpu_isolation()
+rc |= audit_management_daemon_cpu_isolation()
 rc |= audit_linuxcnc_control_listeners()
 rc |= audit_tcf_retirement()
 rc |= audit_uio_devices()

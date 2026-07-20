@@ -5,36 +5,66 @@ import csv
 import json
 import struct
 import subprocess
+import sys
 import tempfile
 import threading
 import time
 from pathlib import Path
+
+UI_SERVICE_SOURCE = Path(__file__).resolve().parents[2] / "services" / "ui"
+sys.path.insert(0, str(UI_SERVICE_SOURCE))
+
 import measure_v5_cold_boot as measure
+from v5_ui_boot_ready import ReadyError, read_kernel_boot_id
 
 from measure_v5_cold_boot import (DeterministicProbeError, FatalMeasurementError,
                                   TransientProbeError, canonical_publisher_argv,
                                   parse_boot_stages, persist_cycle_evidence,
                                   post_ready_ethercat_errors,
+                                  startup_forbidden_errors,
                                   prove_terminal, receive_declared_response,
                                   require_resource_lock, run, summarize_results,
                                   terminal_complete, write_segments)
 
 lines = [(1.2, "noise"), (2.5, "V5_BOOT_STAGE stage=linuxcnc_ready uptime_ms=21220")]
 assert parse_boot_stages(lines) == [{"stage": "linuxcnc_ready", "uptime_s": 21.22, "host_elapsed_s": 2.5}]
-assert post_ready_ethercat_errors([
-    (1.0, "EtherCAT WARNING 0: 1 datagram TIMED OUT!"),
-    (2.0, "LinuxCNC backend transport ready; WKC/DC stable")]) == []
+rejected_after_ready = [
+    "EtherCAT 0: Domain 0: Working counter changed to 0/10.",
+    "EtherCAT WARNING 0: 1 datagram SKIPPED!",
+    "EtherCAT WARNING 0: 1 datagram TIMED OUT!",
+    "EtherCAT WARNING 0: 3 datagrams UNMATCHED!",
+    "Unexpected realtime delay on task 0 with period 2000000",
+    "control error reference=4AE322B9D742",
+]
+assert post_ready_ethercat_errors(
+    [(float(index), line) for index, line in enumerate(rejected_after_ready, 1)] +
+    [(10.0, "LinuxCNC backend transport ready; WKC/DC stable")]) == []
+whole_boot_faults = startup_forbidden_errors(
+    [(float(index), line) for index, line in enumerate(rejected_after_ready, 1)] +
+    [(10.0, "LinuxCNC backend transport ready; WKC/DC stable")])
+assert [item["line"] for item in whole_boot_faults] == rejected_after_ready[-2:]
+assert all(item["scope"] == "whole_boot" for item in whole_boot_faults)
 post_ready_loss = post_ready_ethercat_errors([
     (2.0, "LinuxCNC backend transport ready; WKC/DC stable"),
-    (3.0, "EtherCAT 0: Domain 0: Working counter changed to 0/10."),
-    (4.0, "EtherCAT WARNING 0: 3 datagrams UNMATCHED!")])
-assert [item["stamp_s"] for item in post_ready_loss] == [3.0, 4.0]
+    *[(float(index + 3), line) for index, line in enumerate(rejected_after_ready)]])
+assert [item["line"] for item in post_ready_loss] == rejected_after_ready
+startup_loss = startup_forbidden_errors([
+    (2.0, "LinuxCNC backend transport ready; WKC/DC stable"),
+    *[(float(index + 3), line) for index, line in enumerate(rejected_after_ready)]])
+assert [item["line"] for item in startup_loss] == rejected_after_ready
+assert [item["scope"] for item in startup_loss] == [
+    "post_backend_ready", "post_backend_ready", "post_backend_ready",
+    "post_backend_ready", "whole_boot", "whole_boot"]
 timeout = run(["python", "-c", "import time; time.sleep(1)"], timeout=0.01)
 assert timeout.returncode == 124 and "TIMEOUT" in timeout.stdout
 probe = {key: True for key in ("ethercat_health",
                                 "command_gate_ready",
                                 "touch_registered", "estop_active")}
 probe["machine_enabled"] = False
+probe["boot_id"] = "11111111-1111-4111-8111-111111111111"
+probe["ui_instance_id"] = "22222222-2222-4222-8222-222222222222"
+probe["ui_pid"] = 123
+probe["ui_start_ticks"] = 12345
 pages = []
 for index, page in enumerate(
         ("main", "settings", "tool", "probe", "offset", "io", "network", "program", "mdi"), 1):
@@ -46,22 +76,34 @@ for index, page in enumerate(
 info = {"ui_ready": True, "width": 1024, "height": 600,
         "ready_metadata": {"cache_queue": pages, "cache_page_count": 9,
                            "cache_budget_bytes": 31_948_800, "current_frame_id": 2,
-                           "ui_pid": 123,
+                           "boot_id": probe["boot_id"],
+                           "ui_instance_id": probe["ui_instance_id"],
+                           "ui_pid": 123, "ui_start_ticks": probe["ui_start_ticks"],
                            "first_frame": {"x": 0, "y": 0, "w": 1024, "h": 600,
                                            "frame_id": 2, "base_frame_id": 1}}}
 assert terminal_complete(probe, info)
+wrong_boot = dict(probe, boot_id="33333333-3333-4333-8333-333333333333")
+assert not terminal_complete(wrong_boot, info)
+wrong_start = dict(probe, ui_start_ticks=probe["ui_start_ticks"] + 1)
+assert not terminal_complete(wrong_start, info)
+wrong_instance = dict(
+    probe, ui_instance_id="44444444-4444-4444-8444-444444444444")
+assert not terminal_complete(wrong_instance, info)
+wrong_pid = dict(probe, ui_pid=probe["ui_pid"] + 1)
+assert not terminal_complete(wrong_pid, info)
 probe["ethercat_health"] = False
 assert not terminal_complete(probe, info)
 probe["ethercat_health"] = True
 measure_source = Path(__file__).with_name("measure_v5_cold_boot.py").read_text(encoding="utf-8")
 power_source = Path(__file__).parents[1].joinpath("v5_board_power_cycle.py").read_text(encoding="utf-8")
+ui_init_source = UI_SERVICE_SOURCE.joinpath("init.d/v5-ui-relay").read_text(encoding="utf-8")
 assert 'POWER_TOOL = ROOT / "tools/v5_board_power_cycle.py"' in measure_source
 assert "RELAY_COMMANDS" not in measure_source
 assert 'result["power_on_monotonic_s"]' in power_source
 assert power_source.index("command_monotonic_ns = time.monotonic_ns()") < power_source.index("time.sleep(0.12)")
 assert "console_ready.wait" in measure_source and "terminal_complete" in measure_source
 assert (measure_source.index("fetch_logs_into_state(target, state)") <
-        measure_source.index('state["post_ready_ethercat_errors"] = post_ready_ethercat_errors('))
+        measure_source.index('state["startup_forbidden_errors"] = startup_forbidden_errors('))
 assert "parse_boot_stages(normalized_serial)" not in measure_source
 assert '["ethercat","slaves"]' not in measure_source
 assert '"halcmd"' not in measure_source
@@ -79,8 +121,13 @@ for token in (
         "ba[9:11]==bb[9:11]==(5,5)", "ba[-2]==fnv(bra[:-8])",
         "<=1000000000", "stat.S_ISCHR(os.stat(touch_real).st_mode)",
         'ui_argv==[b"/usr/libexec/8ax/v5_lvgl_shell",b"--serve"]',
+        'json.load(open("/run/8ax_v5_product_ui/ui_ready.json"',
+        'out["ui_instance_id"]',
         "taskset -c 1", "timeout=5.0", "power_stdout.log"):
     assert token in measure_source, token
+for token in ('cat /proc/sys/kernel/random/boot_id', '\\"ui_start_ticks\\":$ui_start_ticks',
+              '\\"boot_id\\":\\"$boot_id\\"'):
+    assert token in ui_init_source, token
 summary = summarize_results([{"cycle": 1, "ok": True, "segments": [
     {"stage": "power_on", "host_elapsed_s": 0},
     {"stage": "ssh_ready", "host_elapsed_s": 10},
@@ -103,6 +150,16 @@ with tempfile.TemporaryDirectory() as temporary:
         raise AssertionError("missing resource lock was accepted")
     lock.write_text("lock_version=1\nthread_id=owner-1\nfile=resource:vm_board\n", encoding="utf-8")
     require_resource_lock("owner-1")
+    boot_id_path = Path(temporary) / "boot_id"
+    boot_id_path.write_text(probe["boot_id"] + "\n", encoding="ascii")
+    assert read_kernel_boot_id(boot_id_path) == probe["boot_id"]
+    boot_id_path.write_text("not-a-kernel-boot-id\n", encoding="ascii")
+    try:
+        read_kernel_boot_id(boot_id_path)
+    except ReadyError:
+        pass
+    else:
+        raise AssertionError("invalid kernel boot id was accepted")
 
 # Behavior: a transport/startup miss is retried once, exactly two seconds after
 # the first probe returns. A deterministic owner/ABI failure is never retried.

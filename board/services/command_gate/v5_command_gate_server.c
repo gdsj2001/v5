@@ -20,6 +20,7 @@
 #include "v5_settings_apply.h"
 
 #include <errno.h>
+#include <math.h>
 #include <signal.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -98,20 +99,21 @@ static void load_axis_slave_mapping_status(void)
                 : "BUS_HOME_MAPPING_INVALID"));
 }
 
-static int project_native_home_config(
+static int project_native_bus_mapping(
     const V5NativeMotionParameters *parameters,
     char *code,
     size_t code_cap)
 {
     unsigned int index;
     unsigned int expected_active_mask = 0U;
+    unsigned int home_ready_mask = 0U;
     unsigned int commit_seq;
     const unsigned int full_mask = (1U << V5_NATIVE_HOME_JOINT_COUNT) - 1U;
     V5NativeHomeConfigRecord records[V5_NATIVE_HOME_JOINT_COUNT];
     V5NativeHalOwnerResponse response;
     if (!parameters || parameters->driver_mode != V5_NATIVE_DRIVER_MODE_BUS ||
-        !parameters->runtime_owner_loaded || !parameters->mapping_generation) {
-        snprintf(code, code_cap, "%s", "NATIVE_HOME_BUS_CONFIG_NOT_RESIDENT");
+        !parameters->mapping_generation) {
+        snprintf(code, code_cap, "%s", "NATIVE_BUS_MAPPING_NOT_RESIDENT");
         return 0;
     }
     memset(records, 0, sizeof(records));
@@ -124,20 +126,35 @@ static int project_native_home_config(
         const V5NativeMotionAxisParameters *axis = &parameters->axes[index];
         if (!axis->active) continue;
         if (axis->status_slot >= V5_NATIVE_HOME_JOINT_COUNT ||
-            !axis->bus_zero_evidence_known ||
             !axis->slave_mapping_known ||
             axis->slave_position >= V5_NATIVE_HOME_JOINT_COUNT ||
+            !isfinite(axis->positioning_resolution_units) ||
+            axis->positioning_resolution_units <= 0.0 ||
             (expected_active_mask & (1U << axis->status_slot))) {
-            snprintf(code, code_cap, "NATIVE_HOME_AXIS_%c_CONFIG_FAILED", axis->axis ? axis->axis : '?');
+            snprintf(code, code_cap, "NATIVE_BUS_AXIS_%c_MAPPING_FAILED", axis->axis ? axis->axis : '?');
             return 0;
         }
         records[axis->status_slot].active = 1U;
         records[axis->status_slot].axis_code = (unsigned int)(unsigned char)axis->axis;
         records[axis->status_slot].slave_position = axis->slave_position;
         records[axis->status_slot].mapping_generation = parameters->mapping_generation;
-        records[axis->status_slot].zero_counts = axis->bus_zero_counts;
-        records[axis->status_slot].counts_per_unit = axis->bus_counts_per_unit;
+        records[axis->status_slot].home_ready = axis->bus_zero_evidence_known ? 1 : 0;
+        records[axis->status_slot].zero_counts =
+            axis->bus_zero_evidence_known ? axis->bus_zero_counts : 0.0;
+        records[axis->status_slot].counts_per_unit =
+            axis->bus_zero_evidence_known
+                ? axis->bus_counts_per_unit
+                : 1.0 / axis->positioning_resolution_units;
+        if (!isfinite(records[axis->status_slot].zero_counts) ||
+            !isfinite(records[axis->status_slot].counts_per_unit) ||
+            records[axis->status_slot].counts_per_unit <= 0.0) {
+            snprintf(code, code_cap, "NATIVE_BUS_AXIS_%c_SCALE_FAILED", axis->axis ? axis->axis : '?');
+            return 0;
+        }
         expected_active_mask |= 1U << axis->status_slot;
+        if (records[axis->status_slot].home_ready) {
+            home_ready_mask |= 1U << axis->status_slot;
+        }
     }
     if (expected_active_mask != full_mask ||
         v5_native_hal_owner_exchange(
@@ -159,7 +176,7 @@ static int project_native_home_config(
         }
     }
     if (!response.home_config_readback_valid ||
-        response.home_config_mask != expected_active_mask ||
+        response.home_config_mask != home_ready_mask ||
         response.home_config_active_mask != expected_active_mask ||
         response.home_mapping_generation != parameters->mapping_generation ||
         response.home_config_commit_seq != commit_seq ||
@@ -168,10 +185,10 @@ static int project_native_home_config(
         response.status_home_router_active_mask != expected_active_mask ||
         response.status_home_router_commit_seq != commit_seq ||
         response.status_home_router_rejected_commit_seq == commit_seq) {
-        snprintf(code, code_cap, "%s", "NATIVE_HOME_CONFIG_READBACK_MISMATCH");
+        snprintf(code, code_cap, "%s", "NATIVE_BUS_MAPPING_READBACK_MISMATCH");
         return 0;
     }
-    snprintf(code, code_cap, "%s", "NATIVE_HOME_CONFIG_PROJECTED");
+    snprintf(code, code_cap, "%s", "NATIVE_BUS_MAPPING_PROJECTED");
     return 1;
 }
 
@@ -940,6 +957,7 @@ static void parse_args(int argc, char **argv)
 int main(int argc, char **argv)
 {
     int listen_fd;
+    int home_runtime_owner_loaded;
     char motion_code[64];
     parse_args(argc, argv);
     if (!v5_process_residency_lock("v5_command_gate_server")) {
@@ -952,21 +970,35 @@ int main(int argc, char **argv)
         return 5;
     }
     load_axis_slave_mapping_status();
-    if (!v5_native_motion_parameters_load_runtime_owner(
+    home_runtime_owner_loaded = v5_native_motion_parameters_load_runtime_owner(
             g_settings_project_root,
             g_settings_runtime_path,
             g_pulse_contract_path,
             &g_motion_parameters,
             motion_code,
-            sizeof(motion_code))) {
+            sizeof(motion_code));
+    if (!home_runtime_owner_loaded) {
         fprintf(stderr,
                 "v5_command_gate_server Home runtime owner unavailable: %s; "
                 "dependent Home actions remain fail-closed\n",
                 motion_code);
-    } else if (!project_native_home_config(&g_motion_parameters, motion_code, sizeof(motion_code))) {
+    }
+    if (g_axis_slave_mapping_applicable && g_axis_slave_mapping_valid &&
+        !project_native_bus_mapping(
+            &g_motion_parameters, motion_code, sizeof(motion_code))) {
+        g_axis_slave_mapping_status_available = 1;
+        g_axis_slave_mapping_valid = 0;
+        g_axis_slave_mapping_generation = 0U;
+        snprintf(
+            g_axis_slave_mapping_code,
+            sizeof(g_axis_slave_mapping_code),
+            "%s",
+            motion_code[0]
+                ? motion_code
+                : "NATIVE_BUS_MAPPING_PROJECTION_FAILED");
         fprintf(stderr,
-                "v5_command_gate_server native Home config projection failed: %s; "
-                "ALL_HOME remains fail-closed\n",
+                "v5_command_gate_server native BUS mapping projection failed: %s; "
+                "BUS motion remains fail-closed\n",
                 motion_code);
     }
     if (!v5_linuxcncrsh_gate_preconnect(&g_linuxcncrsh_config)) {
