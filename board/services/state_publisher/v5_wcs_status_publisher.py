@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 import argparse
+import atexit
+import errno
 import math
 import os
+import secrets
 import struct
 import sys
 import time
@@ -51,6 +54,75 @@ from v5_polling_cadence import StartToStartPollingCadence
 
 SLOW_STATUS_HEARTBEAT_SECONDS = 0.2
 DEFAULT_WCS_INTERVAL_MS = 200
+WCS_LOCK_PATH = '/run/8ax/v5_wcs_status_publisher.lock'
+WCS_PIDFILE_PATH = '/run/8ax/v5_wcs_status_publisher.pid'
+
+
+def process_start_ticks(pid=None) -> str:
+    pid = os.getpid() if pid is None else int(pid)
+    text = open(f'/proc/{pid}/stat', encoding='ascii').read()
+    fields = text.rsplit(')', 1)[1].split()
+    if len(fields) < 20:
+        raise RuntimeError('wcs_publisher_proc_start_unavailable')
+    return fields[19]
+
+
+class WcsLifecycleLock:
+    LOCK_EX = 2
+    LOCK_NB = 4
+    LOCK_UN = 8
+
+    def __init__(self, lock_path=WCS_LOCK_PATH, pidfile_path=WCS_PIDFILE_PATH,
+                 flock_fn=None):
+        self.lock_path = lock_path
+        self.pidfile_path = pidfile_path
+        self._libc = None
+        if flock_fn is None:
+            if os.name != 'posix':
+                raise RuntimeError('wcs_publisher_flock_unavailable')
+            self._libc = ctypes.CDLL('libc.so.6', use_errno=True)
+            flock_fn = self._libc.flock
+        self._flock = flock_fn
+        self._fd = None
+        self.record = ''
+
+    def acquire(self):
+        os.makedirs(os.path.dirname(self.lock_path), exist_ok=True)
+        fd = os.open(self.lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+        ctypes.set_errno(0)
+        if self._flock(fd, self.LOCK_EX | self.LOCK_NB) != 0:
+            error_number = ctypes.get_errno()
+            os.close(fd)
+            if error_number in (errno.EACCES, errno.EAGAIN, errno.EWOULDBLOCK):
+                raise RuntimeError('wcs_publisher_already_running')
+            raise RuntimeError(f'wcs_publisher_flock_failed:{error_number}')
+        self._fd = fd
+        self.record = f'{os.getpid()} {process_start_ticks()}\n'
+        os.ftruncate(fd, 0)
+        os.write(fd, self.record.encode('ascii'))
+        os.fsync(fd)
+        temporary = f'{self.pidfile_path}.{os.getpid()}.{secrets.token_hex(4)}.tmp'
+        with open(temporary, 'w', encoding='ascii') as stream:
+            stream.write(self.record)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, self.pidfile_path)
+        return self
+
+    def release(self):
+        if self._fd is None:
+            return
+        try:
+            try:
+                owned = open(self.pidfile_path, encoding='ascii').read() == self.record
+            except OSError:
+                owned = False
+            if owned:
+                os.unlink(self.pidfile_path)
+        finally:
+            self._flock(self._fd, self.LOCK_UN)
+            os.close(self._fd)
+            self._fd = None
 
 
 class StatusPublishCadence:
@@ -360,6 +432,11 @@ def main() -> int:
     parser.add_argument('--mock-native-error', default='')
     parser.add_argument('--mock-native-error-kind', type=int, default=1)
     args = parser.parse_args()
+
+    lifecycle_lock = None
+    if args.path == DEFAULT_PATH and not args.mock_g5x_index and not args.mock_native_error:
+        lifecycle_lock = WcsLifecycleLock().acquire()
+        atexit.register(lifecycle_lock.release)
 
     operator_error_map = NativeOperatorErrorMap.from_tsv(args.operator_error_map)
     if args.mock_native_error:

@@ -33,7 +33,7 @@ class ReadyError(RuntimeError): pass
 class FinalBarrierError(ReadyError): pass
 BUS_INI = "/opt/8ax/v5/linuxcnc/ini/v5_bus.ini"; POSITION_PATH, WCS_PATH, MODAL_PATH, STATE_PATH = map(Path, ("/dev/shm/v5_native_position_status.bin", "/dev/shm/v5_native_wcs_status.bin", "/dev/shm/v5_native_modal_tool_status.bin", "/dev/shm/v3_status_shm"))
 BUS_STATUS_PATH = Path("/dev/shm/v5_native_bus_status.bin")
-POSITION_PID, POSITION_LOCK, WCS_PID, STATE_PID = map(Path, ("/run/8ax/v5_position_status_publisher.pid", "/run/8ax/v5_position_status_publisher.lock", "/run/8ax/v5_wcs_status_publisher.pid", "/run/8ax/v5_state_publisher.pid"))
+POSITION_PID, POSITION_LOCK, WCS_PID, WCS_LOCK, STATE_PID, STATE_LOCK = map(Path, ("/run/8ax/v5_position_status_publisher.pid", "/run/8ax/v5_position_status_publisher.lock", "/run/8ax/v5_wcs_status_publisher.pid", "/run/8ax/v5_wcs_status_publisher.lock", "/run/8ax/v5_state_publisher.pid", "/run/8ax/v5_state_publisher.lock"))
 POSITION_FMT, WCS_FMT, MODAL_FMT = (
     struct.Struct("<IIIIIIIIQQ" + "d" * 20 + "5B3x" + "d" * 4 + "II"),
     struct.Struct("<IIIIiIIIIIQ" + "d" * 45 + "II"),
@@ -75,19 +75,8 @@ def require_cpu1(pid):
                             if line.startswith("Cpus_allowed_list:")), ""))
     if not cpu_lists_are_cpu1(values):
         raise ReadyError(f"publisher threads are not confined to CPU1 pid={pid}")
-def exact_processes(expected, binary=False):
-    matches = []
-    for entry in Path("/proc").iterdir():
-        if not entry.name.isdigit():
-            continue
-        try:
-            argv = proc_argv(int(entry.name))
-        except (OSError, UnicodeError):
-            continue
-        if (argv == expected if binary else argv[1:] == expected):
-            matches.append(int(entry.name))
-    return matches
-def accept_identity(name, pid, expected_start, argv, allowed, cache, unique, binary=False, extra=()):
+def accept_identity(name, pid, expected_start, argv, allowed, cache, binary=False, extra=()):
+    del binary
     current = (pid, proc_start_ticks(pid), tuple(argv)) + tuple(extra)
     if cache.get(name) not in (None, current):
         raise ReadyError(f"{name} owner changed during barrier")
@@ -97,12 +86,6 @@ def accept_identity(name, pid, expected_start, argv, allowed, cache, unique, bin
         if name in cache:
             raise ReadyError(f"{name} owner argv changed during barrier")
         return False
-    matches = ([found for item in allowed for found in exact_processes(item, binary)]
-               if unique or name not in cache else [pid])
-    if matches != [pid]:
-        if name not in cache and not matches:
-            return False
-        raise ReadyError(f"{name} unique owner mismatch")
     require_cpu1(pid)
     cache[name] = current
     return True
@@ -114,15 +97,16 @@ def read_record(path, count):
     if len(fields) != count:
         raise ReadyError(f"publisher PID record malformed path={path}")
     return fields
-def require_position_lock_held(path=POSITION_LOCK, flock_fn=None):
+def require_lifecycle_lock_held(path, name, flock_fn=None):
     with path.open("r") as stream:
         if flock_fn is None:
             flock_fn = ctypes.CDLL(None, use_errno=True).flock; flock_fn.argtypes = (ctypes.c_int, ctypes.c_int); flock_fn.restype = ctypes.c_int
         ctypes.set_errno(0); result = flock_fn(stream.fileno(), 2 | 4); error = ctypes.get_errno()
         if result == -1 and error in (errno.EACCES, errno.EAGAIN, errno.EWOULDBLOCK): return
-        if result == 0: flock_fn(stream.fileno(), 8); raise ReadyError("position owner lock is not held")
-        raise ReadyError(f"position owner lock probe failed errno={error}")
+        if result == 0: flock_fn(stream.fileno(), 8); raise ReadyError(f"{name} owner lock is not held")
+        raise ReadyError(f"{name} owner lock probe failed errno={error}")
 def publisher_identities(cache=None, unique=False, expected_ini=""):
+    del unique
     cache, owners = ({} if cache is None else cache), {}
     record, lock_record = read_record(POSITION_PID, 3), read_record(POSITION_LOCK, 3)
     if record is not None:
@@ -133,11 +117,13 @@ def publisher_identities(cache=None, unique=False, expected_ini=""):
                     str(POSITION_PATH), "--bus-path", str(BUS_STATUS_PATH),
                     "--interval-ms", "33"]
         if accept_identity("position", pid, record[1], proc_argv(pid)[1:],
-                           [expected], cache, unique, extra=(record[2],)):
-            require_position_lock_held()
+                           [expected], cache, extra=(record[2],)):
+            require_lifecycle_lock_held(POSITION_LOCK, "position")
             owners["position"] = pid
-    record = read_record(WCS_PID, 2)
+    record, lock_record = read_record(WCS_PID, 2), read_record(WCS_LOCK, 2)
     if record is not None:
+        if record != lock_record:
+            raise ReadyError("wcs owner record mismatch")
         pid = int(record[0])
         expected = ["/usr/libexec/8ax/v5_wcs_status_publisher.py", "--path", str(WCS_PATH),
                     "--modal-tool-path", str(MODAL_PATH), "--operator-error-path",
@@ -145,15 +131,19 @@ def publisher_identities(cache=None, unique=False, expected_ini=""):
                     "/opt/8ax/v5/config/ui/v5_native_operator_error_map.tsv", "--ini", expected_ini,
                     "--interval-ms", "200"]
         if accept_identity("wcs", pid, record[1], proc_argv(pid)[1:],
-                           [expected], cache, unique):
+                           [expected], cache):
+            require_lifecycle_lock_held(WCS_LOCK, "wcs")
             owners["wcs"] = pid
-    record = read_record(STATE_PID, 2)
+    record, lock_record = read_record(STATE_PID, 2), read_record(STATE_LOCK, 2)
     if record is not None:
+        if record != lock_record:
+            raise ReadyError("state owner record mismatch")
         pid = int(record[0])
         expected = ["/usr/libexec/8ax/v5_state_publisher", "--path", str(STATE_PATH),
                     "--interval-ms", "33"]
         if accept_identity("state", pid, record[1], proc_argv(pid),
-                           [expected], cache, unique, True):
+                           [expected], cache, True):
+            require_lifecycle_lock_held(STATE_LOCK, "state")
             owners["state"] = pid
     return owners
 def identity_tokens(cache):
@@ -248,7 +238,9 @@ def read_state_seqlock(path):
 def current_pre_ui_inputs(cache=None, unique=False, expected_ini=""):
     owners = publisher_identities(cache, unique, expected_ini)
     markers = {"position": None, "state": None, "wcs": None, "modal": None}
-    position_values = None
+    position_writer_identity = None
+    position_source_time = None
+    position_source_generation = None
     try:
         pos = read_atomic(POSITION_PATH, POSITION_FMT, seq_offset=POSITION_SEQ_OFFSET)
         writer = int(POSITION_PID.read_text(encoding="ascii").split()[2])
@@ -262,7 +254,10 @@ def current_pre_ui_inputs(cache=None, unique=False, expected_ini=""):
         if pos[3] & 3 == 3:
             if not 0 <= time.monotonic_ns() - pos[8] <= 1_000_000_000:
                 raise ReadyError("Position block stale")
-            markers["position"], position_values = pos[9], tuple(pos[10:20])
+            markers["position"] = pos[9]
+            position_writer_identity = pos[5]
+            position_source_time = pos[8]
+            position_source_generation = pos[9]
     except FileNotFoundError:
         pass
     raw = read_state_seqlock(STATE_PATH)
@@ -300,8 +295,13 @@ def current_pre_ui_inputs(cache=None, unique=False, expected_ini=""):
                 not all(math.isfinite(value) for value in following_error) or
                 display_digits != (3, 3, 3, 3, 3)):
             raise ReadyError("State coordinate/trajectory/scene values invalid")
+        lineage_valid = (
+            position_writer_identity is not None and
+            writer_identity == position_writer_identity and
+            0 < source_generation <= position_source_generation and
+            0 < source_time <= position_source_time)
         if (valid & 0x203 == 0x203 and not (typed & 7 or header[5] & 7) and
-                position_values is not None and tuple(values) == position_values):
+                lineage_valid):
             if not 0 <= time.monotonic_ns() - source_time <= 500_000_000:
                 raise ReadyError("State block stale")
             markers["state"] = source_generation
@@ -475,7 +475,7 @@ def validate_final_publisher_barrier(snapshot_path, expected_ini,
                            if checker is current_pre_ui_inputs else checker(identities))
     except ReadyError as exc:
         if any(token in str(exc) for token in (
-                "owner changed", "PID/start mismatch", "unique owner mismatch",
+                "owner changed", "PID/start mismatch", "owner lock is not held",
                 "owner argv changed", "owner record mismatch")):
             raise FinalBarrierError(str(exc)) from exc
         raise

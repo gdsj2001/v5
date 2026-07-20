@@ -15,6 +15,7 @@ PROTOCOL = ROOT / "linuxcnc/src/hal/user_comps/v5_native_hal_owner_protocol.h"
 HAL = ROOT / "board/linuxcnc/hal/v5_bus_2ms.hal"
 COMMAND_IPC = ROOT / "board/services/command_gate/v5_command_gate_ipc.h"
 COMMAND_SERVER = ROOT / "board/services/command_gate/v5_command_gate_server.c"
+HOME_MAPPING = ROOT / "board/services/command_gate/v5_native_home_mapping.c"
 HOME_ADAPTER = ROOT / "board/services/command_gate/v5_native_home.c"
 HOME_COMPONENT = ROOT / "linuxcnc/src/hal/components/v5_bus_homecomp.comp"
 HOME_MOTION = ROOT / "linuxcnc/src/hal/components/v5_bus_home_motion.h"
@@ -152,6 +153,7 @@ def main() -> int:
     hal = HAL.read_text(encoding="utf-8")
     command_ipc = COMMAND_IPC.read_text(encoding="utf-8")
     command_server = COMMAND_SERVER.read_text(encoding="utf-8")
+    home_mapping = HOME_MAPPING.read_text(encoding="utf-8")
     home_adapter = HOME_ADAPTER.read_text(encoding="utf-8")
     home_component = HOME_COMPONENT.read_text(encoding="utf-8")
     home_motion = HOME_MOTION.read_text(encoding="utf-8")
@@ -239,8 +241,9 @@ def main() -> int:
     require(owner, "response->home_current_mask = home_failure_current_mask")
     require(protocol, "#define V5_NATIVE_HAL_OWNER_VERSION 7u")
     require(protocol, "V5_NATIVE_HOME_CONFIG_HOME_READY")
-    require(command_ipc, "#define V5_COMMAND_GATE_IPC_VERSION 5u")
+    require(command_ipc, "#define V5_COMMAND_GATE_IPC_VERSION 6u")
     require(command_ipc, "V5_COMMAND_GATE_IPC_OP_PROBE_AXIS_SLAVE_MAPPING = 6")
+    require(command_ipc, "V5_COMMAND_GATE_IPC_OP_SETTINGS_AXIS_ZERO_LIVE_APPLY = 7")
     require(command_server, "load_axis_slave_mapping_status();")
     require(command_server, "g_axis_slave_mapping_applicable &&")
     require(command_server, '"ALL_HOME_AXIS_SLAVE_MAPPING_INVALID"')
@@ -252,8 +255,9 @@ def main() -> int:
     require(hal, "v5-native-hal-owner.home-rtcp-ack-transaction")
     require(hal, "motion.v5-bus-home-failed-joint")
     require(owner, "home_config_valid(joint) = g_home_stage[joint].home_ready ? 1 : 0;")
-    require(command_server, "project_native_bus_mapping(")
-    require(command_server, "records[axis->status_slot].home_ready = axis->bus_zero_evidence_known ? 1 : 0;")
+    require(command_server, "v5_native_home_mapping_project(")
+    require(home_mapping, "v5_native_home_mapping_project(")
+    require(home_mapping, "record->home_ready = axis->bus_zero_evidence_known ? 1 : 0;")
     projection_failure = command_server.split(
         "if (g_axis_slave_mapping_applicable && g_axis_slave_mapping_valid &&", 1
     )[1].split("if (!v5_linuxcncrsh_gate_preconnect", 1)[0]

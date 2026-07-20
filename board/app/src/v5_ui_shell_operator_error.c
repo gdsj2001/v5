@@ -72,12 +72,9 @@ void shell_show_operator_error_popup(const V5NativeOperatorErrorStatus *status)
         }
     }
     snprintf(
-        message, sizeof(message), "提示: %s\n\n原因: %s%s%s%s\n\n下一步: %s",
+        message, sizeof(message), "提示: %s\n\n原因: %s\n\n下一步: %s",
         status->title_cn,
         status->reason_cn,
-        strcmp(status->source_id, "NATIVE_UNKNOWN") == 0 && status->fingerprint[0] ? "（参考编号: " : "",
-        strcmp(status->source_id, "NATIVE_UNKNOWN") == 0 ? status->fingerprint : "",
-        strcmp(status->source_id, "NATIVE_UNKNOWN") == 0 && status->fingerprint[0] ? "）" : "",
         status->next_cn);
     (void)v5_ui_first_frame_guard_set_label_text(
         &g_operator_error_frame_guard,

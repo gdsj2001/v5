@@ -260,6 +260,41 @@ def write_text_atomic(path: Path, text: str) -> None:
     tmp.replace(path)
 
 
+def snapshot_axis_zero_persistence() -> Dict[str, str]:
+    if not contract.SETTINGS_RUNTIME_JSON.is_file() or not contract.RUNTIME_SETTINGS_INI.is_file():
+        raise DriveActionError(
+            "SETTINGS_AXIS_ZERO_PERSISTENCE_SNAPSHOT_MISSING",
+            "设0前持久owner不完整，不能建立可回滚快照。",
+            {"settings_runtime_json": str(contract.SETTINGS_RUNTIME_JSON),
+             "runtime_ini": str(contract.RUNTIME_SETTINGS_INI)},
+        )
+    return {
+        "settings_runtime_json": contract.SETTINGS_RUNTIME_JSON.read_text(encoding="utf-8"),
+        "runtime_ini": contract.RUNTIME_SETTINGS_INI.read_text(encoding="utf-8", errors="ignore"),
+    }
+
+
+def restore_axis_zero_persistence(snapshot: Dict[str, str]) -> Dict[str, Any]:
+    settings_text = snapshot.get("settings_runtime_json") if isinstance(snapshot, dict) else None
+    ini_text = snapshot.get("runtime_ini") if isinstance(snapshot, dict) else None
+    if not isinstance(settings_text, str) or not isinstance(ini_text, str):
+        raise DriveActionError(
+            "SETTINGS_AXIS_ZERO_ROLLBACK_SNAPSHOT_INVALID",
+            "设0回滚快照无效，保持Machine Off。", snapshot)
+    payload = json.loads(settings_text)
+    validate_settings_runtime_drive_only(payload)
+    write_text_atomic(contract.RUNTIME_SETTINGS_INI, ini_text)
+    write_text_atomic(contract.SETTINGS_RUNTIME_JSON, settings_text)
+    context.runtime_ini_sections_cache.pop(str(contract.RUNTIME_SETTINGS_INI), None)
+    context.settings_runtime_cache = payload
+    return {
+        "ok": True,
+        "code": "SETTINGS_AXIS_ZERO_PERSISTENCE_ROLLED_BACK",
+        "settings_runtime_json": str(contract.SETTINGS_RUNTIME_JSON),
+        "runtime_ini": str(contract.RUNTIME_SETTINGS_INI),
+    }
+
+
 def update_runtime_ini_raw_limits(axis: str, axis_index: int,
                                   old_zero_physical: float,
                                   new_zero_physical: float,
@@ -441,7 +476,7 @@ def persist_axis_zero_model(runtime: Dict[str, Any],
     new_zero_model.update({
         "source": "settings_axis_zero",
         "apply_route": "drive_actual_position_read_then_disk_zero_and_raw_limit_save",
-        "apply_state": "count_domain_zero_saved_pending_final_restart",
+        "apply_state": "count_domain_zero_saved_restart_required",
         "captured_at": now_utc(),
         "position_count_source": "drive.read_actual_position",
         "actual_counts": current_counts,

@@ -7,6 +7,7 @@
 #include "v5_linuxcncrsh_client.h"
 #include "v5_jog_watchdog.h"
 #include "v5_native_axis_zero_position.h"
+#include "v5_native_axis_zero_live.h"
 #include "v5_native_first_point.h"
 #include "v5_native_home.h"
 #include "v5_native_home_mapping.h"
@@ -97,99 +98,6 @@ static void load_axis_slave_mapping_status(void)
             : (g_axis_slave_mapping_valid
                 ? "BUS_HOME_MAPPING_VALID"
                 : "BUS_HOME_MAPPING_INVALID"));
-}
-
-static int project_native_bus_mapping(
-    const V5NativeMotionParameters *parameters,
-    char *code,
-    size_t code_cap)
-{
-    unsigned int index;
-    unsigned int expected_active_mask = 0U;
-    unsigned int home_ready_mask = 0U;
-    unsigned int commit_seq;
-    const unsigned int full_mask = (1U << V5_NATIVE_HOME_JOINT_COUNT) - 1U;
-    V5NativeHomeConfigRecord records[V5_NATIVE_HOME_JOINT_COUNT];
-    V5NativeHalOwnerResponse response;
-    if (!parameters || parameters->driver_mode != V5_NATIVE_DRIVER_MODE_BUS ||
-        !parameters->mapping_generation) {
-        snprintf(code, code_cap, "%s", "NATIVE_BUS_MAPPING_NOT_RESIDENT");
-        return 0;
-    }
-    memset(records, 0, sizeof(records));
-    for (index = 0U; index < V5_NATIVE_HOME_JOINT_COUNT; ++index) {
-        records[index].joint = index;
-        records[index].status_slot = index;
-        records[index].slave_position = UINT32_MAX;
-    }
-    for (index = 0U; index < V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT; ++index) {
-        const V5NativeMotionAxisParameters *axis = &parameters->axes[index];
-        if (!axis->active) continue;
-        if (axis->status_slot >= V5_NATIVE_HOME_JOINT_COUNT ||
-            !axis->slave_mapping_known ||
-            axis->slave_position >= V5_NATIVE_HOME_JOINT_COUNT ||
-            !isfinite(axis->positioning_resolution_units) ||
-            axis->positioning_resolution_units <= 0.0 ||
-            (expected_active_mask & (1U << axis->status_slot))) {
-            snprintf(code, code_cap, "NATIVE_BUS_AXIS_%c_MAPPING_FAILED", axis->axis ? axis->axis : '?');
-            return 0;
-        }
-        records[axis->status_slot].active = 1U;
-        records[axis->status_slot].axis_code = (unsigned int)(unsigned char)axis->axis;
-        records[axis->status_slot].slave_position = axis->slave_position;
-        records[axis->status_slot].mapping_generation = parameters->mapping_generation;
-        records[axis->status_slot].home_ready = axis->bus_zero_evidence_known ? 1 : 0;
-        records[axis->status_slot].zero_counts =
-            axis->bus_zero_evidence_known ? axis->bus_zero_counts : 0.0;
-        records[axis->status_slot].counts_per_unit =
-            axis->bus_zero_evidence_known
-                ? axis->bus_counts_per_unit
-                : 1.0 / axis->positioning_resolution_units;
-        if (!isfinite(records[axis->status_slot].zero_counts) ||
-            !isfinite(records[axis->status_slot].counts_per_unit) ||
-            records[axis->status_slot].counts_per_unit <= 0.0) {
-            snprintf(code, code_cap, "NATIVE_BUS_AXIS_%c_SCALE_FAILED", axis->axis ? axis->axis : '?');
-            return 0;
-        }
-        expected_active_mask |= 1U << axis->status_slot;
-        if (records[axis->status_slot].home_ready) {
-            home_ready_mask |= 1U << axis->status_slot;
-        }
-    }
-    if (expected_active_mask != full_mask ||
-        v5_native_hal_owner_exchange(
-            V5_NATIVE_HAL_OWNER_OP_HOME_STATUS, 0U, 100U,
-            &response) != V5_NATIVE_HAL_OWNER_CLIENT_OK) {
-        snprintf(code, code_cap, "%s", "NATIVE_HOME_CONFIG_TABLE_INCOMPLETE");
-        return 0;
-    }
-    commit_seq = response.home_config_commit_seq + 1U;
-    if (!commit_seq) commit_seq = 1U;
-    for (index = 0U; index < V5_NATIVE_HOME_JOINT_COUNT; ++index) {
-        records[index].expected_active_mask = expected_active_mask;
-        records[index].commit_seq = commit_seq;
-        if (v5_native_hal_owner_stage_home_joint(
-                &records[index], index + 1U == V5_NATIVE_HOME_JOINT_COUNT,
-                100U, &response) != V5_NATIVE_HAL_OWNER_CLIENT_OK) {
-            snprintf(code, code_cap, "NATIVE_HOME_JOINT_%u_CONFIG_FAILED", index);
-            return 0;
-        }
-    }
-    if (!response.home_config_readback_valid ||
-        response.home_config_mask != home_ready_mask ||
-        response.home_config_active_mask != expected_active_mask ||
-        response.home_mapping_generation != parameters->mapping_generation ||
-        response.home_config_commit_seq != commit_seq ||
-        !response.status_home_router_mapping_valid ||
-        response.status_home_router_mapping_generation != parameters->mapping_generation ||
-        response.status_home_router_active_mask != expected_active_mask ||
-        response.status_home_router_commit_seq != commit_seq ||
-        response.status_home_router_rejected_commit_seq == commit_seq) {
-        snprintf(code, code_cap, "%s", "NATIVE_BUS_MAPPING_READBACK_MISMATCH");
-        return 0;
-    }
-    snprintf(code, code_cap, "%s", "NATIVE_BUS_MAPPING_PROJECTED");
-    return 1;
 }
 
 static void publish_home_progress(const V5NativeHomeProgress *progress, void *user_data)
@@ -756,6 +664,64 @@ static void execute_settings_axis_commit(
     }
 }
 
+static void execute_settings_axis_zero_live_apply(
+    const V5CommandGateIpcRequestFrame *frame,
+    V5CommandGateIpcResponseFrame *response)
+{
+    V5NativeAxisZeroLiveResult result;
+    char reject_reason[64];
+    v5_native_axis_zero_live_result_init(&result);
+    reject_reason[0] = '\0';
+    if (!v5_command_gate_validate_envelope(
+            frame, V5_COMMAND_GATE_IPC_OP_SETTINGS_AXIS_ZERO_LIVE_APPLY,
+            reject_reason, sizeof(reject_reason)) ||
+        !frame->text_value[0] ||
+        !memchr(frame->settings_axis, '\0', sizeof(frame->settings_axis)) ||
+        !frame->settings_axis[0] || frame->settings_axis[1] ||
+        frame->index_value < 0 ||
+        frame->index_value >= (int32_t)V5_NATIVE_MOTION_HOME_JOINT_COUNT) {
+        response->send_status = V5_COMMAND_GATE_SEND_INVALID;
+        v5_command_gate_response_copy_text(
+            response->readback_code, sizeof(response->readback_code),
+            reject_reason[0] ? reject_reason : "SETTINGS_AXIS_ZERO_LIVE_BAD_REQUEST");
+        return;
+    }
+    linuxcncrsh_lock();
+    if (v5_drive_write_window_blocks_kind(V5_COMMAND_START)) {
+        linuxcncrsh_unlock();
+        response->send_status = V5_COMMAND_GATE_SEND_INVALID;
+        v5_command_gate_response_copy_text(
+            response->readback_code, sizeof(response->readback_code),
+            "DRIVE_WRITE_WINDOW_ACTIVE");
+        return;
+    }
+    (void)v5_native_axis_zero_live_apply(
+        &g_linuxcncrsh_config,
+        g_ini_path,
+        g_settings_project_root,
+        g_settings_runtime_path,
+        g_pulse_contract_path,
+        &g_motion_parameters,
+        frame->settings_axis[0],
+        (unsigned int)frame->index_value,
+        frame->axis_value,
+        &result);
+    linuxcncrsh_unlock();
+    v5_command_gate_response_fill_safety(response);
+    response->zero_commit_seq = result.commit_seq;
+    response->zero_display_verified = result.display_verified ? 1 : 0;
+    response->zero_mcs_position = result.mcs_position;
+    response->zero_tolerance_units = result.tolerance_units;
+    response->zero_previous_mcs_position = result.previous_mcs_position;
+    response->settings_restart_pending = result.display_verified ? 1 : 0;
+    response->send_status = result.display_verified
+        ? V5_COMMAND_GATE_SEND_SENT
+        : V5_COMMAND_GATE_SEND_INVALID;
+    response->executed = result.display_verified ? 1 : 0;
+    v5_command_gate_response_copy_text(
+        response->readback_code, sizeof(response->readback_code), result.code);
+}
+
 static void handle_frame(const V5CommandGateIpcRequestFrame *request, V5CommandGateIpcResponseFrame *response)
 {
     char reject_reason[64];
@@ -861,6 +827,10 @@ static void handle_frame(const V5CommandGateIpcRequestFrame *request, V5CommandG
     }
     if (request->op == V5_COMMAND_GATE_IPC_OP_SETTINGS_AXIS_COMMIT) {
         execute_settings_axis_commit(request, response);
+        return;
+    }
+    if (request->op == V5_COMMAND_GATE_IPC_OP_SETTINGS_AXIS_ZERO_LIVE_APPLY) {
+        execute_settings_axis_zero_live_apply(request, response);
         return;
     }
     response->send_status = V5_COMMAND_GATE_SEND_INVALID;
@@ -984,8 +954,8 @@ int main(int argc, char **argv)
                 motion_code);
     }
     if (g_axis_slave_mapping_applicable && g_axis_slave_mapping_valid &&
-        !project_native_bus_mapping(
-            &g_motion_parameters, motion_code, sizeof(motion_code))) {
+        !v5_native_home_mapping_project(
+            &g_motion_parameters, 0, motion_code, sizeof(motion_code))) {
         g_axis_slave_mapping_status_available = 1;
         g_axis_slave_mapping_valid = 0;
         g_axis_slave_mapping_generation = 0U;

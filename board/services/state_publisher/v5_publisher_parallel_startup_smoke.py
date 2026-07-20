@@ -47,14 +47,17 @@ def start_body(text: str) -> str:
 
 
 def audit_sources(texts: dict[str, str]) -> None:
-    for path in INIT_FILES:
+    for index, path in enumerate(INIT_FILES):
         body = start_body(texts[str(path)])
         assert "setsid taskset -c 1 nice -n" in body, f"PARALLEL_SPAWN_MISSING:{path.name}"
-        assert "spawned pid=" in body, f"SPAWN_ACTUAL_MISSING:{path.name}"
+        expected_log = "spawned pid=" if index == 0 else "spawn requested launcher_pid="
+        assert expected_log in body, f"SPAWN_ACTUAL_MISSING:{path.name}"
         assert "sleep " not in body, f"START_SLEEP_RESURRECTED:{path.name}"
         assert "while " not in body, f"START_POLL_RESURRECTED:{path.name}"
+    assert "WcsLifecycleLock" in texts[str(STATE_ROOT / "v5_wcs_status_publisher.py")]
+    assert "acquire_state_lifecycle_lock" in texts[str(STATE_ROOT / "v5_state_publisher_main.c")]
     for path in INIT_FILES[1:]:
-        assert "printf '%s %s\\n' \"$pid\" \"$pid_start\"" in texts[str(path)], f"PID_START_TICKS_MISSING:{path.name}"
+        assert "printf '%s %s\\n' \"$pid\" \"$pid_start\"" not in start_body(texts[str(path)]), f"INIT_PID_OWNER_REMAINED:{path.name}"
     position = texts[str(INIT_FILES[0])]
     assert "wait_position_hal_ready" not in position, "POSITION_HAL_PREPROBE_RESURRECTED"
     assert "position_block_matches_owner" not in start_body(position), "POSITION_BLOCK_WAIT_RESURRECTED"
@@ -99,12 +102,15 @@ def audit_sources(texts: dict[str, str]) -> None:
     for token in ("inotify_init1", "inotify_add_watch", "select.poll", "publisher exited before UI barrier"):
         assert token in boot, f"UI_EVENT_GATE_MISSING:{token}"
     assert 'rsplit(")", 1)[1].split()[19]' in boot, "PID_REUSE_START_TICKS_GATE_MISSING"
-    assert 'accept_identity("position"' in boot, "POSITION_UNIQUE_WRITER_GATE_MISSING"
+    assert 'accept_identity("position"' in boot, "POSITION_LIFECYCLE_OWNER_GATE_MISSING"
     assert '"--bus-path", str(BUS_STATUS_PATH)' in boot, "POSITION_BUS_PATH_IDENTITY_MISSING"
     assert "import fcntl" not in boot, "PYTHON_FCNTL_RESURRECTED"
     assert "ctypes.CDLL(None, use_errno=True).flock" in boot, "LIBC_FLOCK_GATE_MISSING"
-    assert 'if ready and checker is current_pre_ui_inputs' in boot, "FINAL_UNIQUE_RECHECK_MISSING"
+    assert 'if ready and checker is current_pre_ui_inputs' in boot, "FINAL_IDENTITY_RECHECK_MISSING"
     assert "publisher_identities(cache, unique, expected_ini)" in boot, "EXPECTED_INI_CHAIN_MISSING"
+    assert "exact_processes" not in boot, "GLOBAL_PROC_UNIQUENESS_SCAN_REMAINED"
+    for token in ("POSITION_LOCK", "WCS_LOCK", "STATE_LOCK"):
+        assert token in boot, f"PUBLISHER_LIFECYCLE_LOCK_MISSING:{token}"
     assert "validate_final_publisher_barrier(" in boot, "FINAL_PUBLISHER_BARRIER_MISSING"
     assert '"schema": FAILURE_SCHEMA' in boot, "STRUCTURED_UI_FAILURE_MISSING"
 
@@ -316,23 +322,23 @@ def with_fnv_crc(boot, fmt, values, crc_index, suffix):
     return fmt.pack(*values)
 
 
-def position_lock_smoke(boot) -> None:
+def publisher_lock_smoke(boot) -> None:
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "position.lock"; path.write_text("owner\n", encoding="ascii")
         calls = []
         def held(fd, operation):
             calls.append(operation); ctypes.set_errno(errno.EAGAIN); return -1
-        boot.require_position_lock_held(path, held)
+        boot.require_lifecycle_lock_held(path, "position", held)
         assert calls == [2 | 4], "CONTENDED_POSITION_LOCK_NOT_ACCEPTED"
         calls.clear()
         def unheld(fd, operation):
             calls.append(operation); ctypes.set_errno(0); return 0
-        try: boot.require_position_lock_held(path, unheld)
+        try: boot.require_lifecycle_lock_held(path, "position", unheld)
         except boot.ReadyError as exc: assert "not held" in str(exc)
         else: raise AssertionError("UNHELD_POSITION_LOCK_FALSE_READY")
         assert calls == [2 | 4, 8], "UNHELD_POSITION_LOCK_NOT_RELEASED"
         def broken(_fd, _operation): ctypes.set_errno(errno.EPERM); return -1
-        try: boot.require_position_lock_held(path, broken)
+        try: boot.require_lifecycle_lock_held(path, "position", broken)
         except boot.ReadyError as exc: assert f"errno={errno.EPERM}" in str(exc)
         else: raise AssertionError("POSITION_LOCK_BACKEND_ERROR_FALSE_READY")
 
@@ -453,6 +459,16 @@ def block_validation_smoke(boot) -> None:
             struct.pack_into("<I", mismatch, 28, 0)
             crc = binascii.crc32(mismatch[:24]); crc = binascii.crc32(mismatch[32:], crc) & 0xFFFFFFFF
             struct.pack_into("<I", mismatch, 28, crc); boot.STATE_PATH.write_bytes(mismatch)
+            assert boot.current_pre_ui_inputs()[0]["state"] is not None
+            wrong_lineage = bytearray(state); struct.pack_into("<I", wrong_lineage, 48, 88)
+            struct.pack_into("<I", wrong_lineage, 28, 0)
+            crc = binascii.crc32(wrong_lineage[:24]); crc = binascii.crc32(wrong_lineage[32:], crc) & 0xFFFFFFFF
+            struct.pack_into("<I", wrong_lineage, 28, crc); boot.STATE_PATH.write_bytes(wrong_lineage)
+            assert boot.current_pre_ui_inputs()[0]["state"] is None
+            future_generation = bytearray(state); struct.pack_into("<Q", future_generation, 64, 2)
+            struct.pack_into("<I", future_generation, 28, 0)
+            crc = binascii.crc32(future_generation[:24]); crc = binascii.crc32(future_generation[32:], crc) & 0xFFFFFFFF
+            struct.pack_into("<I", future_generation, 28, crc); boot.STATE_PATH.write_bytes(future_generation)
             assert boot.current_pre_ui_inputs()[0]["state"] is None
             boot.STATE_PATH.write_bytes(state)
 
@@ -510,11 +526,10 @@ def block_validation_smoke(boot) -> None:
 
     assert boot.cpu_lists_are_cpu1(["1", "1"])
     assert not boot.cpu_lists_are_cpu1(["1", "0"])
-    originals = (boot.proc_start_ticks, boot.require_cpu1, boot.exact_processes)
+    originals = (boot.proc_start_ticks, boot.require_cpu1)
     try:
         boot.proc_start_ticks = lambda pid: "101"
         boot.require_cpu1 = lambda pid: None
-        boot.exact_processes = lambda argv, binary=False: [7]
         assert boot.accept_identity("test", 7, "101", ["daemon"], [["daemon"]], {}, True)
         try: boot.accept_identity("test", 7, "100", ["daemon"], [["daemon"]], {}, True)
         except boot.ReadyError as exc: assert "start" in str(exc)
@@ -529,18 +544,13 @@ def block_validation_smoke(boot) -> None:
         else: raise AssertionError("POSITION_WRITER_IDENTITY_CHANGE_FALSE_READY")
         bus = ["publisher", "--ini", "/opt/8ax/v5/linuxcnc/ini/v5_bus.ini"]
         pulse = ["publisher", "--ini", "/opt/8ax/v5/linuxcnc/ini/v5_pulse.ini"]
-        boot.exact_processes = lambda argv, binary=False: [7]
         assert boot.accept_identity("wcs", 7, "101", bus, [bus], {}, True)
         assert not boot.accept_identity("wcs", 7, "101", pulse, [bus], {}, True)
         try: boot.accept_identity("wcs", 7, "101", pulse, [pulse], {"wcs": (7, "101", tuple(bus))}, False)
         except boot.ReadyError as exc: assert "changed" in str(exc)
         else: raise AssertionError("BUS_PULSE_OWNER_CONFLICT_FALSE_READY")
-        boot.exact_processes = lambda argv, binary=False: [7, 8]
-        try: boot.accept_identity("test", 7, "101", ["daemon"], [["daemon"]], {}, True)
-        except boot.ReadyError as exc: assert "unique" in str(exc)
-        else: raise AssertionError("DUPLICATE_WRITER_FALSE_READY")
     finally:
-        boot.proc_start_ticks, boot.require_cpu1, boot.exact_processes = originals
+        boot.proc_start_ticks, boot.require_cpu1 = originals
 
 
 def mutation_smoke(texts: dict[str, str]) -> None:
@@ -580,6 +590,7 @@ def posix_inotify_smoke(boot) -> None:
 def main() -> int:
     paths = list(INIT_FILES) + [
         STATE_ROOT / "v5_wcs_status_publisher.py",
+        STATE_ROOT / "v5_state_publisher_main.c",
         UI_ROOT / "init.d/v5-ui-relay",
         UI_ROOT / "v5_ui_boot_ready.py",
     ]
@@ -589,7 +600,7 @@ def main() -> int:
     behavior_smoke(boot)
     final_barrier_smoke(boot)
     failure_payload_smoke(boot)
-    position_lock_smoke(boot)
+    publisher_lock_smoke(boot)
     block_validation_smoke(boot)
     posix_inotify_smoke(boot)
     mutation_smoke(texts)

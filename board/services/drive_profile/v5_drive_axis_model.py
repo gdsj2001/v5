@@ -5,6 +5,7 @@ import re
 from typing import Any, Dict, List, Tuple
 
 import v5_drive_bus_contract as contract
+from v5_command_gate_zero_client import apply_axis_zero_live
 from v5_drive_bus_contract import DriveActionError, axis_unit, finite_float, now_utc
 from v5_drive_parameter_table import read_parameter_tsv
 from v5_drive_runtime_store import (
@@ -12,9 +13,11 @@ from v5_drive_runtime_store import (
     load_settings_runtime,
     persist_axis_zero_model,
     read_runtime_ini_sections,
+    restore_axis_zero_persistence,
     runtime_ini_joint_index,
     runtime_ini_value,
     saved_zero_counts,
+    snapshot_axis_zero_persistence,
 )
 from v5_drive_sdo import parse_slave_identity, read_command, read_resident_snapshot, select_profile
 
@@ -310,33 +313,77 @@ def axis_zero_verify(request: Dict[str, Any], timeout_s: float) -> Dict[str, Any
             "SETTINGS_AXIS_ZERO_RUN_ID_REQUIRED",
             "BUS 设零缺少本次 action run_id，拒绝保存不可关联的零点。",
             {"axis": axis})
-    disk_write = persist_axis_zero_model(
-        runtime, axis, axis_index, captured_counts, counts_per_unit,
-        scale_evidence, capture_read_evidence,
-        zero_run_id=zero_run_id)
-    axis_after, _ = find_runtime_axis(runtime, axis)
-    saved_counts = saved_zero_counts(axis_after)
-    current_counts, verify_read_evidence = current_axis_counts(axis_after, timeout_s, slave_position)
-    current_physical = current_counts / counts_per_unit
-    saved_physical = saved_counts / counts_per_unit
-    delta = abs(current_physical - saved_physical)
-    ok = delta <= tolerance
-    code = "SETTINGS_AXIS_ZERO_ENCODER_MATCH" if ok else "SETTINGS_AXIS_ZERO_ENCODER_MISMATCH"
-    message = "%s轴设0校验%s：已先写入本次硬盘零位；当前编码器 %.6f %s，resident 新零位 %.6f %s，差值 %.6f %s，容差 %.3f %s。" % (
-        axis,
-        "成功" if ok else "失败",
-        current_physical,
-        unit,
-        saved_physical,
-        unit,
-        delta,
-        unit,
-        tolerance,
-        unit,
-    )
+    persistence_snapshot = snapshot_axis_zero_persistence()
+    disk_write: Dict[str, Any] = {}
+    verify_read_evidence: Dict[str, Any] = {}
+    live_apply: Dict[str, Any] = {}
+    persistence_touched = False
+    live_attempted = False
+    try:
+        persistence_touched = True
+        disk_write = persist_axis_zero_model(
+            runtime, axis, axis_index, captured_counts, counts_per_unit,
+            scale_evidence, capture_read_evidence,
+            zero_run_id=zero_run_id)
+        axis_after, _ = find_runtime_axis(runtime, axis)
+        saved_counts = saved_zero_counts(axis_after)
+        current_counts, verify_read_evidence = current_axis_counts(axis_after, timeout_s, slave_position)
+        current_physical = current_counts / counts_per_unit
+        saved_physical = saved_counts / counts_per_unit
+        delta = abs(current_physical - saved_physical)
+        if delta > tolerance:
+            raise DriveActionError(
+                "SETTINGS_AXIS_ZERO_ENCODER_MISMATCH",
+                "%s轴设0失败：当前编码器与本次硬盘零位差值超过 %.3f %s。" %
+                (axis, tolerance, unit),
+                {"current_encoder_physical": current_physical,
+                 "saved_zero_physical": saved_physical,
+                 "delta_physical": delta, "unit": unit},
+            )
+        live_attempted = True
+        live_apply = apply_axis_zero_live(
+            axis, slave_position, zero_run_id, min(max(timeout_s, 0.5), 3.0))
+        if not live_apply.get("ok"):
+            raise DriveActionError(
+                str(live_apply.get("code") or "SETTINGS_AXIS_ZERO_LIVE_APPLY_FAILED"),
+                "%s轴硬盘零点已写入但机械坐标实时重算失败，正在回滚。" % axis,
+                live_apply,
+            )
+    except Exception as exc:
+        rollback: Dict[str, Any] = {}
+        rollback_live: Dict[str, Any] = {}
+        rollback_error = ""
+        if persistence_touched:
+            try:
+                rollback = restore_axis_zero_persistence(persistence_snapshot)
+                runtime.clear()
+                runtime.update(load_settings_runtime())
+                if live_attempted:
+                    rollback_live = apply_axis_zero_live(
+                        axis, slave_position, zero_run_id + "-rollback",
+                        min(max(timeout_s, 0.5), 3.0),
+                        float(live_apply.get("previous_mcs_position") or 0.0))
+                    if not rollback_live.get("ok"):
+                        rollback_error = str(rollback_live.get("code") or "live_rollback_failed")
+            except Exception as rollback_exc:
+                rollback_error = "%s: %s" % (type(rollback_exc).__name__, rollback_exc)
+        code = exc.code if isinstance(exc, DriveActionError) else "SETTINGS_AXIS_ZERO_LIVE_TRANSACTION_FAILED"
+        message_cn = exc.message_cn if isinstance(exc, DriveActionError) else "设0实时事务失败，已尝试恢复动作前零点。"
+        detail = exc.detail if isinstance(exc, DriveActionError) else "%s: %s" % (type(exc).__name__, exc)
+        if rollback_error:
+            code = "SETTINGS_AXIS_ZERO_ROLLBACK_FAILED_MACHINE_OFF_REQUIRED"
+            message_cn = "%s轴设0失败且回滚未完成，必须保持Machine Off并彻底重启。" % axis
+        raise DriveActionError(code, message_cn, {
+            "cause": detail,
+            "persistence_rollback": rollback,
+            "live_rollback": rollback_live,
+            "rollback_error": rollback_error,
+        })
+    message = "%s轴设0成功：机械坐标已按新零点实时重算为 %.6f %s；硬盘软限位已更新，其余较重参数将在彻底重启后生效。" % (
+        axis, float(live_apply.get("mcs_position") or 0.0), unit)
     return {
-        "ok": ok,
-        "code": code,
+        "ok": True,
+        "code": "SETTINGS_COUNT_DOMAIN_ZERO_LIVE_APPLIED_RESTART_REQUIRED",
         "message_cn": message,
         "display_message_cn": message,
         "axis": axis,
@@ -360,6 +407,7 @@ def axis_zero_verify(request: Dict[str, Any], timeout_s: float) -> Dict[str, Any
         "disk_write": disk_write,
         "capture_encoder_read": capture_read_evidence,
         "encoder_read": verify_read_evidence,
+        "live_apply": live_apply,
         "write_executed": True,
         "drive_write_executed": False,
         "motion_executed": False,
@@ -367,8 +415,16 @@ def axis_zero_verify(request: Dict[str, Any], timeout_s: float) -> Dict[str, Any
         "restart_deferred": True,
         "raw_limit_disk_saved": True,
         "raw_limit_live_verified": False,
-        "raw_runtime_zero_verified": False,
-        "memory_zero_verified": False,
+        "raw_runtime_zero_verified": True,
+        "memory_zero_verified": True,
+        "zero_display_verified": True,
+        "pending_runtime_proof": True,
+        "canonical_clean_restart_required": True,
+        "commit_seq": int(live_apply.get("commit_seq") or 0),
+        "fresh_previous_mcs_position": float(
+            live_apply.get("previous_mcs_position") or 0.0),
+        "fresh_mcs_position": float(live_apply.get("mcs_position") or 0.0),
+        "fresh_mcs_tolerance": float(live_apply.get("tolerance_units") or 0.0),
     }
 
 

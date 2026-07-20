@@ -106,6 +106,20 @@ def main() -> int:
     assert other_waiting_mode_request.display_mode == DISPLAY_TOP_STATUS
     mcode = error_map.translate("Unknown m code used: M123")
     assert mcode.matched and "M123" in mcode.reason_cn
+    for axis in "abcuvwxyz":
+        model_axis = error_map.translate(f"Bad character '{axis}' used")
+        assert model_axis.matched
+        assert model_axis.source_id == "INTERPRETER_FMT_8B4A844A680D"
+        assert model_axis.title_cn == "程序与运动模型不匹配"
+        assert f"{axis.upper()}轴" in model_axis.reason_cn
+        assert "切换运动模型" in model_axis.next_cn
+    unsupported_word = error_map.translate("Bad character 'n' used")
+    assert unsupported_word.matched
+    assert unsupported_word.title_cn == "程序格式错误"
+    assert "地址字n" in unsupported_word.reason_cn
+    non_printable = error_map.translate("Bad character '\\001' used")
+    assert non_printable.matched
+    assert non_printable.source_id == "INTERPRETER_FMT_E58D8E4C4581"
     internal = error_map.translate("invalid V5 wrapped rotary target state")
     assert internal.matched and "旋转轴" in internal.reason_cn
     native_parameter = error_map.translate("Named hal parameter #<axis> not found")
@@ -125,6 +139,8 @@ def main() -> int:
     unknown = error_map.translate("LinuxCNC private process /internal/path failed")
     assert not unknown.matched
     assert unknown.display_mode == DISPLAY_POPUP
+    assert "尚未登记" in unknown.reason_cn
+    assert "参考编号" not in unknown.reason_cn
     assert_safe(unknown)
     alias = translate_internal_alias("POWER_ON_HOME_REQUIRED")
     assert alias.matched and alias.title_cn == "需要回零"

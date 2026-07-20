@@ -422,6 +422,7 @@ add_library(v5_command_gate_core STATIC
     ../services/command_gate/v5_native_home.c
     ../services/command_gate/v5_native_home_runtime_owner.c
     ../services/command_gate/v5_native_home_mapping.c
+    ../services/command_gate/v5_native_axis_zero_live.c
     ../services/command_gate/v5_native_axis_zero_position.c
     ../services/command_gate/v5_native_motion_parameters.c
     ../services/command_gate/v5_native_readback.c
@@ -734,6 +735,18 @@ add_executable(v5_command_gate_server
 )
 
 target_link_libraries(v5_command_gate_server PRIVATE v5_command_gate_core Threads::Threads)
+
+if(UNIX)
+    add_executable(v5_native_axis_zero_live_smoke
+        ../services/command_gate/v5_native_axis_zero_live.c
+        ../services/command_gate/v5_native_axis_zero_live_smoke.c
+    )
+    target_include_directories(v5_native_axis_zero_live_smoke PRIVATE
+        "${V5_ROOT_DIR}/services/command_gate"
+        "${V5_ROOT_DIR}/../linuxcnc/src/hal/user_comps"
+    )
+    target_link_libraries(v5_native_axis_zero_live_smoke PRIVATE m)
+endif()
 
 add_executable(v5_command_gate_drive_window
     ../services/command_gate/v5_command_gate_drive_window.c

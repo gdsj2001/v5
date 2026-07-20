@@ -1,5 +1,6 @@
 #include "v5_native_home_mapping.h"
 
+#include "v5_native_hal_owner_client.h"
 #include "v5_parameter_owner_map.h"
 #include "v5_settings_apply_internal.h"
 #include "v5_settings_parameter_store.h"
@@ -214,5 +215,98 @@ int v5_native_home_runtime_owner_load_bus(
     snprintf(parameters->pulse_contract_status, sizeof(parameters->pulse_contract_status), "%s", "not_applicable");
     parameters->runtime_owner_loaded = 1;
     snprintf(code, code_cap, "%s", "BUS_HOME_RUNTIME_OWNER_LOADED");
+    return 1;
+}
+
+int v5_native_home_mapping_project(
+    const V5NativeMotionParameters *parameters,
+    unsigned int *commit_seq_out,
+    char *code,
+    size_t code_cap)
+{
+    unsigned int index;
+    unsigned int expected_active_mask = 0U;
+    unsigned int home_ready_mask = 0U;
+    unsigned int commit_seq;
+    const unsigned int full_mask = (1U << V5_NATIVE_HOME_JOINT_COUNT) - 1U;
+    V5NativeHomeConfigRecord records[V5_NATIVE_HOME_JOINT_COUNT];
+    V5NativeHalOwnerResponse response;
+    if (commit_seq_out) *commit_seq_out = 0U;
+    if (!parameters || parameters->driver_mode != V5_NATIVE_DRIVER_MODE_BUS ||
+        !parameters->mapping_generation) {
+        snprintf(code, code_cap, "%s", "NATIVE_BUS_MAPPING_NOT_RESIDENT");
+        return 0;
+    }
+    memset(records, 0, sizeof(records));
+    for (index = 0U; index < V5_NATIVE_HOME_JOINT_COUNT; ++index) {
+        records[index].joint = index;
+        records[index].status_slot = index;
+        records[index].slave_position = UINT32_MAX;
+    }
+    for (index = 0U; index < V5_NATIVE_MOTION_PARAMETER_AXIS_COUNT; ++index) {
+        const V5NativeMotionAxisParameters *axis = &parameters->axes[index];
+        V5NativeHomeConfigRecord *record;
+        if (!axis->active) continue;
+        if (axis->status_slot >= V5_NATIVE_HOME_JOINT_COUNT ||
+            !axis->slave_mapping_known ||
+            axis->slave_position >= V5_NATIVE_HOME_JOINT_COUNT ||
+            !isfinite(axis->positioning_resolution_units) ||
+            axis->positioning_resolution_units <= 0.0 ||
+            (expected_active_mask & (1U << axis->status_slot))) {
+            snprintf(code, code_cap, "NATIVE_BUS_AXIS_%c_MAPPING_FAILED", axis->axis ? axis->axis : '?');
+            return 0;
+        }
+        record = &records[axis->status_slot];
+        record->active = 1U;
+        record->axis_code = (unsigned int)(unsigned char)axis->axis;
+        record->slave_position = axis->slave_position;
+        record->mapping_generation = parameters->mapping_generation;
+        record->home_ready = axis->bus_zero_evidence_known ? 1 : 0;
+        record->zero_counts = axis->bus_zero_evidence_known ? axis->bus_zero_counts : 0.0;
+        record->counts_per_unit = axis->bus_zero_evidence_known
+            ? axis->bus_counts_per_unit
+            : 1.0 / axis->positioning_resolution_units;
+        if (!isfinite(record->zero_counts) ||
+            !isfinite(record->counts_per_unit) || record->counts_per_unit <= 0.0) {
+            snprintf(code, code_cap, "NATIVE_BUS_AXIS_%c_SCALE_FAILED", axis->axis ? axis->axis : '?');
+            return 0;
+        }
+        expected_active_mask |= 1U << axis->status_slot;
+        if (record->home_ready) home_ready_mask |= 1U << axis->status_slot;
+    }
+    if (expected_active_mask != full_mask ||
+        v5_native_hal_owner_exchange(
+            V5_NATIVE_HAL_OWNER_OP_HOME_STATUS, 0U, 100U,
+            &response) != V5_NATIVE_HAL_OWNER_CLIENT_OK) {
+        snprintf(code, code_cap, "%s", "NATIVE_HOME_CONFIG_TABLE_INCOMPLETE");
+        return 0;
+    }
+    commit_seq = response.home_config_commit_seq + 1U;
+    if (!commit_seq) commit_seq = 1U;
+    for (index = 0U; index < V5_NATIVE_HOME_JOINT_COUNT; ++index) {
+        records[index].expected_active_mask = expected_active_mask;
+        records[index].commit_seq = commit_seq;
+        if (v5_native_hal_owner_stage_home_joint(
+                &records[index], index + 1U == V5_NATIVE_HOME_JOINT_COUNT,
+                100U, &response) != V5_NATIVE_HAL_OWNER_CLIENT_OK) {
+            snprintf(code, code_cap, "NATIVE_HOME_JOINT_%u_CONFIG_FAILED", index);
+            return 0;
+        }
+    }
+    if (!response.home_config_readback_valid ||
+        response.home_config_mask != home_ready_mask ||
+        response.home_config_active_mask != expected_active_mask ||
+        response.home_mapping_generation != parameters->mapping_generation ||
+        response.home_config_commit_seq != commit_seq ||
+        !response.status_home_router_mapping_valid ||
+        response.status_home_router_mapping_generation != parameters->mapping_generation ||
+        response.status_home_router_active_mask != expected_active_mask ||
+        response.status_home_router_commit_seq != commit_seq ||
+        response.status_home_router_rejected_commit_seq == commit_seq) {
+        snprintf(code, code_cap, "%s", "NATIVE_BUS_MAPPING_READBACK_MISMATCH");
+        return 0;
+    }
+    if (commit_seq_out) *commit_seq_out = commit_seq;
+    snprintf(code, code_cap, "%s", "NATIVE_BUS_MAPPING_PROJECTED");
     return 1;
 }

@@ -227,11 +227,13 @@ int main(void)
     snprintf(status.source_id, sizeof(status.source_id), "%s", "NATIVE_UNKNOWN");
     snprintf(status.fingerprint, sizeof(status.fingerprint), "%s", "A1B2C3D4E5F6");
     snprintf(status.title_cn, sizeof(status.title_cn), "%s", "控制系统错误");
-    snprintf(status.reason_cn, sizeof(status.reason_cn), "%s", "控制系统返回未识别错误");
+    snprintf(status.reason_cn, sizeof(status.reason_cn), "%s", "控制系统收到尚未登记的异常，当前操作结果不可信");
     snprintf(status.next_cn, sizeof(status.next_cn), "%s", "停止当前操作并联系维护人员");
     shell_show_operator_error_popup(&status);
     text = shell_operator_error_popup_text();
-    if (!strstr(text, "参考编号: A1B2C3D4E5F6") || strstr(text, "NATIVE_UNKNOWN")) {
+    if (!strstr(text, "尚未登记的异常") ||
+        strstr(text, "参考编号") || strstr(text, "A1B2C3D4E5F6") ||
+        strstr(text, "NATIVE_UNKNOWN")) {
         return 7;
     }
 

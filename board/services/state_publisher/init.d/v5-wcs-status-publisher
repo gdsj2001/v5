@@ -25,6 +25,7 @@ ulimit -l unlimited 2>/dev/null || true
 
 DAEMON=/usr/libexec/8ax/v5_wcs_status_publisher.py
 PIDFILE=/run/8ax/v5_wcs_status_publisher.pid
+LOCKFILE=/run/8ax/v5_wcs_status_publisher.lock
 LOGFILE=/run/8ax/v5_wcs_status_publisher.log
 STATUS_PATH=${V5_WCS_STATUS_PATH:-/dev/shm/v5_native_wcs_status.bin}
 LINUXCNC_INI=${V5_LINUXCNC_INI:-/opt/8ax/v5/linuxcnc/ini/v5_bus.ini}
@@ -63,14 +64,16 @@ process_start_ticks() {
 }
 
 read_pid_record() {
-  [ -r "$PIDFILE" ] || return 1
+  [ -r "$PIDFILE" ] && [ -r "$LOCKFILE" ] || return 1
   read -r pid pid_start extra <"$PIDFILE" || return 1
-  [ -n "$pid" ] && [ -n "$pid_start" ] && [ -z "${extra:-}" ]
+  [ -n "$pid" ] && [ -n "$pid_start" ] && [ -z "${extra:-}" ] || return 1
+  [ "$(cat "$PIDFILE" 2>/dev/null || true)" = "$(cat "$LOCKFILE" 2>/dev/null || true)" ]
 }
 
 is_running() {
   read_pid_record || return 1
-  [ "$(process_start_ticks "$pid" 2>/dev/null || true)" = "$pid_start" ]
+  [ "$(process_start_ticks "$pid" 2>/dev/null || true)" = "$pid_start" ] || return 1
+  ! flock -n "$LOCKFILE" true 2>/dev/null
 }
 
 start_service() {
@@ -83,14 +86,12 @@ start_service() {
   require_tool_mmap
   command -v taskset >/dev/null 2>&1
   command -v nice >/dev/null 2>&1
+  command -v flock >/dev/null 2>&1
   mkdir -p /run/8ax /run/8ax_v5_product_ui
   rm -f "$PIDFILE" "$STATUS_PATH" "$MODAL_TOOL_PATH" "$OPERATOR_ERROR_PATH" $RETIRED_STATUS_PATHS
   cd "$LINUXCNC_PY_HOME"
   setsid taskset -c 1 nice -n "$NON_MICROKERNEL_NICE" "$DAEMON" --path "$STATUS_PATH" --modal-tool-path "$MODAL_TOOL_PATH" --operator-error-path "$OPERATOR_ERROR_PATH" --operator-error-map "$OPERATOR_ERROR_MAP" --ini "$LINUXCNC_INI" --interval-ms "$INTERVAL_MS" >>"$LOGFILE" 2>&1 &
-  pid=$!
-  pid_start=$(process_start_ticks "$pid") || { kill "$pid" 2>/dev/null || true; return 1; }
-  printf '%s %s\n' "$pid" "$pid_start" >"$PIDFILE"
-  echo "v5_wcs_status_publisher spawned pid=$pid start_ticks=$pid_start path=$STATUS_PATH modal_tool_path=$MODAL_TOOL_PATH operator_error_path=$OPERATOR_ERROR_PATH interval_ms=$INTERVAL_MS home=$LINUXCNC_PY_HOME tool_mmap=$TOOL_MMAP_PATH"
+  echo "v5_wcs_status_publisher spawn requested launcher_pid=$! path=$STATUS_PATH modal_tool_path=$MODAL_TOOL_PATH operator_error_path=$OPERATOR_ERROR_PATH interval_ms=$INTERVAL_MS home=$LINUXCNC_PY_HOME tool_mmap=$TOOL_MMAP_PATH"
 }
 
 stop_service() {

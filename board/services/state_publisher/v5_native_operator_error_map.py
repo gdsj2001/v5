@@ -15,7 +15,7 @@ from typing import Iterable, List, Pattern, Tuple
 
 
 EXPECTED_SOURCE_COUNT = 556
-EXPECTED_INVENTORY_SHA256 = "0ba0c29826e96f54f574a8db9c6319d29f79c08082cacf170ea8bf4163e7b175"
+EXPECTED_INVENTORY_SHA256 = "44ce11b982b987f133591d04a5b99442f78da25e305248e03544b16532ee6933"
 OPERATOR_ERROR_MAGIC = 0x564F4552
 OPERATOR_ERROR_VERSION = 2
 OPERATOR_ERROR_PREFIX_STRUCT = struct.Struct('<IIIIIIQQ64s24s96s384s256s')
@@ -33,6 +33,7 @@ GROUP_PRESENTATION = {
     "PROGRAM_GEOMETRY": ("程序几何错误", "检查当前高亮程序行的平面、圆弧、循环和终点参数，修正后重试"),
     "PROGRAM_FLOW": ("程序流程错误", "检查子程序、O字、调用、返回和重映射关系，修正后重新打开程序"),
     "PROGRAM_FILE": ("程序文件错误", "检查程序文件是否存在、可读且有正确结束标记，修正后重新打开"),
+    "PROGRAM_MODEL": ("程序与运动模型不匹配", "选择与当前运动模型匹配的程序；或在系统设置中切换运动模型、保存并重启后再运行"),
     "MOTION_HOME": ("需要回零", "选择机械全轴并完成本次开机回零，再重新执行当前动作"),
     "MOTION_LIMIT": ("轴限位阻止运动", "停止当前动作，检查目标位置、软限位和限位开关，确认后再运动"),
     "MOTION_JOG": ("点动未执行", "松开点动按钮，检查轴选择、锁定和运行状态后重新点动"),
@@ -63,6 +64,16 @@ SOURCE_CAPTURE_DISPLAY_MODE = {
         "TASK_FMT_71643D285DD0",
         ("EMC_TASK_PLAN_INIT",),
     ): DISPLAY_LOG_ONLY,
+}
+
+_AXIS_WORDS = "abcuvwxyz"
+SOURCE_CAPTURE_PRESENTATION = {
+    ("INTERPRETER_FMT_8B4A844A680D", (axis,)): (
+        GROUP_PRESENTATION["PROGRAM_MODEL"][0],
+        f"当前运动模型不支持程序中的{axis.upper()}轴指令",
+        GROUP_PRESENTATION["PROGRAM_MODEL"][1],
+    )
+    for axis in _AXIS_WORDS
 }
 
 ALIAS_PRESENTATION = {
@@ -497,25 +508,29 @@ class NativeOperatorErrorMap:
             match = entry.regex.fullmatch(normalized)
             if not match:
                 continue
-            title_cn, next_cn = GROUP_PRESENTATION[entry.handling_group]
+            capture_key = (
+                entry.source_id,
+                tuple(_normalize(value) for value in match.groups()),
+            )
+            presentation = SOURCE_CAPTURE_PRESENTATION.get(capture_key)
+            if presentation:
+                title_cn, reason_cn, next_cn = presentation
+            else:
+                title_cn, next_cn = GROUP_PRESENTATION[entry.handling_group]
             if entry.handling_group == "INTERNAL":
                 reason_cn = "控制系统内部状态异常"
             elif entry.handling_group == "PASSTHROUGH":
                 return NativeOperatorMessage(
                     "NATIVE_UNKNOWN",
                     "控制系统错误",
-                    "控制系统返回未识别错误",
+                    "控制系统收到尚未登记的异常，当前操作结果不可信",
                     "停止当前操作并联系维护人员",
                     DISPLAY_POPUP,
                     fingerprint,
                     False,
                 )
-            else:
+            elif not presentation:
                 reason_cn = _render_template(entry.reason_cn, match.groups())
-            capture_key = (
-                entry.source_id,
-                tuple(_normalize(value) for value in match.groups()),
-            )
             return NativeOperatorMessage(
                 entry.source_id,
                 _sanitize_operator_text(title_cn),
@@ -534,7 +549,7 @@ class NativeOperatorErrorMap:
         return NativeOperatorMessage(
             "NATIVE_UNKNOWN",
             "控制系统错误",
-            "控制系统返回未识别错误",
+            "控制系统收到尚未登记的异常，当前操作结果不可信",
             "停止当前操作并联系维护人员",
             DISPLAY_POPUP,
             fingerprint,

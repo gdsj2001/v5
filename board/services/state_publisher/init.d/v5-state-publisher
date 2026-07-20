@@ -25,6 +25,7 @@ ulimit -l unlimited 2>/dev/null || true
 
 DAEMON=/usr/libexec/8ax/v5_state_publisher
 PIDFILE=/run/8ax/v5_state_publisher.pid
+LOCKFILE=/run/8ax/v5_state_publisher.lock
 LOGFILE=/run/8ax/v5_state_publisher.log
 STATUS_PATH=${V5_STATUS_SHM_PATH:-/dev/shm/v3_status_shm}
 INTERVAL_MS=${V5_STATE_PUBLISHER_INTERVAL_MS:-33}
@@ -41,14 +42,16 @@ process_start_ticks() {
 }
 
 read_pid_record() {
-  [ -r "$PIDFILE" ] || return 1
+  [ -r "$PIDFILE" ] && [ -r "$LOCKFILE" ] || return 1
   read -r pid pid_start extra <"$PIDFILE" || return 1
-  [ -n "$pid" ] && [ -n "$pid_start" ] && [ -z "${extra:-}" ]
+  [ -n "$pid" ] && [ -n "$pid_start" ] && [ -z "${extra:-}" ] || return 1
+  [ "$(cat "$PIDFILE" 2>/dev/null || true)" = "$(cat "$LOCKFILE" 2>/dev/null || true)" ]
 }
 
 is_running() {
   read_pid_record || return 1
-  [ "$(process_start_ticks "$pid" 2>/dev/null || true)" = "$pid_start" ]
+  [ "$(process_start_ticks "$pid" 2>/dev/null || true)" = "$pid_start" ] || return 1
+  ! flock -n "$LOCKFILE" true 2>/dev/null
 }
 
 start_service() {
@@ -59,13 +62,11 @@ start_service() {
   test -x "$DAEMON"
   command -v taskset >/dev/null 2>&1
   command -v nice >/dev/null 2>&1
+  command -v flock >/dev/null 2>&1
   mkdir -p /run/8ax
   rm -f "$PIDFILE"
   setsid taskset -c 1 nice -n "$NON_MICROKERNEL_NICE" "$DAEMON" --path "$STATUS_PATH" --interval-ms "$INTERVAL_MS" >>"$LOGFILE" 2>&1 &
-  pid=$!
-  pid_start=$(process_start_ticks "$pid") || { kill "$pid" 2>/dev/null || true; return 1; }
-  printf '%s %s\n' "$pid" "$pid_start" >"$PIDFILE"
-  echo "v5_state_publisher spawned pid=$pid start_ticks=$pid_start path=$STATUS_PATH interval_ms=$INTERVAL_MS"
+  echo "v5_state_publisher spawn requested launcher_pid=$! path=$STATUS_PATH interval_ms=$INTERVAL_MS"
 }
 
 stop_service() {

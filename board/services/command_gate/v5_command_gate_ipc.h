@@ -13,7 +13,7 @@ extern "C" {
 
 #define V5_COMMAND_GATE_SOCKET_PATH "/run/8ax_v5_product_ui/v5_command_gate.sock"
 #define V5_COMMAND_GATE_IPC_MAGIC 0x56354347u
-#define V5_COMMAND_GATE_IPC_VERSION 5u
+#define V5_COMMAND_GATE_IPC_VERSION 6u
 #define V5_COMMAND_GATE_TEXT_CAP 512u
 #define V5_COMMAND_GATE_SECONDARY_TEXT_CAP 128u
 #define V5_COMMAND_GATE_MODE_CAP 64u
@@ -36,6 +36,7 @@ typedef enum V5CommandGateIpcOp {
     V5_COMMAND_GATE_IPC_OP_PROBE_HOME_STATUS = 4,
     V5_COMMAND_GATE_IPC_OP_PROBE_ESTOP_CLEAN = 5,
     V5_COMMAND_GATE_IPC_OP_PROBE_AXIS_SLAVE_MAPPING = 6,
+    V5_COMMAND_GATE_IPC_OP_SETTINGS_AXIS_ZERO_LIVE_APPLY = 7,
 } V5CommandGateIpcOp;
 
 typedef struct V5CommandGateIpcRequestFrame {
@@ -116,6 +117,11 @@ typedef struct V5CommandGateIpcResponseFrame {
     char home_mode[8];
     char home_current_axes[16];
     char home_direct_reason[64];
+    uint32_t zero_commit_seq;
+    int32_t zero_display_verified;
+    double zero_mcs_position;
+    double zero_tolerance_units;
+    double zero_previous_mcs_position;
 } V5CommandGateIpcResponseFrame;
 
 typedef struct V5CommandGateHomeStatus {

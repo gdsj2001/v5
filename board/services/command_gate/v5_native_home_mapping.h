@@ -22,6 +22,12 @@ int v5_native_home_runtime_owner_load_bus(
     char *code,
     size_t code_cap);
 
+int v5_native_home_mapping_project(
+    const V5NativeMotionParameters *parameters,
+    unsigned int *commit_seq_out,
+    char *code,
+    size_t code_cap);
+
 #ifdef __cplusplus
 }
 #endif

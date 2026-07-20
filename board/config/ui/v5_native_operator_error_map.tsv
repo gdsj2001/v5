@@ -135,7 +135,7 @@ INTERPRETER_FMT_869E814C3BE2	ERS:rs274ngc/interp_queue.cc	"BUG: cutter compensat
 INTERPRETER_FMT_86A9E52600FF	CHKS:rs274ngc/interp_check.cc	"R value must be within 0..360 with M19"	"R值必须在0..360以内与M19"	PROGRAM_SYNTAX
 INTERPRETER_FMT_8942150CB366	ERS:rs274ngc/interp_cycles.cc	"Spindle state unknown for %s"	"在 %s 中主轴状态未知"	SPINDLE
 INTERPRETER_FMT_8AA0F3370F7D	CHKS:rs274ngc/interp_internal.cc	"Cannot use polar coordinate on a machine lacking X or Y axes"	"不能在缺少X或Y轴的机器上使用极坐标"	PROGRAM_SYNTAX
-INTERPRETER_FMT_8B4A844A680D	CHKS:rs274ngc/interp_read.cc	"Bad character '\\%03o' usedBad character '%c' used"	"程序中使用了无效字符"	PROGRAM_SYNTAX
+INTERPRETER_FMT_8B4A844A680D	CHKS:rs274ngc/interp_read.cc	"Bad character '%c' used"	"程序中使用了当前控制配置不支持的地址字%c"	PROGRAM_SYNTAX
 INTERPRETER_FMT_8D63EF50D667	CHKS:rs274ngc/interp_convert.cc	"Cannot restore context from invalid stack frame - missing M70/M73?"	"无法从无效堆栈帧恢复上下文 - 缺少M70 / M73?"	PROGRAM_SYNTAX
 INTERPRETER_FMT_8D9768FFF837	ERS:rs274ngc/interp_convert.cc	"invalid P-word with M66"	"M66没有有效的P字"	PROGRAM_SYNTAX
 INTERPRETER_FMT_8FD779E796EE	CHKS:rs274ngc/interp_convert.cc	"Invalid spindle ($) number in M51 command"	"M51指令中的主轴($) 编号无效"	SPINDLE

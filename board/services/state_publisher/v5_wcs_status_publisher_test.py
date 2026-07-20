@@ -129,11 +129,34 @@ def check_atomic_shm_write_needs_no_fsync() -> None:
         assert path.read_bytes() == b'fresh-native-status'
 
 
+def check_lifecycle_lock_owns_singleton() -> None:
+    with tempfile.TemporaryDirectory(prefix='v5_wcs_lock_') as temporary:
+        lock_path = str(Path(temporary) / 'wcs.lock')
+        pidfile_path = str(Path(temporary) / 'wcs.pid')
+        operations = []
+        original_start_ticks = publisher.process_start_ticks
+        publisher.process_start_ticks = lambda pid=None: '101'
+        try:
+            def flock_fn(_fd, operation):
+                operations.append(operation)
+                return 0
+            owner = publisher.WcsLifecycleLock(
+                lock_path, pidfile_path, flock_fn).acquire()
+            assert Path(lock_path).read_text(encoding='ascii') == owner.record
+            assert Path(pidfile_path).read_text(encoding='ascii') == owner.record
+            owner.release()
+            assert operations == [2 | 4, 8]
+            assert not Path(pidfile_path).exists()
+        finally:
+            publisher.process_start_ticks = original_start_ticks
+
+
 def main() -> int:
     check_resident_epoch_changes_only_with_table()
     check_slow_status_cadence()
     check_wcs_owner_has_no_position_hot_path()
     check_atomic_shm_write_needs_no_fsync()
+    check_lifecycle_lock_owns_singleton()
     print('V5_WCS_STATUS_PUBLISHER_TEST_OK')
     return 0
 
