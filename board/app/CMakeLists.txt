@@ -97,6 +97,7 @@ add_executable(v5_lvgl_shell
     src/v5_coordinate_digits.c
     src/v5_lvgl_headless.c
     src/v5_lvgl_remote_display.c
+    src/v5_lvgl_remote_display_capture.c
     src/v5_ui_first_frame_guard.c
     src/v5_lvgl_remote_input.c
     src/v5_remote_input_ipc.c
@@ -108,6 +109,7 @@ add_executable(v5_lvgl_shell
     src/v5_main_page_toolpath_primitives.c
     src/v5_main_page_toolpath_geometry.c
     src/v5_main_page_toolpath_program.c
+    src/v5_main_page_toolpath_raster.c
     src/v5_main_page_program_preview.c
     src/v5_main_page_input.c
     src/v5_main_page_override.c
@@ -168,6 +170,7 @@ add_executable(v5_program_page_double_click_smoke
     src/v5_coordinate_digits.c
     src/v5_lvgl_headless.c
     src/v5_lvgl_remote_display.c
+    src/v5_lvgl_remote_display_capture.c
     src/v5_ui_first_frame_guard.c
     src/v5_lvgl_remote_input.c
     src/v5_remote_input_ipc.c
@@ -179,6 +182,7 @@ add_executable(v5_program_page_double_click_smoke
     src/v5_main_page_toolpath_primitives.c
     src/v5_main_page_toolpath_geometry.c
     src/v5_main_page_toolpath_program.c
+    src/v5_main_page_toolpath_raster.c
     src/v5_main_page_program_preview.c
     src/v5_main_page_input.c
     src/v5_main_page_override.c
@@ -407,6 +411,7 @@ target_link_libraries(v5_position_status_publisher_smoke PRIVATE
 if(UNIX)
     add_executable(v5_position_status_publisher
         ../services/state_publisher/v5_position_status_publisher.c
+        ../services/state_publisher/v5_position_status_sampler.c
     )
     target_link_libraries(v5_position_status_publisher PRIVATE
         v5_position_status_publisher_core
@@ -560,6 +565,7 @@ add_executable(v5_main_page_actions_smoke
     src/v5_main_page_toolpath_primitives.c
     src/v5_main_page_toolpath_geometry.c
     src/v5_main_page_toolpath_program.c
+    src/v5_main_page_toolpath_raster.c
     src/v5_main_page_program_preview.c
     src/v5_main_page_input.c
     src/v5_main_page_override.c
@@ -629,6 +635,7 @@ add_executable(v5_main_page_smoke
     src/v5_main_page_toolpath_primitives.c
     src/v5_main_page_toolpath_geometry.c
     src/v5_main_page_toolpath_program.c
+    src/v5_main_page_toolpath_raster.c
     src/v5_main_page_program_preview.c
     src/v5_main_page_input.c
     src/v5_main_page_override.c
@@ -766,8 +773,12 @@ endif()
 
 add_executable(v5_command_gate_server
     ../services/command_gate/v5_command_gate_server.c
+    ../services/command_gate/v5_command_gate_server_runtime.c
+    ../services/command_gate/v5_command_gate_server_execute.c
+    ../services/command_gate/v5_command_gate_server_dispatch.c
     ../services/command_gate/v5_command_gate_server_io.c
     ../services/command_gate/v5_command_gate_server_response.c
+    ../services/command_gate/v5_command_gate_server_transport.c
     ../services/command_gate/v5_estop_clean_state.c
     ../services/command_gate/v5_drive_write_window.c
     src/v5_process_residency.c

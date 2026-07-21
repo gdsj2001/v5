@@ -96,6 +96,11 @@ int v5_main_page_internal_program_raster_pixel(
     const V5MainPage *page,
     int x,
     int y);
+void v5_main_page_internal_draw_program_raster(
+    const V5MainPage *page,
+    lv_draw_ctx_t *draw_ctx,
+    lv_coord_t x_offset,
+    lv_coord_t y_offset);
 
 lv_obj_t *v5_main_page_internal_create_toolpath_scene_layer(
     V5MainPage *page,
