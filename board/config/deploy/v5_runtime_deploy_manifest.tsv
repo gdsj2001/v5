@@ -14,6 +14,8 @@ binary	build/board/app/v5_command_gate_server	/usr/libexec/8ax/v5_command_gate_s
 binary	build/board/app/v5_command_gate_drive_window	/usr/libexec/8ax/v5_command_gate_drive_window	0755
 binary	build/board/app/v5_linuxcncrsh_golden_run	/usr/libexec/8ax/v5_linuxcncrsh_golden_run	0755
 script	services/ui/v5_remote_ui_relay.py	/usr/libexec/8ax/v5_remote_ui_relay.py	0755
+binary	build/board/app/v5_remote_ui_packer	/usr/libexec/8ax/v5_remote_ui_packer.so	0755
+module	services/ui/v5_remote_ui_native_packer.py	/usr/libexec/8ax/v5_remote_ui_native_packer.py	0644
 module	services/ui/v5_remote_ui_programs.py	/usr/libexec/8ax/v5_remote_ui_programs.py	0644
 script	services/ui/v5_ui_boot_ready.py	/usr/libexec/8ax/v5_ui_boot_ready.py	0755
 module	services/ui/v5_ui_main_cache_contract.py	/usr/libexec/8ax/v5_ui_main_cache_contract.py	0644

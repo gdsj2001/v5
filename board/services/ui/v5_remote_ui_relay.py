@@ -33,6 +33,7 @@ from v5_remote_ui_contract import (
 )
 from v5_remote_ui_protocol import frame_metadata, recv_ws_frame, send_ws_frame, ws_accept_value
 from v5_remote_ui_programs import MAX_GCODE_BYTES, ProgramApiError, ProgramFileService
+from v5_remote_ui_native_packer import NativeDirtyPacker
 from v5_remote_ui_shared_payload import (
     PreparedDirtyFrame,
     PreparedFullFrame,
@@ -208,7 +209,10 @@ class RemoteRelayHandler(BaseHTTPRequestHandler):
             "stride": self.state.stride,
             "view_only": not input_enabled,
             "input_enabled": input_enabled,
-            "system_metrics": system_metrics(),
+            "system_metrics": system_metrics(
+                self.state.display_cpu_metrics(),
+                sample_cpu_if_missing=False,
+            ),
             "program_api": "v5.remote_program.v1",
             "program_dir": str(self.program_service.root),
         })
@@ -603,7 +607,8 @@ def main() -> int:
     parser.add_argument("--program-root", default=os.environ.get("V5_GCODE_PROGRAM_ROOT", "/opt/8ax/v5/gcode/golden"))
     args = parser.parse_args()
 
-    state = FrameState(Path(args.run_dir), args.width, args.height, Path(args.ready_path))
+    state = FrameState(
+        Path(args.run_dir), args.width, args.height, NativeDirtyPacker(), Path(args.ready_path))
     dirty_reader = DirtyReader(state)
     dirty_reader.start()
     allow_networks = parse_allow_cidrs(args.allow_cidrs)

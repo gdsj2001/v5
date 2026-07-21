@@ -54,6 +54,11 @@ void v5_lvgl_remote_display_cache_invalidate(unsigned int slot);
 size_t v5_lvgl_remote_display_cache_budget_bytes(void);
 int v5_lvgl_remote_display_set_output_suppressed(int suppressed);
 int v5_lvgl_remote_display_output_suppressed(void);
+void v5_lvgl_remote_display_publish_cpu_metrics(
+    double cpu0_percent,
+    double cpu1_percent,
+    unsigned long long sample_generation,
+    unsigned long long sample_monotonic_ns);
 int v5_remote_frame_snapshot(V5RemoteFrameSnapshot *snapshot);
 int v5_remote_frame_ipc_pump(void);
 

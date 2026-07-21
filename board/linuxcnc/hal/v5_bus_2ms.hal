@@ -32,11 +32,28 @@ setp v5-bus-axis-router.wcp-red-den-02 [AXIS_C]LOAD_REV
 setp v5-bus-axis-router.wcp-raw-bits-00 [AXIS_A]WCHECKPOINT_COMMAND_RAW_BITS
 setp v5-bus-axis-router.wcp-raw-bits-01 [AXIS_B]WCHECKPOINT_COMMAND_RAW_BITS
 setp v5-bus-axis-router.wcp-raw-bits-02 [AXIS_C]WCHECKPOINT_COMMAND_RAW_BITS
+# The physical PDO envelope consumes the same runtime INI owners as motion.
+# It is transparent to valid trajectories and only shapes discontinuities.
+setp v5-bus-axis-router.joint-max-velocity-00 [JOINT_0]MAX_VELOCITY
+setp v5-bus-axis-router.joint-max-velocity-01 [JOINT_1]MAX_VELOCITY
+setp v5-bus-axis-router.joint-max-velocity-02 [JOINT_2]MAX_VELOCITY
+setp v5-bus-axis-router.joint-max-velocity-03 [JOINT_3]MAX_VELOCITY
+setp v5-bus-axis-router.joint-max-velocity-04 [JOINT_4]MAX_VELOCITY
+setp v5-bus-axis-router.joint-max-acceleration-00 [JOINT_0]MAX_ACCELERATION
+setp v5-bus-axis-router.joint-max-acceleration-01 [JOINT_1]MAX_ACCELERATION
+setp v5-bus-axis-router.joint-max-acceleration-02 [JOINT_2]MAX_ACCELERATION
+setp v5-bus-axis-router.joint-max-acceleration-03 [JOINT_3]MAX_ACCELERATION
+setp v5-bus-axis-router.joint-max-acceleration-04 [JOINT_4]MAX_ACCELERATION
+setp v5-bus-axis-router.joint-scale-00 [JOINT_0]SCALE
+setp v5-bus-axis-router.joint-scale-01 [JOINT_1]SCALE
+setp v5-bus-axis-router.joint-scale-02 [JOINT_2]SCALE
+setp v5-bus-axis-router.joint-scale-03 [JOINT_3]SCALE
+setp v5-bus-axis-router.joint-scale-04 [JOINT_4]SCALE
 loadrt bitslice names=j0-din,j1-din,j2-din,j3-din,j4-din personality=31,31,31,31,31
 loadrt mux2 count=1
 loadrt or2 count=2
 loadrt not count=1
-loadrt and2 count=1
+loadrt and2 count=6
 loadrt v5_safety_latch
 
 loadusr -W lcec_conf /opt/8ax/v5/linuxcnc/hal/ethercat-conf-2ms.xml
@@ -86,6 +103,14 @@ addf and2.0 servo-thread
 addf mux2.0 servo-thread
 addf motion-command-handler servo-thread
 addf motion-controller servo-thread
+# Gate every physical drive enable in the realtime thread.  The safety latch
+# is evaluated earlier in the same cycle; these gates run after motion has
+# produced the amp requests and before cia402 builds the controlwords.
+addf and2.1 servo-thread
+addf and2.2 servo-thread
+addf and2.3 servo-thread
+addf and2.4 servo-thread
+addf and2.5 servo-thread
 addf cia402.0.write-all servo-thread
 addf cia402.1.write-all servo-thread
 addf cia402.2.write-all servo-thread
@@ -99,7 +124,8 @@ net v5-safety-reset v5-native-hal-owner.safety-reset => v5-safety-latch.0.reset
 net v5-safety-heartbeat v5-native-hal-owner.heartbeat => v5-safety-latch.0.heartbeat
 net v5-safety-estop-active v5-safety-latch.0.estop-active => v5-native-hal-owner.safety-estop-active motion.v5-bus-home-estop-active
 net v5-safety-actual-valid v5-native-hal-owner.safety-actual-valid => motion.v5-bus-home-safety-actual-valid
-net estop-loop v5-safety-latch.0.estop-ok => iocontrol.0.emc-enable-in
+net estop-loop v5-safety-latch.0.estop-ok => iocontrol.0.emc-enable-in \
+    and2.1.in1 and2.2.in1 and2.3.in1 and2.4.in1 and2.5.in1
 net v5-machine-enabled motion.motion-enabled => v5-native-hal-owner.machine-enabled motion.v5-bus-home-machine-enabled
 
 # Publish the backend contract once inside the resident native owner.  These
@@ -375,11 +401,16 @@ net j4-digital v5-bus-axis-router.joint-digital-inputs-04 => j4-din.in
 net j4-control cia402.4.controlword => v5-bus-axis-router.joint-controlword-04
 net j4-target cia402.4.drv-target-position => v5-bus-axis-router.joint-target-position-04
 
-net j0-enable joint.0.amp-enable-out => cia402.0.enable
-net j1-enable joint.1.amp-enable-out => cia402.1.enable
-net j2-enable joint.2.amp-enable-out => cia402.2.enable
-net j3-enable joint.3.amp-enable-out => cia402.3.enable
-net j4-enable joint.4.amp-enable-out => cia402.4.enable
+net j0-enable-request joint.0.amp-enable-out => and2.1.in0
+net j1-enable-request joint.1.amp-enable-out => and2.2.in0
+net j2-enable-request joint.2.amp-enable-out => and2.3.in0
+net j3-enable-request joint.3.amp-enable-out => and2.4.in0
+net j4-enable-request joint.4.amp-enable-out => and2.5.in0
+net j0-enable and2.1.out => cia402.0.enable v5-bus-axis-router.joint-drive-enable-00
+net j1-enable and2.2.out => cia402.1.enable v5-bus-axis-router.joint-drive-enable-01
+net j2-enable and2.3.out => cia402.2.enable v5-bus-axis-router.joint-drive-enable-02
+net j3-enable and2.4.out => cia402.3.enable v5-bus-axis-router.joint-drive-enable-03
+net j4-enable and2.5.out => cia402.4.enable v5-bus-axis-router.joint-drive-enable-04
 net j0-pos-cmd joint.0.motor-pos-cmd => cia402.0.pos-cmd
 net j1-pos-cmd joint.1.motor-pos-cmd => cia402.1.pos-cmd
 net j2-pos-cmd joint.2.motor-pos-cmd => cia402.2.pos-cmd

@@ -105,6 +105,43 @@ def write_at(fd: int, payload: bytes, offset: int) -> None:
     os.write(fd, payload)
 
 
+def read_at(fd: int, size: int, offset: int) -> bytes:
+    if hasattr(os, "pread"):
+        return os.pread(fd, size, offset)
+    os.lseek(fd, offset, os.SEEK_SET)
+    return os.read(fd, size)
+
+
+class ReferenceDirtyPacker:
+    def close(self) -> None:
+        return None
+
+    def pack(self, framebuffer_fd: int, frame_size: int, width: int, height: int,
+             stride: int, rects: list[dict]) -> bytes:
+        payload = bytearray()
+        for rect in rects:
+            x = int(rect["x"])
+            y = int(rect["y"])
+            w = int(rect["w"])
+            h = int(rect["h"])
+            if x < 0 or y < 0 or w <= 0 or h <= 0 or x + w > width or y + h > height:
+                raise ValueError("invalid reference dirty rect")
+            row_bytes = w * 4
+            for row in range(h):
+                offset = ((y + row) * stride) + (x * 4)
+                if offset + row_bytes > frame_size:
+                    raise ValueError("reference dirty rect exceeds framebuffer")
+                part = read_at(framebuffer_fd, row_bytes, offset)
+                if len(part) != row_bytes:
+                    raise ValueError("short reference framebuffer read")
+                payload.extend(part)
+        return bytes(payload)
+
+
+def make_frame_state(relay_module, *args, **kwargs):
+    return relay_module.FrameState(*args, ReferenceDirtyPacker(), **kwargs)
+
+
 def import_relay_for_smoke():
     if os.name == "posix":
         import v5_remote_ui_relay
@@ -167,6 +204,16 @@ def check_proc_cpu_usage_snapshot() -> int:
         ):
             print("relay proc CPU delta is incorrect", second)
             return 10
+        display_sample = {
+            "cpu0_percent": 22.0,
+            "cpu1_percent": 24.0,
+            "cpu_sample_generation": 7,
+            "cpu_sample_monotonic_ns": 9000000000,
+        }
+        displayed = relay.system_metrics(display_sample, sample_cpu_if_missing=False)
+        if any(displayed.get(key) != value for key, value in display_sample.items()):
+            print("relay did not preserve the board display CPU sample", displayed)
+            return 10
     finally:
         support.cpu_samples_snapshot = previous_samples
         support.memory_used_total = previous_memory_reader
@@ -179,9 +226,11 @@ def check_proc_cpu_usage_snapshot() -> int:
 def check_refresh_commit_boundary() -> int:
     source_path = Path(__file__).resolve().parents[2] / "app" / "src" / "v5_lvgl_remote_display.c"
     source = source_path.read_text(encoding="utf-8")
+    capture_source = source_path.with_name("v5_lvgl_remote_display_capture.c").read_text(encoding="utf-8")
     toolpath_source = source_path.with_name("v5_main_page_toolpath_primitives.c").read_text(encoding="utf-8")
     toolpath_geometry_source = source_path.with_name("v5_main_page_toolpath_geometry.c").read_text(encoding="utf-8")
     toolpath_program_source = source_path.with_name("v5_main_page_toolpath_program.c").read_text(encoding="utf-8")
+    toolpath_raster_source = source_path.with_name("v5_main_page_toolpath_raster.c").read_text(encoding="utf-8")
     relay_source = Path(__file__).with_name("v5_remote_ui_relay.py").read_text(encoding="utf-8")
     state_source = Path(__file__).with_name("v5_remote_ui_state.py").read_text(encoding="utf-8")
     compose_start = source.index("static void compose_area")
@@ -205,13 +254,25 @@ def check_refresh_commit_boundary() -> int:
         print("composed refresh does not publish exactly one frame with its dirty rect list")
         return 22
     required_dirty_list = [
-        "V5_REMOTE_DIRTY_RECT_CAPACITY",
-        "g_pending_dirty_rects",
-        "add_pending_dirty_area(x1, y1, x2, y2);",
+        "#define V5_LOCAL_DIRTY_RECT_CAPACITY 16U",
+        "#define V5_REMOTE_DIRTY_RECT_CAPACITY 64U",
+        "#define V5_REMOTE_FRAME_INTERVAL_NS 100000000ULL",
+        "g_local_dirty_rects",
+        "g_remote_dirty_rects",
+        "g_remote_next_publish_ns",
+        "v5_lvgl_remote_display_capture_add_dirty_area(",
     ]
     if any(token not in source for token in required_dirty_list):
         print("bounded dirty rect list is missing")
         return 23
+    local_write = "v5_lvgl_remote_display_capture_write_row("
+    remote_gate = "now_ns < g_remote_next_publish_ns"
+    if local_write not in commit_body or remote_gate not in commit_body:
+        print("local 30 Hz write or remote 100 ms gate is missing")
+        return 59
+    if commit_body.index(local_write) >= commit_body.index(remote_gate):
+        print("remote cadence gate throttles the physical framebuffer")
+        return 60
     retired_union_tokens = ["accumulate_dirty_area", "g_pending_dirty_x1", "g_pending_dirty_x2"]
     if any(token in source for token in retired_union_tokens):
         print("retired single bounding-rect accumulator is still present")
@@ -267,14 +328,15 @@ def check_refresh_commit_boundary() -> int:
         "clip_program_segment",
         "v5_main_page_internal_program_raster_pixel",
     ]
-    if any(token not in toolpath_program_source for token in raster_cache_tokens):
+    raster_sources = toolpath_program_source + toolpath_raster_source
+    if any(token not in raster_sources for token in raster_cache_tokens):
         print("generation raster cache or tile-diff refresh is incomplete")
         return 39
     retired_draw_time_raster_tokens = [
         "raster_program_polyline",
         "raster_program_segment",
     ]
-    if any(token in toolpath_program_source for token in retired_draw_time_raster_tokens):
+    if any(token in raster_sources for token in retired_draw_time_raster_tokens):
         print("retired draw-time pixel line traversal remains")
         return 40
     hide_unproven_start = toolpath_geometry_source.index("void v5_main_page_internal_hide_toolpath_unproven_geometry")
@@ -297,24 +359,20 @@ def check_refresh_commit_boundary() -> int:
     dirty_end = state_source.index("    def publish_dirty(", dirty_start)
     dirty_body = state_source[dirty_start:dirty_end]
     required_dirty_snapshot = [
-        "spans: list[tuple[int, int]] = []",
-        "mapped_view = memoryview(mapped)",
         "flock(fd, LOCK_SH)",
-        "spans.append((start, end))",
-        "spans.append((src_start, src_end))",
-        'payload = b"".join(mapped_view[start:end] for start, end in spans)',
+        "payload = self._dirty_packer.pack(",
+        'self.mark_metric("dirty_payload_native_frames")',
         "return payload, rects",
     ]
     retired_dirty_copy = [
-        "payload = bytearray(total_bytes)",
-        "payload_view = memoryview(payload)",
-        "payload_parts: list[memoryview] = []",
-        "return PayloadViews(payload_parts, total_bytes), rects",
+        "mapped_view = memoryview(mapped)",
+        'payload = b"".join(',
+        "for row in range(h):",
     ]
     if any(token not in dirty_body for token in required_dirty_snapshot) or any(
         token in dirty_body for token in retired_dirty_copy
     ):
-        print("dirty payload is not an owned framebuffer snapshot")
+        print("dirty payload does not use the single native owned-snapshot path")
         return 32
     if '"frame_id": self.state.frame_id' not in relay_source:
         print("remote info does not expose the upstream frame id for stale-stream recovery")
@@ -325,16 +383,18 @@ def check_refresh_commit_boundary() -> int:
 def check_startup_lifecycle_sources() -> int:
     source_path = Path(__file__).resolve().parents[2] / "app" / "src" / "v5_lvgl_remote_display.c"
     source = source_path.read_text(encoding="utf-8")
+    capture_source = source_path.with_name("v5_lvgl_remote_display_capture.c").read_text(encoding="utf-8")
     bootstrap_source = source_path.with_name("v5_ui_shell_bootstrap.c").read_text(encoding="utf-8")
     relay_source = Path(__file__).with_name("v5_remote_ui_relay.py").read_text(encoding="utf-8")
     init_source = Path(__file__).with_name("init.d").joinpath("v5-ui-relay").read_text(encoding="utf-8")
     framebuffer_fail_closed = (
-        "static int init_framebuffer(unsigned int width, unsigned int height)",
-        "if (!init_framebuffer(width, height))",
+        "int v5_lvgl_remote_display_capture_setup(unsigned int width, unsigned int height)",
+        "if (!v5_lvgl_remote_display_capture_setup(width, height))",
         "v5 physical framebuffer claim failed: framebuffer unavailable",
-        "!g_physical_framebuffer_claimed || !g_fb || g_fb_fd < 0",
+        "return v5_lvgl_remote_display_capture_available() &&",
     )
-    if any(token not in source for token in framebuffer_fail_closed):
+    display_sources = source + capture_source
+    if any(token not in display_sources for token in framebuffer_fail_closed):
         print("physical framebuffer startup is not fail-closed")
         return 95
     bootstrap_ready_gate = (
@@ -373,7 +433,7 @@ def check_full_frame_waits_for_commit(root: Path) -> int:
         return 0
     import fcntl
 
-    state = relay.FrameState(root / "flock", 4, 4)
+    state = make_frame_state(relay, root / "flock", 4, 4)
     write_framebuffer(state.framebuffer_path, state.width, state.height)
     writer_fd = os.open(state.framebuffer_path, os.O_RDWR)
     started = threading.Event()
@@ -416,7 +476,7 @@ def check_full_frame_waits_for_commit(root: Path) -> int:
 
 
 def check_dirty_payload_is_owned_snapshot(root: Path) -> int:
-    state = relay.FrameState(root / "dirty_snapshot", 4, 4)
+    state = make_frame_state(relay, root / "dirty_snapshot", 4, 4)
     write_framebuffer(state.framebuffer_path, state.width, state.height)
     event = {"frame_id": 2, "base_frame_id": 1, "x": 0, "y": 0, "w": 4, "h": 4}
     prepared = state.dirty_payload(event)
@@ -491,8 +551,10 @@ class ProducerTestState:
             settle_deadline = first_event_at + max(0.0, coalesce_seconds)
             if coalesce_deadline is not None:
                 settle_deadline = min(settle_deadline, max(first_event_at, float(coalesce_deadline)))
-            remaining = settle_deadline - time.monotonic()
-            if remaining > 0.0:
+            while True:
+                remaining = settle_deadline - time.monotonic()
+                if remaining <= 0.0:
+                    break
                 self.condition.wait(remaining)
             events = [dict(event) for event in self.events if int(event["frame_id"]) > frame_id]
         events.sort(key=lambda event: int(event["frame_id"]))
@@ -974,7 +1036,7 @@ def check_repair_frame_uses_existing_covering_delta() -> int:
     return 0
 
 
-def check_continuous_30hz_input_keeps_30hz_cadence() -> int:
+def check_continuous_30hz_input_is_coalesced_to_10hz() -> int:
     import v5_remote_ui_shared_payload as shared
     from v5_remote_ui_contract import STREAM_COALESCE_SECONDS
 
@@ -989,10 +1051,11 @@ def check_continuous_30hz_input_keeps_30hz_cadence() -> int:
     producer.start()
     producer.subscribe(1)
     started = time.monotonic()
-    expected_frames = 40
+    input_period_seconds = 1.0 / 30.0
+    expected_frames = 60
     try:
         for frame_id in range(2, 2 + expected_frames):
-            target = started + 0.005 + ((frame_id - 2) * STREAM_COALESCE_SECONDS)
+            target = started + 0.005 + ((frame_id - 2) * input_period_seconds)
             remaining = target - time.monotonic()
             if remaining > 0.0:
                 time.sleep(remaining)
@@ -1000,21 +1063,16 @@ def check_continuous_30hz_input_keeps_30hz_cadence() -> int:
                 {"frame_id": frame_id, "base_frame_id": frame_id - 1, "x": 0, "y": 0, "w": 1, "h": 1}
             )
         deadline = time.monotonic() + 0.25
-        while state.build_count < expected_frames and time.monotonic() < deadline:
+        while state.build_count < 18 and time.monotonic() < deadline:
             time.sleep(0.005)
         steady_build_times = state.build_times[1:]
-        minimum_steady_samples = int(expected_frames * 0.85)
-        if len(steady_build_times) < minimum_steady_samples:
-            print("continuous 30 Hz dirty input produced too few steady samples", state.build_count)
+        if len(steady_build_times) < 16 or len(steady_build_times) > 24:
+            print("continuous 30 Hz dirty input was not bounded near 10 Hz", state.build_count)
             return 58
         elapsed = max(0.001, steady_build_times[-1] - steady_build_times[0])
         cadence_hz = (len(steady_build_times) - 1) / elapsed
-        # Windows and shared CI runners are not real-time schedulers.  Keep this
-        # smoke focused on preventing material extra downsampling while the
-        # board profile remains the authority for the actual 30 Hz cadence.
-        minimum_cadence_hz = 1.0 / (STREAM_COALESCE_SECONDS * 1.15)
-        if cadence_hz < minimum_cadence_hz:
-            print("continuous 30 Hz dirty input was merged down below cadence", state.build_count, cadence_hz)
+        if cadence_hz < 8.0 or cadence_hz > 12.0:
+            print("continuous 30 Hz dirty input missed 10 Hz relay cadence", state.build_count, cadence_hz)
             return 58
     finally:
         producer.unsubscribe()
@@ -1148,8 +1206,8 @@ def check_frame_and_byte_budgets_repair_streams() -> int:
     import v5_remote_ui_shared_payload as shared
     from v5_remote_ui_contract import STREAM_COALESCE_SECONDS, STREAM_TARGET_FPS
 
-    if abs(STREAM_COALESCE_SECONDS - (1.0 / STREAM_TARGET_FPS)) > 1e-12 or STREAM_TARGET_FPS != 30:
-        print("shared payload history changed the 30 Hz stream cadence")
+    if abs(STREAM_COALESCE_SECONDS - (1.0 / STREAM_TARGET_FPS)) > 1e-12 or STREAM_TARGET_FPS != 10:
+        print("shared payload history changed the 10 Hz stream cadence")
         return 54
 
     def advance(producer, state, start: int, count: int) -> None:
@@ -1221,7 +1279,7 @@ def check_shared_payload_producer() -> int:
         check_slow_client_does_not_block_global_producer,
         check_lagging_clients_share_latest_full_repair,
         check_repair_frame_uses_existing_covering_delta,
-        check_continuous_30hz_input_keeps_30hz_cadence,
+        check_continuous_30hz_input_is_coalesced_to_10hz,
         check_expensive_build_uses_adaptive_backpressure,
         check_missing_history_uses_latest_full_repair,
         check_invalid_discontinuity_stays_fail_closed,
@@ -1262,7 +1320,7 @@ def check_ready_identity_cache(relay_module, root: Path) -> int:
         "baseline_markers": {"position": 10, "state": 11, "wcs": 12, "modal": 13},
         "final_markers": {"position": 20, "state": 21, "wcs": 22, "modal": 23},
     }
-    ready_state = relay_module.FrameState(
+    ready_state = make_frame_state(relay_module,
         root / "ready", 4, 4, proc_root=proc_root, boot_id_path=boot_id_path,
         process_pid=relay_pid)
     if ready_state.ui_ready():
@@ -1433,7 +1491,7 @@ def main() -> int:
         rc = check_dirty_payload_is_owned_snapshot(Path(tmp))
         if rc != 0:
             return rc
-        state = relay.FrameState(Path(tmp), 4, 4)
+        state = make_frame_state(relay, Path(tmp), 4, 4)
         write_framebuffer(state.framebuffer_path, state.width, state.height)
         normalization_calls = [0]
         original_normalize = state._dirty_geometry._non_overlapping_union_rects
@@ -1444,6 +1502,19 @@ def main() -> int:
 
         state._dirty_geometry._non_overlapping_union_rects = counted_normalize
         reader = relay.DirtyReader(state)
+        reader.handle_line("M 7 9000000000 22.000 24.000")
+        if state.display_cpu_metrics() != {
+            "cpu0_percent": 22.0,
+            "cpu1_percent": 24.0,
+            "cpu_sample_generation": 7,
+            "cpu_sample_monotonic_ns": 9000000000,
+        }:
+            print("dirty IPC did not preserve board display CPU metrics", state.display_cpu_metrics())
+            return 71
+        reader.handle_line("M 8 9000000001 nan 24.000")
+        if state.display_cpu_metrics().get("cpu_sample_generation") != 7:
+            print("dirty IPC accepted invalid display CPU metrics", state.display_cpu_metrics())
+            return 72
         reader.handle_line("2 1 2 0 0 1 1 2 2 1 1")
         batch = state.wait_dirty_batch_after(1, timeout=0.01, coalesce_seconds=0.0)
         if not batch or batch.get("stream_reset"):
@@ -1475,7 +1546,7 @@ def main() -> int:
         if normalization_calls[0] != 1:
             print("dirty batch geometry was normalized more than once", normalization_calls[0])
             return 61
-        overlap_state = relay.FrameState(Path(tmp) / "overlap", 8, 8)
+        overlap_state = make_frame_state(relay, Path(tmp) / "overlap", 8, 8)
         overlap = {
             "frame_id": 3,
             "base_frame_id": 2,
@@ -1493,7 +1564,7 @@ def main() -> int:
         ):
             print("overlapping dirty rects were double-counted or recopied", overlap_rects)
             return 59
-        multi_band_state = relay.FrameState(Path(tmp) / "multi_band", 4, 6)
+        multi_band_state = make_frame_state(relay, Path(tmp) / "multi_band", 4, 6)
         multi_band = {
             "frame_id": 4,
             "base_frame_id": 3,
@@ -1511,7 +1582,7 @@ def main() -> int:
         ]:
             print("multiple y bands were not merged horizontally", multi_band_rects)
             return 63
-        single_state = relay.FrameState(Path(tmp) / "single", 4, 4)
+        single_state = make_frame_state(relay, Path(tmp) / "single", 4, 4)
         single_reader = relay.DirtyReader(single_state)
         single_reader.handle_line("2 1 1 0 0 4 4")
         single_event = single_state.first_dirty_event()
@@ -1520,7 +1591,7 @@ def main() -> int:
         ):
             print("single-rect first-frame diagnostics lost canonical bounds", single_event)
             return 41
-        rejected_state = relay.FrameState(Path(tmp) / "rejected", 4, 4)
+        rejected_state = make_frame_state(relay, Path(tmp) / "rejected", 4, 4)
         rejected_reader = relay.DirtyReader(rejected_state)
         rejected_reader.handle_line("2 1 0 0 1 1")
         if rejected_state.wait_dirty_batch_after(1, timeout=0.001, coalesce_seconds=0.0) is not None:
@@ -1556,7 +1627,7 @@ def main() -> int:
                 for x in range(0, 44, 2)
             ],
         }
-        bounded_state = relay.FrameState(Path(tmp) / "bounded", 43, 9)
+        bounded_state = make_frame_state(relay, Path(tmp) / "bounded", 43, 9)
         write_framebuffer(bounded_state.framebuffer_path, bounded_state.width, bounded_state.height)
         prepared_bounded = bounded_state.dirty_payload(many_rects)
         if prepared_bounded is None:
@@ -1581,13 +1652,13 @@ def main() -> int:
         if not isinstance(cpu_samples, dict) or "pid" not in process or "threads" not in process:
             print("bad diagnostics samples", cpu_samples, process)
             return 13
-        gap_state = relay.FrameState(Path(tmp) / "gap", 4, 4)
+        gap_state = make_frame_state(relay, Path(tmp) / "gap", 4, 4)
         gap_state.publish_dirty({"frame_id": 4, "base_frame_id": 3, "x": 0, "y": 0, "w": 1, "h": 1})
         gap = gap_state.wait_dirty_batch_after(1, timeout=0.01, coalesce_seconds=0.0)
         if not gap or not gap.get("stream_reset") or gap.get("reason") != "missing_dirty_event":
             print("missing dirty history did not request a stream restart", gap)
             return 4
-        invalid_state = relay.FrameState(Path(tmp) / "invalid", 4, 4)
+        invalid_state = make_frame_state(relay, Path(tmp) / "invalid", 4, 4)
         invalid_state.publish_dirty({"frame_id": 2, "base_frame_id": 1, "x": 3, "y": 3, "w": 2, "h": 2})
         invalid = invalid_state.wait_dirty_batch_after(1, timeout=0.01, coalesce_seconds=0.0)
         if not invalid or not invalid.get("stream_reset") or invalid.get("reason") != "invalid_dirty_event":

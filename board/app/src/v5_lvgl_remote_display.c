@@ -1,11 +1,13 @@
 #include "v5_lvgl_remote_display.h"
 
 #include "v5_lvgl_remote_display_capture.h"
+#include "v5_lvgl_remote_display_delta.h"
 
 #include "lvgl.h"
 
 #include <errno.h>
 #include <fcntl.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,6 +15,7 @@
 #include <sys/file.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 #ifndef O_CLOEXEC
@@ -24,7 +27,9 @@
 #define V5_REMOTE_RUN_DIR "/run/8ax_v5_product_ui"
 #define V5_REMOTE_FRAMEBUFFER_PATH V5_REMOTE_RUN_DIR "/remote_framebuffer.bgra"
 #define V5_REMOTE_DIRTY_FIFO_PATH V5_REMOTE_RUN_DIR "/remote_dirty"
-#define V5_REMOTE_DIRTY_RECT_CAPACITY 16U
+#define V5_LOCAL_DIRTY_RECT_CAPACITY 16U
+#define V5_REMOTE_DIRTY_RECT_CAPACITY 64U
+#define V5_REMOTE_FRAME_INTERVAL_NS 100000000ULL
 #define V5_UI_DRAW_BUFFER_ROWS 160U
 
 static lv_color_t g_draw_buffer[V5_UI_MAX_WIDTH * V5_UI_DRAW_BUFFER_ROWS];
@@ -42,8 +47,22 @@ static size_t g_remote_fb_size;
 static int g_remote_dirty_fd = -1;
 static unsigned long long g_frame_id;
 static int g_output_suppressed = 1;
-static V5RemoteDirtyRect g_pending_dirty_rects[V5_REMOTE_DIRTY_RECT_CAPACITY];
-static unsigned int g_pending_dirty_count;
+static V5RemoteDirtyRect g_local_dirty_rects[V5_LOCAL_DIRTY_RECT_CAPACITY];
+static unsigned int g_local_dirty_count;
+static V5RemoteDirtyRect g_remote_dirty_rects[V5_REMOTE_DIRTY_RECT_CAPACITY];
+static unsigned int g_remote_dirty_count;
+static unsigned long long g_remote_next_publish_ns;
+static unsigned long long g_remote_cpu_sample_generation;
+
+static unsigned long long monotonic_ns(void)
+{
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
+        return 0ULL;
+    }
+    return (unsigned long long)now.tv_sec * 1000000000ULL +
+        (unsigned long long)now.tv_nsec;
+}
 
 static int ensure_remote_run_dir(void)
 {
@@ -133,6 +152,37 @@ static int ensure_remote_dirty_fifo(void)
     }
     g_remote_dirty_fd = fd;
     return 1;
+}
+void v5_lvgl_remote_display_publish_cpu_metrics(double cpu0_percent, double cpu1_percent,
+    unsigned long long sample_generation,
+    unsigned long long sample_monotonic_ns)
+{
+    char line[128];
+    int len;
+    ssize_t written;
+    if (!isfinite(cpu0_percent) || !isfinite(cpu1_percent) ||
+        cpu0_percent < 0.0 || cpu0_percent > 100.0 ||
+        cpu1_percent < 0.0 || cpu1_percent > 100.0 ||
+        sample_generation == 0ULL || sample_monotonic_ns == 0ULL ||
+        sample_generation == g_remote_cpu_sample_generation) {
+        return;
+    }
+    if (!ensure_remote_dirty_fifo() || g_remote_dirty_fd < 0) {
+        return;
+    }
+    len = snprintf(line, sizeof(line), "M %llu %llu %.3f %.3f\n",
+                   sample_generation, sample_monotonic_ns,
+                   cpu0_percent, cpu1_percent);
+    if (len <= 0 || (size_t)len >= sizeof(line)) {
+        return;
+    }
+    written = write(g_remote_dirty_fd, line, (size_t)len);
+    if (written == (ssize_t)len) {
+        g_remote_cpu_sample_generation = sample_generation;
+    } else {
+        close(g_remote_dirty_fd);
+        g_remote_dirty_fd = -1;
+    }
 }
 
 static void notify_remote_dirty(unsigned long long base_frame_id,
@@ -242,8 +292,13 @@ static void compose_area(const lv_area_t *area, const lv_color_t *color_p)
     }
     if (!g_output_suppressed) {
         v5_lvgl_remote_display_capture_add_dirty_area(
-            g_pending_dirty_rects,
-            &g_pending_dirty_count,
+            g_local_dirty_rects,
+            &g_local_dirty_count,
+            V5_LOCAL_DIRTY_RECT_CAPACITY,
+            x1, y1, x2, y2);
+        v5_lvgl_remote_display_capture_add_dirty_area(
+            g_remote_dirty_rects,
+            &g_remote_dirty_count,
             V5_REMOTE_DIRTY_RECT_CAPACITY,
             x1, y1, x2, y2);
     }
@@ -252,35 +307,61 @@ static void compose_area(const lv_area_t *area, const lv_color_t *color_p)
 static void commit_composed_frame(void)
 {
     unsigned int i;
-    unsigned int rect_count;
+    unsigned int remote_rect_count;
+    unsigned int changed_count = 0U;
     unsigned long long base_frame_id;
-    if (g_output_suppressed || g_pending_dirty_count == 0U) {
-        g_pending_dirty_count = 0U;
+    unsigned long long now_ns;
+    V5RemoteDirtyRect changed_rects[V5_REMOTE_DIRTY_RECT_CAPACITY];
+    if (g_output_suppressed) {
+        g_local_dirty_count = 0U;
+        g_remote_dirty_count = 0U;
         return;
     }
-    rect_count = g_pending_dirty_count;
-    if (!ensure_remote_framebuffer() || !g_remote_fb || !lock_framebuffer_fd(g_remote_fb_fd, LOCK_EX)) {
-        g_pending_dirty_count = 0U;
-        return;
-    }
-    for (i = 0U; i < rect_count; ++i) {
-        const V5RemoteDirtyRect *rect = &g_pending_dirty_rects[i];
+    for (i = 0U; i < g_local_dirty_count; ++i) {
+        const V5RemoteDirtyRect *rect = &g_local_dirty_rects[i];
         unsigned int x = (unsigned int)rect->x1;
         unsigned int width = (unsigned int)(rect->x2 - rect->x1 + 1);
         int y;
         for (y = rect->y1; y <= rect->y2; ++y) {
             const unsigned char *frame_row = &g_frame[((unsigned int)y * g_width + x) * 4U];
-            unsigned char *remote_row = &g_remote_fb[((unsigned int)y * g_width + x) * 4U];
             v5_lvgl_remote_display_capture_write_row(
                 x, (unsigned int)y, frame_row, width);
-            memcpy(remote_row, frame_row, (size_t)width * 4U);
         }
+    }
+    g_local_dirty_count = 0U;
+    if (g_remote_dirty_count == 0U) {
+        return;
+    }
+    now_ns = monotonic_ns();
+    if (g_remote_next_publish_ns != 0ULL && now_ns != 0ULL &&
+        now_ns < g_remote_next_publish_ns) {
+        return;
+    }
+    remote_rect_count = g_remote_dirty_count;
+    if (!ensure_remote_framebuffer() || !g_remote_fb ||
+        !lock_framebuffer_fd(g_remote_fb_fd, LOCK_EX)) {
+        return;
+    }
+    if (!v5_lvgl_remote_display_delta_commit(
+            g_frame, g_remote_fb, g_width, g_height,
+            g_remote_dirty_rects, remote_rect_count,
+            changed_rects, V5_REMOTE_DIRTY_RECT_CAPACITY,
+            &changed_count)) {
+        (void)lock_framebuffer_fd(g_remote_fb_fd, LOCK_UN);
+        return;
+    }
+    g_remote_dirty_count = 0U;
+    g_remote_next_publish_ns = now_ns == 0ULL ? 0ULL :
+        now_ns + V5_REMOTE_FRAME_INTERVAL_NS;
+    if (changed_count == 0U) {
+        (void)lock_framebuffer_fd(g_remote_fb_fd, LOCK_UN);
+        return;
     }
     base_frame_id = g_frame_id;
     ++g_frame_id;
-    notify_remote_dirty_rects(base_frame_id, g_frame_id, g_pending_dirty_rects, rect_count);
     (void)lock_framebuffer_fd(g_remote_fb_fd, LOCK_UN);
-    g_pending_dirty_count = 0U;
+    notify_remote_dirty_rects(
+        base_frame_id, g_frame_id, changed_rects, changed_count);
 }
 
 static void remote_flush(lv_disp_drv_t *driver, const lv_area_t *area, lv_color_t *color_p)
@@ -375,11 +456,17 @@ int v5_lvgl_remote_display_publish_current_frame(void)
     v5_lvgl_remote_display_capture_write_full(
         g_frame, g_width, g_height);
     memcpy(g_remote_fb, g_frame, frame_size);
-    g_pending_dirty_count = 0U;
+    g_local_dirty_count = 0U;
+    g_remote_dirty_count = 0U;
+    {
+        unsigned long long now_ns = monotonic_ns();
+        g_remote_next_publish_ns = now_ns == 0ULL ? 0ULL :
+            now_ns + V5_REMOTE_FRAME_INTERVAL_NS;
+    }
     base_frame_id = g_frame_id;
     ++g_frame_id;
-    notify_remote_dirty(base_frame_id, g_frame_id, 0U, 0U, g_width, g_height);
     (void)lock_framebuffer_fd(g_remote_fb_fd, LOCK_UN);
+    notify_remote_dirty(base_frame_id, g_frame_id, 0U, 0U, g_width, g_height);
     return 1;
 }
 
@@ -391,7 +478,9 @@ int v5_lvgl_remote_display_blackout_for_restart(void)
     int remote_black = 0;
 
     g_output_suppressed = 1;
-    g_pending_dirty_count = 0U;
+    g_local_dirty_count = 0U;
+    g_remote_dirty_count = 0U;
+    g_remote_next_publish_ns = 0ULL;
     if (!g_display_ready) {
         return 0;
     }
@@ -435,7 +524,9 @@ int v5_lvgl_remote_display_set_output_suppressed(int suppressed)
     int previous = g_output_suppressed;
     g_output_suppressed = suppressed ? 1 : 0;
     if (g_output_suppressed) {
-        g_pending_dirty_count = 0U;
+        g_local_dirty_count = 0U;
+        g_remote_dirty_count = 0U;
+        g_remote_next_publish_ns = 0ULL;
     }
     return previous;
 }

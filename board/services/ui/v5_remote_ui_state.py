@@ -3,6 +3,7 @@ from __future__ import annotations
 import ctypes
 import errno
 import json
+import math
 import mmap
 import os
 import select
@@ -58,7 +59,7 @@ def process_start_ticks(proc_root: Path, pid: int) -> int:
     return int(fields[19])
 
 class FrameState:
-    def __init__(self, run_dir: Path, width: int, height: int,
+    def __init__(self, run_dir: Path, width: int, height: int, dirty_packer,
                  ready_path: Path | None = None, *, proc_root: Path = Path("/proc"),
                  boot_id_path: Path = Path("/proc/sys/kernel/random/boot_id"),
                  process_pid: int | None = None):
@@ -91,6 +92,8 @@ class FrameState:
             "dirty_payload_bytes": 0,
             "dirty_payload_rows": 0,
             "dirty_payload_rects": 0,
+            "dirty_payload_native_frames": 0,
+            "dirty_payload_native_failures": 0,
             "dirty_payload_contiguous_frames": 0,
             "dirty_payload_union_frames": 0,
             "dirty_payload_union_source_rects": 0,
@@ -126,6 +129,8 @@ class FrameState:
         self._ready_file_key: tuple[int, int, int, int] | None = None
         self._system_boot_id: str | None = None
         self._dirty_geometry = DirtyGeometryNormalizer(width, height, self.mark_metric)
+        self._dirty_packer = dirty_packer
+        self._display_cpu_metrics: dict | None = None
 
     @property
     def framebuffer_path(self) -> Path:
@@ -314,6 +319,7 @@ class FrameState:
         return self.stride * self.height
 
     def close_framebuffer_map(self) -> None:
+        self._dirty_packer.close()
         if self._framebuffer_mmap is not None:
             try:
                 self._framebuffer_mmap.close()
@@ -344,7 +350,9 @@ class FrameState:
             return self._framebuffer_mmap
         self.close_framebuffer_map()
         try:
-            fd = os.open(self.framebuffer_path, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0))
+            fd = os.open(
+                self.framebuffer_path,
+                os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_BINARY", 0))
         except OSError:
             return None
         try:
@@ -433,35 +441,14 @@ class FrameState:
             return None
         total_bytes = sum(int(rect["w"]) * int(rect["h"]) * 4 for rect in rects)
         total_rows = sum(int(rect["h"]) for rect in rects)
-        spans: list[tuple[int, int]] = []
-        mapped_view = memoryview(mapped)
-        payload = b""
         locked = False
         try:
             flock(fd, LOCK_SH)
             locked = True
-            for rect in rects:
-                x = int(rect["x"])
-                y = int(rect["y"])
-                w = int(rect["w"])
-                h = int(rect["h"])
-                row_bytes = w * 4
-                if x == 0 and w == self.width:
-                    start = (y * self.stride) + (x * 4)
-                    end = start + (row_bytes * h)
-                    if end > self.frame_size:
-                        return None
-                    spans.append((start, end))
-                    self.mark_metric("dirty_payload_contiguous_frames")
-                    continue
-                for row in range(h):
-                    src_start = ((y + row) * self.stride) + (x * 4)
-                    src_end = src_start + row_bytes
-                    if src_end > self.frame_size:
-                        return None
-                    spans.append((src_start, src_end))
-            payload = b"".join(mapped_view[start:end] for start, end in spans)
-        except OSError:
+            payload = self._dirty_packer.pack(
+                fd, self.frame_size, self.width, self.height, self.stride, rects)
+        except (OSError, RuntimeError, ValueError):
+            self.mark_metric("dirty_payload_native_failures")
             return None
         finally:
             if locked:
@@ -469,9 +456,10 @@ class FrameState:
                     flock(fd, LOCK_UN)
                 except OSError:
                     pass
-            mapped_view.release()
         if len(payload) != total_bytes:
+            self.mark_metric("dirty_payload_native_failures")
             return None
+        self.mark_metric("dirty_payload_native_frames")
         self.mark_metric("dirty_payload_bytes", total_bytes)
         self.mark_metric("dirty_payload_rows", total_rows)
         self.mark_metric("dirty_payload_rects", len(rects))
@@ -487,6 +475,14 @@ class FrameState:
             self.latest_event = stored
             self.dirty_events.append(stored)
             self.condition.notify_all()
+
+    def publish_display_cpu_metrics(self, metrics: dict) -> None:
+        with self.condition:
+            self._display_cpu_metrics = dict(metrics)
+
+    def display_cpu_metrics(self) -> dict | None:
+        with self.condition:
+            return dict(self._display_cpu_metrics) if self._display_cpu_metrics is not None else None
 
     def wait_dirty_batch_after(
         self,
@@ -610,6 +606,30 @@ class DirtyReader(threading.Thread):
 
     def handle_line(self, line: str) -> None:
         parts = line.split()
+        if len(parts) == 5 and parts[0] == "M":
+            try:
+                generation = int(parts[1])
+                monotonic_ns = int(parts[2])
+                cpu0_percent = float(parts[3])
+                cpu1_percent = float(parts[4])
+            except ValueError:
+                return
+            if (
+                generation <= 0
+                or monotonic_ns <= 0
+                or not math.isfinite(cpu0_percent)
+                or not math.isfinite(cpu1_percent)
+                or not 0.0 <= cpu0_percent <= 100.0
+                or not 0.0 <= cpu1_percent <= 100.0
+            ):
+                return
+            self.state.publish_display_cpu_metrics({
+                "cpu0_percent": cpu0_percent,
+                "cpu1_percent": cpu1_percent,
+                "cpu_sample_generation": generation,
+                "cpu_sample_monotonic_ns": monotonic_ns,
+            })
+            return
         if len(parts) < 7:
             return
         try:

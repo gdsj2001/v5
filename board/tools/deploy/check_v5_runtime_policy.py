@@ -284,13 +284,14 @@ def check_remote_relay_access_control() -> int:
             print("REMOTE_RELAY_RUNTIME_RESET_MISSING", file=sys.stderr)
             rc = 1
     for token in (
-        "minimum_steady_samples = int(expected_frames * 0.85)",
-        "minimum_cadence_hz = 1.0 / (STREAM_COALESCE_SECONDS * 1.15)",
-        "cadence_hz < minimum_cadence_hz",
+        "def check_continuous_30hz_input_is_coalesced_to_10hz() -> int:",
+        "if len(steady_build_times) < 16 or len(steady_build_times) > 24:",
+        "if cadence_hz < 8.0 or cadence_hz > 12.0:",
+        "STREAM_TARGET_FPS != 10",
     ):
         if token not in relay_smoke_text:
             print(
-                f"REMOTE_RELAY_30HZ_SMOKE_THRESHOLD_MISSING: {token}",
+                f"REMOTE_RELAY_10HZ_SMOKE_THRESHOLD_MISSING: {token}",
                 file=sys.stderr,
             )
             rc = 1
@@ -390,6 +391,10 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         ROOT / "services" / "state_publisher" /
         "v5_position_status_publisher.c"
     )
+    position_sampler = (
+        ROOT / "services" / "state_publisher" /
+        "v5_position_status_sampler.c"
+    )
     retired_position_sources = (
         ROOT / "services" / "state_publisher" /
         "v5_position_status_publisher.py",
@@ -450,6 +455,7 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         or not runtime_installer.exists()
         or not position_publisher_init.exists()
         or not position_publisher.exists()
+        or not position_sampler.exists()
         or not bus_ini.exists()
         or not bus_hal.exists()
         or not motion_private.exists()
@@ -971,6 +977,9 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
             rc = 1
     position_text = position_publisher.read_text(
         encoding="utf-8", errors="ignore")
+    position_sampler_text = position_sampler.read_text(
+        encoding="utf-8", errors="ignore")
+    position_fast_path_text = position_text + position_sampler_text
     for forbidden in ("system(", "popen(", "v5_position_status_publisher.py"):
         if forbidden in position_text:
             print(
@@ -1061,7 +1070,7 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         "motion.current-vel",
         "spindle.0.speed-cmd-rps",
     ):
-        if token not in position_text:
+        if token not in position_fast_path_text:
             print(
                 f"POSITION_DISPLAY_FAST_PATH_CONTRACT_MISSING: {token}",
                 file=sys.stderr,
@@ -2577,12 +2586,29 @@ def check_cc_golden_model_specific_motion() -> int:
     hal_text = hal.read_text(encoding="utf-8", errors="ignore")
     required_hal = (
         "loadrt or2 count=2",
+        "loadrt and2 count=6",
         "loadrt v5_safety_latch",
         "loadusr -Wn v5_native_hal_owner /usr/bin/v5_native_hal_owner",
         "addf or2.0 servo-thread",
         "addf or2.1 servo-thread",
         "addf v5-safety-latch.0 servo-thread",
+        "addf and2.1 servo-thread",
+        "addf and2.2 servo-thread",
+        "addf and2.3 servo-thread",
+        "addf and2.4 servo-thread",
+        "addf and2.5 servo-thread",
         "v5-safety-force v5-native-hal-owner.safety-force => v5-safety-latch.0.force",
+        "v5-safety-latch.0.estop-ok => iocontrol.0.emc-enable-in",
+        "joint.0.amp-enable-out => and2.1.in0",
+        "joint.1.amp-enable-out => and2.2.in0",
+        "joint.2.amp-enable-out => and2.3.in0",
+        "joint.3.amp-enable-out => and2.4.in0",
+        "joint.4.amp-enable-out => and2.5.in0",
+        "and2.1.out => cia402.0.enable",
+        "and2.2.out => cia402.1.enable",
+        "and2.3.out => cia402.2.enable",
+        "and2.4.out => cia402.3.enable",
+        "and2.5.out => cia402.4.enable",
         "v5-rtcp-ui-request",
         "v5-rtcp-gcode-request motion.digital-out-00 => v5-native-hal-owner.rtcp-gcode-request or2.0.in1",
         "v5-rtcp-owner-force-off v5-native-hal-owner.rtcp-force-off => motion.v5-bus-home-rtcp-force-latched or2.1.in0",
@@ -2597,6 +2623,21 @@ def check_cc_golden_model_specific_motion() -> int:
         if token not in hal_text:
             print(f"CC_GOLDEN_RTCP_HAL_CONTRACT_MISSING: {hal.relative_to(ROOT)} lacks {token}", file=sys.stderr)
             rc = 1
+    for joint in range(5):
+        suffix = f"{joint:02d}"
+        limiter_tokens = (
+            f"v5-bus-axis-router.joint-max-velocity-{suffix} [JOINT_{joint}]MAX_VELOCITY",
+            f"v5-bus-axis-router.joint-max-acceleration-{suffix} [JOINT_{joint}]MAX_ACCELERATION",
+            f"v5-bus-axis-router.joint-scale-{suffix} [JOINT_{joint}]SCALE",
+            f"cia402.{joint}.enable v5-bus-axis-router.joint-drive-enable-{suffix}",
+        )
+        for token in limiter_tokens:
+            if token not in hal_text:
+                print(
+                    f"CC_GOLDEN_TARGET_ENVELOPE_MISSING: {hal.relative_to(ROOT)} lacks {token}",
+                    file=sys.stderr,
+                )
+                rc = 1
 
     owner_text = native_hal_owner.read_text(encoding="utf-8", errors="ignore")
     required_owner = (
@@ -2855,7 +2896,11 @@ def check_product_runtime_closure_policy() -> int:
             print(f"PRODUCT_RUNTIME_CMAKE_GATE_MISSING: {token}", file=sys.stderr)
             return 1
     for target in binary_targets:
-        if re.search(rf"add_executable\(\s*{re.escape(target)}(?:\s|\))", cmake_text) is None:
+        executable_owner = re.search(
+            rf"add_executable\(\s*{re.escape(target)}(?:\s|\))", cmake_text)
+        shared_library_owner = re.search(
+            rf"add_library\(\s*{re.escape(target)}\s+SHARED(?:\s|\))", cmake_text)
+        if executable_owner is None and shared_library_owner is None:
             print(f"PRODUCT_RUNTIME_CMAKE_TARGET_MISSING: {target}", file=sys.stderr)
             return 1
 

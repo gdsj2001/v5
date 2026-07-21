@@ -11,6 +11,25 @@ set(LV_LVGL_H_INCLUDE_SIMPLE ON CACHE BOOL "Use simple LVGL include" FORCE)
 
 add_subdirectory("${V5_LVGL_DIR}" "${CMAKE_BINARY_DIR}/third_party/lvgl" EXCLUDE_FROM_ALL)
 
+if(UNIX)
+    add_library(v5_remote_ui_packer SHARED
+        ../services/ui/v5_remote_ui_native_packer.c
+    )
+    target_include_directories(v5_remote_ui_packer PUBLIC
+        "${V5_ROOT_DIR}/services/ui"
+    )
+    set_target_properties(v5_remote_ui_packer PROPERTIES
+        PREFIX ""
+        OUTPUT_NAME "v5_remote_ui_packer"
+        SUFFIX ""
+    )
+
+    add_executable(v5_remote_ui_native_packer_smoke
+        ../services/ui/v5_remote_ui_native_packer_smoke.c
+    )
+    target_link_libraries(v5_remote_ui_native_packer_smoke PRIVATE v5_remote_ui_packer)
+endif()
+
 set(V5_PROGRAM_SCENE_PRODUCER_SOURCES
     ../services/state_publisher/v5_program_scene_producer.c
     ../services/state_publisher/v5_program_scene_projection.c
@@ -86,6 +105,15 @@ if(NOT WIN32)
     target_link_libraries(v5_program_scene_producer_smoke PRIVATE m)
 endif()
 
+add_executable(v5_lvgl_remote_display_delta_smoke
+    src/v5_lvgl_remote_display_delta_smoke.c
+    src/v5_lvgl_remote_display_delta.c
+)
+
+target_include_directories(v5_lvgl_remote_display_delta_smoke PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+
 add_executable(v5_lvgl_shell
     src/lv_font_zh_16.c
     src/v5_layout_icon_masks.c
@@ -97,6 +125,7 @@ add_executable(v5_lvgl_shell
     src/v5_coordinate_digits.c
     src/v5_lvgl_headless.c
     src/v5_lvgl_remote_display.c
+    src/v5_lvgl_remote_display_delta.c
     src/v5_lvgl_remote_display_capture.c
     src/v5_ui_first_frame_guard.c
     src/v5_lvgl_remote_input.c
@@ -170,6 +199,7 @@ add_executable(v5_program_page_double_click_smoke
     src/v5_coordinate_digits.c
     src/v5_lvgl_headless.c
     src/v5_lvgl_remote_display.c
+    src/v5_lvgl_remote_display_delta.c
     src/v5_lvgl_remote_display_capture.c
     src/v5_ui_first_frame_guard.c
     src/v5_lvgl_remote_input.c
@@ -990,6 +1020,7 @@ set(V5_PRODUCT_RUNTIME_TARGETS)
 set(V5_UNIX_ONLY_RUNTIME_TARGETS
     v5_backend_readiness_probe
     v5_position_status_publisher
+    v5_remote_ui_packer
 )
 foreach(V5_RUNTIME_DEPLOY_ROW IN LISTS V5_RUNTIME_DEPLOY_ROWS)
     string(STRIP "${V5_RUNTIME_DEPLOY_ROW}" V5_RUNTIME_DEPLOY_ROW_STRIPPED)

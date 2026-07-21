@@ -138,14 +138,6 @@ public partial class MainWindow
             await EnableRelayInputAsync(relayClient, info);
         }
 
-        _stats.MarkFullFrameRequest();
-        _evidence.RecordEvent("full_frame_request", new Dictionary<string, object?>
-        {
-            ["reason"] = "initial",
-            ["relay"] = relayBaseUri,
-        });
-        RemoteFramePacket fullFrame = await relayClient.GetFullFrameAsync(_shutdown.Token);
-        await Dispatcher.InvokeAsync(() => ApplyRelayPacket(fullFrame, relayBaseUri, "full"));
         _relaySessionConnected = true;
 
         try

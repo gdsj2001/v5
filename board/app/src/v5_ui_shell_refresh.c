@@ -264,6 +264,13 @@ int v5_ui_shell_refresh_once(void)
         int scene_changed;
         int pose_changed;
         (void)v5_ui_model_refresh_status_from_shm(&g_v5_shell_model, V5_STATUS_SHM_PATH);
+        if ((g_v5_shell_model.status_view.valid_mask & V5_STATUS_VALID_CPU_USAGE) != 0U) {
+            v5_lvgl_remote_display_publish_cpu_metrics(
+                g_v5_shell_model.status_view.cpu0_percent,
+                g_v5_shell_model.status_view.cpu1_percent,
+                g_v5_shell_model.status_view.cpu_sample_generation,
+                g_v5_shell_model.status_view.cpu_sample_monotonic_ns);
+        }
         if (shell_refresh_modal_line_readback(0)) {
             flags |= V5_MAIN_PAGE_REFRESH_SLOW;
             main_cache_changed = 1;

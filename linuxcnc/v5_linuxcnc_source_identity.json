@@ -10,7 +10,7 @@
     "tree": "cbadbb8d029aefe7a8d0e3218885aaa59798337b"
   },
   "v5_source_tree": "c1f4c53315c8e614fafbe48992afa91e8aef8014",
-  "content_sha256": "de9b052205f3099a09361cab82c3eca1b644e1711f9b55cdb0a488e0f6dfc9cc",
+  "content_sha256": "a44edb46e7f948ea59041efe4a291e0267d59709370b96404181b79e866eb1bc",
   "implementation": "in_tree",
   "changed_files": [
     "scripts/linuxcnc.in",
@@ -43,6 +43,7 @@
     "src/emc/usr_intf/axis/Submakefile",
     "src/emc/usr_intf/axis/extensions/emcmodule.cc",
     "src/hal/components/v5_bus_axis_router.comp",
+    "src/hal/components/v5_bus_axis_target_limiter.h",
     "src/hal/components/homecomp.comp",
     "src/hal/components/v5_bus_home_api.h",
     "src/hal/components/v5_bus_home_math.h",
@@ -225,13 +226,21 @@
       "component v5_bus_axis_router",
       "option singleton yes;",
       "function read fp;",
-      "function write nofp;",
+      "function write fp;",
       "joint-zero-counts-##[5]",
       "joint-axis-code-##[5]",
+      "joint-limit-ok-##[5]",
+      "v5_bus_axis_target_limiter_step",
       "wcp-base-##[3]",
       "wcp-runtime-##[3]",
       "v5_bus_router_nearest_quantized",
       "rejected-commit-seq"
+    ],
+    "src/hal/components/v5_bus_axis_target_limiter.h": [
+      "v5_bus_axis_target_limiter_step",
+      "max_velocity_units_per_s",
+      "max_acceleration_units_per_s2",
+      "synchronized to actual position"
     ],
     "src/hal/components/v5_bus_home_api.h": [
       "V5_HOME_EXPORT(homeMotFunctions);"
@@ -510,6 +519,7 @@
       "required_ascii": [
         "v5_bus_axis_router",
         "mapping-valid",
+        "joint-limit-ok",
         "wcp-base",
         "wcp-runtime",
         "rejected-commit-seq"

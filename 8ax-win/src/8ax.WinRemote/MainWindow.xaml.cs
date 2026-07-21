@@ -22,7 +22,7 @@ public partial class MainWindow : Window
     private const int RelayReconnectInitialDelayMs = 700;
     private const int RelayReconnectMaxDelayMs = 5000;
     private const int SystemMetricsRefreshMs = 2000;
-    private const int RelayStreamTargetFps = 30;
+    private const int RelayStreamTargetFps = 10;
     private const double RelayFrameMetricsMinIntervalMs = 1000.0 / RelayStreamTargetFps;
 
     private readonly AppSettings _settings = AppSettings.LoadFromEnvironment();

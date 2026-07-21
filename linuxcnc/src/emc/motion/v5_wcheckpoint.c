@@ -322,7 +322,10 @@ void v5_wcheckpoint_update_before_inputs(void)
 {
     double new_base_turns[V5_WCHECKPOINT_ROTARY_AXES];
     unsigned long turn_quantum[V5_WCHECKPOINT_ROTARY_AXES] = {1U, 1U, 1U};
-    int shift_needed = 0;
+    unsigned int router_generation[V5_WCHECKPOINT_ROTARY_AXES] = {0U, 0U, 0U};
+    unsigned char router_candidate[V5_WCHECKPOINT_ROTARY_AXES] = {0U, 0U, 0U};
+    int local_shift_needed = 0;
+    int router_shift_needed = 0;
     unsigned int index;
 
     for (index = 0U; index < V5_WCHECKPOINT_ROTARY_AXES; ++index) {
@@ -350,12 +353,13 @@ void v5_wcheckpoint_update_before_inputs(void)
                 floor(fabs(router_base_counts)) == fabs(router_base_counts) &&
                 quantum_counts > 0.0 &&
                 fmod(fabs(router_base_counts), quantum_counts) == 0.0) {
-                axis_state[index].base_turns = router_base_counts /
+                new_base_turns[index] = router_base_counts /
                     (double)v5_wcheckpoint_counts_per_rev[index];
-                axis_state[index].generation = *hal_axis->router_generation;
-                axis_state[index].reason = V5_WCHECKPOINT_OK;
-                axis_state[index].router_synced = 1U;
-                axis_state[index].valid = 1U;
+                router_generation[index] = *hal_axis->router_generation;
+                router_candidate[index] = 1U;
+                if (new_base_turns[index] != axis_state[index].base_turns) {
+                    router_shift_needed = 1;
+                }
                 continue;
             }
         }
@@ -377,18 +381,31 @@ void v5_wcheckpoint_update_before_inputs(void)
             double logical_turns = logical_deg / V5_FULL_TURN_DEG;
             new_base_turns[index] = floor((logical_turns / quantum) + 0.5) * quantum;
             if (new_base_turns[index] != axis_state[index].base_turns) {
-                shift_needed = 1;
+                local_shift_needed = 1;
             }
         }
     }
 
-    if (shift_needed && get_allhomed() && !get_homing_is_active()) {
+    if (local_shift_needed && (!get_allhomed() || get_homing_is_active())) {
+        for (index = 0U; index < V5_WCHECKPOINT_ROTARY_AXES; ++index) {
+            if (!router_candidate[index]) {
+                new_base_turns[index] = axis_state[index].base_turns;
+            }
+        }
+        local_shift_needed = 0;
+    }
+
+    if (router_shift_needed || local_shift_needed) {
         int result = apply_joint_shift(&emcmotStatus->carte_pos_cmd, new_base_turns);
         if (result == V5_WCHECKPOINT_OK) {
             for (index = 0U; index < V5_WCHECKPOINT_ROTARY_AXES; ++index) {
                 if (new_base_turns[index] != axis_state[index].base_turns) {
                     axis_state[index].base_turns = new_base_turns[index];
-                    axis_state[index].generation++;
+                    if (router_candidate[index]) {
+                        axis_state[index].generation = router_generation[index];
+                    } else {
+                        axis_state[index].generation++;
+                    }
                 }
             }
         } else {
@@ -396,9 +413,23 @@ void v5_wcheckpoint_update_before_inputs(void)
                 if (new_base_turns[index] != axis_state[index].base_turns) {
                     axis_state[index].valid = 0U;
                     axis_state[index].reason = (enum v5_wcheckpoint_reason)result;
+                    axis_state[index].router_synced = 0U;
                 }
             }
         }
+    }
+
+    for (index = 0U; index < V5_WCHECKPOINT_ROTARY_AXES; ++index) {
+        if (!router_candidate[index]) {
+            continue;
+        }
+        if (new_base_turns[index] != axis_state[index].base_turns) {
+            continue;
+        }
+        axis_state[index].generation = router_generation[index];
+        axis_state[index].reason = V5_WCHECKPOINT_OK;
+        axis_state[index].router_synced = 1U;
+        axis_state[index].valid = 1U;
     }
 }
 

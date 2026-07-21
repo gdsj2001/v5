@@ -62,7 +62,7 @@ internal sealed class MockRelayServer
     private const int Height = 600;
     private const string PixelFormat = RemotePixelFormats.Bgra32;
     private const int Stride = Width * 4;
-    private const int StreamTargetFps = 30;
+    private const int StreamTargetFps = 10;
     private static readonly long StreamFrameIntervalTicks = (long)Math.Round(Stopwatch.Frequency / (double)StreamTargetFps);
     private const string ProgramDir = "/opt/8ax/v5/gcode/golden";
     private const long ProgramEditMaxBytes = 1024 * 1024;

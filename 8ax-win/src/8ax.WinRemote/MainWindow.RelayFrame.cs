@@ -177,7 +177,7 @@ public partial class MainWindow
         Cpu0MetricValue.Text = Percent(metrics?.Cpu0Percent);
         Cpu1MetricValue.Text = Percent(metrics?.Cpu1Percent);
         MemoryMetricValue.Text = Percent(metrics?.MemoryPercent);
-        DiskMetricValue.Text = Percent(metrics?.DiskPercent);
+        DiskMetricValue.Text = DiskPercent(metrics);
         SystemMetricsText.ToolTip = metrics is null
             ? "waiting for board /remote/info system_metrics"
             : FormatSystemMetricsTooltip(metrics);
@@ -193,7 +193,7 @@ public partial class MainWindow
             return MissingSystemMetricsText();
         }
 
-        return $"cpu0 {Percent(metrics.Cpu0Percent)}  cpu1 {Percent(metrics.Cpu1Percent)}  内存 {Percent(metrics.MemoryPercent)}  硬盘 {Percent(metrics.DiskPercent)}";
+        return $"cpu0 {Percent(metrics.Cpu0Percent)}  cpu1 {Percent(metrics.Cpu1Percent)}  内存 {Percent(metrics.MemoryPercent)}  硬盘 {DiskPercent(metrics)}";
     }
 
     private static string FormatSystemMetricsTooltip(RemoteSystemMetrics metrics) =>
@@ -201,6 +201,22 @@ public partial class MainWindow
 
     private static string Percent(double? value) =>
         value.HasValue ? $"{Math.Clamp(value.Value, 0.0, 100.0):0}%" : "--%";
+
+    private static string DiskPercent(RemoteSystemMetrics? metrics)
+    {
+        if (metrics?.DiskPercent is not double rawPercent)
+        {
+            return "--%";
+        }
+        double percent = Math.Clamp(rawPercent, 0.0, 100.0);
+        if (percent <= 0.0 &&
+            metrics.DiskUsedBytes is long used && used > 0 &&
+            metrics.DiskTotalBytes is long total && total > 0)
+        {
+            percent = (double)used / total * 100.0;
+        }
+        return percent > 0.0 && percent < 0.1 ? "<0.1%" : $"{percent:0.0}%";
+    }
 
     private static string BytesPair(long? used, long? total) =>
         used.HasValue && total.HasValue ? $"{FormatBytes(used.Value)} / {FormatBytes(total.Value)}" : "--";

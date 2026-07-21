@@ -36,8 +36,14 @@ def peer_allowed(peer: str, networks) -> bool:
     return any(addr in network for network in networks)
 
 
-def system_metrics() -> dict:
-    cpu_usage = sample_cpu_usage()
+def system_metrics(cpu_usage=None, sample_cpu_if_missing=True) -> dict:
+    if cpu_usage is None:
+        cpu_usage = sample_cpu_usage() if sample_cpu_if_missing else {
+            "cpu0_percent": None,
+            "cpu1_percent": None,
+            "cpu_sample_generation": 0,
+            "cpu_sample_monotonic_ns": 0,
+        }
     memory_used, memory_total = memory_used_total()
     disk_used, disk_total = disk_used_total()
     return {

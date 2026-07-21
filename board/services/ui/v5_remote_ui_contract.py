@@ -36,7 +36,7 @@ class PayloadViews:
 
 
 FramePayload = Union[bytes, bytearray, memoryview, PayloadViews]
-STREAM_TARGET_FPS = 30
+STREAM_TARGET_FPS = 10
 STREAM_COALESCE_SECONDS = 1.0 / STREAM_TARGET_FPS
 DIRTY_EVENT_HISTORY_LIMIT = 512
 SHARED_DIRTY_FRAME_HISTORY_LIMIT = 8

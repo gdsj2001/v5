@@ -101,6 +101,13 @@ static void VerifyRemoteInfoSystemMetricsSerialization()
     Require(11.0, decoded.SystemMetrics?.Cpu1Percent ?? -1.0, "decoded cpu1 percent");
     Require(42.5, decoded.SystemMetrics?.MemoryPercent ?? -1.0, "decoded memory percent");
     Require(64.0, decoded.SystemMetrics?.DiskPercent ?? -1.0, "decoded disk percent");
+
+    MethodInfo diskFormatter = typeof(MainWindow).GetMethod("DiskPercent", BindingFlags.NonPublic | BindingFlags.Static)
+        ?? throw new InvalidOperationException("disk percent formatter missing");
+    RemoteSystemMetrics fractionalDisk = new(22.0, 24.0, 42.5, 0.1, 420, 1000, 1, 1000);
+    Require("0.1%", (string?)diskFormatter.Invoke(null, new object?[] { fractionalDisk }) ?? "", "fractional disk percent");
+    RemoteSystemMetrics roundedZeroDisk = new(22.0, 24.0, 42.5, 0.0, 420, 1000, 1, 10000);
+    Require("<0.1%", (string?)diskFormatter.Invoke(null, new object?[] { roundedZeroDisk }) ?? "", "nonzero disk does not display zero");
 }
 
 static void VerifyProgramProtocolCompatibility()
@@ -561,7 +568,7 @@ static void VerifyRelayDisplayRefreshRateContract()
     string mainWindow = ReadMainWindowSource(winRoot);
     string mockRelay = ReadWinRemoteFile(winRoot, "tools", "mock-relay", "Program.cs");
     string readme = ReadWinRemoteFile(winRoot, "README.md");
-    Require(true, mainWindow.Contains("RelayStreamTargetFps = 30", StringComparison.Ordinal), "relay target fps is 30");
+    Require(true, mainWindow.Contains("RelayStreamTargetFps = 10", StringComparison.Ordinal), "relay target fps is 10");
     Require(true, mainWindow.Contains("RelayFrameMetricsMinIntervalMs = 1000.0 / RelayStreamTargetFps", StringComparison.Ordinal), "relay frame metrics cadence derives from target fps");
     Require(true, mainWindow.Contains("RelayEvidenceIntervalMs = 1000.0", StringComparison.Ordinal), "relay frame evidence is throttled to 1Hz");
     Require(true, mainWindow.Contains("RelayStatusIntervalMs = 100.0", StringComparison.Ordinal), "relay status text is throttled to 10Hz");
@@ -569,15 +576,22 @@ static void VerifyRelayDisplayRefreshRateContract()
     Require(true, mainWindow.Contains("ShouldRefreshRelayFrameStatus", StringComparison.Ordinal), "relay status cadence is independent of frame apply");
     Require(true, mainWindow.Contains("await foreach (RemoteFramePacket packet", StringComparison.Ordinal), "every streamed frame is consumed in order");
     Require(true, mainWindow.Contains("Dispatcher.InvokeAsync(() => ApplyRelayPacket(packet", StringComparison.Ordinal), "every streamed frame is applied in order");
+    Require(false, mainWindow.Contains("[\"reason\"] = \"initial\"", StringComparison.Ordinal), "normal connection does not request a duplicate HTTP initial full frame");
+    Require(true,
+        mainWindow.Contains("GetFullFrameAsync(_shutdown.Token)", StringComparison.Ordinal)
+            && mainWindow.IndexOf("GetFullFrameAsync(_shutdown.Token)", StringComparison.Ordinal)
+                == mainWindow.LastIndexOf("GetFullFrameAsync(_shutdown.Token)", StringComparison.Ordinal),
+        "HTTP full frame remains only for explicit repair");
     Require(true, mainWindow.Contains("[\"target_fps\"] = RelayStreamTargetFps", StringComparison.Ordinal), "relay target fps is recorded in session evidence");
-    Require(true, mockRelay.Contains("StreamTargetFps = 30", StringComparison.Ordinal), "mock relay target fps is 30");
+    Require(true, mockRelay.Contains("StreamTargetFps = 10", StringComparison.Ordinal), "mock relay target fps is 10");
     Require(true, mockRelay.Contains("StreamFrameIntervalTicks = (long)Math.Round(Stopwatch.Frequency / (double)StreamTargetFps)", StringComparison.Ordinal), "mock relay frame interval derives from target fps");
     Require(true, mockRelay.Contains("PaceToNextStreamFrameAsync", StringComparison.Ordinal), "mock relay uses target-time stream pacing");
     Require(true,
-        readme.Contains("targets 30Hz", StringComparison.Ordinal)
+        readme.Contains("targets 10Hz", StringComparison.Ordinal)
             && readme.Contains("WebSocket dirty-rect stream", StringComparison.Ordinal)
+            && readme.Contains("single WebSocket initial full frame", StringComparison.Ordinal)
             && readme.Contains("must not switch to HTTP full-frame polling", StringComparison.Ordinal),
-        "README documents 30Hz dirty-rect relay stream without full-frame polling");
+        "README documents 10Hz dirty-rect relay stream without full-frame polling");
 }
 
 static void VerifyRelayInputRetryContract()
@@ -623,7 +637,8 @@ static void VerifySystemMetricsTopBarContract()
     Require(true, mainWindow.Contains("Cpu0MetricValue.Text = Percent(metrics?.Cpu0Percent)", StringComparison.Ordinal), "cpu0 refresh updates only the value field");
     Require(true, mainWindow.Contains("Cpu1MetricValue.Text = Percent(metrics?.Cpu1Percent)", StringComparison.Ordinal), "cpu1 refresh updates only the value field");
     Require(true, mainWindow.Contains("MemoryMetricValue.Text = Percent(metrics?.MemoryPercent)", StringComparison.Ordinal), "memory refresh updates only the value field");
-    Require(true, mainWindow.Contains("DiskMetricValue.Text = Percent(metrics?.DiskPercent)", StringComparison.Ordinal), "disk refresh updates only the value field");
+    Require(true, mainWindow.Contains("DiskMetricValue.Text = DiskPercent(metrics)", StringComparison.Ordinal), "disk refresh updates only the value field");
+    Require(true, mainWindow.Contains("$\"{percent:0.0}%\"", StringComparison.Ordinal), "disk percent retains one decimal place");
     Require(false, mainWindow.Contains("SystemMetricsText.Text =", StringComparison.Ordinal), "system metrics refresh must not rewrite the whole line");
     Require(true, protocol.Contains("RemoteSystemMetrics", StringComparison.Ordinal), "system metrics DTO exists");
     Require(true, readme.Contains("Top-bar board resource diagnostics", StringComparison.Ordinal), "README documents resource diagnostics");

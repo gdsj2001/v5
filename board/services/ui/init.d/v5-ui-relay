@@ -25,6 +25,7 @@ ulimit -l unlimited 2>/dev/null || true
 
 UI_DAEMON=/usr/libexec/8ax/v5_lvgl_shell
 RELAY_DAEMON=/usr/libexec/8ax/v5_remote_ui_relay.py
+REMOTE_PACKER=/usr/libexec/8ax/v5_remote_ui_packer.so
 BOOT_READY=/usr/libexec/8ax/v5_ui_boot_ready.py
 BACKEND_READINESS_PROBE=/usr/libexec/8ax/v5_backend_readiness_probe
 PIDFILE=/run/8ax/v5_ui_relay.pid
@@ -271,6 +272,7 @@ start_service() {
   fi
   test -x "$UI_DAEMON"
   test -x "$RELAY_DAEMON"
+  test -r "$REMOTE_PACKER"
   test -x "$BOOT_READY"
   cpu1_available
   command -v taskset >/dev/null 2>&1

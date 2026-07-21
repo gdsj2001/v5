@@ -58,8 +58,9 @@ def send_ws_frame(sock: socket.socket, opcode: int, payload: FramePayload) -> No
         header = first + bytes([126]) + struct.pack("!H", size)
     else:
         header = first + bytes([127]) + struct.pack("!Q", size)
-    sock.sendall(header)
-    send_payload(sock, payload)
+    parts = [memoryview(header)]
+    parts.extend(payload_parts(payload))
+    send_payload(sock, PayloadViews(parts, len(header) + len(payload)))
 
 
 def recv_exact(sock: socket.socket, size: int) -> bytes:

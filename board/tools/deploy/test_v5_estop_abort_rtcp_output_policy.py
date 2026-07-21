@@ -34,6 +34,36 @@ def main() -> None:
         "v5-native-hal-owner.rtcp-gcode-request or2.0.in1"
     ) not in hal_text:
         raise AssertionError("motion.digital-out-00 is not the registered RTCP request")
+    if "loadrt and2 count=6" not in hal_text:
+        raise AssertionError("five physical drive safety gates are not allocated")
+    safety_index = hal_text.index("addf v5-safety-latch.0 servo-thread")
+    motion_index = hal_text.index("addf motion-controller servo-thread")
+    cia402_index = hal_text.index("addf cia402.0.write-all servo-thread")
+    for joint in range(5):
+        gate = joint + 1
+        addf_token = f"addf and2.{gate} servo-thread"
+        amp_token = f"joint.{joint}.amp-enable-out => and2.{gate}.in0"
+        enable_token = f"and2.{gate}.out => cia402.{joint}.enable"
+        for token in (addf_token, amp_token, enable_token):
+            if token not in hal_text:
+                raise AssertionError(f"axis {joint} realtime safety gate missing: {token}")
+        gate_index = hal_text.index(addf_token)
+        if not safety_index < motion_index < gate_index < cia402_index:
+            raise AssertionError(
+                f"axis {joint} safety gate must run after motion and before cia402 write"
+            )
+    estop_net = hal_text[
+        hal_text.index("net estop-loop ") : hal_text.index("\nnet v5-machine-enabled")
+    ]
+    for gate in range(1, 6):
+        if f"and2.{gate}.in1" not in estop_net:
+            raise AssertionError(f"axis safety gate {gate} lacks realtime estop permit")
+    for joint in range(5):
+        direct_route = (
+            f"joint.{joint}.amp-enable-out => cia402.{joint}.enable"
+        )
+        if direct_route in hal_text:
+            raise AssertionError(f"axis {joint} bypasses the realtime estop gate")
     print("V5_ESTOP_ABORT_RTCP_OUTPUT_POLICY_OK")
 
 
