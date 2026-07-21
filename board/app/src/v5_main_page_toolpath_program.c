@@ -18,6 +18,9 @@ void v5_main_page_internal_hide_toolpath_program_line(V5MainPage *page)
     }
     if (!page->toolpath_display_scene_valid) {
         lv_obj_add_flag(page->trajectory_line, LV_OBJ_FLAG_HIDDEN);
+        if (page->toolpath_dynamic_layer) {
+            lv_obj_add_flag(page->toolpath_dynamic_layer, LV_OBJ_FLAG_HIDDEN);
+        }
     }
 }
 
@@ -169,8 +172,8 @@ static lv_point_t local_point(
 }
 
 static void draw_line(
-    lv_obj_t *object,
     lv_draw_ctx_t *draw_ctx,
+    lv_draw_line_dsc_t *line,
     lv_coord_t x_offset,
     lv_coord_t y_offset,
     V5StatusScreenPoint start_point,
@@ -178,20 +181,17 @@ static void draw_line(
     lv_color_t color,
     lv_coord_t width)
 {
-    lv_draw_line_dsc_t line;
     lv_point_t start = local_point(start_point, x_offset, y_offset);
     lv_point_t end = local_point(end_point, x_offset, y_offset);
-    lv_draw_line_dsc_init(&line);
-    lv_obj_init_draw_line_dsc(object, LV_PART_MAIN, &line);
-    line.color = color;
-    line.width = width;
-    line.opa = LV_OPA_COVER;
-    lv_draw_line(draw_ctx, &line, &start, &end);
+    line->color = color;
+    line->width = width;
+    line->opa = LV_OPA_COVER;
+    lv_draw_line(draw_ctx, line, &start, &end);
 }
 
 static void draw_marker(
-    lv_obj_t *object,
     lv_draw_ctx_t *draw_ctx,
+    lv_draw_line_dsc_t *line,
     lv_coord_t x_offset,
     lv_coord_t y_offset,
     const V5StatusSceneMarker *marker)
@@ -207,10 +207,10 @@ static void draw_marker(
     const V5StatusScreenPoint vertical_start = {x, y - half};
     const V5StatusScreenPoint vertical_end = {x, y + half};
     draw_line(
-        object, draw_ctx, x_offset, y_offset,
+        draw_ctx, line, x_offset, y_offset,
         horizontal_start, horizontal_end, color, 2);
     draw_line(
-        object, draw_ctx, x_offset, y_offset,
+        draw_ctx, line, x_offset, y_offset,
         vertical_start, vertical_end, color, 2);
 }
 
@@ -223,6 +223,8 @@ static void toolpath_scene_draw_event_cb(lv_event_t *event)
     lv_coord_t x_offset;
     lv_coord_t y_offset;
     const V5StatusDisplayScene *scene;
+    lv_draw_line_dsc_t line;
+    int dynamic_layer;
     unsigned int i;
     if (!event || lv_event_get_code(event) != LV_EVENT_DRAW_MAIN) return;
     page = (V5MainPage *)lv_event_get_user_data(event);
@@ -232,32 +234,46 @@ static void toolpath_scene_draw_event_cb(lv_event_t *event)
         !page->toolpath_display_scene_valid ||
         !page->toolpath_display_scene) return;
     scene = page->toolpath_display_scene;
+    dynamic_layer = object == page->toolpath_dynamic_layer;
     lv_obj_get_coords(object, &coords);
     x_offset = coords.x1 - lv_obj_get_scroll_x(object);
     y_offset = coords.y1 - lv_obj_get_scroll_y(object);
-    for (i = 1U; i < scene->point_count; ++i) {
-        if (!scene->break_before[i]) {
-            draw_line(
-                object, draw_ctx, x_offset, y_offset,
-                scene->points[i - 1U], scene->points[i],
-                lv_color_make(255, 214, 64),
-                V5_TOOLPATH_PROGRAM_LINE_WIDTH);
+    lv_draw_line_dsc_init(&line);
+    lv_obj_init_draw_line_dsc(object, LV_PART_MAIN, &line);
+    if (!dynamic_layer) {
+        for (i = 1U; i < scene->point_count; ++i) {
+            if (!scene->break_before[i]) {
+                draw_line(
+                    draw_ctx, &line, x_offset, y_offset,
+                    scene->points[i - 1U], scene->points[i],
+                    lv_color_make(255, 214, 64),
+                    V5_TOOLPATH_PROGRAM_LINE_WIDTH);
+            }
         }
     }
     for (i = 0U; i < scene->segment_count; ++i) {
         const V5StatusSceneSegment *segment = &scene->segments[i];
+        const int is_dynamic =
+            segment->role == V5_STATUS_SCENE_SEGMENT_MODEL_AXIS ||
+            segment->role == V5_STATUS_SCENE_SEGMENT_HOLDER;
+        if (dynamic_layer != is_dynamic) continue;
         draw_line(
-            object, draw_ctx, x_offset, y_offset,
+            draw_ctx, &line, x_offset, y_offset,
             segment->start, segment->end, segment_color(segment),
             segment->role == V5_STATUS_SCENE_SEGMENT_HOLDER ? 5 : 1);
     }
     for (i = 0U; i < scene->marker_count; ++i) {
+        const int is_dynamic =
+            scene->markers[i].role == V5_STATUS_SCENE_MARKER_MODEL_CENTER ||
+            scene->markers[i].role == V5_STATUS_SCENE_MARKER_MCS_ACTUAL ||
+            scene->markers[i].role == V5_STATUS_SCENE_MARKER_CMD_TIP;
+        if (dynamic_layer != is_dynamic) continue;
         draw_marker(
-            object, draw_ctx, x_offset, y_offset, &scene->markers[i]);
+            draw_ctx, &line, x_offset, y_offset, &scene->markers[i]);
     }
 }
 
-lv_obj_t *v5_main_page_internal_create_toolpath_program_scene(
+lv_obj_t *v5_main_page_internal_create_toolpath_scene_layer(
     V5MainPage *page,
     lv_obj_t *parent)
 {

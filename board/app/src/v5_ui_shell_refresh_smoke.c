@@ -1,8 +1,10 @@
 #define V5_UI_SHELL_REFRESH_CLASSIFIER_ONLY
 #include "v5_ui_shell_internal.h"
 
-#define V5_MAIN_PAGE_REFRESH_DYNAMIC (1U << 0)
+#define V5_MAIN_PAGE_REFRESH_COORDINATES (1U << 0)
 #define V5_MAIN_PAGE_REFRESH_POSE (1U << 4)
+#define V5_MAIN_PAGE_REFRESH_RATES (1U << 6)
+#define V5_MAIN_PAGE_REFRESH_SCENE (1U << 7)
 
 #include <stdio.h>
 
@@ -14,20 +16,24 @@ int main(void)
     V5StatusDisplayScene before_scene = {0};
     V5StatusDisplayScene after_scene = {0};
 
-    flags = shell_refresh_classify_changes(1, 0, 0, 1);
-    if (flags != V5_MAIN_PAGE_REFRESH_DYNAMIC) {
+    flags = shell_refresh_classify_changes(1, 0, 0, 0, 0, 1);
+    if (flags != V5_MAIN_PAGE_REFRESH_COORDINATES) {
         return 1;
     }
-    flags = shell_refresh_classify_changes(1, 1, 0, 1);
-    if (flags != (V5_MAIN_PAGE_REFRESH_DYNAMIC | V5_MAIN_PAGE_REFRESH_POSE)) {
+    flags = shell_refresh_classify_changes(0, 1, 1, 1, 0, 1);
+    if (flags != (V5_MAIN_PAGE_REFRESH_RATES |
+                  V5_MAIN_PAGE_REFRESH_SCENE |
+                  V5_MAIN_PAGE_REFRESH_POSE)) {
         return 2;
     }
-    flags = shell_refresh_classify_changes(0, 0, 1, 1);
+    flags = shell_refresh_classify_changes(0, 0, 0, 0, 1, 1);
     if (flags != V5_MAIN_PAGE_REFRESH_POSE) {
         return 3;
     }
-    flags = shell_refresh_classify_changes(1, 1, 1, 0);
-    if (flags != V5_MAIN_PAGE_REFRESH_DYNAMIC) {
+    flags = shell_refresh_classify_changes(1, 1, 1, 1, 1, 0);
+    if (flags != (V5_MAIN_PAGE_REFRESH_COORDINATES |
+                  V5_MAIN_PAGE_REFRESH_RATES |
+                  V5_MAIN_PAGE_REFRESH_SCENE)) {
         return 4;
     }
     before.valid_mask = V5_STATUS_VALID_MCS |

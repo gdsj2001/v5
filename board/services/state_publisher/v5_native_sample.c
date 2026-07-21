@@ -1,4 +1,5 @@
 #include "v5_native_sample.h"
+#include "v5_native_position_status.h"
 
 #include <fcntl.h>
 #include <math.h>
@@ -11,39 +12,9 @@
 #include <time.h>
 #include <unistd.h>
 
-#define V5_POSITION_MAGIC 0x56504F53u
-#define V5_POSITION_VERSION 3u
-#define V5_POSITION_DEFAULT_PATH "/dev/shm/v5_native_position_status.bin"
-#define V5_POSITION_DEFAULT_MAX_AGE_MS 1000U
 #define V5_POSITION_READ_RETRY_COUNT 3U
-
-typedef struct V5NativePositionStatusBlock {
-    uint32_t magic;
-    uint32_t version;
-    uint32_t size;
-    uint32_t valid_mask;
-    uint32_t axis_count;
-    uint32_t writer_identity;
-    uint32_t seq;
-    uint32_t reserved;
-    uint64_t source_acquired_mono_ns;
-    uint64_t source_generation;
-    double mcs[V5_STATUS_AXIS_COUNT];
-    double cmd_mcs[V5_STATUS_AXIS_COUNT];
-    double unit_per_count[V5_STATUS_AXIS_COUNT];
-    double following_error[V5_STATUS_AXIS_COUNT];
-    uint8_t display_digits[V5_STATUS_AXIS_COUNT];
-    uint8_t reserved_display[3];
-    double spindle_speed_rpm;
-    double linear_velocity_mm_per_min;
-    double feedrate_override;
-    double spindle_override;
-    uint32_t crc32;
-    uint32_t reserved2;
-} V5NativePositionStatusBlock;
-
-typedef char V5NativePositionStatusBlockSize[
-    sizeof(V5NativePositionStatusBlock) == 256U ? 1 : -1];
+typedef char V5NativePositionAxisCountMatches[
+    V5_STATUS_AXIS_COUNT == V5_POSITION_AXIS_COUNT ? 1 : -1];
 
 static void memory_barrier(void)
 {
@@ -59,19 +30,6 @@ static uint64_t monotonic_ns(void)
         return 0ULL;
     }
     return ((uint64_t)ts.tv_sec * 1000000000ULL) + (uint64_t)ts.tv_nsec;
-}
-
-static uint32_t crc32_like(const V5NativePositionStatusBlock *block)
-{
-    const unsigned char *bytes = (const unsigned char *)block;
-    size_t limit = offsetof(V5NativePositionStatusBlock, crc32);
-    uint32_t hash = 2166136261u;
-    size_t i;
-    for (i = 0U; i < limit; ++i) {
-        hash ^= (uint32_t)bytes[i];
-        hash *= 16777619u;
-    }
-    return hash;
 }
 
 static const char *position_status_path(void)
@@ -135,7 +93,7 @@ void v5_native_display_sample_reader_close(V5NativeDisplaySampleReader *reader)
         return;
     }
     if (reader->page) {
-        munmap(reader->page, reader->mapped_size);
+        munmap((void *)reader->page, reader->mapped_size);
     }
     if (reader->fd >= 0) {
         close(reader->fd);
@@ -254,7 +212,7 @@ int v5_native_display_sample_reader_read(
         block.axis_count != V5_STATUS_AXIS_COUNT ||
         block.writer_identity == 0U ||
         block.source_generation == 0ULL ||
-        block.crc32 != crc32_like(&block) ||
+        block.crc32 != v5_native_position_status_crc32(&block) ||
         !block_fresh(&block) ||
         !display_metadata_valid(&block)) {
         if (!reader_backing_matches(reader)) {

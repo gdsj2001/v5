@@ -1,7 +1,7 @@
 # kind	source	destination	mode
 binary	build/board/app/v5_lvgl_shell	/usr/libexec/8ax/v5_lvgl_shell	0755
 binary	build/board/app/v5_state_publisher	/usr/libexec/8ax/v5_state_publisher	0755
-script	services/state_publisher/v5_position_status_publisher.py	/usr/libexec/8ax/v5_position_status_publisher.py	0755
+binary	build/board/app/v5_position_status_publisher	/usr/libexec/8ax/v5_position_status_publisher	0755
 script	services/state_publisher/v5_wcs_status_publisher.py	/usr/libexec/8ax/v5_wcs_status_publisher.py	0755
 module	services/state_publisher/v5_polling_cadence.py	/usr/libexec/8ax/v5_polling_cadence.py	0644
 module	services/state_publisher/v5_machine_status_projection.py	/usr/libexec/8ax/v5_machine_status_projection.py	0644

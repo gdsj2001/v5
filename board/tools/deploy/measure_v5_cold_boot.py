@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[2]
 POWER_TOOL = ROOT / "tools/v5_board_power_cycle.py"
 RESOURCE_LOCK = ROOT.parent / "repo_ignored/locks/resources/vm_board.lock"
 POSITION_PUBLISHER_ARGV = [
-    "/usr/libexec/8ax/v5_position_status_publisher.py",
+    "/usr/libexec/8ax/v5_position_status_publisher",
     "--path", "/dev/shm/v5_native_position_status.bin",
     "--bus-path", "/dev/shm/v5_native_bus_status.bin",
     "--interval-ms", "33",
@@ -39,10 +39,9 @@ WCS_PUBLISHER_ARGV = [[
 
 
 def canonical_publisher_argv(executable: str, argv: list[str], kind: str) -> bool:
-    if executable != "/usr/bin/python3.7":
-        return False
-    expected = [POSITION_PUBLISHER_ARGV] if kind == "position" else WCS_PUBLISHER_ARGV
-    return argv[1:] in expected
+    if kind == "position":
+        return executable == POSITION_PUBLISHER_ARGV[0] and argv == POSITION_PUBLISHER_ARGV
+    return executable == "/usr/bin/python3.7" and argv[1:] in WCS_PUBLISHER_ARGV
 
 
 def require_resource_lock(owner: str) -> None:

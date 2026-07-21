@@ -275,13 +275,13 @@ for injected in ("json", "http", "ssh", "terminal", "serial", "keyboard"):
 
 # Complete canonical publisher argv is accepted. Missing, repeated, additional
 # flags and a second matching process all fail the uniqueness predicate.
-position_argv = ["python3"] + measure.POSITION_PUBLISHER_ARGV
-assert canonical_publisher_argv("/usr/bin/python3.7", position_argv, "position")
+position_argv = list(measure.POSITION_PUBLISHER_ARGV)
+assert canonical_publisher_argv(position_argv[0], position_argv, "position")
 for invalid in (position_argv[:-2], position_argv + ["--extra"],
                 position_argv + ["--path", "/tmp/duplicate"]):
-    assert not canonical_publisher_argv("/usr/bin/python3.7", invalid, "position")
-assert not canonical_publisher_argv("/usr/bin/python3", position_argv, "position")
-assert sum(canonical_publisher_argv("/usr/bin/python3.7", argv, "position")
+    assert not canonical_publisher_argv(position_argv[0], invalid, "position")
+assert not canonical_publisher_argv("/usr/bin/python3.7", position_argv, "position")
+assert sum(canonical_publisher_argv(position_argv[0], argv, "position")
            for argv in (position_argv, list(position_argv))) == 2
 for expected in measure.WCS_PUBLISHER_ARGV:
     assert canonical_publisher_argv("/usr/bin/python3.7", ["python3"] + expected, "wcs")

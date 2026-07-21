@@ -384,6 +384,36 @@ add_executable(v5_state_publisher
 
 target_link_libraries(v5_state_publisher PRIVATE v5_status_shm_projection)
 
+add_library(v5_position_status_publisher_core STATIC
+    ../services/state_publisher/v5_position_status_publisher_core.c
+)
+
+target_include_directories(v5_position_status_publisher_core PUBLIC
+    "${V5_ROOT_DIR}/services/state_publisher"
+)
+
+if(NOT WIN32)
+    target_link_libraries(v5_position_status_publisher_core PUBLIC m)
+endif()
+
+add_executable(v5_position_status_publisher_smoke
+    ../services/state_publisher/v5_position_status_publisher_smoke.c
+)
+
+target_link_libraries(v5_position_status_publisher_smoke PRIVATE
+    v5_position_status_publisher_core
+)
+
+if(UNIX)
+    add_executable(v5_position_status_publisher
+        ../services/state_publisher/v5_position_status_publisher.c
+    )
+    target_link_libraries(v5_position_status_publisher PRIVATE
+        v5_position_status_publisher_core
+        ${CMAKE_DL_LIBS}
+    )
+endif()
+
 add_executable(v5_touch_diagnostics
     ../services/ui/v5_touch_diagnostics.c
 )
@@ -948,6 +978,7 @@ file(STRINGS "${V5_RUNTIME_DEPLOY_MANIFEST}" V5_RUNTIME_DEPLOY_ROWS)
 set(V5_PRODUCT_RUNTIME_TARGETS)
 set(V5_UNIX_ONLY_RUNTIME_TARGETS
     v5_backend_readiness_probe
+    v5_position_status_publisher
 )
 foreach(V5_RUNTIME_DEPLOY_ROW IN LISTS V5_RUNTIME_DEPLOY_ROWS)
     string(STRIP "${V5_RUNTIME_DEPLOY_ROW}" V5_RUNTIME_DEPLOY_ROW_STRIPPED)

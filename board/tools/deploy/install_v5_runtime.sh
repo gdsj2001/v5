@@ -279,7 +279,7 @@ manifest_shm_abi_touched=0
 manifest_shm_abi_complete=0
 manifest_shm_abi_ui_binary=0
 manifest_shm_abi_state_binary=0
-manifest_shm_abi_position_script=0
+manifest_shm_abi_position_binary=0
 manifest_shm_abi_wcs_script=0
 manifest_shm_abi_cadence=0
 manifest_shm_abi_projection=0
@@ -368,9 +368,9 @@ while IFS="$tab" read -r scope_kind scope_source scope_destination scope_mode sc
       manifest_shm_abi_touched=1
       manifest_shm_abi_state_binary=1
       ;;
-    /usr/libexec/8ax/v5_position_status_publisher.py)
+    /usr/libexec/8ax/v5_position_status_publisher)
       manifest_shm_abi_touched=1
-      manifest_shm_abi_position_script=1
+      manifest_shm_abi_position_binary=1
       ;;
     /usr/libexec/8ax/v5_wcs_status_publisher.py)
       manifest_shm_abi_wcs_script=1
@@ -469,7 +469,7 @@ while IFS="$tab" read -r scope_kind scope_source scope_destination scope_mode sc
       ;;
   esac
   case "$scope_destination" in
-    /usr/libexec/8ax/v5_position_status_publisher.py|\
+    /usr/libexec/8ax/v5_position_status_publisher|\
     /usr/libexec/8ax/v5_polling_cadence.py|\
     /etc/init.d/v5-position-status-publisher)
       manifest_position_publisher=1
@@ -497,7 +497,7 @@ while IFS="$tab" read -r scope_kind scope_source scope_destination scope_mode sc
       ;;
   esac
   case "$scope_destination" in
-    /usr/libexec/8ax/v5_position_status_publisher.py|\
+    /usr/libexec/8ax/v5_position_status_publisher|\
     /usr/libexec/8ax/v5_wcs_status_publisher.py|\
     /usr/libexec/8ax/v5_polling_cadence.py|\
     /usr/libexec/8ax/v5_machine_status_projection.py|\
@@ -588,7 +588,7 @@ fi
 
 if [ "$manifest_shm_abi_ui_binary" -eq 1 ] &&
    [ "$manifest_shm_abi_state_binary" -eq 1 ] &&
-   [ "$manifest_shm_abi_position_script" -eq 1 ] &&
+   [ "$manifest_shm_abi_position_binary" -eq 1 ] &&
    [ "$manifest_shm_abi_wcs_script" -eq 1 ] &&
    [ "$manifest_shm_abi_cadence" -eq 1 ] &&
    [ "$manifest_shm_abi_projection" -eq 1 ] &&
@@ -913,7 +913,7 @@ stop_affected_writers_before_install() {
   if [ "$manifest_position_publisher" -eq 1 ]; then
     stop_writer_before_upgrade \
       v5-position-status-publisher \
-      /usr/libexec/8ax/v5_position_status_publisher.py
+      /usr/libexec/8ax/v5_position_status_publisher
   fi
   if [ "$manifest_wcs_publisher" -eq 1 ]; then
     stop_writer_before_upgrade \
@@ -939,7 +939,7 @@ stop_shm_abi_domain_before_install() {
     /usr/libexec/8ax/v5_wcs_status_publisher.py
   stop_writer_before_upgrade \
     v5-position-status-publisher \
-    /usr/libexec/8ax/v5_position_status_publisher.py
+    /usr/libexec/8ax/v5_position_status_publisher
 }
 
 wait_position_shm_abi_readback() {
@@ -1161,6 +1161,10 @@ while IFS="$tab" read -r kind source destination mode extra; do
     install -m "$mode" "$source_path" "$destination"
   fi
 done < "$manifest"
+if [ "$apply" -eq 1 ] && [ "$manifest_shm_abi_position_binary" -eq 1 ]; then
+  rm -f /usr/libexec/8ax/v5_position_status_publisher.py
+  rm -f /usr/libexec/8ax/__pycache__/v5_position_status_publisher.*.pyc
+fi
 if [ "$apply" -eq 1 ] && [ "$manifest_ethercat_complete" -eq 1 ]; then
   [ -x /sbin/depmod ] || {
     echo "required module dependency tool is missing: /sbin/depmod" >&2

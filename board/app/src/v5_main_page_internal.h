@@ -88,7 +88,7 @@ void v5_main_page_internal_coalesce_toolpath_invalidations(V5MainPage *page);
 
 void v5_main_page_internal_hide_toolpath_program_line(V5MainPage *page);
 
-lv_obj_t *v5_main_page_internal_create_toolpath_program_scene(
+lv_obj_t *v5_main_page_internal_create_toolpath_scene_layer(
     V5MainPage *page,
     lv_obj_t *parent);
 

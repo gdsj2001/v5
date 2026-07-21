@@ -25,12 +25,18 @@ extern "C" {
 #define V5_MAIN_PAGE_BUTTON_COUNT 29u
 
 enum {
-    V5_MAIN_PAGE_REFRESH_DYNAMIC = 1u << 0,
+    V5_MAIN_PAGE_REFRESH_COORDINATES = 1u << 0,
     V5_MAIN_PAGE_REFRESH_BUTTONS = 1u << 1,
     V5_MAIN_PAGE_REFRESH_ESTOP = 1u << 2,
     V5_MAIN_PAGE_REFRESH_SLOW = 1u << 3,
     V5_MAIN_PAGE_REFRESH_POSE = 1u << 4,
     V5_MAIN_PAGE_REFRESH_STRUCTURE = 1u << 5,
+    V5_MAIN_PAGE_REFRESH_RATES = 1u << 6,
+    V5_MAIN_PAGE_REFRESH_SCENE = 1u << 7,
+    V5_MAIN_PAGE_REFRESH_DYNAMIC =
+        V5_MAIN_PAGE_REFRESH_COORDINATES |
+        V5_MAIN_PAGE_REFRESH_RATES |
+        V5_MAIN_PAGE_REFRESH_SCENE,
     V5_MAIN_PAGE_REFRESH_ALL =
         V5_MAIN_PAGE_REFRESH_DYNAMIC |
         V5_MAIN_PAGE_REFRESH_BUTTONS |
@@ -86,6 +92,7 @@ typedef struct V5MainPage {
     lv_obj_t *cpu1_label;
     lv_obj_t *toolpath_clip_layer;
     lv_obj_t *trajectory_line;
+    lv_obj_t *toolpath_dynamic_layer;
     lv_obj_t *toolpath_summary_label;
     lv_obj_t *toolpath_detail_label;
     lv_obj_t *toolpath_view_label;

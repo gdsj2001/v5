@@ -29,15 +29,32 @@ typedef struct V5ProgramSceneModelGeometry {
     double child_direction[3];
 } V5ProgramSceneModelGeometry;
 
+typedef struct V5ProgramScenePoseMatrix {
+    double value[3][4];
+} V5ProgramScenePoseMatrix;
+
 int v5_program_scene_model_resolve(
     const V5NativeReadback *readback,
     const V5StatusPoint *mcs,
     V5ProgramSceneModel *model);
-int v5_program_scene_model_transform(
+int v5_program_scene_model_pose_matrix(
     const V5ProgramSceneModel *model,
-    double point[V5_STATUS_AXIS_COUNT]);
+    V5ProgramScenePoseMatrix *matrix);
+void v5_program_scene_pose_matrix_identity(
+    V5ProgramScenePoseMatrix *matrix);
+void v5_program_scene_pose_matrix_apply(
+    const V5ProgramScenePoseMatrix *matrix,
+    const double point[V5_STATUS_AXIS_COUNT],
+    double transformed[V5_STATUS_AXIS_COUNT]);
 int v5_program_scene_model_geometry(
     const V5ProgramSceneModel *model,
     V5ProgramSceneModelGeometry *geometry);
+int v5_program_scene_model_topology_same(
+    const V5ProgramSceneModel *left,
+    const V5ProgramSceneModel *right);
+int v5_program_scene_model_pose_same(
+    const V5ProgramSceneModel *left,
+    const V5ProgramSceneModel *right);
+int v5_program_scene_model_registry_complete(void);
 
 #endif

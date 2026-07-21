@@ -6,7 +6,7 @@
 typedef struct V5ProgramSceneModelOps {
     uint32_t registry_id;
     int (*resolve)(const V5NativeReadback *, const V5StatusPoint *, V5ProgramSceneModel *);
-    void (*transform)(const V5ProgramSceneModel *, double[V5_STATUS_AXIS_COUNT]);
+    int (*pose_matrix)(const V5ProgramSceneModel *, V5ProgramScenePoseMatrix *);
     int (*geometry)(const V5ProgramSceneModel *, V5ProgramSceneModelGeometry *);
 } V5ProgramSceneModelOps;
 

@@ -44,7 +44,8 @@ check_remote_test "native HAL owner installed executable" 'test -x /usr/bin/v5_n
 check_remote_test "realtime safety latch installed module" 'test -r /usr/lib/linuxcnc/modules/v5_safety_latch.so'
 check_remote_test "retired Python HAL owners absent" 'test ! -e /usr/libexec/8ax/v5_rtcp_status_publisher.py && test ! -e /usr/libexec/8ax/v5_g53_geometry_memory_owner.py && test ! -e /usr/libexec/8ax/v5_native_safety_latch_owner.py'
 check_remote_test "v5_wcs_status_publisher installed executable" 'test -x /usr/libexec/8ax/v5_wcs_status_publisher.py'
-check_remote_test "v5_position_status_publisher installed executable" 'test -x /usr/libexec/8ax/v5_position_status_publisher.py'
+check_remote_test "v5_position_status_publisher installed executable" 'test -x /usr/libexec/8ax/v5_position_status_publisher'
+check_remote_test "retired Python position publisher absent" 'test ! -e /usr/libexec/8ax/v5_position_status_publisher.py'
 check_remote_test "position polling cadence installed module" 'test -r /usr/libexec/8ax/v5_polling_cadence.py'
 check_remote_test "remote dirty geometry installed module" 'test -r /usr/libexec/8ax/v5_remote_ui_dirty_geometry.py'
 check_remote_test "native operator error mapper installed" 'test -r /usr/libexec/8ax/v5_native_operator_error_map.py'
@@ -163,11 +164,23 @@ else
 fi
 remote 'rm -f /dev/shm/v5_verify_native_operator_error.bin /tmp/v5_operator_error_mock.out' >/dev/null 2>&1 || true
 
+scene_socket_identity_before=$(remote 'test -S /run/v5_program_scene_request.sock && stat -c "%d:%i" /run/v5_program_scene_request.sock' 2>/dev/null || true)
+if [ -n "$scene_socket_identity_before" ]; then
+  ok "canonical program scene request socket exists before one-shot verify"
+else
+  fail_msg "canonical program scene request socket exists before one-shot verify"
+fi
 if remote "/usr/libexec/8ax/v5_state_publisher --path /dev/shm/v5_verify_state_publisher --once >/tmp/v5_verify_state_publisher.out 2>&1 && test -s /dev/shm/v5_verify_state_publisher" >/dev/null 2>&1; then
   ok "state publisher one-shot writes shm"
   remote 'cat /tmp/v5_verify_state_publisher.out 2>/dev/null || true' | sed 's/^/INFO state publisher: /'
 else
   fail_msg "state publisher one-shot writes shm"
+fi
+scene_socket_identity_after=$(remote 'test -S /run/v5_program_scene_request.sock && stat -c "%d:%i" /run/v5_program_scene_request.sock' 2>/dev/null || true)
+if [ -n "$scene_socket_identity_before" ] && [ "$scene_socket_identity_after" = "$scene_socket_identity_before" ]; then
+  ok "state publisher one-shot preserves canonical program scene request socket identity"
+else
+  fail_msg "state publisher one-shot preserves canonical program scene request socket identity"
 fi
 remote 'rm -f /dev/shm/v5_verify_state_publisher /tmp/v5_verify_state_publisher.out' >/dev/null 2>&1 || true
 

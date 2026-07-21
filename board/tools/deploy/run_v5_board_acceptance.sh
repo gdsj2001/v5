@@ -9,7 +9,7 @@ board_ssh_port="${V5_BOARD_SSH_PORT:-22}"
 home_dir="${HOME:?HOME is required}"
 build_root="${V5_BUILD_ROOT:-$home_dir/v5-build}"
 board_build_dir="${V5_BOARD_BUILD_DIR:-$build_root/board}"
-board_build_targets="${V5_BOARD_BUILD_TARGETS:-v5_lvgl_shell v5_state_publisher v5_touch_diagnostics v5_linuxcncrsh_probe v5_command_gate_server v5_command_gate_drive_window v5_linuxcncrsh_golden_run}"
+board_build_targets="${V5_BOARD_BUILD_TARGETS:-v5_lvgl_shell v5_state_publisher v5_position_status_publisher v5_touch_diagnostics v5_linuxcncrsh_probe v5_command_gate_server v5_command_gate_drive_window v5_linuxcncrsh_golden_run}"
 product_closure_verify="$repo_root/tools/deploy/verify_v5_product_source_closure.py"
 apply=0
 ui_first_frame=0
@@ -61,6 +61,14 @@ if [ ! -r "$cmake_cache" ]; then
   exit 6
 fi
 cmake_c_compiler=$(sed -n 's/^CMAKE_C_COMPILER:FILEPATH=//p' "$cmake_cache" | head -n 1)
+if [ -z "$cmake_c_compiler" ]; then
+  cmake_compiler_file=$(find "$board_build_dir/CMakeFiles" -mindepth 2 -maxdepth 2 \
+    -name CMakeCCompiler.cmake -type f -print -quit)
+  if [ -n "$cmake_compiler_file" ]; then
+    cmake_c_compiler=$(sed -n 's/^set(CMAKE_C_COMPILER "\(.*\)")$/\1/p' \
+      "$cmake_compiler_file" | head -n 1)
+  fi
+fi
 case "$cmake_c_compiler" in
   *arm-xilinx-linux-gnueabi-gcc) ;;
   *)

@@ -179,7 +179,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Capture before/after frames around one v3-compatible WebSocket pointer input action."
     )
-    parser.add_argument("--ssh", required=True, help="board SSH host")
+    parser.add_argument("--ssh", help="optional board SSH host for event-delta collection")
     parser.add_argument("--host", default="192.168.1.221", help="relay host/IP")
     parser.add_argument("--port", type=int, default=18080)
     parser.add_argument("--out-dir", default=str(evidence_root / "board_remote_input"))
@@ -193,11 +193,18 @@ def main():
     drag.add_argument("--x2", type=int, required=True)
     drag.add_argument("--y2", type=int, required=True)
     drag.add_argument("--steps", type=int, default=12)
+    sub.add_parser("capture")
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    if args.kind == "capture":
+        frame = out_dir / f"v5_board_capture_{stamp}.bmp"
+        meta_path = out_dir / f"v5_board_capture_{stamp}.json"
+        capture_frame(args.host, args.port, frame, meta_path)
+        print(frame)
+        return
     before_bmp = out_dir / f"v5_remote_input_{stamp}_before.bmp"
     before_json = out_dir / f"v5_remote_input_{stamp}_before.json"
     after_bmp = out_dir / f"v5_remote_input_{stamp}_after.bmp"
@@ -207,16 +214,17 @@ def main():
     summary = out_dir / f"v5_remote_input_{stamp}_summary.json"
 
     before_meta = capture_frame(args.host, args.port, before_bmp, before_json)
-    before_ui = count_remote_lines(args.ssh, "/run/8ax_v5_product_ui/ui_events.jsonl")
-    before_input = count_remote_lines(args.ssh, "/run/8ax_v5_product_ui/remote_input_events.jsonl")
+    before_ui = count_remote_lines(args.ssh, "/run/8ax_v5_product_ui/ui_events.jsonl") if args.ssh else None
+    before_input = count_remote_lines(args.ssh, "/run/8ax_v5_product_ui/remote_input_events.jsonl") if args.ssh else None
 
     result = remote_action(args.host, args.port, args.kind, args)
     time.sleep(0.2)
     after_meta = capture_frame(args.host, args.port, after_bmp, after_json)
-    after_ui = count_remote_lines(args.ssh, "/run/8ax_v5_product_ui/ui_events.jsonl")
-    after_input = count_remote_lines(args.ssh, "/run/8ax_v5_product_ui/remote_input_events.jsonl")
-    fetch_delta(args.ssh, "/run/8ax_v5_product_ui/ui_events.jsonl", before_ui, ui_delta)
-    fetch_delta(args.ssh, "/run/8ax_v5_product_ui/remote_input_events.jsonl", before_input, input_delta)
+    after_ui = count_remote_lines(args.ssh, "/run/8ax_v5_product_ui/ui_events.jsonl") if args.ssh else None
+    after_input = count_remote_lines(args.ssh, "/run/8ax_v5_product_ui/remote_input_events.jsonl") if args.ssh else None
+    if args.ssh:
+        fetch_delta(args.ssh, "/run/8ax_v5_product_ui/ui_events.jsonl", before_ui, ui_delta)
+        fetch_delta(args.ssh, "/run/8ax_v5_product_ui/remote_input_events.jsonl", before_input, input_delta)
 
     summary.write_text(json.dumps({
         "schema": "v5.remote_input_evidence.v1",
@@ -231,7 +239,7 @@ def main():
         "before_remote_input_events": before_input,
         "after_remote_input_events": after_input,
         "result": result,
-        "note": "frame captured before remote input; this is not touch calibration, real-finger hardware, MDI/start, or motion evidence",
+        "note": "frames captured before/after remote input; without --ssh, pair with board_exec event/native readback; this is not real-finger hardware or motion evidence by itself",
     }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(summary)
 

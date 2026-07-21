@@ -102,10 +102,10 @@ def publisher_identities(cache=None, unique=False, expected_ini=""):
         if record != lock_record:
             raise ReadyError("position owner record mismatch")
         pid = int(record[0])
-        expected = ["/usr/libexec/8ax/v5_position_status_publisher.py", "--path",
+        expected = ["/usr/libexec/8ax/v5_position_status_publisher", "--path",
                     str(POSITION_PATH), "--bus-path", str(BUS_STATUS_PATH),
                     "--interval-ms", "33"]
-        if accept_identity("position", pid, record[1], proc_argv(pid)[1:],
+        if accept_identity("position", pid, record[1], proc_argv(pid),
                            [expected], cache, extra=(record[2],)):
             require_lifecycle_lock_held(POSITION_LOCK, "position")
             owners["position"] = pid

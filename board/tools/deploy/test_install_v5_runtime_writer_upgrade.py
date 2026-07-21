@@ -45,13 +45,22 @@ def main() -> int:
     for token in (
         'disable_unconditional_ethercat_autostart',
         'rm -f "$dir"/S??ethercat',
-        'enable_boot_service v5-linuxcnc-command-gate 05 19',
-        'enable_boot_service v5-position-status-publisher 06 18',
-        'enable_boot_service v5-wcs-status-publisher 06 17',
-        'enable_boot_service v5-state-publisher 07 16',
-        'enable_boot_service v5-ui-relay 08 15',
+        'enable_runtime_startup_boot_graph',
+        'disable_boot_service "$service"',
+        'enable_auxiliary_boot_service v5-runtime-startup 05 14',
     ):
         assert token in text, 'MODE_SELECTED_BOOT_ORDER_MISSING:' + token
+    for retired in (
+        'enable_boot_service()',
+        'enable_boot_service_raw()',
+        'enable_boot_service v5-linuxcnc-command-gate',
+        'enable_boot_service v5-position-status-publisher',
+        'enable_boot_service v5-wcs-status-publisher',
+        'enable_boot_service v5-state-publisher',
+        'enable_boot_service v5-ui-relay',
+        'enable_boot_service v5-settings-actiond',
+    ):
+        assert retired not in text, 'RETIRED_PER_SERVICE_BOOT_EDGE_SURVIVED:' + retired
     assert 'manifest_state_only=1' in text
     assert 'restart_scope=state' in text
     assert 'State-publisher restart scope requires a non-empty State-publisher-only manifest' in text
@@ -74,7 +83,7 @@ def main() -> int:
     install_loop_text = section(
         text,
         'while IFS="$tab" read -r kind source destination mode extra; do',
-        '\nenable_boot_service() {')
+        '\nenable_auxiliary_boot_service() {')
     assert 'if [ "$kind" = "runtime_seed" ] && [ -e "$destination" ]; then' in install_loop_text
     assert 'preserve runtime seed %s -> %s (exists)' in install_loop_text
     for row in (
@@ -143,7 +152,7 @@ def main() -> int:
                               'elif [ "$restart_scope" = "settings" ]'),
         'settings': section(text, 'elif [ "$restart_scope" = "settings" ]',
                             '\n  else\n'),
-        'all': section(text, '\n  else\n    enable_boot_services', '\n  fi\nelse\n'),
+        'all': section(text, '\n  else\n    enable_auxiliary_boot_services', '\n  fi\nelse\n'),
     }
     for name in ('backend', 'ethercat', 'wcs', 'settings'):
         assert scopes[name].count('wait_publisher_actual_barrier') == 1, name
@@ -171,13 +180,14 @@ def main() -> int:
     required_destinations = (
         '/usr/libexec/8ax/v5_lvgl_shell',
         '/usr/libexec/8ax/v5_state_publisher',
-        '/usr/libexec/8ax/v5_position_status_publisher.py',
+        '/usr/libexec/8ax/v5_position_status_publisher',
         '/usr/libexec/8ax/v5_wcs_status_publisher.py',
         '/usr/libexec/8ax/v5_polling_cadence.py',
         '/usr/libexec/8ax/v5_machine_status_projection.py',
         '/usr/libexec/8ax/v5_wcs_status_codec.py',
         '/usr/libexec/8ax/v5_remote_ui_relay.py',
         '/usr/libexec/8ax/v5_ui_boot_ready.py',
+        '/usr/libexec/8ax/v5_ui_main_cache_contract.py',
         '/usr/libexec/8ax/v5_status_shm_reader.py',
         '/etc/init.d/v5-position-status-publisher',
         '/etc/init.d/v5-wcs-status-publisher',
@@ -220,7 +230,7 @@ def main() -> int:
     for destination in (
         '/usr/libexec/8ax/v5_lvgl_shell',
         '/usr/libexec/8ax/v5_state_publisher',
-        '/usr/libexec/8ax/v5_position_status_publisher.py',
+        '/usr/libexec/8ax/v5_position_status_publisher',
         '/usr/libexec/8ax/v5_status_shm_reader.py',
     ):
         incomplete_rows = [

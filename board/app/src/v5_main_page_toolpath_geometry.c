@@ -1,27 +1,97 @@
 #include "v5_main_page.h"
 #include "v5_main_page_internal.h"
 
+#include <math.h>
 #include <string.h>
 
-static void invalidate_scene_dirty(
+static int segment_in_layer(uint16_t role, uint32_t layer)
+{
+    if (layer == V5_STATUS_SCENE_FLAG_DIRTY_STATIC) {
+        return role == V5_STATUS_SCENE_SEGMENT_MCS_AXIS ||
+            role == V5_STATUS_SCENE_SEGMENT_WCS_AXIS;
+    }
+    if (layer == V5_STATUS_SCENE_FLAG_DIRTY_MODEL) {
+        return role == V5_STATUS_SCENE_SEGMENT_MODEL_AXIS;
+    }
+    return layer == V5_STATUS_SCENE_FLAG_DIRTY_DYNAMIC &&
+        role == V5_STATUS_SCENE_SEGMENT_HOLDER;
+}
+
+static int marker_in_layer(uint16_t role, uint32_t layer)
+{
+    if (layer == V5_STATUS_SCENE_FLAG_DIRTY_STATIC) {
+        return role == V5_STATUS_SCENE_MARKER_MCS_ORIGIN ||
+            role == V5_STATUS_SCENE_MARKER_WCS_ORIGIN;
+    }
+    if (layer == V5_STATUS_SCENE_FLAG_DIRTY_MODEL) {
+        return role == V5_STATUS_SCENE_MARKER_MODEL_CENTER;
+    }
+    return layer == V5_STATUS_SCENE_FLAG_DIRTY_DYNAMIC &&
+        (role == V5_STATUS_SCENE_MARKER_MCS_ACTUAL ||
+         role == V5_STATUS_SCENE_MARKER_CMD_TIP);
+}
+
+static void bounds_add_point(
+    int *valid,
+    int32_t *x1,
+    int32_t *y1,
+    int32_t *x2,
+    int32_t *y2,
+    V5StatusScreenPoint point)
+{
+    const int32_t x = (int32_t)lroundf(point.x);
+    const int32_t y = (int32_t)lroundf(point.y);
+    if (!*valid) {
+        *valid = 1;
+        *x1 = *x2 = x;
+        *y1 = *y2 = y;
+        return;
+    }
+    if (x < *x1) *x1 = x;
+    if (x > *x2) *x2 = x;
+    if (y < *y1) *y1 = y;
+    if (y > *y2) *y2 = y;
+}
+
+static void invalidate_scene_layer(
     V5MainPage *page,
-    const V5StatusDisplayScene *scene)
+    lv_obj_t *object,
+    const V5StatusDisplayScene *scene,
+    uint32_t layer)
 {
     lv_area_t coords;
     lv_area_t dirty;
-    int32_t x1;
-    int32_t y1;
-    int32_t x2;
-    int32_t y2;
+    int32_t x1 = 0;
+    int32_t y1 = 0;
+    int32_t x2 = 0;
+    int32_t y2 = 0;
+    int valid = 0;
     uint64_t pixels;
-    if (!page || !page->trajectory_line || !scene ||
-        scene->dirty_x2 < scene->dirty_x1 ||
-        scene->dirty_y2 < scene->dirty_y1) return;
-    lv_obj_get_coords(page->trajectory_line, &coords);
-    x1 = (int32_t)coords.x1 + scene->dirty_x1 - 7;
-    y1 = (int32_t)coords.y1 + scene->dirty_y1 - 7;
-    x2 = (int32_t)coords.x1 + scene->dirty_x2 + 7;
-    y2 = (int32_t)coords.y1 + scene->dirty_y2 + 7;
+    unsigned int i;
+    if (!page || !object || !scene) return;
+    if (layer == V5_STATUS_SCENE_FLAG_DIRTY_STATIC) {
+        for (i = 0U; i < scene->point_count; ++i) {
+            bounds_add_point(&valid, &x1, &y1, &x2, &y2, scene->points[i]);
+        }
+    }
+    for (i = 0U; i < scene->segment_count; ++i) {
+        if (!segment_in_layer(scene->segments[i].role, layer)) continue;
+        bounds_add_point(
+            &valid, &x1, &y1, &x2, &y2, scene->segments[i].start);
+        bounds_add_point(
+            &valid, &x1, &y1, &x2, &y2, scene->segments[i].end);
+    }
+    for (i = 0U; i < scene->marker_count; ++i) {
+        if (!marker_in_layer(scene->markers[i].role, layer)) continue;
+        bounds_add_point(
+            &valid, &x1, &y1, &x2, &y2, scene->markers[i].point);
+    }
+    if (!valid) return;
+    lv_obj_get_coords(object, &coords);
+    x1 += (int32_t)coords.x1 - 7;
+    y1 += (int32_t)coords.y1 - 7;
+    x2 += (int32_t)coords.x1 + 7;
+    y2 += (int32_t)coords.y1 + 7;
     if (x1 < coords.x1) x1 = coords.x1;
     if (y1 < coords.y1) y1 = coords.y1;
     if (x2 > coords.x2) x2 = coords.x2;
@@ -31,7 +101,7 @@ static void invalidate_scene_dirty(
     dirty.y1 = (lv_coord_t)y1;
     dirty.x2 = (lv_coord_t)x2;
     dirty.y2 = (lv_coord_t)y2;
-    lv_obj_invalidate_area(page->trajectory_line, &dirty);
+    lv_obj_invalidate_area(object, &dirty);
     pixels = (uint64_t)(x2 - x1 + 1) * (uint64_t)(y2 - y1 + 1);
     page->toolpath_line_last_dirty_rect_count += 1U;
     page->toolpath_line_last_dirty_pixels += pixels;
@@ -55,7 +125,15 @@ void v5_main_page_internal_hide_toolpath_unproven_geometry(V5MainPage *page)
 {
     if (!page) return;
     if (page->toolpath_display_scene_valid && page->toolpath_display_scene) {
-        invalidate_scene_dirty(page, page->toolpath_display_scene);
+        invalidate_scene_layer(
+            page, page->trajectory_line, page->toolpath_display_scene,
+            V5_STATUS_SCENE_FLAG_DIRTY_STATIC);
+        invalidate_scene_layer(
+            page, page->toolpath_dynamic_layer, page->toolpath_display_scene,
+            V5_STATUS_SCENE_FLAG_DIRTY_MODEL);
+        invalidate_scene_layer(
+            page, page->toolpath_dynamic_layer, page->toolpath_display_scene,
+            V5_STATUS_SCENE_FLAG_DIRTY_DYNAMIC);
     }
     page->toolpath_display_scene_valid = 0;
     page->toolpath_display_scene = NULL;
@@ -124,6 +202,9 @@ void v5_main_page_internal_apply_display_scene(
 {
     unsigned char model_seen[2] = {0};
     int wcs_seen = 0;
+    uint32_t dirty_layers;
+    const V5StatusDisplayScene *previous_scene;
+    int previous_valid;
     unsigned int i;
     if (!page || !scene ||
         (scene->flags & V5_STATUS_SCENE_FLAG_VALID) == 0U) {
@@ -133,13 +214,55 @@ void v5_main_page_internal_apply_display_scene(
     page->toolpath_line_last_dirty_rect_count = 0U;
     page->toolpath_line_last_dirty_pixels = 0U;
     page->toolpath_line_last_dirty_max_pixels = 0U;
-    if (page->toolpath_display_scene_valid && page->toolpath_display_scene) {
-        invalidate_scene_dirty(page, page->toolpath_display_scene);
+    previous_scene = page->toolpath_display_scene;
+    previous_valid = page->toolpath_display_scene_valid && previous_scene;
+    dirty_layers = scene->flags & V5_STATUS_SCENE_FLAG_DIRTY_MASK;
+    if (!previous_valid ||
+        (scene->flags & V5_STATUS_SCENE_FLAG_DIRTY_KNOWN) == 0U) {
+        dirty_layers = V5_STATUS_SCENE_FLAG_DIRTY_MASK;
+    }
+    if (previous_valid) {
+        if (dirty_layers & V5_STATUS_SCENE_FLAG_DIRTY_STATIC) {
+            invalidate_scene_layer(
+                page, page->trajectory_line, previous_scene,
+                V5_STATUS_SCENE_FLAG_DIRTY_STATIC);
+        }
+        if (dirty_layers & V5_STATUS_SCENE_FLAG_DIRTY_MODEL) {
+            invalidate_scene_layer(
+                page, page->toolpath_dynamic_layer, previous_scene,
+                V5_STATUS_SCENE_FLAG_DIRTY_MODEL);
+        }
+        if (dirty_layers & V5_STATUS_SCENE_FLAG_DIRTY_DYNAMIC) {
+            invalidate_scene_layer(
+                page, page->toolpath_dynamic_layer, previous_scene,
+                V5_STATUS_SCENE_FLAG_DIRTY_DYNAMIC);
+        }
     }
     page->toolpath_display_scene = scene;
     page->toolpath_display_scene_valid = 1;
-    (void)v5_main_page_internal_apply_program_display_scene(page, scene);
-    invalidate_scene_dirty(page, scene);
+    if (!previous_valid ||
+        (dirty_layers & V5_STATUS_SCENE_FLAG_DIRTY_STATIC) != 0U) {
+        (void)v5_main_page_internal_apply_program_display_scene(page, scene);
+    }
+    lv_obj_clear_flag(page->trajectory_line, LV_OBJ_FLAG_HIDDEN);
+    if (page->toolpath_dynamic_layer) {
+        lv_obj_clear_flag(page->toolpath_dynamic_layer, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (dirty_layers & V5_STATUS_SCENE_FLAG_DIRTY_STATIC) {
+        invalidate_scene_layer(
+            page, page->trajectory_line, scene,
+            V5_STATUS_SCENE_FLAG_DIRTY_STATIC);
+    }
+    if (dirty_layers & V5_STATUS_SCENE_FLAG_DIRTY_MODEL) {
+        invalidate_scene_layer(
+            page, page->toolpath_dynamic_layer, scene,
+            V5_STATUS_SCENE_FLAG_DIRTY_MODEL);
+    }
+    if (dirty_layers & V5_STATUS_SCENE_FLAG_DIRTY_DYNAMIC) {
+        invalidate_scene_layer(
+            page, page->toolpath_dynamic_layer, scene,
+            V5_STATUS_SCENE_FLAG_DIRTY_DYNAMIC);
+    }
     apply_segment_labels(page, scene, model_seen);
     apply_marker_labels(page, scene, &wcs_seen);
     for (i = 0U; i < 2U; ++i) {

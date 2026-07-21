@@ -43,6 +43,28 @@ static void transform_bc(const V5ProgramSceneModel *model, double point[V5_STATU
     point[2] = model->primary_center[2] - bx * model->primary_sin + bz * model->primary_cos;
 }
 
+static int pose_matrix_bc(
+    const V5ProgramSceneModel *model,
+    V5ProgramScenePoseMatrix *matrix)
+{
+    double origin[V5_STATUS_AXIS_COUNT] = {0};
+    double basis[V5_STATUS_AXIS_COUNT] = {0};
+    unsigned int column;
+    unsigned int row;
+    if (!model || !matrix) return 0;
+    transform_bc(model, origin);
+    for (row = 0U; row < 3U; ++row) matrix->value[row][3] = origin[row];
+    for (column = 0U; column < 3U; ++column) {
+        memset(basis, 0, sizeof(basis));
+        basis[column] = 1.0;
+        transform_bc(model, basis);
+        for (row = 0U; row < 3U; ++row) {
+            matrix->value[row][column] = basis[row] - origin[row];
+        }
+    }
+    return 1;
+}
+
 static int geometry_bc(const V5ProgramSceneModel *model, V5ProgramSceneModelGeometry *geometry)
 {
     const double dx = model->child_center[0] - model->primary_center[0];
@@ -59,4 +81,4 @@ static int geometry_bc(const V5ProgramSceneModel *model, V5ProgramSceneModelGeom
 }
 
 const V5ProgramSceneModelOps v5_program_scene_model_bc_ops = {
-    V5_MOTION_MODEL_ID_XYZBC_TRT, resolve_bc, transform_bc, geometry_bc};
+    V5_MOTION_MODEL_ID_XYZBC_TRT, resolve_bc, pose_matrix_bc, geometry_bc};

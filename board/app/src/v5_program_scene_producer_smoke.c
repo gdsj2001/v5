@@ -60,6 +60,188 @@ static unsigned int count_markers(
     return count;
 }
 
+static const V5StatusSceneSegment *find_segment(
+    const V5StatusDisplayScene *scene,
+    uint16_t role,
+    uint16_t index)
+{
+    unsigned int i;
+    if (!scene) return 0;
+    for (i = 0U; i < scene->segment_count; ++i) {
+        if (scene->segments[i].role == role &&
+            scene->segments[i].index == index) return &scene->segments[i];
+    }
+    return 0;
+}
+
+static int rotary_pose_cache_smoke(const char *model_name)
+{
+    V5ProgramSceneProducer producer;
+    V5ProgramSceneRequest request;
+    V5NativeDisplaySample sample;
+    V5NativeReadback readback;
+    V5StatusDisplayScene first;
+    V5StatusDisplayScene scene;
+    uint64_t generation = 0ULL;
+    uint64_t initial_build_count;
+    uint64_t initial_transform_count;
+    uint64_t initial_project_count;
+    uint64_t initial_point_traversal_count;
+    uint64_t initial_fit_generation;
+    float first_x;
+    float first_y;
+    int program_moved = 0;
+    unsigned int frame;
+
+    v5_program_scene_producer_init(&producer);
+    v5_program_scene_request_init(&request);
+    request.program_source_identity = model_name[3] == 'A' ? 0xa1ULL : 0xb1ULL;
+    request.program_generation = 1ULL;
+    request.view_generation = 1ULL;
+    request.fit_generation = 1ULL;
+    request.point_count = 3U;
+    request.program_wcs_mask = 1U;
+    request.points[0].axis[0] = 5.0;
+    request.points[0].axis[1] = 7.0;
+    request.points[0].axis[2] = 11.0;
+    request.points[1].axis[0] = 20.0;
+    request.points[1].axis[1] = -3.0;
+    request.points[1].axis[2] = 9.0;
+    request.points[2].axis[0] = -4.0;
+    request.points[2].axis[1] = 18.0;
+    request.points[2].axis[2] = 2.0;
+    request.wcs_index[0] = 0;
+    request.wcs_index[1] = 0;
+    request.wcs_index[2] = 0;
+    v5_program_scene_producer_set_request(&producer, &request);
+
+    memset(&sample, 0, sizeof(sample));
+    sample.available = 1;
+    sample.valid_mask = V5_STATUS_VALID_MCS | V5_STATUS_VALID_CMD_MCS;
+    sample.source_generation = 1ULL;
+    sample.mcs[3] = 10.0;
+    sample.mcs[4] = 20.0;
+    memcpy(sample.cmd_mcs, sample.mcs, sizeof(sample.cmd_mcs));
+    prepare_readback(&readback, model_name, 1);
+    if (!v5_program_scene_producer_build(
+            &producer, &sample, &readback, &first, &generation)) return 0;
+    if ((first.flags & (V5_STATUS_SCENE_FLAG_DIRTY_KNOWN |
+            V5_STATUS_SCENE_FLAG_DIRTY_MASK)) !=
+        (V5_STATUS_SCENE_FLAG_DIRTY_KNOWN |
+            V5_STATUS_SCENE_FLAG_DIRTY_MASK)) return 0;
+    initial_build_count = first.build_count;
+    initial_transform_count = first.rtcp_transform_count;
+    initial_project_count = first.project_count;
+    initial_point_traversal_count = producer.point_traversal_count;
+    initial_fit_generation = first.fit_generation;
+    first_x = first.points[0].x;
+    first_y = first.points[0].y;
+    for (frame = 0U; frame < 300U; ++frame) {
+        const double step = (double)((frame + 1U) % 101U) * 0.0005;
+        sample.source_generation += 1ULL;
+        sample.mcs[3] = 10.0 + step;
+        sample.mcs[4] = 20.0 - step;
+        memcpy(sample.cmd_mcs, sample.mcs, sizeof(sample.cmd_mcs));
+        if (!v5_program_scene_producer_build(
+                &producer, &sample, &readback, &scene, &generation) ||
+            scene.build_count != initial_build_count ||
+            scene.rtcp_transform_count != initial_transform_count + frame + 1ULL ||
+            scene.project_count != initial_project_count + frame + 1ULL ||
+            producer.point_traversal_count !=
+                initial_point_traversal_count + frame + 1ULL ||
+            scene.fit_generation != initial_fit_generation ||
+            (scene.flags & (V5_STATUS_SCENE_FLAG_DIRTY_KNOWN |
+                V5_STATUS_SCENE_FLAG_DIRTY_MASK)) !=
+                (V5_STATUS_SCENE_FLAG_DIRTY_KNOWN |
+                    V5_STATUS_SCENE_FLAG_DIRTY_MASK)) return 0;
+        if (fabs((double)scene.points[0].x - first_x) > 1.0e-5 ||
+            fabs((double)scene.points[0].y - first_y) > 1.0e-5) {
+            program_moved = 1;
+        }
+    }
+    if (!program_moved) return 0;
+
+    /* RTCP OFF freezes program pixels while model geometry remains dynamic. */
+    v5_program_scene_producer_init(&producer);
+    v5_program_scene_producer_set_request(&producer, &request);
+    sample.source_generation += 1ULL;
+    sample.mcs[3] = 0.0;
+    sample.mcs[4] = 0.0;
+    memcpy(sample.cmd_mcs, sample.mcs, sizeof(sample.cmd_mcs));
+    prepare_readback(&readback, model_name, 0);
+    if (!v5_program_scene_producer_build(
+            &producer, &sample, &readback, &first, &generation)) return 0;
+    {
+        const V5StatusSceneSegment *first_model_axis = find_segment(
+            &first, V5_STATUS_SCENE_SEGMENT_MODEL_AXIS, 1U);
+        V5StatusScreenPoint first_axis_end;
+        if (!first_model_axis) return 0;
+        first_axis_end = first_model_axis->end;
+        sample.source_generation += 1ULL;
+        sample.mcs[3] = 17.0;
+        sample.mcs[4] = -23.0;
+        memcpy(sample.cmd_mcs, sample.mcs, sizeof(sample.cmd_mcs));
+        if (!v5_program_scene_producer_build(
+                &producer, &sample, &readback, &scene, &generation) ||
+            scene.build_count != first.build_count ||
+            scene.rtcp_transform_count != first.rtcp_transform_count ||
+            scene.project_count != first.project_count ||
+            (scene.flags & V5_STATUS_SCENE_FLAG_DIRTY_KNOWN) == 0U ||
+            (scene.flags & V5_STATUS_SCENE_FLAG_DIRTY_STATIC) != 0U ||
+            (scene.flags & (V5_STATUS_SCENE_FLAG_DIRTY_MODEL |
+                V5_STATUS_SCENE_FLAG_DIRTY_DYNAMIC)) !=
+                (V5_STATUS_SCENE_FLAG_DIRTY_MODEL |
+                    V5_STATUS_SCENE_FLAG_DIRTY_DYNAMIC) ||
+            memcmp(scene.points, first.points,
+                sizeof(first.points[0]) * first.point_count) != 0) return 0;
+        {
+            const V5StatusSceneSegment *second_model_axis = find_segment(
+                &scene, V5_STATUS_SCENE_SEGMENT_MODEL_AXIS, 1U);
+            if (!second_model_axis ||
+                (second_model_axis->end.x == first_axis_end.x &&
+                 second_model_axis->end.y == first_axis_end.y)) return 0;
+        }
+    }
+    return 1;
+}
+
+static int pixel_compaction_smoke(void)
+{
+    V5ProgramSceneProducer producer;
+    V5ProgramSceneRequest request;
+    V5NativeDisplaySample sample;
+    V5NativeReadback readback;
+    V5StatusDisplayScene scene;
+    uint64_t generation = 0ULL;
+    unsigned int i;
+    v5_program_scene_producer_init(&producer);
+    v5_program_scene_request_init(&request);
+    request.program_source_identity = 0xc1ULL;
+    request.program_generation = 1ULL;
+    request.point_count = 4U;
+    request.program_wcs_mask = 1U;
+    for (i = 0U; i < request.point_count; ++i) {
+        request.points[i].axis[0] = 1.0;
+        request.points[i].axis[1] = 2.0;
+        request.points[i].axis[2] = 3.0;
+        request.wcs_index[i] = 0;
+    }
+    request.break_before[2] = 1U;
+    v5_program_scene_producer_set_request(&producer, &request);
+    memset(&sample, 0, sizeof(sample));
+    sample.available = 1;
+    sample.valid_mask = V5_STATUS_VALID_MCS | V5_STATUS_VALID_CMD_MCS;
+    sample.source_generation = 1ULL;
+    prepare_readback(&readback, "XYZAC_TRT", 0);
+    if (!v5_program_scene_producer_build(
+            &producer, &sample, &readback, &scene, &generation) ||
+        scene.point_count != 2U || scene.break_before[0] != 0U ||
+        scene.break_before[1] != 1U ||
+        lroundf(scene.points[0].x) != lroundf(scene.points[1].x) ||
+        lroundf(scene.points[0].y) != lroundf(scene.points[1].y)) return 0;
+    return 1;
+}
+
 static int ipc_validation_smoke(void)
 {
     V5ProgramSceneRequest valid;
@@ -247,6 +429,10 @@ int main(void)
     unsigned int repeat;
     V5ProgramSceneRequest merged_request;
     V5ProgramSceneRequest view_request;
+    if (!v5_program_scene_model_registry_complete()) return 29;
+    if (!rotary_pose_cache_smoke("XYZAC_TRT")) return 30;
+    if (!rotary_pose_cache_smoke("XYZBC_TRT")) return 31;
+    if (!pixel_compaction_smoke()) return 32;
     if (!ipc_validation_smoke()) return 25;
     if (!transport_loss_recovery_smoke()) return 26;
     if (!unknown_model_degraded_smoke()) return 27;

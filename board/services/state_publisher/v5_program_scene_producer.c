@@ -5,6 +5,8 @@
 #include <math.h>
 #include <string.h>
 
+#define V5_PROGRAM_SCENE_MODEL_AXIS_LENGTH 40.0
+
 void v5_program_scene_producer_init(V5ProgramSceneProducer *producer)
 {
     if (!producer) return;
@@ -60,7 +62,8 @@ static void apply_scene_metadata(
     const V5ProgramSceneModel *model,
     uint32_t model_id,
     uint32_t rtcp_enabled,
-    int model_valid)
+    int model_valid,
+    uint32_t dirty_flags)
 {
     V5ProgramSceneModelGeometry geometry;
     unsigned int axis;
@@ -79,7 +82,9 @@ static void apply_scene_metadata(
     producer->scene.program_wcs_mask = producer->request.program_wcs_mask;
     producer->scene.current_wcs_index =
         readback->wcs_index >= 0 ? (uint8_t)readback->wcs_index : 255U;
-    producer->scene.flags = V5_STATUS_SCENE_FLAG_VALID;
+    producer->scene.flags = V5_STATUS_SCENE_FLAG_VALID |
+        V5_STATUS_SCENE_FLAG_DIRTY_KNOWN |
+        (dirty_flags & V5_STATUS_SCENE_FLAG_DIRTY_MASK);
     if (producer->scene.point_count) {
         producer->scene.flags |= V5_STATUS_SCENE_FLAG_PROGRAM;
     }
@@ -102,6 +107,92 @@ static void apply_scene_metadata(
     }
 }
 
+static int model_geometry_points(
+    const V5ProgramSceneModel *model,
+    uint32_t model_id,
+    double start[2][V5_STATUS_AXIS_COUNT],
+    double end[2][V5_STATUS_AXIS_COUNT],
+    double center[2][V5_STATUS_AXIS_COUNT])
+{
+    V5ProgramSceneModelGeometry geometry;
+    unsigned int model_axis;
+    unsigned int axis;
+    if (!model || !model_id ||
+        !v5_program_scene_model_geometry(model, &geometry)) return 0;
+    for (model_axis = 0U; model_axis < 2U; ++model_axis) {
+        const double *source_center = model_axis ?
+            geometry.child_center : geometry.primary_center;
+        const double *direction = model_axis ?
+            geometry.child_direction : geometry.primary_direction;
+        memset(start[model_axis], 0, sizeof(start[model_axis]));
+        memset(end[model_axis], 0, sizeof(end[model_axis]));
+        memset(center[model_axis], 0, sizeof(center[model_axis]));
+        for (axis = 0U; axis < 3U; ++axis) {
+            center[model_axis][axis] = source_center[axis];
+            start[model_axis][axis] = source_center[axis] -
+                direction[axis] * V5_PROGRAM_SCENE_MODEL_AXIS_LENGTH;
+            end[model_axis][axis] = source_center[axis] +
+                direction[axis] * V5_PROGRAM_SCENE_MODEL_AXIS_LENGTH;
+        }
+    }
+    return 1;
+}
+
+static void add_model_geometry_bounds(
+    V5ProgramSceneBounds *bounds,
+    const V5ProgramSceneProducer *producer,
+    const V5ProgramSceneModel *model,
+    uint32_t model_id)
+{
+    double start[2][V5_STATUS_AXIS_COUNT];
+    double end[2][V5_STATUS_AXIS_COUNT];
+    double center[2][V5_STATUS_AXIS_COUNT];
+    unsigned int model_axis;
+    if (!bounds || !producer || !model_geometry_points(
+            model, model_id, start, end, center)) return;
+    for (model_axis = 0U; model_axis < 2U; ++model_axis) {
+        v5_program_scene_bounds_add(
+            bounds, start[model_axis], producer->request.plane);
+        v5_program_scene_bounds_add(
+            bounds, end[model_axis], producer->request.plane);
+        v5_program_scene_bounds_add(
+            bounds, center[model_axis], producer->request.plane);
+    }
+}
+
+static void add_model_geometry_scene(
+    V5ProgramSceneProducer *producer,
+    const V5ProgramSceneModel *model,
+    uint32_t model_id)
+{
+    double start[2][V5_STATUS_AXIS_COUNT];
+    double end[2][V5_STATUS_AXIS_COUNT];
+    double center[2][V5_STATUS_AXIS_COUNT];
+    unsigned int model_axis;
+    if (!producer || !model_geometry_points(
+            model, model_id, start, end, center)) return;
+    for (model_axis = 0U; model_axis < 2U; ++model_axis) {
+        unsigned int segment_count = producer->scene.segment_count;
+        unsigned int marker_count = producer->scene.marker_count;
+        v5_program_scene_add_dynamic_segment(
+            producer, start[model_axis], end[model_axis],
+            V5_STATUS_SCENE_SEGMENT_MODEL_AXIS);
+        if (producer->scene.segment_count == segment_count + 1U) {
+            V5StatusSceneSegment *segment =
+                &producer->scene.segments[producer->scene.segment_count - 1U];
+            segment->index = (uint16_t)model_axis;
+        }
+        v5_program_scene_add_dynamic_marker(
+            producer, center[model_axis],
+            V5_STATUS_SCENE_MARKER_MODEL_CENTER);
+        if (producer->scene.marker_count == marker_count + 1U) {
+            V5StatusSceneMarker *marker =
+                &producer->scene.markers[producer->scene.marker_count - 1U];
+            marker->index = (uint16_t)model_axis;
+        }
+    }
+}
+
 int v5_program_scene_producer_build(
     V5ProgramSceneProducer *producer,
     const V5NativeDisplaySample *sample,
@@ -118,8 +209,14 @@ int v5_program_scene_producer_build(
     uint32_t rtcp_enabled;
     int model_valid;
     int static_changed;
+    int pose_changed;
+    int model_pose_changed;
+    int dynamic_changed;
     int reproject;
+    int fit_key_changed;
+    int program_projected = 0;
     int tool_valid;
+    uint32_t dirty_flags;
     if (generation_out) *generation_out = 0ULL;
     if (!producer || !sample || !readback || !scene_out ||
         !sample->available || sample->source_generation == 0ULL ||
@@ -132,18 +229,36 @@ int v5_program_scene_producer_build(
     if (model_valid) model_id = model.registry_id;
     if (rtcp_enabled && !model_valid) return 0;
     static_changed = !v5_program_scene_static_key_same(
-        producer, readback, &model, model_id, rtcp_enabled);
+        producer, readback, &model, model_id);
+    pose_changed = static_changed || !v5_program_scene_pose_cache_same(
+        producer, &model, rtcp_enabled);
+    model_pose_changed = !producer->scene_valid ||
+        !v5_program_scene_model_pose_same(&producer->model, &model);
     tool_valid = v5_native_readback_tool_length_known(readback);
     if (tool_valid) tool_length = readback->tool_length_mm;
     if (unchanged_scene(
-            producer, sample, static_changed, tool_valid, tool_length)) {
+            producer, sample, static_changed || pose_changed,
+            tool_valid, tool_length)) {
         *scene_out = producer->scene;
         if (generation_out) *generation_out = producer->scene_generation;
         return 1;
     }
     if (static_changed && !v5_program_scene_build_static_cache(
-            producer, readback, &model, model_id, rtcp_enabled)) return 0;
-    candidate = producer->static_bounds;
+            producer, readback, &model, model_id)) return 0;
+    if (pose_changed && !v5_program_scene_prepare_pose_cache(
+            producer, &model, rtcp_enabled)) return 0;
+    fit_key_changed = v5_program_scene_fit_key_changed(
+        producer, &producer->request);
+    if (pose_changed) {
+        if (producer->fit_bounds.valid && !fit_key_changed) {
+            if (!v5_program_scene_transform_project_program(
+                    producer, 1)) return 0;
+            program_projected = 1;
+        } else if (!v5_program_scene_transform_project_program(
+                producer, 0)) return 0;
+    }
+    candidate = producer->pose_bounds;
+    add_model_geometry_bounds(&candidate, producer, &model, model_id);
     memcpy(holder_end, sample->mcs, sizeof(holder_end));
     holder_end[2] -= tool_length;
     memcpy(cmd_tip, sample->cmd_mcs, sizeof(cmd_tip));
@@ -158,24 +273,46 @@ int v5_program_scene_producer_build(
         v5_program_scene_bounds_add(
             &candidate, cmd_tip, producer->request.plane);
     }
-    reproject = static_changed || !producer->scene_valid ||
+    reproject = static_changed || pose_changed || !producer->scene_valid ||
         producer->last_request_view_generation !=
             producer->request.view_generation ||
         producer->scene.plane != producer->request.plane;
     if (producer->request.page_visible &&
-        (v5_program_scene_fit_key_changed(
-             producer, &producer->request) ||
+        (fit_key_changed ||
          v5_program_scene_bounds_outside_viewport(
              &candidate, &producer->fit_bounds, &producer->request))) {
         v5_program_scene_commit_fit(producer, &candidate);
+        if (!v5_program_scene_transform_project_program(
+                producer, 1)) return 0;
+        program_projected = 1;
         reproject = 1;
     }
-    if (reproject) v5_program_scene_project_static_cache(producer);
-    else v5_program_scene_prepare_dynamic_update(producer);
+    dynamic_changed = !producer->scene_valid ||
+        producer->last_dynamic_valid_mask != (sample->valid_mask &
+            (V5_STATUS_VALID_MCS | V5_STATUS_VALID_CMD_MCS)) ||
+        ((sample->valid_mask & V5_STATUS_VALID_MCS) != 0U &&
+            memcmp(producer->last_mcs, sample->mcs,
+                sizeof(producer->last_mcs)) != 0) ||
+        ((sample->valid_mask & V5_STATUS_VALID_CMD_MCS) != 0U &&
+            memcmp(producer->last_cmd_mcs, sample->cmd_mcs,
+                sizeof(producer->last_cmd_mcs)) != 0) ||
+        producer->last_tool_length_valid != tool_valid ||
+        (tool_valid && producer->last_tool_length != tool_length);
+    if (reproject && !program_projected) {
+        if (!v5_program_scene_transform_project_program(
+                producer, 1)) return 0;
+    } else if (!reproject) {
+        v5_program_scene_prepare_dynamic_update(producer);
+    }
     producer->model = model;
+    dirty_flags = reproject ? V5_STATUS_SCENE_FLAG_DIRTY_MASK :
+        ((model_pose_changed ? V5_STATUS_SCENE_FLAG_DIRTY_MODEL : 0U) |
+         (dynamic_changed ? V5_STATUS_SCENE_FLAG_DIRTY_DYNAMIC : 0U));
     apply_scene_metadata(
         producer, sample, readback, &model,
-        model_id, rtcp_enabled, model_valid);
+        model_id, rtcp_enabled, model_valid,
+        dirty_flags);
+    add_model_geometry_scene(producer, &model, model_id);
     if (sample->valid_mask & V5_STATUS_VALID_MCS) {
         v5_program_scene_add_dynamic_marker(
             producer, sample->mcs, V5_STATUS_SCENE_MARKER_MCS_ACTUAL);

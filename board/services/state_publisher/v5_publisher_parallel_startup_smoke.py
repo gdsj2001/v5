@@ -90,9 +90,9 @@ def audit_sources(texts: dict[str, str]) -> None:
         assert token in relay, f"UI_LIFECYCLE_IDENTITY_GATE_MISSING:{token}"
     assert "time.sleep(0.1)" not in relay, "UI_STATUS_POLL_RESURRECTED"
     start = start_body(relay)
-    assert start.index('"$UI_DAEMON" --serve') < start.index(
-        "wait_boot_inputs_ready"
-    ), "UI_CACHE_NOT_STARTED_IN_PARALLEL"
+    assert start.index("wait_boot_inputs_ready") < start.index(
+        '"$UI_DAEMON" --serve'
+    ), "FULL_UI_STARTED_BEFORE_PUBLISHER_BARRIER"
     wait_inputs = relay.split("wait_boot_inputs_ready() {", 1)[1].split(
         "\nstale_service_pids() {", 1
     )[0]
@@ -105,6 +105,9 @@ def audit_sources(texts: dict[str, str]) -> None:
         assert token in boot, f"UI_EVENT_GATE_MISSING:{token}"
     assert 'rsplit(")", 1)[1].split()[19]' in boot, "PID_REUSE_START_TICKS_GATE_MISSING"
     assert 'accept_identity("position"' in boot, "POSITION_LIFECYCLE_OWNER_GATE_MISSING"
+    assert '"/usr/libexec/8ax/v5_position_status_publisher", "--path"' in boot, "NATIVE_POSITION_ARGV_GATE_MISSING"
+    assert 'proc_argv(pid),' in boot, "NATIVE_POSITION_FULL_ARGV_GATE_MISSING"
+    assert "v5_position_status_publisher.py" not in boot, "PYTHON_POSITION_ARGV_SURVIVOR"
     assert '"--bus-path", str(BUS_STATUS_PATH)' in boot, "POSITION_BUS_PATH_IDENTITY_MISSING"
     assert "import fcntl" not in boot, "PYTHON_FCNTL_RESURRECTED"
     assert "ctypes.CDLL(None, use_errno=True).flock" in boot, "LIBC_FLOCK_GATE_MISSING"

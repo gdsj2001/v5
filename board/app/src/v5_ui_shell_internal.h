@@ -74,12 +74,16 @@ static inline int shell_refresh_display_scene_equal(
 }
 
 static inline unsigned int shell_refresh_classify_changes(
-    int display_changed,
+    int coordinates_changed,
+    int rates_changed,
+    int scene_changed,
     int pose_changed,
     int native_pose_changed,
     int main_page_visible)
 {
-    unsigned int flags = display_changed ? (1U << 0) : 0U;
+    unsigned int flags = coordinates_changed ? (1U << 0) : 0U;
+    if (rates_changed) flags |= (1U << 6);
+    if (scene_changed) flags |= (1U << 7);
     if (main_page_visible && (pose_changed || native_pose_changed)) {
         flags |= (1U << 4);
     }

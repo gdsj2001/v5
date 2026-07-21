@@ -35,15 +35,12 @@ static void plane_values(
     } else { *u = axis[0]; *v = axis[1]; }
 }
 
-void v5_program_scene_bounds_add(
+static void bounds_add_values(
     V5ProgramSceneBounds *bounds,
-    const double axis[V5_STATUS_AXIS_COUNT],
-    uint32_t plane)
+    double u,
+    double v)
 {
-    double u;
-    double v;
-    if (!bounds || !finite_axis(axis)) return;
-    plane_values(axis, plane, &u, &v);
+    if (!bounds || !isfinite(u) || !isfinite(v)) return;
     if (!bounds->valid) {
         bounds->valid = 1;
         bounds->min_u = bounds->max_u = u;
@@ -54,6 +51,18 @@ void v5_program_scene_bounds_add(
     if (u > bounds->max_u) bounds->max_u = u;
     if (v < bounds->min_v) bounds->min_v = v;
     if (v > bounds->max_v) bounds->max_v = v;
+}
+
+void v5_program_scene_bounds_add(
+    V5ProgramSceneBounds *bounds,
+    const double axis[V5_STATUS_AXIS_COUNT],
+    uint32_t plane)
+{
+    double u;
+    double v;
+    if (!bounds || !finite_axis(axis)) return;
+    plane_values(axis, plane, &u, &v);
+    bounds_add_values(bounds, u, v);
 }
 
 static int project_plane_values(
@@ -98,17 +107,15 @@ static int project_plane_values(
     return isfinite(*x) && isfinite(*y);
 }
 
-static V5StatusScreenPoint project_point(
-    const double axis[V5_STATUS_AXIS_COUNT],
+static V5StatusScreenPoint project_plane_point(
+    double u,
+    double v,
     const V5ProgramSceneBounds *bounds,
     const V5ProgramSceneRequest *request)
 {
     V5StatusScreenPoint point = {0.0f, 0.0f};
-    double u;
-    double v;
     double x;
     double y;
-    plane_values(axis, request->plane, &u, &v);
     if (!project_plane_values(u, v, bounds, request, &x, &y)) return point;
     if (request->scale != 1.0f || request->sine != 0.0f ||
         request->cosine != 1.0f || request->pan_x != 0.0f ||
@@ -125,6 +132,90 @@ static V5StatusScreenPoint project_point(
     point.x = (float)x;
     point.y = (float)y;
     return point;
+}
+
+static V5StatusScreenPoint project_point(
+    const double axis[V5_STATUS_AXIS_COUNT],
+    const V5ProgramSceneBounds *bounds,
+    const V5ProgramSceneRequest *request)
+{
+    double u;
+    double v;
+    plane_values(axis, request->plane, &u, &v);
+    return project_plane_point(u, v, bounds, request);
+}
+
+typedef struct V5ProgramScenePlaneMatrix {
+    double u[4];
+    double v[4];
+} V5ProgramScenePlaneMatrix;
+
+static void prepare_plane_matrix(
+    const V5ProgramScenePoseMatrix *pose,
+    uint32_t plane,
+    V5ProgramScenePlaneMatrix *matrix)
+{
+    unsigned int column;
+    memset(matrix, 0, sizeof(*matrix));
+    for (column = 0U; column < 4U; ++column) {
+        if (plane == 1U) {
+            matrix->u[column] = pose->value[0][column];
+            matrix->v[column] = pose->value[2][column];
+        } else if (plane == 2U) {
+            matrix->u[column] = pose->value[1][column];
+            matrix->v[column] = pose->value[2][column];
+        } else if (plane == 3U) {
+            matrix->u[column] = pose->value[0][column] * V5_SCENE_3D_RIGHT_X +
+                pose->value[1][column] * V5_SCENE_3D_RIGHT_Y;
+            matrix->v[column] = pose->value[0][column] * V5_SCENE_3D_UP_X +
+                pose->value[1][column] * V5_SCENE_3D_UP_Y +
+                pose->value[2][column] * V5_SCENE_3D_UP_Z;
+        } else {
+            matrix->u[column] = pose->value[0][column];
+            matrix->v[column] = pose->value[1][column];
+        }
+    }
+}
+
+static void transform_plane_values(
+    const V5ProgramScenePlaneMatrix *matrix,
+    const double axis[V5_STATUS_AXIS_COUNT],
+    double *u,
+    double *v)
+{
+    *u = matrix->u[0] * axis[0] + matrix->u[1] * axis[1] +
+        matrix->u[2] * axis[2] + matrix->u[3];
+    *v = matrix->v[0] * axis[0] + matrix->v[1] * axis[1] +
+        matrix->v[2] * axis[2] + matrix->v[3];
+}
+
+static int same_integer_pixel(
+    V5StatusScreenPoint left,
+    V5StatusScreenPoint right)
+{
+    return lroundf(left.x) == lroundf(right.x) &&
+        lroundf(left.y) == lroundf(right.y);
+}
+
+static void compact_program_pixel_duplicates(V5StatusDisplayScene *scene)
+{
+    unsigned int read_index;
+    unsigned int write_index;
+    if (!scene || scene->point_count < 2U) return;
+    write_index = 1U;
+    for (read_index = 1U; read_index < scene->point_count; ++read_index) {
+        const int starts_segment = scene->break_before[read_index] != 0U;
+        if (!starts_segment && same_integer_pixel(
+                scene->points[write_index - 1U],
+                scene->points[read_index])) {
+            continue;
+        }
+        scene->points[write_index] = scene->points[read_index];
+        scene->break_before[write_index] =
+            scene->break_before[read_index] ? 1U : 0U;
+        write_index += 1U;
+    }
+    scene->point_count = write_index;
 }
 
 int v5_program_scene_bounds_outside_viewport(
@@ -207,22 +298,40 @@ static void dirty_add(V5StatusDisplayScene *scene, V5StatusScreenPoint point)
     if (y > scene->dirty_y2) scene->dirty_y2 = (int16_t)y;
 }
 
-void v5_program_scene_project_static_cache(
-    V5ProgramSceneProducer *producer)
+int v5_program_scene_transform_project_program(
+    V5ProgramSceneProducer *producer,
+    int emit_scene)
 {
-    V5StatusDisplayScene *scene = &producer->scene;
+    V5StatusDisplayScene *scene;
+    V5ProgramScenePlaneMatrix matrix;
     unsigned int i;
-    memset(scene, 0, sizeof(*scene));
-    dirty_reset(scene);
-    scene->point_count = producer->static_point_count;
-    for (i = 0U; i < scene->point_count; ++i) {
-        scene->points[i] = project_point(
-            producer->world_points[i].axis,
-            &producer->fit_bounds, &producer->request);
-        scene->break_before[i] =
-            producer->request.break_before[i] ? 1U : 0U;
-        dirty_add(scene, scene->points[i]);
+    if (!producer || !producer->pose_valid) return 0;
+    scene = &producer->scene;
+    prepare_plane_matrix(
+        &producer->pose_matrix, producer->request.plane, &matrix);
+    if (emit_scene) {
+        if (!producer->fit_bounds.valid) return 0;
+        memset(scene, 0, sizeof(*scene));
+        dirty_reset(scene);
+        scene->point_count = producer->static_point_count;
     }
+    producer->point_traversal_count += 1ULL;
+    for (i = 0U; i < producer->static_point_count; ++i) {
+        double u;
+        double v;
+        transform_plane_values(
+            &matrix, producer->base_points[i].axis, &u, &v);
+        bounds_add_values(&producer->pose_bounds, u, v);
+        if (emit_scene) {
+            scene->points[i] = project_plane_point(
+                u, v, &producer->fit_bounds, &producer->request);
+            scene->break_before[i] =
+                producer->request.break_before[i] ? 1U : 0U;
+            dirty_add(scene, scene->points[i]);
+        }
+    }
+    if (!emit_scene) return producer->pose_bounds.valid;
+    compact_program_pixel_duplicates(scene);
     for (i = 0U; i < producer->world_segment_count; ++i) {
         const V5ProgramSceneWorldSegment *world =
             &producer->world_segments[i];
@@ -250,6 +359,7 @@ void v5_program_scene_project_static_cache(
     }
     scene->marker_count = producer->world_marker_count;
     producer->project_count += 1ULL;
+    return 1;
 }
 
 void v5_program_scene_prepare_dynamic_update(

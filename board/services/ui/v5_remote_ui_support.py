@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import ipaddress
 import os
+import threading
 import time
 from pathlib import Path
 
-from v5_status_shm_reader import V5StatusShmReader
-
-
-_STATUS_CPU_USAGE = V5StatusShmReader()
+_CPU_SAMPLE_LOCK = threading.Lock()
+_CPU_SAMPLE_PREVIOUS = None
+_CPU_SAMPLE_GENERATION = 0
 
 def now_ms() -> int:
     return int(time.time() * 1000)
@@ -37,18 +37,14 @@ def peer_allowed(peer: str, networks) -> bool:
 
 
 def system_metrics() -> dict:
-    cpu_usage = _STATUS_CPU_USAGE.read()
+    cpu_usage = sample_cpu_usage()
     memory_used, memory_total = memory_used_total()
     disk_used, disk_total = disk_used_total()
     return {
-        "cpu0_percent": cpu_usage.cpu0_percent if cpu_usage is not None else None,
-        "cpu1_percent": cpu_usage.cpu1_percent if cpu_usage is not None else None,
-        "cpu_sample_generation": (
-            cpu_usage.cpu_sample_generation if cpu_usage is not None else None
-        ),
-        "cpu_sample_monotonic_ns": (
-            cpu_usage.cpu_sample_monotonic_ns if cpu_usage is not None else None
-        ),
+        "cpu0_percent": cpu_usage["cpu0_percent"],
+        "cpu1_percent": cpu_usage["cpu1_percent"],
+        "cpu_sample_generation": cpu_usage["cpu_sample_generation"],
+        "cpu_sample_monotonic_ns": cpu_usage["cpu_sample_monotonic_ns"],
         "memory_percent": percent_used(memory_used, memory_total),
         "disk_percent": percent_used(disk_used, disk_total),
         "memory_used_bytes": memory_used,
@@ -56,6 +52,39 @@ def system_metrics() -> dict:
         "disk_used_bytes": disk_used,
         "disk_total_bytes": disk_total,
     }
+
+
+def sample_cpu_usage() -> dict:
+    global _CPU_SAMPLE_PREVIOUS
+    global _CPU_SAMPLE_GENERATION
+    current = cpu_samples_snapshot()
+    now_ns = time.monotonic_ns()
+    with _CPU_SAMPLE_LOCK:
+        previous = _CPU_SAMPLE_PREVIOUS
+        _CPU_SAMPLE_PREVIOUS = current
+        _CPU_SAMPLE_GENERATION += 1
+        result = {
+            "cpu0_percent": None,
+            "cpu1_percent": None,
+            "cpu_sample_generation": _CPU_SAMPLE_GENERATION,
+            "cpu_sample_monotonic_ns": now_ns,
+        }
+        if not isinstance(previous, dict):
+            return result
+        for name in ("cpu0", "cpu1"):
+            before = previous.get(name)
+            after = current.get(name)
+            if not isinstance(before, dict) or not isinstance(after, dict):
+                continue
+            total_delta = int(after["total"]) - int(before["total"])
+            idle_delta = int(after["idle"]) - int(before["idle"])
+            if total_delta <= 0 or idle_delta < 0:
+                continue
+            busy_delta = max(0, min(total_delta, total_delta - idle_delta))
+            result[name + "_percent"] = round(
+                (busy_delta / total_delta) * 100.0, 3
+            )
+        return result
 
 
 def cpu_samples_snapshot() -> dict:

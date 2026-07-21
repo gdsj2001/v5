@@ -72,7 +72,16 @@ enum {
     V5_STATUS_SCENE_FLAG_RTCP = 1u << 2,
     V5_STATUS_SCENE_FLAG_MODEL = 1u << 3,
     V5_STATUS_SCENE_FLAG_WCS = 1u << 4,
+    V5_STATUS_SCENE_FLAG_DIRTY_STATIC = 1u << 8,
+    V5_STATUS_SCENE_FLAG_DIRTY_MODEL = 1u << 9,
+    V5_STATUS_SCENE_FLAG_DIRTY_DYNAMIC = 1u << 10,
+    V5_STATUS_SCENE_FLAG_DIRTY_KNOWN = 1u << 11,
 };
+
+#define V5_STATUS_SCENE_FLAG_DIRTY_MASK \
+    (V5_STATUS_SCENE_FLAG_DIRTY_STATIC | \
+     V5_STATUS_SCENE_FLAG_DIRTY_MODEL | \
+     V5_STATUS_SCENE_FLAG_DIRTY_DYNAMIC)
 
 enum {
     V5_STATUS_SCENE_PLANE_XY = 0u,
@@ -114,6 +123,7 @@ typedef struct V5StatusDisplayScene {
     uint32_t segment_count;
     uint32_t marker_count;
     uint32_t program_wcs_mask;
+    /* Coarse v3 ABI damage bounds retained for readers and diagnostics. */
     int16_t dirty_x1;
     int16_t dirty_y1;
     int16_t dirty_x2;

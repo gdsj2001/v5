@@ -107,19 +107,22 @@ static int shell_trajectory_equal(const V5UiStatusView *before, const V5UiStatus
     return 1;
 }
 
-static int shell_status_display_equal(const V5UiStatusView *before, const V5UiStatusView *after)
+static int shell_status_coordinates_equal(
+    const V5UiStatusView *before,
+    const V5UiStatusView *after)
 {
+    const uint32_t coordinate_mask =
+        V5_STATUS_VALID_MCS | V5_STATUS_VALID_CMD_MCS |
+        V5_STATUS_VALID_TRAJECTORY;
     uint32_t changed_mask;
     if (!before || !after) {
         return 0;
     }
-    if (before->valid_mask != after->valid_mask || before->frame_flags != after->frame_flags) {
+    if (((before->valid_mask ^ after->valid_mask) & coordinate_mask) != 0U ||
+        before->frame_flags != after->frame_flags) {
         return 0;
     }
     changed_mask = before->valid_mask | after->valid_mask;
-    if (!shell_refresh_display_scene_equal(before, after)) {
-        return 0;
-    }
     if ((changed_mask & V5_STATUS_VALID_MCS) != 0U &&
         !shell_axis_values_equal(before->mcs, after->mcs, 1000.0)) {
         return 0;
@@ -131,6 +134,21 @@ static int shell_status_display_equal(const V5UiStatusView *before, const V5UiSt
     if ((changed_mask & V5_STATUS_VALID_TRAJECTORY) != 0U && !shell_trajectory_equal(before, after)) {
         return 0;
     }
+    return 1;
+}
+
+static int shell_status_rates_equal(
+    const V5UiStatusView *before,
+    const V5UiStatusView *after)
+{
+    const uint32_t rate_mask =
+        V5_STATUS_VALID_SPINDLE_SPEED | V5_STATUS_VALID_LINEAR_VELOCITY |
+        V5_STATUS_VALID_FEED_OVERRIDE | V5_STATUS_VALID_SPINDLE_OVERRIDE;
+    uint32_t changed_mask;
+    if (!before || !after) return 0;
+    if (((before->valid_mask ^ after->valid_mask) & rate_mask) != 0U ||
+        before->frame_flags != after->frame_flags) return 0;
+    changed_mask = before->valid_mask | after->valid_mask;
     if ((changed_mask & V5_STATUS_VALID_SPINDLE_SPEED) != 0U &&
         !shell_quantized_values_equal(before->spindle_speed_rpm, after->spindle_speed_rpm, 10.0)) {
         return 0;
@@ -241,25 +259,34 @@ int v5_ui_shell_refresh_once(void)
     now = shell_monotonic_ns();
     if (shell_refresh_due(now, &g_v5_shell_ui_dynamic_last_refresh_ns, V5_UI_DYNAMIC_REFRESH_NS)) {
         V5UiStatusView before = g_v5_shell_model.status_view;
-        int display_changed;
+        int coordinates_changed;
+        int rates_changed;
+        int scene_changed;
         int pose_changed;
         (void)v5_ui_model_refresh_status_from_shm(&g_v5_shell_model, V5_STATUS_SHM_PATH);
         if (shell_refresh_modal_line_readback(0)) {
-            flags |= V5_MAIN_PAGE_REFRESH_DYNAMIC;
+            flags |= V5_MAIN_PAGE_REFRESH_SLOW;
             main_cache_changed = 1;
         }
         if (shell_refresh_operator_error(0)) {
-            flags |= V5_MAIN_PAGE_REFRESH_DYNAMIC;
+            flags |= V5_MAIN_PAGE_REFRESH_SLOW;
         }
-        display_changed = !shell_status_display_equal(&before, &g_v5_shell_model.status_view);
+        coordinates_changed = !shell_status_coordinates_equal(
+            &before, &g_v5_shell_model.status_view);
+        rates_changed = !shell_status_rates_equal(
+            &before, &g_v5_shell_model.status_view);
+        scene_changed = !shell_refresh_display_scene_equal(
+            &before, &g_v5_shell_model.status_view);
         pose_changed = !shell_refresh_model_pose_equal(
             &before,
             &g_v5_shell_model.status_view);
-        if (display_changed) {
+        if (coordinates_changed || rates_changed || scene_changed) {
             main_cache_changed = 1;
         }
         flags |= shell_refresh_classify_changes(
-            display_changed,
+            coordinates_changed,
+            rates_changed,
+            scene_changed,
             pose_changed,
             0,
             g_v5_shell_current_page == V5_SHELL_PAGE_MAIN);
@@ -290,6 +317,8 @@ int v5_ui_shell_refresh_once(void)
             shell_mark_page_cache_dirty(V5_SHELL_PAGE_NETWORK);
         }
         flags |= shell_refresh_classify_changes(
+            0,
+            0,
             0,
             0,
             !shell_native_pose_equal(&before_native, &g_v5_shell_main_page.native_readback),

@@ -36,22 +36,6 @@ BOARD_OWNER_DEPLOY_ROWS = {
 }
 
 
-def position_status_writer_identity_bound(text: str) -> bool:
-    start = text.find("position_block_matches_owner() {")
-    end = text.find("\nbus_block_matches_owner() {", start)
-    return (
-        start >= 0 and end > start and
-        "values[5] != int(sys.argv[2])" in text[start:end])
-
-
-def bus_status_writer_identity_bound(text: str) -> bool:
-    start = text.find("bus_block_matches_owner() {")
-    end = text.find("\nstart_service() {", start)
-    return (
-        start >= 0 and end > start and
-        "values[5] != int(sys.argv[2])" in text[start:end])
-
-
 def iter_sources(root: Path):
     for path in root.rglob("*"):
         if path.is_file() and path.suffix in SOURCE_SUFFIXES:
@@ -299,9 +283,17 @@ def check_remote_relay_access_control() -> int:
         if "if delivery.restart_stream:\n" not in stream_body:
             print("REMOTE_RELAY_RUNTIME_RESET_MISSING", file=sys.stderr)
             rc = 1
-    if "cadence_hz < 29.0" not in relay_smoke_text:
-        print("REMOTE_RELAY_30HZ_SMOKE_THRESHOLD_MISSING", file=sys.stderr)
-        rc = 1
+    for token in (
+        "minimum_steady_samples = int(expected_frames * 0.85)",
+        "minimum_cadence_hz = 1.0 / (STREAM_COALESCE_SECONDS * 1.15)",
+        "cadence_hz < minimum_cadence_hz",
+    ):
+        if token not in relay_smoke_text:
+            print(
+                f"REMOTE_RELAY_30HZ_SMOKE_THRESHOLD_MISSING: {token}",
+                file=sys.stderr,
+            )
+            rc = 1
     required_init = (
         "V5_UI_REMOTE_BIND",
         "V5_UI_REMOTE_ALLOW_CIDRS",
@@ -396,7 +388,22 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
     )
     position_publisher = (
         ROOT / "services" / "state_publisher" /
-        "v5_position_status_publisher.py"
+        "v5_position_status_publisher.c"
+    )
+    retired_position_sources = (
+        ROOT / "services" / "state_publisher" /
+        "v5_position_status_publisher.py",
+        ROOT / "services" / "state_publisher" /
+        "v5_position_status_publisher_test.py",
+        ROOT / "services" / "state_publisher" /
+        "v5_machine_status_projection_test.py",
+    )
+    machine_status_projection = (
+        ROOT / "services" / "state_publisher" /
+        "v5_machine_status_projection.py"
+    )
+    wcs_status_codec = (
+        ROOT / "services" / "state_publisher" / "v5_wcs_status_codec.py"
     )
     bus_ini = ROOT / "linuxcnc" / "ini" / "v5_bus.ini"
     bus_hal = ROOT / "linuxcnc" / "hal" / "v5_bus_2ms.hal"
@@ -627,7 +634,7 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         "backend_cpu_contract_capture",
         "backend_readiness_arm",
         "backend_readiness_tick",
-        "registered_processes_alive",
+        "registered_processes_failure",
         "V5_BACKEND_READINESS_SOCKET_PATH",
         "backend_domain_wkc",
         "backend_domain_wc_complete",
@@ -916,12 +923,6 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         rc = 1
     position_init_text = position_publisher_init.read_text(
         encoding="utf-8", errors="ignore")
-    if not position_status_writer_identity_bound(position_init_text):
-        print("POSITION_STATUS_WRITER_IDENTITY_BINDING_MISSING", file=sys.stderr)
-        rc = 1
-    if not bus_status_writer_identity_bound(position_init_text):
-        print("BUS_STATUS_WRITER_IDENTITY_BINDING_MISSING", file=sys.stderr)
-        rc = 1
     for token in (
         "POSITION_NICE=0",
         'taskset -c 1 nice -n "$POSITION_NICE"',
@@ -933,11 +934,6 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         'grep -Fqx "$DAEMON"',
         '/proc/$OWNER_PID/stat',
         '/proc/$OWNER_PID/cmdline',
-        "position_block_matches_owner()",
-        "RUNTIME_MODULE_ROOT=/usr/libexec/8ax",
-        "PYTHONPATH=$RUNTIME_MODULE_ROOT:",
-        "command -v python3",
-        "values[-2] != crc32_like(payload[:-8])",
     ):
         if token not in position_init_text:
             print(
@@ -949,6 +945,12 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
     for retired in (
         "tr '\\000' ' '",
         'grep -F "$DAEMON"',
+        "position_block_matches_owner()",
+        "bus_block_matches_owner()",
+        "RUNTIME_MODULE_ROOT=/usr/libexec/8ax",
+        "PYTHONPATH=$RUNTIME_MODULE_ROOT:",
+        "command -v python3",
+        "POSITION_BLOCK_STRUCT",
     ):
         if retired in position_init_text:
             print(
@@ -969,13 +971,39 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
             rc = 1
     position_text = position_publisher.read_text(
         encoding="utf-8", errors="ignore")
-    for forbidden in ("import linuxcnc", "linuxcnc.stat", "error_channel"):
+    for forbidden in ("system(", "popen(", "v5_position_status_publisher.py"):
         if forbidden in position_text:
             print(
                 f"POSITION_DISPLAY_FAST_PATH_BLOCKING_SOURCE_PRESENT: {forbidden}",
                 file=sys.stderr,
             )
             rc = 1
+    for retired_source in retired_position_sources:
+        if retired_source.exists():
+            print(
+                "POSITION_RETIRED_PYTHON_SOURCE_SURVIVOR: "
+                f"{retired_source.relative_to(ROOT)}",
+                file=sys.stderr,
+            )
+            rc = 1
+    for path, retired_tokens in (
+        (machine_status_projection, (
+            "NativeRotaryDisplayProjection", "write_position_status",
+            "write_mock_position_status", "display_position_projection",
+        )),
+        (wcs_status_codec, (
+            "pack_bus_status", "BusStatusMmapWriter", "HalBusStatusAccess",
+        )),
+    ):
+        source_text = path.read_text(encoding="utf-8", errors="strict")
+        for retired in retired_tokens:
+            if retired in source_text:
+                print(
+                    "POSITION_RETIRED_PYTHON_BRANCH_SURVIVOR: "
+                    f"{path.relative_to(ROOT)} token={retired}",
+                    file=sys.stderr,
+                )
+                rc = 1
     board_runtime_policy_text = board_runtime_policy.read_text(
         encoding="utf-8", errors="ignore")
     for token in (
@@ -1024,9 +1052,10 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
             print(f"RUNTIME_STARTUP_BOARD_AUDIT_MISSING: {token}", file=sys.stderr)
             rc = 1
     for token in (
-        "StartToStartPollingCadence",
-        "PositionLifecycleLock",
-        "writer_identity=lifecycle.writer_identity",
+        "clock_nanosleep",
+        "V5_POSITION_HEARTBEAT_NS",
+        "lifecycle.writer_identity",
+        "hal_get_pin_value_by_name",
         "motion.feed-override",
         "spindle.0.override",
         "motion.current-vel",
@@ -1055,7 +1084,7 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
     manifest_text = deploy_manifest.read_text(encoding="utf-8", errors="ignore")
     required_cpu_policy_rows = (
         "binary\tbuild/board/app/v5_backend_readiness_probe\t/usr/libexec/8ax/v5_backend_readiness_probe\t0755",
-        "services/state_publisher/v5_position_status_publisher.py\t/usr/libexec/8ax/v5_position_status_publisher.py\t0755",
+        "binary\tbuild/board/app/v5_position_status_publisher\t/usr/libexec/8ax/v5_position_status_publisher\t0755",
         "services/state_publisher/v5_polling_cadence.py\t/usr/libexec/8ax/v5_polling_cadence.py\t0644",
         "services/state_publisher/init.d/v5-position-status-publisher\t/etc/init.d/v5-position-status-publisher\t0755",
         "services/ui/v5_remote_ui_shared_payload.py\t/usr/libexec/8ax/v5_remote_ui_shared_payload.py\t0644",
@@ -1073,7 +1102,7 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
     required_shm_abi_rows = (
         "binary\tbuild/board/app/v5_lvgl_shell\t/usr/libexec/8ax/v5_lvgl_shell\t0755",
         "binary\tbuild/board/app/v5_state_publisher\t/usr/libexec/8ax/v5_state_publisher\t0755",
-        "script\tservices/state_publisher/v5_position_status_publisher.py\t/usr/libexec/8ax/v5_position_status_publisher.py\t0755",
+        "binary\tbuild/board/app/v5_position_status_publisher\t/usr/libexec/8ax/v5_position_status_publisher\t0755",
         "script\tservices/state_publisher/v5_wcs_status_publisher.py\t/usr/libexec/8ax/v5_wcs_status_publisher.py\t0755",
         "module\tservices/state_publisher/v5_polling_cadence.py\t/usr/libexec/8ax/v5_polling_cadence.py\t0644",
         "module\tservices/state_publisher/v5_machine_status_projection.py\t/usr/libexec/8ax/v5_machine_status_projection.py\t0644",
@@ -1133,7 +1162,7 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         "writer did not stop before upgrade",
         "manifest_shm_abi_touched=0",
         "manifest_shm_abi_complete=0",
-        "manifest_shm_abi_required_rows=14",
+        "manifest_shm_abi_required_rows=15",
         "SHM ABI deploy requires the complete Position/State/UI atomic bundle",
         "manifest_ethercat_required_rows=4",
         "manifest_ethercat_touched=0",
@@ -2879,7 +2908,7 @@ def check_product_runtime_closure_policy() -> int:
             return 1
     acceptance = acceptance_path.read_text(encoding="utf-8", errors="strict")
     for token in (
-        'V5_BOARD_BUILD_TARGETS:-v5_lvgl_shell v5_state_publisher v5_touch_diagnostics v5_linuxcncrsh_probe v5_command_gate_server v5_command_gate_drive_window v5_linuxcncrsh_golden_run',
+        'V5_BOARD_BUILD_TARGETS:-v5_lvgl_shell v5_state_publisher v5_position_status_publisher v5_touch_diagnostics v5_linuxcncrsh_probe v5_command_gate_server v5_command_gate_drive_window v5_linuxcncrsh_golden_run',
         "CMAKE_C_COMPILER:FILEPATH=",
         "arm-xilinx-linux-gnueabi-gcc",
         "verify_v5_product_source_closure.py",

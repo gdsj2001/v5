@@ -81,9 +81,13 @@ int v5_main_page_create(V5MainPage *page, lv_obj_t *parent)
     }
     lv_obj_set_style_bg_opa(page->toolpath_clip_layer, LV_OPA_TRANSP, 0);
     lv_obj_clear_flag(page->toolpath_clip_layer, LV_OBJ_FLAG_CLICKABLE);
-    page->trajectory_line = v5_main_page_internal_create_toolpath_program_scene(
+    page->trajectory_line = v5_main_page_internal_create_toolpath_scene_layer(
         page,
         page->toolpath_clip_layer);
+    page->toolpath_dynamic_layer =
+        v5_main_page_internal_create_toolpath_scene_layer(
+            page,
+            page->toolpath_clip_layer);
     page->toolpath_summary_label = v5_main_page_internal_make_label_ex(page->root, 12, 401, 374, 18, "", 68, 221, 144, LV_TEXT_ALIGN_LEFT);
     page->toolpath_detail_label = v5_main_page_internal_make_label_ex(page->root, 12, 420, 374, 18, "", 86, 204, 252, LV_TEXT_ALIGN_LEFT);
     page->toolpath_view_label = v5_main_page_internal_make_label_ex(page->root, 18, 358, 260, 24, "", 86, 204, 252, LV_TEXT_ALIGN_LEFT);
@@ -209,6 +213,8 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
     }
     if ((refresh_flags & V5_MAIN_PAGE_REFRESH_DYNAMIC) != 0U) {
         page->toolpath_dynamic_refresh_count += 1U;
+    }
+    if ((refresh_flags & V5_MAIN_PAGE_REFRESH_COORDINATES) != 0U) {
         v5_coordinate_panel_from_status(status, &panel);
         v5_coordinate_digits_begin_update(&page->coordinate_digits);
         for (i = 0; i < V5_MAIN_PAGE_AXIS_COUNT; ++i) {
@@ -240,10 +246,17 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
             }
         }
         v5_coordinate_digits_end_update(&page->coordinate_digits);
-        v5_main_page_internal_set_label_text_if_changed(page->spindle_speed_label, panel.spindle_speed_text);
-        v5_main_page_internal_set_label_text_if_changed(page->linear_velocity_label, panel.linear_velocity_text);
-        v5_main_page_internal_set_label_text_if_changed(page->feed_override_label, panel.feed_override_text);
-        v5_main_page_internal_set_label_text_if_changed(page->spindle_override_label, panel.spindle_override_text);
+    }
+    if ((refresh_flags & V5_MAIN_PAGE_REFRESH_RATES) != 0U) {
+        v5_coordinate_panel_from_status(status, &panel);
+        v5_main_page_internal_set_label_text_if_changed(
+            page->spindle_speed_label, panel.spindle_speed_text);
+        v5_main_page_internal_set_label_text_if_changed(
+            page->linear_velocity_label, panel.linear_velocity_text);
+        v5_main_page_internal_set_label_text_if_changed(
+            page->feed_override_label, panel.feed_override_text);
+        v5_main_page_internal_set_label_text_if_changed(
+            page->spindle_override_label, panel.spindle_override_text);
         v5_main_page_internal_sync_override_sliders(page, status);
     }
 
@@ -260,7 +273,7 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
         }
     }
 
-    if ((refresh_flags & (V5_MAIN_PAGE_REFRESH_DYNAMIC |
+    if ((refresh_flags & (V5_MAIN_PAGE_REFRESH_SCENE |
                           V5_MAIN_PAGE_REFRESH_POSE |
                           V5_MAIN_PAGE_REFRESH_STRUCTURE)) != 0U) {
         uint64_t expected_program_generation = runtime_has_program ?

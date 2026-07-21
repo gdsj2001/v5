@@ -24,16 +24,23 @@ int v5_program_scene_static_key_same(
     const V5ProgramSceneProducer *producer,
     const V5NativeReadback *readback,
     const V5ProgramSceneModel *model,
-    uint32_t model_id,
-    uint32_t rtcp_enabled);
+    uint32_t model_id);
 int v5_program_scene_build_static_cache(
     V5ProgramSceneProducer *producer,
     const V5NativeReadback *readback,
     const V5ProgramSceneModel *model,
-    uint32_t model_id,
+    uint32_t model_id);
+int v5_program_scene_pose_cache_same(
+    const V5ProgramSceneProducer *producer,
+    const V5ProgramSceneModel *model,
     uint32_t rtcp_enabled);
-void v5_program_scene_project_static_cache(
-    V5ProgramSceneProducer *producer);
+int v5_program_scene_prepare_pose_cache(
+    V5ProgramSceneProducer *producer,
+    const V5ProgramSceneModel *model,
+    uint32_t rtcp_enabled);
+int v5_program_scene_transform_project_program(
+    V5ProgramSceneProducer *producer,
+    int emit_scene);
 void v5_program_scene_prepare_dynamic_update(
     V5ProgramSceneProducer *producer);
 void v5_program_scene_add_dynamic_segment(

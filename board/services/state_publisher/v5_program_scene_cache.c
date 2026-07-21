@@ -21,10 +21,10 @@ static int cache_segment(
     uint16_t index)
 {
     V5ProgramSceneWorldSegment *segment;
-    if (producer->world_segment_count >= V5_STATUS_SCENE_SEGMENT_COUNT) {
+    if (producer->base_segment_count >= V5_STATUS_SCENE_SEGMENT_COUNT) {
         return 0;
     }
-    segment = &producer->world_segments[producer->world_segment_count++];
+    segment = &producer->base_segments[producer->base_segment_count++];
     memcpy(segment->start.axis, start, sizeof(segment->start.axis));
     memcpy(segment->end.axis, end, sizeof(segment->end.axis));
     segment->role = role;
@@ -43,8 +43,8 @@ static int cache_marker(
     uint16_t index)
 {
     V5ProgramSceneWorldMarker *marker;
-    if (producer->world_marker_count >= V5_STATUS_SCENE_MARKER_COUNT) return 0;
-    marker = &producer->world_markers[producer->world_marker_count++];
+    if (producer->base_marker_count >= V5_STATUS_SCENE_MARKER_COUNT) return 0;
+    marker = &producer->base_markers[producer->base_marker_count++];
     memcpy(marker->point.axis, point, sizeof(marker->point.axis));
     marker->role = role;
     marker->index = index;
@@ -65,8 +65,7 @@ int v5_program_scene_static_key_same(
     const V5ProgramSceneProducer *producer,
     const V5NativeReadback *readback,
     const V5ProgramSceneModel *model,
-    uint32_t model_id,
-    uint32_t rtcp_enabled)
+    uint32_t model_id)
 {
     return producer->static_valid &&
         producer->static_program_source_identity ==
@@ -79,15 +78,13 @@ int v5_program_scene_static_key_same(
         producer->static_active_model_generation ==
             v5_program_scene_active_model_generation(readback, model_id) &&
         producer->static_wcs_generation == readback->wcs_offsets_epoch &&
-        producer->static_rtcp_enabled == rtcp_enabled &&
-        memcmp(&producer->static_model, model, sizeof(*model)) == 0;
+        v5_program_scene_model_topology_same(
+            &producer->static_model, model);
 }
 
 static int cache_mcs_and_wcs_axes(
     V5ProgramSceneProducer *producer,
-    const V5NativeReadback *readback,
-    const V5ProgramSceneModel *model,
-    uint32_t rtcp_enabled)
+    const V5NativeReadback *readback)
 {
     double origin[V5_STATUS_AXIS_COUNT] = {0};
     double endpoint[V5_STATUS_AXIS_COUNT];
@@ -113,13 +110,6 @@ static int cache_mcs_and_wcs_axes(
     for (axis = 0U; axis < 3U; ++axis) {
         prepare_axis(wcs_axis[axis], wcs_origin, axis);
     }
-    if (rtcp_enabled) {
-        if (!v5_program_scene_model_transform(model, wcs_origin)) return 0;
-        for (axis = 0U; axis < 3U; ++axis) {
-            if (!v5_program_scene_model_transform(
-                    model, wcs_axis[axis])) return 0;
-        }
-    }
     for (axis = 0U; axis < 3U; ++axis) {
         if (!cache_segment(
                 producer, wcs_origin, wcs_axis[axis],
@@ -129,72 +119,31 @@ static int cache_mcs_and_wcs_axes(
         producer, wcs_origin, V5_STATUS_SCENE_MARKER_WCS_ORIGIN, 0U);
 }
 
-static int cache_model_axes(
-    V5ProgramSceneProducer *producer,
-    const V5ProgramSceneModel *model,
-    uint32_t model_id)
-{
-    V5ProgramSceneModelGeometry geometry;
-    unsigned int model_axis;
-    unsigned int axis;
-    if (!model_id || !v5_program_scene_model_geometry(model, &geometry)) {
-        return 1;
-    }
-    for (model_axis = 0U; model_axis < 2U; ++model_axis) {
-        const double *center = model_axis ?
-            geometry.child_center : geometry.primary_center;
-        const double *direction = model_axis ?
-            geometry.child_direction : geometry.primary_direction;
-        double start[V5_STATUS_AXIS_COUNT] = {0};
-        double end[V5_STATUS_AXIS_COUNT] = {0};
-        for (axis = 0U; axis < 3U; ++axis) {
-            start[axis] = center[axis] -
-                direction[axis] * V5_SCENE_AXIS_LENGTH;
-            end[axis] = center[axis] +
-                direction[axis] * V5_SCENE_AXIS_LENGTH;
-        }
-        if (!cache_segment(
-                producer, start, end,
-                V5_STATUS_SCENE_SEGMENT_MODEL_AXIS,
-                (uint16_t)model_axis) ||
-            !cache_marker(
-                producer, center,
-                V5_STATUS_SCENE_MARKER_MODEL_CENTER,
-                (uint16_t)model_axis)) return 0;
-    }
-    return 1;
-}
-
 int v5_program_scene_build_static_cache(
     V5ProgramSceneProducer *producer,
     const V5NativeReadback *readback,
     const V5ProgramSceneModel *model,
-    uint32_t model_id,
-    uint32_t rtcp_enabled)
+    uint32_t model_id)
 {
     unsigned int i;
     unsigned int axis;
     memset(&producer->static_bounds, 0, sizeof(producer->static_bounds));
-    producer->world_segment_count = 0U;
-    producer->world_marker_count = 0U;
+    producer->base_segment_count = 0U;
+    producer->base_marker_count = 0U;
     for (i = 0U; i < producer->request.point_count; ++i) {
         int wcs = producer->request.wcs_index[i];
-        producer->world_points[i] = producer->request.points[i];
+        producer->base_points[i] = producer->request.points[i];
         if (wcs < 0 || wcs >= (int)V5_NATIVE_READBACK_WCS_COUNT ||
             !v5_native_readback_wcs_table_known(readback)) return 0;
         for (axis = 0U; axis < 3U; ++axis) {
-            producer->world_points[i].axis[axis] +=
+            producer->base_points[i].axis[axis] +=
                 readback->wcs_offsets[wcs][axis];
         }
-        if (rtcp_enabled && !v5_program_scene_model_transform(
-                model, producer->world_points[i].axis)) return 0;
         v5_program_scene_bounds_add(
-            &producer->static_bounds, producer->world_points[i].axis,
+            &producer->static_bounds, producer->base_points[i].axis,
             producer->request.plane);
     }
-    if (!cache_mcs_and_wcs_axes(
-            producer, readback, model, rtcp_enabled) ||
-        !cache_model_axes(producer, model, model_id)) return 0;
+    if (!cache_mcs_and_wcs_axes(producer, readback)) return 0;
     producer->static_model = *model;
     producer->static_program_source_identity =
         producer->request.program_source_identity;
@@ -204,9 +153,84 @@ int v5_program_scene_build_static_cache(
     producer->static_active_model_generation =
         v5_program_scene_active_model_generation(readback, model_id);
     producer->static_wcs_generation = readback->wcs_offsets_epoch;
-    producer->static_rtcp_enabled = rtcp_enabled;
     producer->static_valid = producer->static_bounds.valid;
+    producer->pose_valid = 0;
     producer->build_count += 1ULL;
-    if (rtcp_enabled) producer->transform_count += 1ULL;
     return producer->static_valid;
+}
+
+int v5_program_scene_pose_cache_same(
+    const V5ProgramSceneProducer *producer,
+    const V5ProgramSceneModel *model,
+    uint32_t rtcp_enabled)
+{
+    return producer && model && producer->pose_valid &&
+        producer->pose_rtcp_enabled == (rtcp_enabled ? 1 : 0) &&
+        producer->pose_plane == producer->request.plane &&
+        (!rtcp_enabled || v5_program_scene_model_pose_same(
+            &producer->pose_model, model));
+}
+
+int v5_program_scene_prepare_pose_cache(
+    V5ProgramSceneProducer *producer,
+    const V5ProgramSceneModel *model,
+    uint32_t rtcp_enabled)
+{
+    unsigned int i;
+    if (!producer || !model || !producer->static_valid) return 0;
+    memset(&producer->pose_bounds, 0, sizeof(producer->pose_bounds));
+    v5_program_scene_pose_matrix_identity(&producer->pose_matrix);
+    if (rtcp_enabled && !v5_program_scene_model_pose_matrix(
+            model, &producer->pose_matrix)) return 0;
+    producer->world_segment_count = producer->base_segment_count;
+    for (i = 0U; i < producer->base_segment_count; ++i) {
+        producer->world_segments[i] = producer->base_segments[i];
+        if (rtcp_enabled &&
+            producer->world_segments[i].role ==
+                V5_STATUS_SCENE_SEGMENT_WCS_AXIS) {
+            double start[V5_STATUS_AXIS_COUNT];
+            double end[V5_STATUS_AXIS_COUNT];
+            v5_program_scene_pose_matrix_apply(
+                &producer->pose_matrix,
+                producer->world_segments[i].start.axis, start);
+            v5_program_scene_pose_matrix_apply(
+                &producer->pose_matrix,
+                producer->world_segments[i].end.axis, end);
+            memcpy(producer->world_segments[i].start.axis, start, sizeof(start));
+            memcpy(producer->world_segments[i].end.axis, end, sizeof(end));
+        }
+        v5_program_scene_bounds_add(
+            &producer->pose_bounds,
+            producer->world_segments[i].start.axis,
+            producer->request.plane);
+        v5_program_scene_bounds_add(
+            &producer->pose_bounds,
+            producer->world_segments[i].end.axis,
+            producer->request.plane);
+    }
+    producer->world_marker_count = producer->base_marker_count;
+    for (i = 0U; i < producer->base_marker_count; ++i) {
+        producer->world_markers[i] = producer->base_markers[i];
+        if (rtcp_enabled &&
+            producer->world_markers[i].role ==
+                V5_STATUS_SCENE_MARKER_WCS_ORIGIN) {
+            double transformed[V5_STATUS_AXIS_COUNT];
+            v5_program_scene_pose_matrix_apply(
+                &producer->pose_matrix,
+                producer->world_markers[i].point.axis, transformed);
+            memcpy(
+                producer->world_markers[i].point.axis,
+                transformed, sizeof(transformed));
+        }
+        v5_program_scene_bounds_add(
+            &producer->pose_bounds,
+            producer->world_markers[i].point.axis,
+            producer->request.plane);
+    }
+    producer->pose_model = *model;
+    producer->pose_rtcp_enabled = rtcp_enabled ? 1 : 0;
+    producer->pose_plane = producer->request.plane;
+    producer->pose_valid = producer->pose_bounds.valid;
+    if (rtcp_enabled) producer->transform_count += 1ULL;
+    return producer->pose_valid;
 }

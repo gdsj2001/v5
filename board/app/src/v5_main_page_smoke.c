@@ -21,7 +21,9 @@ static void prepare_status(
     status->scene_generation = scene_generation;
     status->display_scene = scene;
     scene->flags = V5_STATUS_SCENE_FLAG_VALID | V5_STATUS_SCENE_FLAG_PROGRAM |
-        V5_STATUS_SCENE_FLAG_MODEL | V5_STATUS_SCENE_FLAG_WCS;
+        V5_STATUS_SCENE_FLAG_MODEL | V5_STATUS_SCENE_FLAG_WCS |
+        V5_STATUS_SCENE_FLAG_DIRTY_KNOWN |
+        V5_STATUS_SCENE_FLAG_DIRTY_MASK;
     scene->native_generation = 7ULL;
     scene->view_generation = 1ULL;
     scene->fit_generation = 1ULL;
@@ -60,6 +62,7 @@ int main(void)
     V5UiStatusView status;
     V5StatusDisplayScene first_scene;
     V5StatusDisplayScene second_scene;
+    V5StatusDisplayScene third_scene;
     lv_obj_t *screen;
     unsigned int rewrites;
     lv_init();
@@ -73,11 +76,15 @@ int main(void)
             lv_obj_get_y(page.toolpath_clip_layer) != viewport->y ||
             lv_obj_get_width(page.toolpath_clip_layer) != viewport->width ||
             lv_obj_get_height(page.toolpath_clip_layer) != viewport->height ||
-            lv_obj_get_child_cnt(page.toolpath_clip_layer) != 1U ||
+            lv_obj_get_child_cnt(page.toolpath_clip_layer) != 2U ||
             lv_obj_get_x(page.trajectory_line) != 0 ||
             lv_obj_get_y(page.trajectory_line) != 0 ||
             lv_obj_get_width(page.trajectory_line) != viewport->width ||
-            lv_obj_get_height(page.trajectory_line) != viewport->height) {
+            lv_obj_get_height(page.trajectory_line) != viewport->height ||
+            lv_obj_get_x(page.toolpath_dynamic_layer) != 0 ||
+            lv_obj_get_y(page.toolpath_dynamic_layer) != 0 ||
+            lv_obj_get_width(page.toolpath_dynamic_layer) != viewport->width ||
+            lv_obj_get_height(page.toolpath_dynamic_layer) != viewport->height) {
             fprintf(stderr,
                 "viewport clip=%d,%d,%d,%d children=%u scene=%d,%d,%d,%d expected=%d,%d,%d,%d\n",
                 (int)lv_obj_get_x(page.toolpath_clip_layer),
@@ -147,6 +154,8 @@ int main(void)
     prepare_status(&status, &second_scene, 2ULL);
     second_scene.view_generation = page.toolpath_view_generation;
     second_scene.points[1].x = 110.0f;
+    second_scene.flags &= ~V5_STATUS_SCENE_FLAG_DIRTY_MASK;
+    second_scene.flags |= V5_STATUS_SCENE_FLAG_DIRTY_STATIC;
     if (!v5_main_page_apply_status_flags(&page, &status, V5_MAIN_PAGE_REFRESH_DYNAMIC) ||
         page.toolpath_scene_generation != 2ULL ||
         page.toolpath_line_rewrite_count <= rewrites ||
@@ -154,6 +163,17 @@ int main(void)
         page.toolpath_line_last_dirty_pixels >=
             (uint64_t)v5_toolpath_viewport()->width *
             (uint64_t)v5_toolpath_viewport()->height) return 7;
+    rewrites = page.toolpath_line_rewrite_count;
+    prepare_status(&status, &third_scene, 3ULL);
+    third_scene.view_generation = page.toolpath_view_generation;
+    third_scene.flags &= ~V5_STATUS_SCENE_FLAG_DIRTY_MASK;
+    third_scene.flags |= V5_STATUS_SCENE_FLAG_DIRTY_DYNAMIC;
+    third_scene.markers[1].point.x = 154.0f;
+    if (!v5_main_page_apply_status_flags(&page, &status, V5_MAIN_PAGE_REFRESH_DYNAMIC) ||
+        page.toolpath_scene_generation != 3ULL ||
+        page.toolpath_line_rewrite_count != rewrites ||
+        page.toolpath_line_last_dirty_rect_count != 2U ||
+        page.toolpath_line_last_dirty_pixels >= 2048U) return 34;
     status.valid_mask &= ~V5_STATUS_VALID_DISPLAY_SCENE;
     if (!v5_main_page_apply_status_flags(&page, &status, V5_MAIN_PAGE_REFRESH_DYNAMIC) ||
         !lv_obj_has_flag(page.trajectory_line, LV_OBJ_FLAG_HIDDEN)) return 8;

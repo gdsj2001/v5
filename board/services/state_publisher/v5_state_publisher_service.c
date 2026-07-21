@@ -296,7 +296,12 @@ static void read_native_scene_inputs(
         readback, &rtcp, &wcs, &g53, &modal_tool);
 }
 
-static int context_init(V5StatePublisherContext *context)
+static int canonical_state_path(const char *path)
+{
+    return !path || !path[0] || strcmp(path, V5_STATUS_SHM_PATH) == 0;
+}
+
+static int context_init(V5StatePublisherContext *context, int scene_request_owner)
 {
     if (!context) return 0;
     v5_native_display_sample_reader_init(&context->reader);
@@ -328,6 +333,7 @@ static int context_init(V5StatePublisherContext *context)
         v5_native_modal_tool_status_block_size(),
         V5_NATIVE_MODAL_TOOL_STATUS_DEFAULT_MAX_AGE_MS,
         v5_native_modal_tool_status_read_from_memory);
+    if (!scene_request_owner) return 1;
     return v5_program_scene_request_server_open(&context->request_server, 0);
 }
 
@@ -388,7 +394,7 @@ int v5_state_publisher_run_loop(
     V5StatePublisherReport *out = report ? report : &local_report;
     v5_state_publisher_reset_stop();
     v5_status_shm_mmap_writer_init(&writer);
-    if (!context_init(&context)) return 0;
+    if (!context_init(&context, canonical_state_path(path))) return 0;
     if (!v5_status_shm_mmap_writer_open(&writer, path)) {
         context_close(&context);
         return 0;
