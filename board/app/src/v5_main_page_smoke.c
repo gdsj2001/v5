@@ -1,5 +1,6 @@
 #include "v5_lvgl_headless.h"
 #include "v5_main_page.h"
+#include "v5_main_page_internal.h"
 #include "v5_toolpath_viewport.h"
 
 #include <stdio.h>
@@ -61,8 +62,10 @@ int main(void)
     V5MainPage page;
     V5UiStatusView status;
     V5StatusDisplayScene first_scene;
+    V5StatusDisplayScene quiet_scene;
     V5StatusDisplayScene second_scene;
     V5StatusDisplayScene third_scene;
+    V5StatusDisplayScene large_scene;
     lv_obj_t *screen;
     unsigned int rewrites;
     lv_init();
@@ -70,6 +73,12 @@ int main(void)
     screen = lv_scr_act();
     if (!screen || !v5_main_page_create(&page, screen)) return 2;
     lv_obj_update_layout(screen);
+    lv_refr_now(NULL);
+    v5_ui_status_view_init(&status);
+    v5_main_page_internal_sync_override_sliders(&page, &status);
+    lv_refr_now(NULL);
+    v5_main_page_internal_sync_override_sliders(&page, &status);
+    if (lv_disp_get_default()->inv_p != 0U) return 38;
     {
         const V5ToolpathViewport *viewport = v5_toolpath_viewport();
         if (lv_obj_get_x(page.toolpath_clip_layer) != viewport->x ||
@@ -147,35 +156,76 @@ int main(void)
         !page.toolpath_display_scene_valid ||
         page.toolpath_display_scene != &first_scene ||
         page.toolpath_display_scene->segment_count != 2U ||
-        page.toolpath_display_scene->marker_count != 2U) return 5;
+        page.toolpath_display_scene->marker_count != 2U ||
+        page.toolpath_program_raster_build_count != 1ULL ||
+        !v5_main_page_internal_program_raster_pixel(&page, 20, 20) ||
+        !v5_main_page_internal_program_raster_pixel(&page, 100, 60)) return 5;
     rewrites = page.toolpath_line_rewrite_count;
     if (!v5_main_page_apply_status_flags(&page, &status, V5_MAIN_PAGE_REFRESH_DYNAMIC) ||
-        page.toolpath_line_rewrite_count != rewrites || page.toolpath_static_cache_hits == 0U) return 6;
-    prepare_status(&status, &second_scene, 2ULL);
+        page.toolpath_line_rewrite_count != rewrites ||
+        page.toolpath_static_cache_hits == 0U ||
+        page.toolpath_program_raster_build_count != 1ULL) return 6;
+    lv_timer_handler();
+    prepare_status(&status, &quiet_scene, 2ULL);
+    quiet_scene.view_generation = page.toolpath_view_generation;
+    quiet_scene.flags &= ~V5_STATUS_SCENE_FLAG_DIRTY_MASK;
+    if (!v5_main_page_apply_status_flags(
+            &page, &status, V5_MAIN_PAGE_REFRESH_SCENE) ||
+        page.toolpath_scene_generation != 2ULL ||
+        page.toolpath_program_raster_build_count != 1ULL ||
+        lv_disp_get_default()->inv_p != 0U) return 37;
+    prepare_status(&status, &second_scene, 3ULL);
     second_scene.view_generation = page.toolpath_view_generation;
     second_scene.points[1].x = 110.0f;
     second_scene.flags &= ~V5_STATUS_SCENE_FLAG_DIRTY_MASK;
-    second_scene.flags |= V5_STATUS_SCENE_FLAG_DIRTY_STATIC;
+    second_scene.flags |= V5_STATUS_SCENE_FLAG_DIRTY_PROGRAM;
     if (!v5_main_page_apply_status_flags(&page, &status, V5_MAIN_PAGE_REFRESH_DYNAMIC) ||
-        page.toolpath_scene_generation != 2ULL ||
+        page.toolpath_scene_generation != 3ULL ||
         page.toolpath_line_rewrite_count <= rewrites ||
-        page.toolpath_line_last_dirty_rect_count != 2U ||
+        page.toolpath_program_raster_build_count != 2ULL ||
+        page.toolpath_line_last_dirty_rect_count == 0U ||
+        page.toolpath_line_last_dirty_rect_count > 12U ||
         page.toolpath_line_last_dirty_pixels >=
             (uint64_t)v5_toolpath_viewport()->width *
-            (uint64_t)v5_toolpath_viewport()->height) return 7;
+            (uint64_t)v5_toolpath_viewport()->height ||
+        v5_main_page_internal_program_raster_pixel(&page, 100, 60) ||
+        !v5_main_page_internal_program_raster_pixel(&page, 110, 60)) return 7;
     rewrites = page.toolpath_line_rewrite_count;
-    prepare_status(&status, &third_scene, 3ULL);
+    prepare_status(&status, &third_scene, 4ULL);
     third_scene.view_generation = page.toolpath_view_generation;
     third_scene.flags &= ~V5_STATUS_SCENE_FLAG_DIRTY_MASK;
     third_scene.flags |= V5_STATUS_SCENE_FLAG_DIRTY_DYNAMIC;
     third_scene.markers[1].point.x = 154.0f;
     if (!v5_main_page_apply_status_flags(&page, &status, V5_MAIN_PAGE_REFRESH_DYNAMIC) ||
-        page.toolpath_scene_generation != 3ULL ||
+        page.toolpath_scene_generation != 4ULL ||
         page.toolpath_line_rewrite_count != rewrites ||
+        page.toolpath_program_raster_build_count != 2ULL ||
         page.toolpath_line_last_dirty_rect_count != 2U ||
         page.toolpath_line_last_dirty_pixels >= 2048U) return 34;
+    prepare_status(&status, &large_scene, 5ULL);
+    large_scene.view_generation = page.toolpath_view_generation;
+    large_scene.flags &= ~V5_STATUS_SCENE_FLAG_DIRTY_MASK;
+    large_scene.flags |= V5_STATUS_SCENE_FLAG_DIRTY_PROGRAM;
+    large_scene.point_count = V5_STATUS_SCENE_POINT_COUNT;
+    {
+        unsigned int i;
+        for (i = 0U; i < large_scene.point_count; ++i) {
+            large_scene.points[i].x = (float)(i % V5_TOOLPATH_VIEWPORT_WIDTH);
+            large_scene.points[i].y = (float)((i * 7U) % V5_TOOLPATH_VIEWPORT_HEIGHT);
+            large_scene.break_before[i] = 0U;
+        }
+    }
+    if (!v5_main_page_apply_status_flags(
+            &page, &status, V5_MAIN_PAGE_REFRESH_SCENE) ||
+        page.toolpath_program_raster_build_count != 3ULL ||
+        page.toolpath_line_last_dirty_rect_count == 0U ||
+        page.toolpath_line_last_dirty_rect_count > 12U) return 35;
+    if (!v5_main_page_apply_status_flags(
+            &page, &status, V5_MAIN_PAGE_REFRESH_SCENE) ||
+        page.toolpath_program_raster_build_count != 3ULL) return 36;
     status.valid_mask &= ~V5_STATUS_VALID_DISPLAY_SCENE;
     if (!v5_main_page_apply_status_flags(&page, &status, V5_MAIN_PAGE_REFRESH_DYNAMIC) ||
-        !lv_obj_has_flag(page.trajectory_line, LV_OBJ_FLAG_HIDDEN)) return 8;
+        !lv_obj_has_flag(page.trajectory_line, LV_OBJ_FLAG_HIDDEN) ||
+        page.toolpath_program_raster_valid) return 8;
     return 0;
 }

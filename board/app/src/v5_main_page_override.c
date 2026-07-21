@@ -118,10 +118,14 @@ static void sync_override_slider(
         return;
     }
     if (!valid || !isfinite(actual)) {
-        lv_obj_add_state(slider, LV_STATE_DISABLED);
+        if (!lv_obj_has_state(slider, LV_STATE_DISABLED)) {
+            lv_obj_add_state(slider, LV_STATE_DISABLED);
+        }
         return;
     }
-    lv_obj_clear_state(slider, LV_STATE_DISABLED);
+    if (lv_obj_has_state(slider, LV_STATE_DISABLED)) {
+        lv_obj_clear_state(slider, LV_STATE_DISABLED);
+    }
     if (drag_active) {
         return;
     }

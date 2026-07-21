@@ -130,6 +130,10 @@ $script:RepositoryRoot = [IO.Path]::GetFullPath($resolvedRepository).TrimEnd([IO
 if (-not [IO.Directory]::Exists((Join-Path $script:RepositoryRoot '.git'))) {
     throw "Git repository not found: $script:RepositoryRoot"
 }
+$requiredRuleOwner = Join-Path $script:RepositoryRoot 'AGENTS.md'
+if (-not [IO.File]::Exists($requiredRuleOwner)) {
+    throw "Required root rule owner is missing: $requiredRuleOwner"
+}
 
 $baselineRoot = @(Invoke-GitLines -Arguments @(
     '-c', 'core.quotepath=false',
@@ -139,7 +143,11 @@ $allowedFromEnvironment = @(
     $env:V5_GIT_ALLOWED_NEW_ROOT -split ';' |
         Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
 )
-$effectiveAllowedRoot = @($AllowedNewRoot + $allowedFromEnvironment | Sort-Object -Unique)
+$canonicalAllowedRoot = @('AGENTS.md')
+$effectiveAllowedRoot = @(
+    $canonicalAllowedRoot + $AllowedNewRoot + $allowedFromEnvironment |
+        Sort-Object -Unique
+)
 
 $runId = Get-Date -Format 'yyyyMMdd_HHmmss_fff'
 $quarantineRoot = Join-Path $script:RepositoryRoot "repo_ignored\git_push_quarantine\$runId"

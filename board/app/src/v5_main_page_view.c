@@ -309,7 +309,8 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
             if (page->toolpath_scene_generation == status->scene_generation) {
                 page->toolpath_static_cache_hits += 1U;
             } else {
-                v5_main_page_internal_apply_display_scene(page, status->display_scene);
+                v5_main_page_internal_apply_display_scene(
+                    page, status->display_scene, status->scene_generation);
                 page->toolpath_scene_generation = status->scene_generation;
                 page->toolpath_program_generation = (unsigned int)expected_program_generation;
                 page->toolpath_program_view_generation = page->toolpath_view_generation;

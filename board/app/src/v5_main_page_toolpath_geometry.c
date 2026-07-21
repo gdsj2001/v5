@@ -69,11 +69,6 @@ static void invalidate_scene_layer(
     uint64_t pixels;
     unsigned int i;
     if (!page || !object || !scene) return;
-    if (layer == V5_STATUS_SCENE_FLAG_DIRTY_STATIC) {
-        for (i = 0U; i < scene->point_count; ++i) {
-            bounds_add_point(&valid, &x1, &y1, &x2, &y2, scene->points[i]);
-        }
-    }
     for (i = 0U; i < scene->segment_count; ++i) {
         if (!segment_in_layer(scene->segments[i].role, layer)) continue;
         bounds_add_point(
@@ -123,20 +118,25 @@ static void hide_scene_labels(V5MainPage *page)
 
 void v5_main_page_internal_hide_toolpath_unproven_geometry(V5MainPage *page)
 {
+    const V5StatusDisplayScene *previous;
     if (!page) return;
-    if (page->toolpath_display_scene_valid && page->toolpath_display_scene) {
+    previous = page->toolpath_previous_scene_valid ?
+        &page->toolpath_previous_scene : NULL;
+    v5_main_page_internal_clear_program_raster(page);
+    if (previous) {
         invalidate_scene_layer(
-            page, page->trajectory_line, page->toolpath_display_scene,
+            page, page->trajectory_line, previous,
             V5_STATUS_SCENE_FLAG_DIRTY_STATIC);
         invalidate_scene_layer(
-            page, page->toolpath_dynamic_layer, page->toolpath_display_scene,
+            page, page->toolpath_dynamic_layer, previous,
             V5_STATUS_SCENE_FLAG_DIRTY_MODEL);
         invalidate_scene_layer(
-            page, page->toolpath_dynamic_layer, page->toolpath_display_scene,
+            page, page->toolpath_dynamic_layer, previous,
             V5_STATUS_SCENE_FLAG_DIRTY_DYNAMIC);
     }
     page->toolpath_display_scene_valid = 0;
     page->toolpath_display_scene = NULL;
+    page->toolpath_previous_scene_valid = 0;
     v5_main_page_internal_hide_toolpath_program_line(page);
     hide_scene_labels(page);
 }
@@ -198,7 +198,8 @@ static void apply_marker_labels(
 
 void v5_main_page_internal_apply_display_scene(
     V5MainPage *page,
-    const V5StatusDisplayScene *scene)
+    const V5StatusDisplayScene *scene,
+    uint64_t scene_generation)
 {
     unsigned char model_seen[2] = {0};
     int wcs_seen = 0;
@@ -214,8 +215,9 @@ void v5_main_page_internal_apply_display_scene(
     page->toolpath_line_last_dirty_rect_count = 0U;
     page->toolpath_line_last_dirty_pixels = 0U;
     page->toolpath_line_last_dirty_max_pixels = 0U;
-    previous_scene = page->toolpath_display_scene;
-    previous_valid = page->toolpath_display_scene_valid && previous_scene;
+    previous_scene = page->toolpath_previous_scene_valid ?
+        &page->toolpath_previous_scene : NULL;
+    previous_valid = previous_scene != NULL;
     dirty_layers = scene->flags & V5_STATUS_SCENE_FLAG_DIRTY_MASK;
     if (!previous_valid ||
         (scene->flags & V5_STATUS_SCENE_FLAG_DIRTY_KNOWN) == 0U) {
@@ -241,12 +243,18 @@ void v5_main_page_internal_apply_display_scene(
     page->toolpath_display_scene = scene;
     page->toolpath_display_scene_valid = 1;
     if (!previous_valid ||
-        (dirty_layers & V5_STATUS_SCENE_FLAG_DIRTY_STATIC) != 0U) {
+        (dirty_layers & V5_STATUS_SCENE_FLAG_DIRTY_PROGRAM) != 0U) {
         (void)v5_main_page_internal_apply_program_display_scene(page, scene);
     }
-    lv_obj_clear_flag(page->trajectory_line, LV_OBJ_FLAG_HIDDEN);
+    v5_main_page_internal_clear_hidden_flag_if_hidden(
+        page->trajectory_line);
     if (page->toolpath_dynamic_layer) {
-        lv_obj_clear_flag(page->toolpath_dynamic_layer, LV_OBJ_FLAG_HIDDEN);
+        v5_main_page_internal_clear_hidden_flag_if_hidden(
+            page->toolpath_dynamic_layer);
+    }
+    if (dirty_layers & V5_STATUS_SCENE_FLAG_DIRTY_PROGRAM) {
+        v5_main_page_internal_update_program_raster(
+            page, scene, scene_generation);
     }
     if (dirty_layers & V5_STATUS_SCENE_FLAG_DIRTY_STATIC) {
         invalidate_scene_layer(
@@ -276,6 +284,8 @@ void v5_main_page_internal_apply_display_scene(
         v5_main_page_internal_add_hidden_flag_if_visible(
             page->toolpath_wcs_label);
     }
+    page->toolpath_previous_scene = *scene;
+    page->toolpath_previous_scene_valid = 1;
     v5_main_page_internal_coalesce_toolpath_invalidations(page);
 }
 
@@ -289,5 +299,5 @@ void v5_main_page_internal_update_toolpath_state_lines(
         return;
     }
     v5_main_page_internal_apply_display_scene(
-        page, status->display_scene);
+        page, status->display_scene, status->scene_generation);
 }

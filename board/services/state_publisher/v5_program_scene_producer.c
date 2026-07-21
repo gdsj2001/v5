@@ -55,6 +55,115 @@ static int unchanged_scene(
         (!tool_valid || producer->last_tool_length == tool_length);
 }
 
+static int same_screen_pixel(
+    V5StatusScreenPoint left,
+    V5StatusScreenPoint right)
+{
+    return lroundf(left.x) == lroundf(right.x) &&
+        lroundf(left.y) == lroundf(right.y);
+}
+
+static int program_pixels_same(
+    const V5StatusDisplayScene *left,
+    const V5StatusDisplayScene *right)
+{
+    unsigned int i;
+    if (!left || !right || left->point_count != right->point_count) return 0;
+    for (i = 0U; i < left->point_count; ++i) {
+        if (left->break_before[i] != right->break_before[i] ||
+            !same_screen_pixel(left->points[i], right->points[i])) return 0;
+    }
+    return 1;
+}
+
+static int segment_in_dirty_layer(uint16_t role, uint32_t layer)
+{
+    if (layer == V5_STATUS_SCENE_FLAG_DIRTY_STATIC) {
+        return role == V5_STATUS_SCENE_SEGMENT_MCS_AXIS ||
+            role == V5_STATUS_SCENE_SEGMENT_WCS_AXIS;
+    }
+    if (layer == V5_STATUS_SCENE_FLAG_DIRTY_MODEL) {
+        return role == V5_STATUS_SCENE_SEGMENT_MODEL_AXIS;
+    }
+    return layer == V5_STATUS_SCENE_FLAG_DIRTY_DYNAMIC &&
+        role == V5_STATUS_SCENE_SEGMENT_HOLDER;
+}
+
+static int marker_in_dirty_layer(uint16_t role, uint32_t layer)
+{
+    if (layer == V5_STATUS_SCENE_FLAG_DIRTY_STATIC) {
+        return role == V5_STATUS_SCENE_MARKER_MCS_ORIGIN ||
+            role == V5_STATUS_SCENE_MARKER_WCS_ORIGIN;
+    }
+    if (layer == V5_STATUS_SCENE_FLAG_DIRTY_MODEL) {
+        return role == V5_STATUS_SCENE_MARKER_MODEL_CENTER;
+    }
+    return layer == V5_STATUS_SCENE_FLAG_DIRTY_DYNAMIC &&
+        (role == V5_STATUS_SCENE_MARKER_MCS_ACTUAL ||
+         role == V5_STATUS_SCENE_MARKER_CMD_TIP);
+}
+
+static int segment_layer_pixels_same(
+    const V5StatusDisplayScene *left,
+    const V5StatusDisplayScene *right,
+    uint32_t layer)
+{
+    unsigned int li = 0U;
+    unsigned int ri = 0U;
+    if (!left || !right) return 0;
+    while (1) {
+        while (li < left->segment_count &&
+               !segment_in_dirty_layer(left->segments[li].role, layer)) ++li;
+        while (ri < right->segment_count &&
+               !segment_in_dirty_layer(right->segments[ri].role, layer)) ++ri;
+        if (li == left->segment_count || ri == right->segment_count) {
+            return li == left->segment_count && ri == right->segment_count;
+        }
+        if (left->segments[li].role != right->segments[ri].role ||
+            left->segments[li].index != right->segments[ri].index ||
+            !same_screen_pixel(
+                left->segments[li].start, right->segments[ri].start) ||
+            !same_screen_pixel(
+                left->segments[li].end, right->segments[ri].end)) return 0;
+        ++li;
+        ++ri;
+    }
+}
+
+static int marker_layer_pixels_same(
+    const V5StatusDisplayScene *left,
+    const V5StatusDisplayScene *right,
+    uint32_t layer)
+{
+    unsigned int li = 0U;
+    unsigned int ri = 0U;
+    if (!left || !right) return 0;
+    while (1) {
+        while (li < left->marker_count &&
+               !marker_in_dirty_layer(left->markers[li].role, layer)) ++li;
+        while (ri < right->marker_count &&
+               !marker_in_dirty_layer(right->markers[ri].role, layer)) ++ri;
+        if (li == left->marker_count || ri == right->marker_count) {
+            return li == left->marker_count && ri == right->marker_count;
+        }
+        if (left->markers[li].role != right->markers[ri].role ||
+            left->markers[li].index != right->markers[ri].index ||
+            !same_screen_pixel(
+                left->markers[li].point, right->markers[ri].point)) return 0;
+        ++li;
+        ++ri;
+    }
+}
+
+static int scene_layer_pixels_same(
+    const V5StatusDisplayScene *left,
+    const V5StatusDisplayScene *right,
+    uint32_t layer)
+{
+    return segment_layer_pixels_same(left, right, layer) &&
+        marker_layer_pixels_same(left, right, layer);
+}
+
 static void apply_scene_metadata(
     V5ProgramSceneProducer *producer,
     const V5NativeDisplaySample *sample,
@@ -202,6 +311,7 @@ int v5_program_scene_producer_build(
 {
     V5ProgramSceneBounds candidate;
     V5ProgramSceneModel model;
+    V5StatusDisplayScene previous_scene;
     double holder_end[V5_STATUS_AXIS_COUNT];
     double cmd_tip[V5_STATUS_AXIS_COUNT];
     double tool_length = 0.0;
@@ -210,17 +320,18 @@ int v5_program_scene_producer_build(
     int model_valid;
     int static_changed;
     int pose_changed;
-    int model_pose_changed;
-    int dynamic_changed;
     int reproject;
     int fit_key_changed;
     int program_projected = 0;
     int tool_valid;
     uint32_t dirty_flags;
+    int previous_scene_valid;
     if (generation_out) *generation_out = 0ULL;
     if (!producer || !sample || !readback || !scene_out ||
         !sample->available || sample->source_generation == 0ULL ||
         !producer->request_valid) return 0;
+    previous_scene = producer->scene;
+    previous_scene_valid = producer->scene_valid;
     memset(&model, 0, sizeof(model));
     rtcp_enabled = v5_native_readback_rtcp_known(readback) &&
         readback->rtcp_enabled ? 1U : 0U;
@@ -232,8 +343,6 @@ int v5_program_scene_producer_build(
         producer, readback, &model, model_id);
     pose_changed = static_changed || !v5_program_scene_pose_cache_same(
         producer, &model, rtcp_enabled);
-    model_pose_changed = !producer->scene_valid ||
-        !v5_program_scene_model_pose_same(&producer->model, &model);
     tool_valid = v5_native_readback_tool_length_known(readback);
     if (tool_valid) tool_length = readback->tool_length_mm;
     if (unchanged_scene(
@@ -287,17 +396,6 @@ int v5_program_scene_producer_build(
         program_projected = 1;
         reproject = 1;
     }
-    dynamic_changed = !producer->scene_valid ||
-        producer->last_dynamic_valid_mask != (sample->valid_mask &
-            (V5_STATUS_VALID_MCS | V5_STATUS_VALID_CMD_MCS)) ||
-        ((sample->valid_mask & V5_STATUS_VALID_MCS) != 0U &&
-            memcmp(producer->last_mcs, sample->mcs,
-                sizeof(producer->last_mcs)) != 0) ||
-        ((sample->valid_mask & V5_STATUS_VALID_CMD_MCS) != 0U &&
-            memcmp(producer->last_cmd_mcs, sample->cmd_mcs,
-                sizeof(producer->last_cmd_mcs)) != 0) ||
-        producer->last_tool_length_valid != tool_valid ||
-        (tool_valid && producer->last_tool_length != tool_length);
     if (reproject && !program_projected) {
         if (!v5_program_scene_transform_project_program(
                 producer, 1)) return 0;
@@ -305,13 +403,10 @@ int v5_program_scene_producer_build(
         v5_program_scene_prepare_dynamic_update(producer);
     }
     producer->model = model;
-    dirty_flags = reproject ? V5_STATUS_SCENE_FLAG_DIRTY_MASK :
-        ((model_pose_changed ? V5_STATUS_SCENE_FLAG_DIRTY_MODEL : 0U) |
-         (dynamic_changed ? V5_STATUS_SCENE_FLAG_DIRTY_DYNAMIC : 0U));
     apply_scene_metadata(
         producer, sample, readback, &model,
         model_id, rtcp_enabled, model_valid,
-        dirty_flags);
+        0U);
     add_model_geometry_scene(producer, &model, model_id);
     if (sample->valid_mask & V5_STATUS_VALID_MCS) {
         v5_program_scene_add_dynamic_marker(
@@ -326,6 +421,31 @@ int v5_program_scene_producer_build(
         v5_program_scene_add_dynamic_marker(
             producer, cmd_tip, V5_STATUS_SCENE_MARKER_CMD_TIP);
     }
+    if (!previous_scene_valid) {
+        dirty_flags = V5_STATUS_SCENE_FLAG_DIRTY_MASK;
+    } else {
+        dirty_flags = 0U;
+        if (!program_pixels_same(&previous_scene, &producer->scene)) {
+            dirty_flags |= V5_STATUS_SCENE_FLAG_DIRTY_PROGRAM;
+        }
+        if (!scene_layer_pixels_same(
+                &previous_scene, &producer->scene,
+                V5_STATUS_SCENE_FLAG_DIRTY_STATIC)) {
+            dirty_flags |= V5_STATUS_SCENE_FLAG_DIRTY_STATIC;
+        }
+        if (!scene_layer_pixels_same(
+                &previous_scene, &producer->scene,
+                V5_STATUS_SCENE_FLAG_DIRTY_MODEL)) {
+            dirty_flags |= V5_STATUS_SCENE_FLAG_DIRTY_MODEL;
+        }
+        if (!scene_layer_pixels_same(
+                &previous_scene, &producer->scene,
+                V5_STATUS_SCENE_FLAG_DIRTY_DYNAMIC)) {
+            dirty_flags |= V5_STATUS_SCENE_FLAG_DIRTY_DYNAMIC;
+        }
+    }
+    producer->scene.flags &= ~V5_STATUS_SCENE_FLAG_DIRTY_MASK;
+    producer->scene.flags |= dirty_flags;
     producer->scene.build_count = producer->build_count;
     producer->scene.rtcp_transform_count = producer->transform_count;
     producer->scene.project_count = producer->project_count;

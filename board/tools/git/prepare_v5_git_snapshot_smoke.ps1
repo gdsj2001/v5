@@ -36,13 +36,13 @@ try {
     Invoke-TestGit -Repository $tempRoot -Arguments @('init', '-q') | Out-Null
 
     [IO.File]::WriteAllText((Join-Path $tempRoot '.gitignore'), "repo_ignored/`n")
-    [IO.File]::WriteAllText((Join-Path $tempRoot 'AGENTS.md'), "test root owner`n")
-    Invoke-TestGit -Repository $tempRoot -Arguments @('add', '--', '.gitignore', 'AGENTS.md') | Out-Null
+    Invoke-TestGit -Repository $tempRoot -Arguments @('add', '--', '.gitignore') | Out-Null
     Invoke-TestGit -Repository $tempRoot -Arguments @(
         '-c', 'user.name=V5 Test',
         '-c', 'user.email=v5-test@example.invalid',
         'commit', '-q', '-m', 'baseline'
     ) | Out-Null
+    [IO.File]::WriteAllText((Join-Path $tempRoot 'AGENTS.md'), "test root owner`n")
 
     $gitExecutable = (Get-Command git -ErrorAction Stop).Source
     $gitRoot = Split-Path -Parent (Split-Path -Parent $gitExecutable)
@@ -79,6 +79,9 @@ try {
     if (-not [IO.File]::Exists((Join-Path $tempRoot 'allowed.txt'))) {
         throw 'The explicitly allowed root owner was moved.'
     }
+    if (-not [IO.File]::Exists((Join-Path $tempRoot 'AGENTS.md'))) {
+        throw 'The canonical AGENTS.md root owner was moved.'
+    }
     if (-not [IO.File]::Exists((Join-Path $tempRoot 'src\source.c'))) {
         throw 'A legitimate nested source file was moved.'
     }
@@ -108,7 +111,9 @@ try {
 
     Invoke-TestGit -Repository $tempRoot -Arguments @('add', '-A', '--', '.') | Out-Null
     $staged = @(Invoke-TestGit -Repository $tempRoot -Arguments @('diff', '--cached', '--name-only', '--'))
-    if ($staged -notcontains 'allowed.txt' -or $staged -notcontains 'src/source.c') {
+    if ($staged -notcontains 'AGENTS.md' -or
+        $staged -notcontains 'allowed.txt' -or
+        $staged -notcontains 'src/source.c') {
         throw 'Expected canonical test files were not staged.'
     }
     if ($staged | Where-Object { $_ -like 'repo_ignored/*' }) {

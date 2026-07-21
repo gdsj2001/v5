@@ -336,63 +336,74 @@ CPU0、EtherCAT和安全状态：
 下一步：停止 | 用户测试 | 进入下一卡
 ```
 
-## 11. 2026-07-21 本轮实际结果
+## 11. 2026-07-21 当前代码与板端实测
 
-### 11.1 已完成代码闭环
+### 11.1 当前完成度
 
-- C01：静态 topology 与逐帧 pose 已解耦，`build_count`不再随旋转姿态增长；但2026-07-21复审确认当前实现仍先在`v5_program_scene_prepare_pose_cache()`遍历全部程序点执行模型变换，再在`v5_program_scene_project_static_cache()`第二次遍历全部点投影，尚未满足正常fit下一次融合矩阵、一次全点遍历的要求，状态退回`source_in_progress`。
-- C02：UI 刷新原因已拆成坐标、标量、黄色程序层和动态几何层；复用现有 SHM scene flags，没有扩 ABI。隐藏页不渲染，静态黄线与动态 marker 分层失效，连续同像素点只做安全等价压缩；已删除旧 `lv_line_set_points` 逐点对象更新和失效分支。
-- C03：shared payload、coalesce、repair和latest-wins路径已存在；但2026-07-21复审确认`v5_remote_ui_relay.py`经`v5_remote_ui_support.py`间接导入并实例化`V5StatusShmReader`，运行时仍依赖State SHM，尚未达到纯framebuffer relay，状态退回`source_in_progress`。
-- C04：唯一 Position owner 已由 Python 等价替换为独立 native C writer，保持 Position v3 256 字节 ABI、SeqLock/CRC、writer identity、33ms cadence、100ms heartbeat、200ms bus cadence、模型 descriptor、旋转轴环形距离和一脉冲抗抖。旧 Python writer、旧 import 型测试、旧投影/打包分支和 init 中残留的 Python ABI status 校验已物理删除；installer 仅保留一次性删除旧板端文件的迁移清理，policy/verify 仅保留禁止其复活的断言。
-- CMake manifest owner 已把 `v5_backend_readiness_probe` 与 `v5_position_status_publisher` 明确登记为 UNIX-only runtime target；Windows configure 不再要求伪造 native Windows 可执行文件，ARM product target仍必须构建二者。
+- C01：`board_verified`（当前 BC 模型）。AC/BC branch 只负责生成本模型的 3x4 affine pose matrix；normal-fit 路径把模型变换、平面变换和屏幕投影融合为一次全点遍历。`world_points`、`v5_program_scene_model_transform()`和`v5_program_scene_project_static_cache()`旧双遍历入口已删除。Windows smoke、ARM build 和 ARM QEMU smoke 均通过；BC 真实运动 30 秒内 `build_count 3 -> 3`、`transform_count 7325 -> 8260`、`project_count 7376 -> 8311`，935 个 fresh scene 各增加一次 transform/project，静态 build 未增长。
+- C02：`board_verified_target_narrow_miss`。分层 dirty、scene 直接消费、局部失效、旧逐点 LVGL 对象路径删除、黄色轨迹 generation raster cache、`16x16` tile XOR、clip 内非零 bit 绘制和 unchanged visibility/state setter 门禁均已落地；BC 的 3D/RTCP ON 黄线、轴线、红绿点、坐标和刀柄连续正确且无残影。相同真实运动窗口中固定全刀路框 `0,50,399,396` 已从 dirty FIFO 消失，LVGL UI 平均由47.89%降到25.94%，CPU1平均由66.15%降到44.54%；但UI仍高于本文件25%失败上限0.94个百分点，因此不得写成完全通过，也不得靠降30Hz或冻结黄线凑数。
+- C03：`board_verified`。relay及support模块已不再导入或实例化`V5StatusShmReader`；`/remote/info`的CPU数据直接从`/proc/stat`按请求间隔取delta，画面只消费UI framebuffer和dirty FIFO。coalesce smoke、`py_compile`、静态禁用依赖检查和板端两次`/remote/info`读回通过；真实运动窗口 relay 平均2.57%。
+- C04：`board_verified`（当前 BC 模型）。唯一 Position owner 是 native C writer；板端 Position v3 256字节 ABI、SeqLock、CRC、writer identity、lineage和freshness读回通过，真实运动窗口 Position 平均0.16%。旧 Python writer、旧测试和旧 init Python ABI status分支已物理删除。
+- 尚未登记的AB、XYZ三轴或其它模型不进入已验证集合；AC仍须切换真实active model后运行原始`cc-ac.ngc`，不能用BC结果代替。
 
-### 11.2 已执行门禁
+### 11.2 已执行验证
 
-- Windows：native Position smoke、Scene Producer smoke 实际运行通过；Python `py_compile`、WCS publisher、parallel startup、relay coalesce、runtime policy、board policy smoke、installer upgrade、cold-boot smoke、严格文档路由和 `git diff --check` 通过。UI/State依赖POSIX，不用Windows clean build冒充其有效门禁。
-- ARM：canonical `/root/v5-build/board` 重编 `v5_position_status_publisher_smoke`、`v5_program_scene_producer_smoke`、`v5_state_publisher_smoke`、`v5_ui_shell_refresh_smoke`、`v5_ui_display_models_smoke`、`v5_ui_shm_refresh_smoke`、`v5_main_page_smoke`；七个ARM executable均经QEMU实际运行通过。
-- 板端：native Position bundle和退役清理已部署；Position/State lineage、CRC、generation/freshness、UI boot input、UI ready、remote full-frame、CPU0 affinity、LinuxCNC BUS、Command Gate、5/5 OP、WKC/DC及完整`verify_v5_board_runtime.sh`通过。验收负载退去后的最终截图在`截图/CPU1优化/v5_cpu1_final_quiet_20260720T164630Z.png`；先前验收过程中抓到的93%只代表瞬时验证负载，不用于性能结论。
-- 未完成项：当前 Codex 工具只有`board_exec`，没有 owner 指定的 MCP board screen/pointer；`功能/自动闭环测试方式.md`又明确禁止自动操作`8ax.WinRemote.exe`及direct UDS/linuxcncrsh冒充operator path。因此本轮没有执行`cc-ac.ngc`/`cc-bc.ngc`真实运动，不能声明 AC/BC Golden Motion 或加工态CPU已`board_verified`。完整核验读取到本轮前已存在的`MACHINE ON`，核验前后均保持ON且没有发送运动命令；同样因为缺少合规pointer，AI未用旁路伪造最终ESTOP，交接时必须先由真实operator按急停再进入后续运动验收。
+- Windows：`v5_program_scene_producer_smoke.exe`实际运行通过；relay相关`py_compile`和`v5_remote_ui_relay_coalesce_smoke.py`通过；严格文档路由与`git diff --check`通过。
+- ARM：canonical `/root/v5-build/board`重编`v5_program_scene_producer_smoke`、`v5_state_publisher_smoke`、`v5_state_publisher`、`v5_lvgl_shell`和`v5_position_status_publisher`；两个ARM smoke均经QEMU实际运行通过。
+- 部署：15项Position/State/UI ABI原子bundle读回`V5_POSITION_ABI_READBACK_OK`、`V5_STATE_ABI_READBACK_OK`、`V5_SHM_ABI_ATOMIC_RESTART_OK`；relay support按UI scope单独部署。板端当前binary hash与canonical ARM artifact一致。
+- Operator路径：只使用`collect_v5_remote_input_evidence.py click/capture`完成取消急停、打开原始`cc-bc.ngc`、机械全轴Home、Start和最终急停；没有使用WinRemote、direct UDS或SSH命令冒充按钮操作。运行截图为`截图/跑cc/28_running_after_sample/v5_board_capture_20260721T021548Z.bmp`。
+- 真实运动readback：`motion.current-vel=3.75`、`motion.program-line=30`、`motion.distance-to-go=53.98515`；画面为3D、RTCP ON且黄色轨迹连续。最终安全readback为`v5-safety-estop-active=TRUE`、`v5-safety-actual-valid=TRUE`、`v5-machine-enabled=FALSE`，最终截图为`截图/跑cc/29_final_estop/v5_remote_input_20260721T021638Z_after.bmp`。
 
-### 11.3 板端同窗实测
+### 11.3 同窗CPU1实测
 
-测量条件：active model=`XYZBC_TRT`，Machine ON但无程序运动，主页3D视图，保持一个真实WinRemote长连接；30个约1秒样本。该窗口用于证明C04和显示链静稳成本，不冒充`cc-bc.ngc`加工态。
+测量方法：板端直接按0.5秒间隔读取`/proc/stat`和各PID的`/proc/<pid>/stat`，不在采样循环中调用`halcmd`，避免诊断进程污染CPU1。active窗口为`XYZBC_TRT`、原始`cc-bc.ngc`、主页3D、RTCP ON、1个remote stream、30.339秒。
 
-| 项目 | C01-C03后基线 | C04最终窗口 | 实际变化 |
-| --- | ---: | ---: | ---: |
-| CPU1平均 | 42.85% | 31.225% | -11.625个百分点 |
-| CPU1 P95 | 44.79% | 32.759% | -12.031个百分点 |
-| CPU1最大 | 44.90% | 33.621% | -11.279个百分点 |
-| Position平均 | 9.47% | 0.170% | -9.300个百分点，约-98.2% |
-| CPU0平均 | 0.62% | 0.724% | 保持低占用，未迁入显示任务 |
-
-最终窗口进程分解：
-
-| CPU1进程/类别 | 平均 | P95 | 最大 |
-| --- | ---: | ---: | ---: |
-| native Position | 0.170% | 0.857% | 0.860% |
-| LVGL UI | 2.696% | 3.433% | 3.449% |
-| remote relay | 2.695% | 3.439% | 4.295% |
-| State Publisher | 2.413% | 3.419% | 3.427% |
-| WCS Publisher | 3.010% | 4.259% | 4.311% |
-| native HAL owner | 3.351% | 4.268% | 4.284% |
-| milltask | 1.791% | 2.570% | 2.587% |
-
-进程行之和不会等于CPU1总值：CPU1总值还包含kernel、IRQ、softirq、其它常驻进程和采样窗口误差；禁止用进程百分比再次线性相减。
-
-### 11.4 Golden Motion 预计占用与验收上限
-
-以下是基于最终静稳窗口、512点scene上限和原97%热点分布给出的工程预估，不是实测通过值；只有按第9节分别运行`cc-ac.ngc`、`cc-bc.ngc`取得同条件30秒窗口后才能替换为最终值。
-
-| 项目 | 预计正常区间 | 失败上限 |
+| 项目 | BC真实运动 | 最终急停静稳 |
 | --- | ---: | ---: |
-| CPU1总平均 | 40%～65% | >70% |
-| CPU1 P95 | 50%～75% | >80%或连续1秒100% |
-| native Position | 0.1%～1.0% | P95 >1.5% |
-| LVGL UI | 5%～20% | P95 >25% |
-| remote relay（1 stream） | 2%～8% | P95 >12%或持续full repair |
-| State Publisher | 2%～6% | P95 >8% |
-| WCS Publisher | 2%～5% | P95 >7% |
-| native HAL owner | 3%～7% | P95 >10% |
-| milltask/interpreter | 2%～15% | P95 >20%；超限后才进入第8节执行侧预缓冲立项 |
+| CPU1平均 | 66.15% | 15.58% |
+| CPU1 P95 | 68.00% | 18.37% |
+| CPU1最大 | 82.02% | 33.87% |
+| LVGL UI平均 | 47.89% | 2.75% |
+| remote relay平均 | 2.57% | 0.07% |
+| native Position平均 | 0.16% | 0.17% |
+| State Publisher平均 | 3.23% | 2.45% |
+| WCS Publisher平均 | 3.03% | 3.02% |
+| milltask平均 | 2.08% | 1.72% |
 
-若实测落在预计区间外，先按同窗口counter和函数级profile定位新第一热点；不得通过降刷新率、迁任务到CPU0、冻结RTCP轨迹或隐藏错误状态达标。
+BC总CPU1平均和P95已进入第一阶段`平均<=70%、P95<=80%`门槛，且没有连续1秒100%；但C02不能关闭，因为UI自身仍是第一热点。急停后scene仅`10670 -> 10672`，`build/transform/project`分别保持`3/10253/10309`不变，说明高占用随真实动态投影停止，没有残留程序重建循环。
+
+### 11.4 C02收口前预计占用（历史）
+
+以下是基于本次同窗归因的工程目标，不是提前承诺。只有保持相同程序、视角、RTCP和remote stream复测后才能替换为完成值。
+
+| 项目 | 当前BC实测 | C02收口后预计 | 失败上限 |
+| --- | ---: | ---: | ---: |
+| CPU1总平均 | 66.15% | 28%～42% | >70% |
+| CPU1 P95 | 68.00% | 35%～55% | >80%或连续1秒100% |
+| LVGL UI | 47.89% | 10%～20% | >25% |
+| remote relay（1 stream） | 2.57% | 1%～4% | >12%或持续full repair |
+| native Position | 0.16% | 0.1%～1.0% | >1.5% |
+| State Publisher | 3.23% | 2%～5% | >8% |
+| WCS Publisher | 3.03% | 2%～5% | >7% |
+| milltask/interpreter | 2.08% | 2%～5% | >20% |
+
+本次数据已经排除“G-code文件解析是97%首因”：真实运动中`milltask=2.08%`，而UI为47.89%。下一步先修UI program layer raster/flush，不进入第8节执行侧预缓冲，也不做线性百分比相减承诺。
+
+### 11.5 C02最新上板结果
+
+同一测量脚本按0.5秒采样60次，窗口为`XYZBC_TRT`、原始`cc-bc.ngc`、主页3D、RTCP ON、1个remote stream、30.224秒；scene在窗口内保持30Hz freshness，`build_count 3 -> 3`、`transform_count 545 -> 1467`、`project_count 550 -> 1473`，证明静态程序未重建且每个fresh scene只有一次transform/project。最终保留版本撤回了会把坐标区拆成10个rect的负优化：该试验曾使UI升到29.13%、relay升到4.03%，不进入产品代码。
+
+| 项目 | C02前BC真实运动 | C02最新BC真实运动 | 当前结论 |
+| --- | ---: | ---: | --- |
+| CPU1平均 | 66.15% | 44.54% | 通过第一阶段`<=70%` |
+| CPU1 P95 | 68.00% | 46.94% | 通过第一阶段`<=80%` |
+| CPU1最大 | 82.02% | 65.79% | 未出现连续1秒100% |
+| LVGL UI平均 | 47.89% | 25.94% | 距`<=25%`还差0.94个百分点，C02不可冒充全通过 |
+| remote relay平均 | 2.57% | 2.58% | 稳定，保留既有33ms合并/Latest-Wins/shared payload |
+| native Position平均 | 0.16% | 0.17% | 稳定 |
+| State Publisher平均 | 3.23% | 3.28% | 稳定 |
+| WCS Publisher平均 | 3.03% | 3.04% | 稳定 |
+| milltask平均 | 2.08% | 1.89% | 不是当前首要瓶颈 |
+| rtapi_app平均 | 未单列 | 18.53% | 属运动实时链，禁止为显示目标迁移或降周期 |
+
+板端`strace`脏区证据已证明运行时不再出现固定`0 50 399 396`整刀路框，黄线只提交实际变化tile/rect；最终两帧抓屏位于`repo_ignored/evidence/c02_final_visual/v5_board_capture_20260721T034905Z.bmp`和`v5_board_capture_20260721T034914Z.bmp`，可见黄色轨迹随BC姿态连续变化且旧位置无残影。最终急停截图为`repo_ignored/evidence/c02_final_visual/v5_remote_input_20260721T034951Z_after.bmp`；HAL读回`estop-active=TRUE`、`machine-enabled=FALSE`，runtime DAG ready，backend为`BACKEND_MOTION_READY`、5/5 OP、WKC 10/10、DC valid。

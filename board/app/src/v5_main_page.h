@@ -10,6 +10,7 @@
 #include "v5_native_readback.h"
 #include "v5_program_scene_ipc.h"
 #include "v5_toolpath_display.h"
+#include "v5_toolpath_viewport.h"
 #include "v5_ui_first_frame_guard.h"
 #include "v5_ui_status_view.h"
 
@@ -151,6 +152,13 @@ typedef struct V5MainPage {
     unsigned int trajectory_point_count;
     const V5StatusDisplayScene *toolpath_display_scene;
     int toolpath_display_scene_valid;
+    V5StatusDisplayScene toolpath_previous_scene;
+    int toolpath_previous_scene_valid;
+    uint64_t toolpath_program_raster[2][V5_TOOLPATH_RASTER_WORD_COUNT];
+    uint64_t toolpath_program_raster_generation;
+    uint64_t toolpath_program_raster_build_count;
+    unsigned int toolpath_program_raster_active;
+    int toolpath_program_raster_valid;
     lv_point_t toolpath_gesture_last_points[2];
     int toolpath_gesture_active_count;
     double toolpath_gesture_last_mid_x;

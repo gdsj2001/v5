@@ -167,8 +167,7 @@ int v5_program_scene_pose_cache_same(
     return producer && model && producer->pose_valid &&
         producer->pose_rtcp_enabled == (rtcp_enabled ? 1 : 0) &&
         producer->pose_plane == producer->request.plane &&
-        (!rtcp_enabled || v5_program_scene_model_pose_same(
-            &producer->pose_model, model));
+        v5_program_scene_model_pose_same(&producer->pose_model, model);
 }
 
 int v5_program_scene_prepare_pose_cache(
@@ -180,7 +179,8 @@ int v5_program_scene_prepare_pose_cache(
     if (!producer || !model || !producer->static_valid) return 0;
     memset(&producer->pose_bounds, 0, sizeof(producer->pose_bounds));
     v5_program_scene_pose_matrix_identity(&producer->pose_matrix);
-    if (rtcp_enabled && !v5_program_scene_model_pose_matrix(
+    if (model->registry_id != 0U &&
+        !v5_program_scene_model_pose_matrix(
             model, &producer->pose_matrix)) return 0;
     producer->world_segment_count = producer->base_segment_count;
     for (i = 0U; i < producer->base_segment_count; ++i) {
@@ -231,6 +231,6 @@ int v5_program_scene_prepare_pose_cache(
     producer->pose_rtcp_enabled = rtcp_enabled ? 1 : 0;
     producer->pose_plane = producer->request.plane;
     producer->pose_valid = producer->pose_bounds.valid;
-    if (rtcp_enabled) producer->transform_count += 1ULL;
+    if (model->registry_id != 0U) producer->transform_count += 1ULL;
     return producer->pose_valid;
 }

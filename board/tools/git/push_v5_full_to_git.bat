@@ -7,7 +7,7 @@ set "REMOTE=origin"
 set "BRANCH=main"
 set "GIT_PAGER=cat"
 set "CHECK_ONLY=0"
-set "V5_GIT_ALLOWED_NEW_ROOT="
+set "V5_GIT_ALLOWED_NEW_ROOT=AGENTS.md"
 
 if /i "%~1"=="--check-only" (
     set "CHECK_ONLY=1"
@@ -31,6 +31,11 @@ if not exist "%REPO%\.git" (
 )
 
 cd /d "%REPO%" || goto :fail
+
+if not exist "%REPO%\AGENTS.md" (
+    echo ERROR: Required root rule owner is missing: %REPO%\AGENTS.md
+    goto :fail
+)
 
 where git >nul 2>&1 || (
     echo ERROR: git.exe was not found in PATH.
@@ -62,6 +67,11 @@ echo [2/10] Sanitizing root outputs and staging canonical source...
 echo Unregistered root files are preserved under repo_ignored before staging.
 call :stage_snapshot
 if errorlevel 1 goto :fail
+
+git ls-files --error-unmatch -- AGENTS.md >nul 2>&1 || (
+    echo ERROR: AGENTS.md was not staged as the canonical root rule owner.
+    goto :fail
+)
 
 rem .gitignore owns the normal Git range. Deletions are intentionally allowed
 rem here so previously tracked process/proof output can leave Git once. Any
@@ -146,6 +156,14 @@ if /i not "%LOCAL_HEAD%"=="%REMOTE_HEAD%" (
 )
 
 echo [10/10] Checking for files changed during the push...
+if not exist "%REPO%\AGENTS.md" (
+    echo ERROR: AGENTS.md disappeared during the push.
+    goto :fail
+)
+git cat-file -e HEAD:AGENTS.md 2>nul || (
+    echo ERROR: The pushed HEAD does not contain AGENTS.md.
+    goto :fail
+)
 for /f "delims=" %%S in ('git status --porcelain') do (
     echo ERROR: The working tree changed while the push was running.
     git status --short

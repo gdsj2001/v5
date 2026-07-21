@@ -2,6 +2,7 @@
 #include "v5_toolpath_viewport.h"
 
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 static void prepare_readback(V5NativeReadback *readback, const char *model_name, int rtcp)
@@ -74,6 +75,22 @@ static const V5StatusSceneSegment *find_segment(
     return 0;
 }
 
+static int program_integer_pixels_same(
+    const V5StatusDisplayScene *left,
+    const V5StatusDisplayScene *right)
+{
+    unsigned int i;
+    if (!left || !right || left->point_count != right->point_count) return 0;
+    for (i = 0U; i < left->point_count; ++i) {
+        if (left->break_before[i] != right->break_before[i] ||
+            lroundf(left->points[i].x) != lroundf(right->points[i].x) ||
+            lroundf(left->points[i].y) != lroundf(right->points[i].y)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 static int rotary_pose_cache_smoke(const char *model_name)
 {
     V5ProgramSceneProducer producer;
@@ -91,6 +108,7 @@ static int rotary_pose_cache_smoke(const char *model_name)
     float first_x;
     float first_y;
     int program_moved = 0;
+    V5StatusDisplayScene previous;
     unsigned int frame;
 
     v5_program_scene_producer_init(&producer);
@@ -124,11 +142,18 @@ static int rotary_pose_cache_smoke(const char *model_name)
     memcpy(sample.cmd_mcs, sample.mcs, sizeof(sample.cmd_mcs));
     prepare_readback(&readback, model_name, 1);
     if (!v5_program_scene_producer_build(
-            &producer, &sample, &readback, &first, &generation)) return 0;
+            &producer, &sample, &readback, &first, &generation)) {
+        fprintf(stderr, "%s initial build failed\n", model_name);
+        return 0;
+    }
     if ((first.flags & (V5_STATUS_SCENE_FLAG_DIRTY_KNOWN |
             V5_STATUS_SCENE_FLAG_DIRTY_MASK)) !=
         (V5_STATUS_SCENE_FLAG_DIRTY_KNOWN |
-            V5_STATUS_SCENE_FLAG_DIRTY_MASK)) return 0;
+            V5_STATUS_SCENE_FLAG_DIRTY_MASK)) {
+        fprintf(stderr, "%s initial dirty flags=0x%x mask=0x%x\n",
+            model_name, first.flags, V5_STATUS_SCENE_FLAG_DIRTY_MASK);
+        return 0;
+    }
     initial_build_count = first.build_count;
     initial_transform_count = first.rtcp_transform_count;
     initial_project_count = first.project_count;
@@ -136,32 +161,58 @@ static int rotary_pose_cache_smoke(const char *model_name)
     initial_fit_generation = first.fit_generation;
     first_x = first.points[0].x;
     first_y = first.points[0].y;
+    previous = first;
     for (frame = 0U; frame < 300U; ++frame) {
         const double step = (double)((frame + 1U) % 101U) * 0.0005;
+        int program_pixels_changed;
         sample.source_generation += 1ULL;
         sample.mcs[3] = 10.0 + step;
         sample.mcs[4] = 20.0 - step;
         memcpy(sample.cmd_mcs, sample.mcs, sizeof(sample.cmd_mcs));
         if (!v5_program_scene_producer_build(
-                &producer, &sample, &readback, &scene, &generation) ||
-            scene.build_count != initial_build_count ||
+                &producer, &sample, &readback, &scene, &generation)) return 0;
+        program_pixels_changed = !program_integer_pixels_same(
+            &previous, &scene);
+        if (scene.build_count != initial_build_count ||
             scene.rtcp_transform_count != initial_transform_count + frame + 1ULL ||
             scene.project_count != initial_project_count + frame + 1ULL ||
             producer.point_traversal_count !=
                 initial_point_traversal_count + frame + 1ULL ||
             scene.fit_generation != initial_fit_generation ||
-            (scene.flags & (V5_STATUS_SCENE_FLAG_DIRTY_KNOWN |
-                V5_STATUS_SCENE_FLAG_DIRTY_MASK)) !=
-                (V5_STATUS_SCENE_FLAG_DIRTY_KNOWN |
-                    V5_STATUS_SCENE_FLAG_DIRTY_MASK)) return 0;
+            (scene.flags & V5_STATUS_SCENE_FLAG_DIRTY_KNOWN) == 0U ||
+            (((scene.flags & V5_STATUS_SCENE_FLAG_DIRTY_PROGRAM) != 0U) !=
+                program_pixels_changed)) {
+            fprintf(stderr,
+                "%s frame=%u build=%llu/%llu transform=%llu/%llu "
+                "project=%llu/%llu traversal=%llu/%llu fit=%llu/%llu "
+                "flags=0x%x pixel_changed=%d\n",
+                model_name, frame,
+                (unsigned long long)scene.build_count,
+                (unsigned long long)initial_build_count,
+                (unsigned long long)scene.rtcp_transform_count,
+                (unsigned long long)(initial_transform_count + frame + 1ULL),
+                (unsigned long long)scene.project_count,
+                (unsigned long long)(initial_project_count + frame + 1ULL),
+                (unsigned long long)producer.point_traversal_count,
+                (unsigned long long)(initial_point_traversal_count + frame + 1ULL),
+                (unsigned long long)scene.fit_generation,
+                (unsigned long long)initial_fit_generation,
+                scene.flags, program_pixels_changed);
+            return 0;
+        }
         if (fabs((double)scene.points[0].x - first_x) > 1.0e-5 ||
             fabs((double)scene.points[0].y - first_y) > 1.0e-5) {
             program_moved = 1;
         }
+        previous = scene;
     }
-    if (!program_moved) return 0;
+    if (!program_moved) {
+        fprintf(stderr, "%s program did not move\n", model_name);
+        return 0;
+    }
 
-    /* RTCP OFF freezes program pixels while model geometry remains dynamic. */
+    /* RTCP OFF keeps WCS axes fixed, but program geometry follows the same
+     * active-model display pose as RTCP ON. */
     v5_program_scene_producer_init(&producer);
     v5_program_scene_producer_set_request(&producer, &request);
     sample.source_generation += 1ULL;
@@ -170,12 +221,18 @@ static int rotary_pose_cache_smoke(const char *model_name)
     memcpy(sample.cmd_mcs, sample.mcs, sizeof(sample.cmd_mcs));
     prepare_readback(&readback, model_name, 0);
     if (!v5_program_scene_producer_build(
-            &producer, &sample, &readback, &first, &generation)) return 0;
+            &producer, &sample, &readback, &first, &generation)) {
+        fprintf(stderr, "%s RTCP OFF initial build failed\n", model_name);
+        return 0;
+    }
     {
         const V5StatusSceneSegment *first_model_axis = find_segment(
             &first, V5_STATUS_SCENE_SEGMENT_MODEL_AXIS, 1U);
         V5StatusScreenPoint first_axis_end;
-        if (!first_model_axis) return 0;
+        if (!first_model_axis) {
+            fprintf(stderr, "%s RTCP OFF missing model axis\n", model_name);
+            return 0;
+        }
         first_axis_end = first_model_axis->end;
         sample.source_generation += 1ULL;
         sample.mcs[3] = 17.0;
@@ -184,16 +241,28 @@ static int rotary_pose_cache_smoke(const char *model_name)
         if (!v5_program_scene_producer_build(
                 &producer, &sample, &readback, &scene, &generation) ||
             scene.build_count != first.build_count ||
-            scene.rtcp_transform_count != first.rtcp_transform_count ||
-            scene.project_count != first.project_count ||
+            scene.rtcp_transform_count != first.rtcp_transform_count + 1ULL ||
+            scene.project_count != first.project_count + 1ULL ||
             (scene.flags & V5_STATUS_SCENE_FLAG_DIRTY_KNOWN) == 0U ||
             (scene.flags & V5_STATUS_SCENE_FLAG_DIRTY_STATIC) != 0U ||
-            (scene.flags & (V5_STATUS_SCENE_FLAG_DIRTY_MODEL |
-                V5_STATUS_SCENE_FLAG_DIRTY_DYNAMIC)) !=
-                (V5_STATUS_SCENE_FLAG_DIRTY_MODEL |
-                    V5_STATUS_SCENE_FLAG_DIRTY_DYNAMIC) ||
-            memcmp(scene.points, first.points,
-                sizeof(first.points[0]) * first.point_count) != 0) return 0;
+            (scene.flags & (V5_STATUS_SCENE_FLAG_DIRTY_PROGRAM |
+                V5_STATUS_SCENE_FLAG_DIRTY_MODEL)) !=
+                (V5_STATUS_SCENE_FLAG_DIRTY_PROGRAM |
+                    V5_STATUS_SCENE_FLAG_DIRTY_MODEL) ||
+            program_integer_pixels_same(&scene, &first)) {
+            fprintf(stderr,
+                "%s RTCP OFF mismatch build=%llu/%llu transform=%llu/%llu "
+                "project=%llu/%llu flags=0x%x same=%d\n",
+                model_name,
+                (unsigned long long)scene.build_count,
+                (unsigned long long)first.build_count,
+                (unsigned long long)scene.rtcp_transform_count,
+                (unsigned long long)(first.rtcp_transform_count + 1ULL),
+                (unsigned long long)scene.project_count,
+                (unsigned long long)(first.project_count + 1ULL),
+                scene.flags, program_integer_pixels_same(&scene, &first));
+            return 0;
+        }
         {
             const V5StatusSceneSegment *second_model_axis = find_segment(
                 &scene, V5_STATUS_SCENE_SEGMENT_MODEL_AXIS, 1U);
@@ -486,7 +555,7 @@ int main(void)
         first.plane != V5_STATUS_SCENE_PLANE_3D ||
         first.point_count != 2U || first.segment_count == 0U || first.marker_count == 0U ||
         first.build_count != 1ULL || first.project_count != 1ULL ||
-        first.rtcp_transform_count != 0ULL ||
+        first.rtcp_transform_count != 1ULL ||
         count_segments(&first, V5_STATUS_SCENE_SEGMENT_WCS_AXIS) != 3U ||
         count_markers(&first, V5_STATUS_SCENE_MARKER_WCS_ORIGIN) != 1U) return 1;
     for (repeat = 0U; repeat < 100U; ++repeat) {
@@ -533,13 +602,13 @@ int main(void)
     sample.source_generation += 1ULL;
     prepare_readback(&readback, "XYZAC_TRT", 1);
     if (!v5_program_scene_producer_build(&producer, &sample, &readback, &second, &generation) ||
-        second.rtcp_transform_count != 1ULL ||
+        second.rtcp_transform_count != 2ULL ||
         (second.flags & V5_STATUS_SCENE_FLAG_RTCP) == 0U) return 3;
     sample.source_generation += 1ULL;
     prepare_readback(&readback, "XYZBC_TRT", 1);
     if (!v5_program_scene_producer_build(&producer, &sample, &readback, &second, &generation) ||
         second.active_model_id != 2U || second.primary_axis != 'B' || second.child_axis != 'C' ||
-        second.rtcp_transform_count != 2ULL) return 4;
+        second.rtcp_transform_count != 3ULL) return 4;
     if (!isfinite(second.points[0].x) || !isfinite(second.points[0].y)) return 5;
     v5_program_scene_producer_init(&producer);
     v5_program_scene_request_init(&request);

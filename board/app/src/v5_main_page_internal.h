@@ -87,6 +87,15 @@ void v5_main_page_internal_format_main_page_wcs_coordinate(char *out, size_t out
 void v5_main_page_internal_coalesce_toolpath_invalidations(V5MainPage *page);
 
 void v5_main_page_internal_hide_toolpath_program_line(V5MainPage *page);
+void v5_main_page_internal_clear_program_raster(V5MainPage *page);
+void v5_main_page_internal_update_program_raster(
+    V5MainPage *page,
+    const V5StatusDisplayScene *scene,
+    uint64_t scene_generation);
+int v5_main_page_internal_program_raster_pixel(
+    const V5MainPage *page,
+    int x,
+    int y);
 
 lv_obj_t *v5_main_page_internal_create_toolpath_scene_layer(
     V5MainPage *page,
@@ -120,7 +129,8 @@ int v5_main_page_internal_apply_program_display_scene(
     const V5StatusDisplayScene *scene);
 void v5_main_page_internal_apply_display_scene(
     V5MainPage *page,
-    const V5StatusDisplayScene *scene);
+    const V5StatusDisplayScene *scene,
+    uint64_t scene_generation);
 
 void v5_main_page_internal_make_button_rgb(V5MainPage *page, int x, int y, int w, int h, V5MainPageActionKind action, const char *text, uint8_t r, uint8_t g, uint8_t b);
 

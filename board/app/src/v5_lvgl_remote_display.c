@@ -15,6 +15,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#if defined(__ARM_NEON)
+#include <arm_neon.h>
+#endif
+
 #ifndef O_CLOEXEC
 #define O_CLOEXEC 0
 #endif
@@ -342,14 +346,52 @@ static void copy_row_to_fb(unsigned int x, unsigned int y, const unsigned char *
     }
     dst = &g_fb[(size_t)y * g_fb_stride + (size_t)x * (g_fb_bpp / 8U)];
     if (g_fb_bpp == 32U) {
-        for (i = 0; i < pixels; ++i) {
-            dst[i * 4U + 0U] = bgra[i * 4U + 2U];
-            dst[i * 4U + 1U] = bgra[i * 4U + 1U];
-            dst[i * 4U + 2U] = bgra[i * 4U + 0U];
-            dst[i * 4U + 3U] = 0xffU;
+        if ((((uintptr_t)dst | (uintptr_t)bgra) & 3U) == 0U) {
+            uint32_t *dst_words = (uint32_t *)dst;
+            const uint32_t *src_words = (const uint32_t *)bgra;
+#if defined(__ARM_NEON)
+            for (i = 0U; i + 16U <= pixels; i += 16U) {
+                uint8x16x4_t input = vld4q_u8(
+                    (const uint8_t *)(src_words + i));
+                uint8x16x4_t output;
+                output.val[0] = input.val[2];
+                output.val[1] = input.val[1];
+                output.val[2] = input.val[0];
+                output.val[3] = vdupq_n_u8(0xffU);
+                vst4q_u8((uint8_t *)(dst_words + i), output);
+            }
+#else
+            i = 0U;
+#endif
+            for (; i < pixels; ++i) {
+                uint32_t pixel = src_words[i];
+                dst_words[i] = 0xff000000U |
+                    ((pixel & 0x00ff0000U) >> 16) |
+                    (pixel & 0x0000ff00U) |
+                    ((pixel & 0x000000ffU) << 16);
+            }
+        } else {
+            for (i = 0U; i < pixels; ++i) {
+                dst[i * 4U + 0U] = bgra[i * 4U + 2U];
+                dst[i * 4U + 1U] = bgra[i * 4U + 1U];
+                dst[i * 4U + 2U] = bgra[i * 4U + 0U];
+                dst[i * 4U + 3U] = 0xffU;
+            }
         }
     } else if (g_fb_bpp == 24U) {
-        for (i = 0; i < pixels; ++i) {
+#if defined(__ARM_NEON)
+        for (i = 0U; i + 16U <= pixels; i += 16U) {
+            uint8x16x4_t input = vld4q_u8(bgra + i * 4U);
+            uint8x16x3_t output;
+            output.val[0] = input.val[2];
+            output.val[1] = input.val[1];
+            output.val[2] = input.val[0];
+            vst3q_u8(dst + i * 3U, output);
+        }
+#else
+        i = 0U;
+#endif
+        for (; i < pixels; ++i) {
             dst[i * 3U + 0U] = bgra[i * 4U + 2U];
             dst[i * 3U + 1U] = bgra[i * 4U + 1U];
             dst[i * 3U + 2U] = bgra[i * 4U + 0U];

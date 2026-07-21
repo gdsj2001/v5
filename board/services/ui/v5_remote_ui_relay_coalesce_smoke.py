@@ -227,6 +227,7 @@ def check_refresh_commit_boundary() -> int:
         return 26
     layered_dirty_tokens = [
         "static void invalidate_scene_layer",
+        "V5_STATUS_SCENE_FLAG_DIRTY_PROGRAM",
         "V5_STATUS_SCENE_FLAG_DIRTY_STATIC",
         "V5_STATUS_SCENE_FLAG_DIRTY_MODEL",
         "V5_STATUS_SCENE_FLAG_DIRTY_DYNAMIC",
@@ -240,6 +241,13 @@ def check_refresh_commit_boundary() -> int:
     ):
         print("layered toolpath dirty invalidation is missing")
         return 28
+    conditional_visibility_tokens = [
+        "v5_main_page_internal_clear_hidden_flag_if_hidden(\n        page->trajectory_line)",
+        "v5_main_page_internal_clear_hidden_flag_if_hidden(\n            page->toolpath_dynamic_layer)",
+    ]
+    if any(token not in toolpath_geometry_source for token in conditional_visibility_tokens):
+        print("toolpath layers still risk full-object invalidation on unchanged visibility")
+        return 41
     layered_draw_tokens = [
         "dynamic_layer = object == page->toolpath_dynamic_layer;",
         "if (dynamic_layer != is_dynamic) continue;",
@@ -251,6 +259,24 @@ def check_refresh_commit_boundary() -> int:
     if "lv_line_set_points(" in toolpath_program_source:
         print("retired multi-line renderer remains in custom-draw path")
         return 30
+    raster_cache_tokens = [
+        "toolpath_program_raster_generation",
+        "toolpath_program_raster_build_count",
+        "V5_TOOLPATH_RASTER_TILE_SIZE",
+        "raster_changed_tile_rows",
+        "clip_program_segment",
+        "v5_main_page_internal_program_raster_pixel",
+    ]
+    if any(token not in toolpath_program_source for token in raster_cache_tokens):
+        print("generation raster cache or tile-diff refresh is incomplete")
+        return 39
+    retired_draw_time_raster_tokens = [
+        "raster_program_polyline",
+        "raster_program_segment",
+    ]
+    if any(token in toolpath_program_source for token in retired_draw_time_raster_tokens):
+        print("retired draw-time pixel line traversal remains")
+        return 40
     hide_unproven_start = toolpath_geometry_source.index("void v5_main_page_internal_hide_toolpath_unproven_geometry")
     hide_unproven_end = toolpath_geometry_source.index("static void apply_segment_labels", hide_unproven_start)
     hide_body = toolpath_geometry_source[hide_unproven_start:hide_unproven_end]
