@@ -79,17 +79,26 @@ rem added, copied, modified, renamed or type-changed forbidden output fails.
 rem A new file directly under the repository root also fails unless it is
 rem explicitly registered in the owner document and in allowedNewRoot below.
 powershell -NoProfile -Command ^
-    "$specs=@(':(top)repo_ignored/**',':(glob)**/repo_ignored/**',':(glob)**/__pycache__/**',':(glob)**/.pytest_cache/**',':(glob)**/node_modules/**',':(glob)**/Testing/Temporary/**',':(glob)**/artifacts/**',':(glob)**/evidence/**',':(glob)**/evidence_*/**',':(glob)**/*_evidence/**',':(glob)**/*evidence*/**',':(glob)**/graphify-out/**',':(top)build/**',':(top)build-*/**',':(top)board/build/**',':(glob)**/CMakeFiles/**',':(glob)**/.Xil/**',':(glob)**/*.tmp',':(glob)**/*.temp',':(glob)**/*.log',':(glob)**/*.gcda',':(glob)**/*.gcno',':(glob)**/*.profraw',':(glob)**/*.profdata',':(glob)**/*.dmp',':(top)-e',':(top)event',':(top)pclk',':(top)restart_required',':(top)rtcp_force_off',':(top)source_path',':(top)commandNum',':(top)trajectory',':(top)trajectory_line',':(top)wait',':(top)wait()');" ^
+    "$specs=@(':(top)repo_ignored/**',':(glob)**/repo_ignored/**',':(glob)**/__pycache__/**',':(glob)**/.pytest_cache/**',':(glob)**/node_modules/**',':(glob)**/Testing/Temporary/**',':(glob)**/artifacts/**',':(glob)**/evidence/**',':(glob)**/evidence_*/**',':(glob)**/*_evidence/**',':(glob)**/*evidence*/**',':(glob)**/graphify-out/**',':(top)build/**',':(top)build-*/**',':(top)board/build/**',':(top)8ax-win/publish/**',':(top)8ax-dealer-client-source/publish/**',':(top)8ax-factory-client-source/publish/**',':(glob)**/CMakeFiles/**',':(glob)**/.Xil/**',':(glob)**/*.tmp',':(glob)**/*.temp',':(glob)**/*.log',':(glob)**/*.gcda',':(glob)**/*.gcno',':(glob)**/*.profraw',':(glob)**/*.profdata',':(glob)**/*.dmp',':(top)-e',':(top)event',':(top)pclk',':(top)restart_required',':(top)rtcp_force_off',':(top)source_path',':(top)commandNum',':(top)trajectory',':(top)trajectory_line',':(top)wait',':(top)wait()');" ^
     "$forbidden=@(& git -c core.quotepath=false diff --cached --name-only --diff-filter=ACMRTUXB -- $specs);" ^
     "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE };" ^
-    "$rootAdded=@(& git -c core.quotepath=false diff --cached --name-only --diff-filter=A --);" ^
+    "$indexPaths=@(& git -c core.quotepath=false ls-files --);" ^
     "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE };" ^
-    "$remoteRoot=@(& git -c core.quotepath=false ls-tree --name-only '%REMOTE%/%BRANCH%' --);" ^
-    "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE };" ^
-    "$allowedNewRoot=@($env:V5_GIT_ALLOWED_NEW_ROOT -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) });" ^
-    "$unexpectedRoot=@($rootAdded | Where-Object { $_ -and $_ -notmatch '[\\/]' -and $remoteRoot -notcontains $_ -and $allowedNewRoot -notcontains $_ });" ^
+    "$allowedRoot=@('.gitattributes','.gitignore','AGENTS.md') + @($env:V5_GIT_ALLOWED_NEW_ROOT -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) });" ^
+    "$unexpectedRoot=@($indexPaths | Where-Object { $_ -and $_ -notmatch '[\\/]' -and $allowedRoot -notcontains $_ });" ^
     "$blocked=@($forbidden + $unexpectedRoot | Sort-Object -Unique);" ^
     "if ($blocked.Count -gt 0) { Write-Host 'ERROR: Temporary/process output or an unregistered root path is staged:'; $blocked | ForEach-Object { Write-Host ('  ' + $_) }; Write-Host 'Delete/move temporary output to repo_ignored, or register a real root owner before pushing.'; exit 3 }"
+if errorlevel 1 goto :fail
+
+echo Verifying canonical Git recovery sentinels in the prospective index...
+powershell -NoProfile -Command ^
+    "$requiredFiles=@('.gitattributes','.gitignore','AGENTS.md','linux/kernel/v5_linux_source_identity.json','linux/realtime/v5_realtime_source_identity.json','linuxcnc/v5_linuxcnc_source_identity.json','board/petalinux/v5_petalinux_source_identity.json','board/petalinux/config.project','board/petalinux/project-spec/configs/config','board/petalinux/project-spec/configs/rootfs_config','board/petalinux/project-spec/hw-description/system.xsa','board/petalinux/project-spec/hw-description/system.bit','board/third_party/petalinux-source-packages/v5_source_packages.json','vivado_hw_project/vivado_hw_project.xpr','new-vivado/z20_v1_5_hw_project/z20_v1_5_hw_project.xpr','new-vivado/z20_v1_5_hw_project/board_inputs/system.xsa');" ^
+    "$requiredPrefixes=@('linux/kernel/tools/build','linux/realtime/patches/build','linuxcnc/bin','linuxcnc/tcl/bin','board/tools/petalinux','board/petalinux/project-spec/meta-user','board/third_party/petalinux-source-packages');" ^
+    "$missing=@();" ^
+    "foreach ($path in $requiredFiles) { $matches=@(& git -c core.quotepath=false ls-files -- $path); if ($LASTEXITCODE -ne 0 -or $matches.Count -ne 1) { $missing += $path } };" ^
+    "foreach ($prefix in $requiredPrefixes) { $matches=@(& git -c core.quotepath=false ls-files -- ($prefix + '/**')); if ($LASTEXITCODE -ne 0 -or $matches.Count -eq 0) { $missing += ($prefix + '/**') } };" ^
+    "if ($missing.Count -gt 0) { Write-Host 'ERROR: Required Git recovery owner/sentinel is absent from the index:'; $missing | Sort-Object -Unique | ForEach-Object { Write-Host ('  ' + $_) }; exit 4 };" ^
+    "Write-Host 'Git recovery sentinels: OK.'"
 if errorlevel 1 goto :fail
 
 echo [3/10] Checking staged whitespace errors...
@@ -183,7 +192,11 @@ for /l %%A in (1,1,3) do (
     if errorlevel 1 exit /b 1
 
     git add -A -- .
-    if not errorlevel 1 exit /b 0
+    if not errorlevel 1 (
+        git rm -r --cached --ignore-unmatch -- "8ax-win/publish" "8ax-dealer-client-source/publish" "8ax-factory-client-source/publish"
+        if errorlevel 1 exit /b 1
+        exit /b 0
+    )
 
     if %%A LSS 3 echo WARNING: staging attempt %%A failed; rerunning the root preflight before retry.
 )

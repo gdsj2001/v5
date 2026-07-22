@@ -45,14 +45,16 @@ node_modules/
 /tmp/
 /temp/
 /logs/
-# Known .NET generated output directories
+# Known .NET generated output and reproducible publish directories
 /8ax-win/**/bin/
 /8ax-win/**/obj/
-/8ax-win/publish/win-x64/.update_backup/
+/8ax-win/publish/
 /8ax-dealer-client-source/**/bin/
 /8ax-dealer-client-source/**/obj/
+/8ax-dealer-client-source/publish/
 /8ax-factory-client-source/**/bin/
 /8ax-factory-client-source/**/obj/
+/8ax-factory-client-source/publish/
 
 # CMake generated files
 CMakeFiles/

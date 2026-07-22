@@ -56,7 +56,6 @@ function Get-WindowsReservedStem {
 
 function Get-UnregisteredRootFiles {
     param(
-        [Parameter(Mandatory = $true)][string[]]$BaselineRoot,
         [string[]]$AllowedRoot = @()
     )
 
@@ -69,7 +68,7 @@ function Get-UnregisteredRootFiles {
 
     $candidates = foreach ($sourcePath in $files) {
         $name = [IO.Path]::GetFileName($sourcePath)
-        if ($BaselineRoot -contains $name -or $AllowedRoot -contains $name) {
+        if ($AllowedRoot -contains $name) {
             continue
         }
 
@@ -135,15 +134,12 @@ if (-not [IO.File]::Exists($requiredRuleOwner)) {
     throw "Required root rule owner is missing: $requiredRuleOwner"
 }
 
-$baselineRoot = @(Invoke-GitLines -Arguments @(
-    '-c', 'core.quotepath=false',
-    'ls-tree', '--name-only', $BaselineRef, '--'
-))
+Invoke-GitLines -Arguments @('cat-file', '-e', "${BaselineRef}^{tree}") | Out-Null
 $allowedFromEnvironment = @(
     $env:V5_GIT_ALLOWED_NEW_ROOT -split ';' |
         Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
 )
-$canonicalAllowedRoot = @('AGENTS.md')
+$canonicalAllowedRoot = @('.gitattributes', '.gitignore', 'AGENTS.md')
 $effectiveAllowedRoot = @(
     $canonicalAllowedRoot + $AllowedNewRoot + $allowedFromEnvironment |
         Sort-Object -Unique
@@ -157,7 +153,7 @@ $movedCount = 0
 $maxPasses = 3
 
 for ($pass = 1; $pass -le $maxPasses; $pass++) {
-    $candidates = @(Get-UnregisteredRootFiles -BaselineRoot $baselineRoot -AllowedRoot $effectiveAllowedRoot)
+    $candidates = @(Get-UnregisteredRootFiles -AllowedRoot $effectiveAllowedRoot)
     if ($candidates.Count -eq 0) {
         break
     }
@@ -200,7 +196,7 @@ for ($pass = 1; $pass -le $maxPasses; $pass++) {
     }
 }
 
-$remaining = @(Get-UnregisteredRootFiles -BaselineRoot $baselineRoot -AllowedRoot $effectiveAllowedRoot)
+$remaining = @(Get-UnregisteredRootFiles -AllowedRoot $effectiveAllowedRoot)
 if ($remaining.Count -gt 0) {
     $names = ($remaining | ForEach-Object { $_.Name }) -join ', '
     throw "Unregistered root files remain after $maxPasses preflight passes: $names"

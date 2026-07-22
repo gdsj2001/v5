@@ -36,7 +36,8 @@ try {
     Invoke-TestGit -Repository $tempRoot -Arguments @('init', '-q') | Out-Null
 
     [IO.File]::WriteAllText((Join-Path $tempRoot '.gitignore'), "repo_ignored/`n")
-    Invoke-TestGit -Repository $tempRoot -Arguments @('add', '--', '.gitignore') | Out-Null
+    [IO.File]::WriteAllText((Join-Path $tempRoot 'legacy-output'), 'tracked-process-output')
+    Invoke-TestGit -Repository $tempRoot -Arguments @('add', '--', '.gitignore', 'legacy-output') | Out-Null
     Invoke-TestGit -Repository $tempRoot -Arguments @(
         '-c', 'user.name=V5 Test',
         '-c', 'user.email=v5-test@example.invalid',
@@ -76,6 +77,9 @@ try {
     if ([IO.File]::Exists((Join-Path $tempRoot 'users'))) {
         throw 'The unregistered root output was not quarantined.'
     }
+    if ([IO.File]::Exists((Join-Path $tempRoot 'legacy-output'))) {
+        throw 'The tracked legacy root output was not quarantined.'
+    }
     if (-not [IO.File]::Exists((Join-Path $tempRoot 'allowed.txt'))) {
         throw 'The explicitly allowed root owner was moved.'
     }
@@ -99,7 +103,9 @@ try {
         throw 'Root output content was not preserved in quarantine.'
     }
     $manifest = [IO.File]::ReadAllText((Join-Path $run 'manifest.tsv'))
-    if ($manifest -notmatch '(?m)^NUL\t' -or $manifest -notmatch '(?m)^users\t') {
+    if ($manifest -notmatch '(?m)^NUL\t' -or
+        $manifest -notmatch '(?m)^users\t' -or
+        $manifest -notmatch '(?m)^legacy-output\t') {
         throw 'Quarantine manifest is missing an original root path.'
     }
 
@@ -113,8 +119,15 @@ try {
     $staged = @(Invoke-TestGit -Repository $tempRoot -Arguments @('diff', '--cached', '--name-only', '--'))
     if ($staged -notcontains 'AGENTS.md' -or
         $staged -notcontains 'allowed.txt' -or
-        $staged -notcontains 'src/source.c') {
+        $staged -notcontains 'src/source.c' -or
+        $staged -notcontains 'legacy-output') {
         throw 'Expected canonical test files were not staged.'
+    }
+    $stagedDeletions = @(Invoke-TestGit -Repository $tempRoot -Arguments @(
+        'diff', '--cached', '--name-only', '--diff-filter=D', '--'
+    ))
+    if ($stagedDeletions -notcontains 'legacy-output') {
+        throw 'The tracked legacy root output deletion was not staged.'
     }
     if ($staged | Where-Object { $_ -like 'repo_ignored/*' }) {
         throw 'Quarantine content entered the Git index.'
