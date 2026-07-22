@@ -110,6 +110,11 @@ static uint32_t pin_u32(const V5HalRef *reference)
     return reference->data->u;
 }
 
+static int32_t pin_s32(const V5HalRef *reference)
+{
+    return reference->data->s;
+}
+
 static int pin_bit(const V5HalRef *reference)
 {
     return reference->data->b ? 1 : 0;
@@ -159,6 +164,7 @@ static int hal_pins_bind(V5HalApi *api, V5PositionHalPins *pins)
     BIND(router_valid, "v5-bus-axis-router.mapping-valid", V5_HAL_BIT);
     BIND(router_generation, "v5-bus-axis-router.latched-mapping-generation", V5_HAL_U32);
     BIND(router_active_mask, "v5-bus-axis-router.latched-active-mask", V5_HAL_U32);
+    BIND(router_diagnostic_seq, "v5-bus-axis-router.diagnostic-seq", V5_HAL_U32);
     BIND(master_link_up, "lcec.0.link-up", V5_HAL_BIT);
     BIND(master_state_op, "lcec.0.state-op", V5_HAL_BIT);
     BIND(master_all_op, "lcec.0.all-op", V5_HAL_BIT);
@@ -183,6 +189,10 @@ static int hal_pins_bind(V5HalApi *api, V5PositionHalPins *pins)
                 "joint.%u.pos-fb", joint) ||
             !bind_formatted(api, &pins->commanded[joint], V5_HAL_FLOAT,
                 "joint.%u.pos-cmd", joint) ||
+            !bind_formatted(api, &pins->router_accepted_raw[joint], V5_HAL_S32,
+                "v5-bus-axis-router.accepted-raw-%02u", joint) ||
+            !bind_formatted(api, &pins->router_actual_raw[joint], V5_HAL_S32,
+                "v5-bus-axis-router.actual-raw-%02u", joint) ||
             !bind_formatted(api, &pins->slave_statusword[joint], V5_HAL_U32,
                 "lcec.0.s%u.statusword", joint)) {
             return 0;
@@ -260,6 +270,10 @@ static int sample_source(
     uint32_t mapping_mask;
     uint32_t mapping_commit;
     int mapping_valid;
+    uint32_t diagnostic_before;
+    uint32_t diagnostic_after;
+    int32_t accepted_raw[V5_POSITION_AXIS_COUNT];
+    int32_t actual_raw[V5_POSITION_AXIS_COUNT];
     size_t axis;
     if (!pins || !source) return 0;
     memset(source, 0, sizeof(*source));
@@ -268,6 +282,8 @@ static int sample_source(
     display_generation = pin_u32(&pins->display_generation);
     display_mask = pin_u32(&pins->display_active_mask);
     display_commit = pin_u32(&pins->display_commit_seq);
+    diagnostic_before = pin_u32(&pins->router_diagnostic_seq);
+    if (!diagnostic_before || (diagnostic_before & 1u)) return 0;
     for (axis = 0u; axis < V5_POSITION_AXIS_COUNT; ++axis) {
         source->display.axis_code[axis] =
             pin_u32(&pins->display_axis_code[axis]);
@@ -275,6 +291,8 @@ static int sample_source(
             pin_float(&pins->display_unit_per_count[axis]);
         source->actual[axis] = pin_float(&pins->actual[axis]);
         source->commanded[axis] = pin_float(&pins->commanded[axis]);
+        accepted_raw[axis] = pin_s32(&pins->router_accepted_raw[axis]);
+        actual_raw[axis] = pin_s32(&pins->router_actual_raw[axis]);
     }
     source->spindle_speed_rpm = pin_float(&pins->spindle_speed_rps) * 60.0;
     source->linear_velocity_mm_per_min =
@@ -284,10 +302,13 @@ static int sample_source(
     source->spindle_override_percent =
         pin_float(&pins->spindle_override_ratio) * 100.0;
     memory_barrier();
+    diagnostic_after = pin_u32(&pins->router_diagnostic_seq);
     if (!pin_bit(&pins->display_valid) ||
         pin_u32(&pins->display_generation) != display_generation ||
         pin_u32(&pins->display_active_mask) != display_mask ||
-        pin_u32(&pins->display_commit_seq) != display_commit) {
+        pin_u32(&pins->display_commit_seq) != display_commit ||
+        diagnostic_after != diagnostic_before ||
+        (diagnostic_after & 1u)) {
         return 0;
     }
     source->display.generation = display_generation;
@@ -328,6 +349,18 @@ static int sample_source(
     }
     for (axis = 0u; axis < V5_POSITION_ROTARY_AXIS_COUNT; ++axis) {
         sample_checkpoint(pins, (unsigned int)axis, &source->checkpoint[axis]);
+    }
+    for (axis = 0u; axis < V5_POSITION_AXIS_COUNT; ++axis) {
+        uint32_t slot = (uint32_t)axis;
+        int32_t delta;
+        if (source->mapping.state == V5_POSITION_MAPPING_VALID) {
+            slot = source->mapping.joints[axis].status_slot;
+        }
+        if (slot >= V5_POSITION_AXIS_COUNT) return 0;
+        delta = (int32_t)((uint32_t)actual_raw[axis] -
+            (uint32_t)accepted_raw[axis]);
+        source->following_error[slot] =
+            (double)delta * source->display.unit_per_count[slot];
     }
     return 1;
 }

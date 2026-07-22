@@ -297,7 +297,6 @@ int main(int argc, char **argv)
     V5MappedWriter position_writer;
     V5MappedWriter bus_writer;
     V5PositionStatusSampler sampler;
-    V5PositionDisplayStabilizer stabilizer;
     V5NativePositionStatusBlock block;
     V5NativePositionStatusBlock last_published;
     int last_published_valid = 0;
@@ -321,7 +320,6 @@ int main(int argc, char **argv)
     memset(&bus_writer, 0, sizeof(bus_writer));
     bus_writer.fd = -1;
     memset(&sampler, 0, sizeof(sampler));
-    v5_position_display_stabilizer_reset(&stabilizer);
     for (index = 1; index < argc; ++index) {
         if (strcmp(argv[index], "--path") == 0 && index + 1 < argc) {
             position_path = argv[++index];
@@ -387,7 +385,7 @@ int main(int argc, char **argv)
             if (!sequence) sequence = 2u;
             if (v5_position_status_build(
                     &source, lifecycle.writer_identity, sequence, sample_now,
-                    source_generation, &stabilizer, &block)) {
+                    source_generation, &block)) {
                 should_publish = !last_published_valid ||
                     !v5_position_status_display_equal(&block, &last_published) ||
                     sample_now - last_publish_ns >= V5_POSITION_HEARTBEAT_NS;
@@ -418,11 +416,9 @@ int main(int argc, char **argv)
                     break;
                 }
             } else {
-                v5_position_display_stabilizer_reset(&stabilizer);
                 ++consecutive_failures;
             }
         } else {
-            v5_position_display_stabilizer_reset(&stabilizer);
             ++consecutive_failures;
         }
         if (consecutive_failures == 1u || sample_now >= next_status_log) {

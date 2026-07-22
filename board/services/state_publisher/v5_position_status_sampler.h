@@ -67,6 +67,9 @@ typedef struct V5PositionHalPins {
     V5HalRef checkpoint_runtime[V5_POSITION_ROTARY_AXIS_COUNT];
     V5HalRef actual[V5_POSITION_AXIS_COUNT];
     V5HalRef commanded[V5_POSITION_AXIS_COUNT];
+    V5HalRef router_diagnostic_seq;
+    V5HalRef router_accepted_raw[V5_POSITION_AXIS_COUNT];
+    V5HalRef router_actual_raw[V5_POSITION_AXIS_COUNT];
     V5HalRef spindle_speed_rps;
     V5HalRef linear_velocity_per_second;
     V5HalRef feed_override_ratio;

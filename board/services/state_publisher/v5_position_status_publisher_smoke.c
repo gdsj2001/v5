@@ -35,13 +35,12 @@ static V5PositionSourceSnapshot base_source(void)
 
 static V5NativePositionStatusBlock build(
     const V5PositionSourceSnapshot *source,
-    V5PositionDisplayStabilizer *stabilizer,
     uint64_t generation)
 {
     V5NativePositionStatusBlock block;
     assert(v5_position_status_build(
         source, 0x1234abcdu, 2u, 1000000u + generation, generation,
-        stabilizer, &block));
+        &block));
     assert(block.magic == V5_POSITION_MAGIC);
     assert(block.version == V5_POSITION_VERSION);
     assert(block.size == V5_POSITION_BLOCK_SIZE);
@@ -55,14 +54,14 @@ static V5NativePositionStatusBlock build(
 static void test_absent_mapping_rounding_and_wrap(void)
 {
     V5PositionSourceSnapshot source = base_source();
-    V5PositionDisplayStabilizer stabilizer;
     V5NativePositionStatusBlock block;
-    v5_position_display_stabilizer_reset(&stabilizer);
     source.actual[0] = 29.9825;
     source.commanded[0] = -29.9825;
+    source.following_error[0] = 0.1234;
     source.actual[3] = 359.9999;
     source.commanded[3] = -0.0001;
-    block = build(&source, &stabilizer, 1u);
+    source.following_error[3] = -1.2346;
+    block = build(&source, 1u);
     assert((block.valid_mask &
         (V5_POSITION_VALID_MCS | V5_POSITION_VALID_CMD_MCS)) ==
         (V5_POSITION_VALID_MCS | V5_POSITION_VALID_CMD_MCS));
@@ -70,6 +69,8 @@ static void test_absent_mapping_rounding_and_wrap(void)
     assert_close(block.cmd_mcs[0], -29.983);
     assert_close(block.mcs[3], 0.0);
     assert_close(block.cmd_mcs[3], 0.0);
+    assert_close(block.following_error[0], 0.123);
+    assert_close(block.following_error[3], -1.235);
     assert_close(block.spindle_speed_rpm, 1200.0);
     assert_close(block.linear_velocity_mm_per_min, 345.0);
     assert_close(block.feedrate_override, 90.0);
@@ -79,10 +80,8 @@ static void test_absent_mapping_rounding_and_wrap(void)
 static void test_mapping_projection(void)
 {
     V5PositionSourceSnapshot source = base_source();
-    V5PositionDisplayStabilizer stabilizer;
     V5NativePositionStatusBlock block;
     size_t joint;
-    v5_position_display_stabilizer_reset(&stabilizer);
     source.mapping.state = V5_POSITION_MAPPING_VALID;
     source.mapping.generation = 44u;
     source.mapping.active_mask = 0x1fu;
@@ -107,7 +106,7 @@ static void test_mapping_projection(void)
     source.checkpoint[2].runtime_counts = 50.0;
     source.commanded[3] = 1.0;
     source.commanded[4] = -1.0;
-    block = build(&source, &stabilizer, 1u);
+    block = build(&source, 1u);
     assert_close(block.mcs[3], 1.230);
     assert_close(block.cmd_mcs[3], 1.000);
     assert_close(block.mcs[4], 359.500);
@@ -117,11 +116,9 @@ static void test_mapping_projection(void)
 static void test_invalid_mapping_degrades_coordinates_only(void)
 {
     V5PositionSourceSnapshot source = base_source();
-    V5PositionDisplayStabilizer stabilizer;
     V5NativePositionStatusBlock block;
-    v5_position_display_stabilizer_reset(&stabilizer);
     source.mapping.state = V5_POSITION_MAPPING_INVALID;
-    block = build(&source, &stabilizer, 1u);
+    block = build(&source, 1u);
     assert(!(block.valid_mask & V5_POSITION_VALID_MCS));
     assert(!(block.valid_mask & V5_POSITION_VALID_CMD_MCS));
     assert(block.valid_mask & V5_POSITION_VALID_SPINDLE_SPEED);
@@ -130,63 +127,73 @@ static void test_invalid_mapping_degrades_coordinates_only(void)
     assert(block.valid_mask & V5_POSITION_VALID_SPINDLE_OVERRIDE);
 }
 
-static void test_one_pulse_boundary_stabilizer(void)
+static void test_stateless_display_projection(void)
 {
     V5PositionSourceSnapshot source = base_source();
-    V5PositionDisplayStabilizer stabilizer;
-    V5NativePositionStatusBlock first;
-    V5NativePositionStatusBlock boundary;
-    V5NativePositionStatusBlock candidate;
-    V5NativePositionStatusBlock confirmed;
-    v5_position_display_stabilizer_reset(&stabilizer);
-    first = build(&source, &stabilizer, 1u);
+    V5NativePositionStatusBlock projected;
     source.actual[0] = 0.00051;
-    boundary = build(&source, &stabilizer, 2u);
-    assert_close(boundary.mcs[0], first.mcs[0]);
-    source.actual[0] = 0.00080;
-    candidate = build(&source, &stabilizer, 3u);
-    assert_close(candidate.mcs[0], first.mcs[0]);
-    confirmed = build(&source, &stabilizer, 4u);
-    assert_close(confirmed.mcs[0], 0.001);
+    projected = build(&source, 1u);
+    assert_close(projected.mcs[0], 0.001);
+    source.actual[0] = 0.00049;
+    projected = build(&source, 1u);
+    assert_close(projected.mcs[0], 0.0);
     source.actual[0] = 0.2504;
-    confirmed = build(&source, &stabilizer, 5u);
-    assert_close(confirmed.mcs[0], 0.250);
+    projected = build(&source, 2u);
+    assert_close(projected.mcs[0], 0.250);
 }
 
 static void test_descriptor_driven_rotary_slot(void)
 {
     V5PositionSourceSnapshot source = base_source();
-    V5PositionDisplayStabilizer stabilizer;
     V5NativePositionStatusBlock block;
     static const uint32_t codes[V5_POSITION_AXIS_COUNT] = {
         'B', 'X', 'Y', 'Z', 'C'
     };
     size_t axis;
-    v5_position_display_stabilizer_reset(&stabilizer);
     for (axis = 0u; axis < V5_POSITION_AXIS_COUNT; ++axis) {
         source.display.axis_code[axis] = codes[axis];
     }
     source.actual[0] = 359.9999;
     source.commanded[0] = -0.0001;
-    block = build(&source, &stabilizer, 1u);
+    block = build(&source, 1u);
     assert_close(block.mcs[0], 0.0);
     assert_close(block.cmd_mcs[0], 0.0);
+}
+
+static void test_rotary_full_turn_display_bucket(void)
+{
+    V5PositionSourceSnapshot source = base_source();
+    V5NativePositionStatusBlock block;
+
+    source.actual[3] = 360.0;
+    source.commanded[3] = 720.0;
+    source.actual[4] = -360.0;
+    source.commanded[4] = 359.9994;
+    block = build(&source, 1u);
+    assert_close(block.mcs[3], 0.0);
+    assert_close(block.cmd_mcs[3], 0.0);
+    assert_close(block.mcs[4], 0.0);
+    assert_close(block.cmd_mcs[4], 359.999);
+
+    source.actual[3] = 359.9995;
+    source.commanded[3] = -0.0004;
+    block = build(&source, 2u);
+    assert_close(block.mcs[3], 0.0);
+    assert_close(block.cmd_mcs[3], 0.0);
 }
 
 static void test_generation_and_payload_identity(void)
 {
     V5PositionSourceSnapshot source = base_source();
-    V5PositionDisplayStabilizer stabilizer;
     V5NativePositionStatusBlock first;
     V5NativePositionStatusBlock repeated;
     V5NativePositionStatusBlock changed;
-    v5_position_display_stabilizer_reset(&stabilizer);
-    first = build(&source, &stabilizer, 1u);
+    first = build(&source, 1u);
     source.actual[0] = 10.0;
-    repeated = build(&source, &stabilizer, 1u);
-    assert_close(repeated.mcs[0], first.mcs[0]);
-    assert(v5_position_status_display_equal(&first, &repeated));
-    changed = build(&source, &stabilizer, 2u);
+    repeated = build(&source, 1u);
+    assert_close(repeated.mcs[0], 10.0);
+    assert(!v5_position_status_display_equal(&first, &repeated));
+    changed = build(&source, 2u);
     assert_close(changed.mcs[0], 10.0);
     assert(!v5_position_status_display_equal(&first, &changed));
     changed.source_acquired_mono_ns += 999u;
@@ -198,16 +205,14 @@ static void test_generation_and_payload_identity(void)
 static void test_fail_closed_metadata(void)
 {
     V5PositionSourceSnapshot source = base_source();
-    V5PositionDisplayStabilizer stabilizer;
     V5NativePositionStatusBlock block;
-    v5_position_display_stabilizer_reset(&stabilizer);
     source.display.axis_code[4] = source.display.axis_code[3];
     assert(!v5_position_status_build(
-        &source, 1u, 2u, 1u, 1u, &stabilizer, &block));
+        &source, 1u, 2u, 1u, 1u, &block));
     source = base_source();
     source.display.unit_per_count[2] = 0.0;
     assert(!v5_position_status_build(
-        &source, 1u, 2u, 1u, 1u, &stabilizer, &block));
+        &source, 1u, 2u, 1u, 1u, &block));
 }
 
 int main(void)
@@ -215,8 +220,9 @@ int main(void)
     test_absent_mapping_rounding_and_wrap();
     test_mapping_projection();
     test_invalid_mapping_degrades_coordinates_only();
-    test_one_pulse_boundary_stabilizer();
+    test_stateless_display_projection();
     test_descriptor_driven_rotary_slot();
+    test_rotary_full_turn_display_bucket();
     test_generation_and_payload_identity();
     test_fail_closed_metadata();
     puts("V5_POSITION_STATUS_PUBLISHER_SMOKE_OK");

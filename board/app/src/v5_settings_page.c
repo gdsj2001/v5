@@ -230,7 +230,19 @@ int v5_settings_page_trigger_action(V5SettingsPage *page, V5MainPageActionKind a
         {
             const char *daemon_action = action_result.message ? action_result.message : "accepted";
             char body[256];
-            snprintf(body, sizeof(body), "提示: 正在处理\n原因: %s\n下一步: 正在读取后台状态", daemon_action);
+            if (action == V5_MAIN_PAGE_ACTION_SETTINGS_SAVE_RETURN) {
+                snprintf(
+                    body,
+                    sizeof(body),
+                    "提示: 正在设置驱动\n原因: 正在按最终轴参数和从站映射写入并读回电子齿轮\n下一步: 读回一致后自动准备保存并重启");
+            } else if (action == V5_MAIN_PAGE_ACTION_SETTINGS_SET_DRIVE) {
+                snprintf(
+                    body,
+                    sizeof(body),
+                    "提示: 正在自动同步驱动\n原因: 正在按当前模型的逻辑轴、从站映射、螺距、减速比和编码器位数计算电子齿轮\n下一步: 等待各物理从站写入并读回一致");
+            } else {
+                snprintf(body, sizeof(body), "提示: 正在处理\n原因: %s\n下一步: 正在读取后台状态", daemon_action);
+            }
             v5_settings_page_popup_show(page, action_result.daemon_action, v5_settings_page_status_action_label(action_result.daemon_action), body, 0, 0);
         }
         return 1;

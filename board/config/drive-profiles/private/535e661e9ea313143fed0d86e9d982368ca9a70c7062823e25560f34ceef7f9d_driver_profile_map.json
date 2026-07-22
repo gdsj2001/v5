@@ -1736,6 +1736,52 @@
           "write_value": null
         }
       },
+      "commissioning_parameters": {
+        "csp_command_scheduler": {
+          "data_type": "uint16",
+          "default_raw": 0,
+          "field": "csp_command_scheduler_raw",
+          "object": {"index": "0x2001", "subindex": "0x3e"},
+          "readback_required": true,
+          "requires_disabled": true,
+          "scale": 1.0,
+          "unit": "enum",
+          "vendor_parameter": "H01.61"
+        },
+        "csp_velocity_feedforward_source": {
+          "data_type": "uint16",
+          "default_raw": 1,
+          "field": "csp_velocity_feedforward_source_raw",
+          "object": {"index": "0x2005", "subindex": "0x14"},
+          "readback_required": true,
+          "requires_disabled": true,
+          "scale": 1.0,
+          "unit": "enum",
+          "vendor_parameter": "H05.19"
+        },
+        "csp_velocity_feedforward_filter": {
+          "data_type": "uint16",
+          "default_raw": 50,
+          "field": "csp_velocity_feedforward_filter_0p01_ms",
+          "object": {"index": "0x2008", "subindex": "0x13"},
+          "readback_required": true,
+          "requires_disabled": true,
+          "scale": 0.01,
+          "unit": "ms",
+          "vendor_parameter": "H08.18"
+        },
+        "csp_velocity_feedforward_gain": {
+          "data_type": "uint16",
+          "default_raw": 1000,
+          "field": "csp_velocity_feedforward_gain_0p1_percent",
+          "object": {"index": "0x2008", "subindex": "0x14"},
+          "readback_required": true,
+          "requires_disabled": true,
+          "scale": 0.1,
+          "unit": "percent",
+          "vendor_parameter": "H08.19"
+        }
+      },
       "drive_wrapped_rotary_support": false,
       "drive_wrapped_rotary_support_semantics": "command_and_feedback_same_cycle_output_turn_periodic_window_proven",
       "position_command_raw_bits": 32,
@@ -3584,6 +3630,52 @@
       "model": "SV630N-18bit",
       "model_pattern": "InoSV630N",
       "model_variant": "18bit_encoder_262144_counts",
+      "commissioning_parameters": {
+        "csp_command_scheduler": {
+          "data_type": "uint16",
+          "default_raw": 0,
+          "field": "csp_command_scheduler_raw",
+          "object": {"index": "0x2001", "subindex": "0x3e"},
+          "readback_required": true,
+          "requires_disabled": true,
+          "scale": 1.0,
+          "unit": "enum",
+          "vendor_parameter": "H01.61"
+        },
+        "csp_velocity_feedforward_source": {
+          "data_type": "uint16",
+          "default_raw": 1,
+          "field": "csp_velocity_feedforward_source_raw",
+          "object": {"index": "0x2005", "subindex": "0x14"},
+          "readback_required": true,
+          "requires_disabled": true,
+          "scale": 1.0,
+          "unit": "enum",
+          "vendor_parameter": "H05.19"
+        },
+        "csp_velocity_feedforward_filter": {
+          "data_type": "uint16",
+          "default_raw": 50,
+          "field": "csp_velocity_feedforward_filter_0p01_ms",
+          "object": {"index": "0x2008", "subindex": "0x13"},
+          "readback_required": true,
+          "requires_disabled": true,
+          "scale": 0.01,
+          "unit": "ms",
+          "vendor_parameter": "H08.18"
+        },
+        "csp_velocity_feedforward_gain": {
+          "data_type": "uint16",
+          "default_raw": 1000,
+          "field": "csp_velocity_feedforward_gain_0p1_percent",
+          "object": {"index": "0x2008", "subindex": "0x14"},
+          "readback_required": true,
+          "requires_disabled": true,
+          "scale": 0.1,
+          "unit": "percent",
+          "vendor_parameter": "H08.19"
+        }
+      },
       "name_pattern": "InoSV630N",
       "product_code": "0x000c0112",
       "profile_id": "inovance_sv630n_18bit",

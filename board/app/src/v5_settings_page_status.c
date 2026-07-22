@@ -72,7 +72,8 @@ static int settings_action_requires_countdown(const char *action)
            strcmp(action, "drive_factory_reset") == 0 ||
            strcmp(action, "drive_parameter_read") == 0 ||
            strcmp(action, "drive_fault_reset") == 0 ||
-           strcmp(action, "drive_set_parameters") == 0;
+           strcmp(action, "drive_set_parameters") == 0 ||
+           strcmp(action, "settings_save_and_restart") == 0;
 }
 
 static void settings_status_popup_title(const V5SettingsActionStatus *status, char *out, size_t out_size)
@@ -98,6 +99,7 @@ static int settings_action_eta_seconds(const char *action)
     if (strcmp(action, "drive_parameter_read") == 0) return 45;
     if (strcmp(action, "drive_fault_reset") == 0) return 45;
     if (strcmp(action, "drive_set_parameters") == 0) return 180;
+    if (strcmp(action, "settings_save_and_restart") == 0) return 180;
     return 0;
 }
 

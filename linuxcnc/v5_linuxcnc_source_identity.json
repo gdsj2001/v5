@@ -10,7 +10,7 @@
     "tree": "cbadbb8d029aefe7a8d0e3218885aaa59798337b"
   },
   "v5_source_tree": "c1f4c53315c8e614fafbe48992afa91e8aef8014",
-  "content_sha256": "a44edb46e7f948ea59041efe4a291e0267d59709370b96404181b79e866eb1bc",
+  "content_sha256": "c9fc15d06800aa83d294ff6ed681cb967b5f302ea256b2e86925bf8094c6263d",
   "implementation": "in_tree",
   "changed_files": [
     "scripts/linuxcnc.in",
@@ -43,7 +43,6 @@
     "src/emc/usr_intf/axis/Submakefile",
     "src/emc/usr_intf/axis/extensions/emcmodule.cc",
     "src/hal/components/v5_bus_axis_router.comp",
-    "src/hal/components/v5_bus_axis_target_limiter.h",
     "src/hal/components/homecomp.comp",
     "src/hal/components/v5_bus_home_api.h",
     "src/hal/components/v5_bus_home_math.h",
@@ -229,18 +228,16 @@
       "function write fp;",
       "joint-zero-counts-##[5]",
       "joint-axis-code-##[5]",
-      "joint-limit-ok-##[5]",
-      "v5_bus_axis_target_limiter_step",
+      "desired-raw-##[5]",
+      "accepted-raw-##[5]",
+      "actual-raw-##[5]",
+      "diagnostic-seq",
+      "accepted_raw(joint) = physical_target;",
+      "slave_target_position(slave) = physical_target;",
       "wcp-base-##[3]",
       "wcp-runtime-##[3]",
       "v5_bus_router_nearest_quantized",
       "rejected-commit-seq"
-    ],
-    "src/hal/components/v5_bus_axis_target_limiter.h": [
-      "v5_bus_axis_target_limiter_step",
-      "max_velocity_units_per_s",
-      "max_acceleration_units_per_s2",
-      "synchronized to actual position"
     ],
     "src/hal/components/v5_bus_home_api.h": [
       "V5_HOME_EXPORT(homeMotFunctions);"
@@ -421,7 +418,22 @@
       "WRAPPED_ROTARY"
     ],
     "src/emc/motion/control.c": [
-      "z20_wrapped_rotary_planner_idle"
+      "z20_wrapped_rotary_planner_idle",
+      "scale *= envelope_scale;"
+    ],
+    "src/emc/motion/mot_priv.h": [
+      "v5_axis_envelope_scale"
+    ],
+    "src/emc/motion/motion.c": [
+      "motion.v5-axis-envelope-scale"
+    ],
+    "src/hal/components/v5_bus_axis_router.comp": [
+      "motion-envelope-scale",
+      "v5_bus_axis_target_limiter_step",
+      "target_limiter_",
+      "limiter-active",
+      "lag-counts",
+      "joint-limit-ok"
     ],
     "src/emc/usr_intf/emcrsh.cc": [
       "server_address.sin_addr.s_addr = htonl(INADDR_ANY)"
@@ -441,7 +453,8 @@
         "invalid V5 wrapped rotary target state"
       ],
       "forbidden_ascii": [
-        "z20_wrapped_rotary_planner_idle"
+        "z20_wrapped_rotary_planner_idle",
+        "motion.v5-axis-envelope-scale"
       ]
     },
     {
@@ -519,12 +532,20 @@
       "required_ascii": [
         "v5_bus_axis_router",
         "mapping-valid",
-        "joint-limit-ok",
+        "desired-raw",
+        "accepted-raw",
+        "actual-raw",
+        "diagnostic-seq",
         "wcp-base",
         "wcp-runtime",
         "rejected-commit-seq"
       ],
-      "forbidden_ascii": []
+      "forbidden_ascii": [
+        "motion-envelope-scale",
+        "limiter-active",
+        "lag-counts",
+        "joint-limit-ok"
+      ]
     }
   ],
   "symlink_count": 203,

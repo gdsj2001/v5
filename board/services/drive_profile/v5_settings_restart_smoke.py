@@ -112,6 +112,150 @@ class SettingsRestartSmoke(unittest.TestCase):
         self.assertFalse(go_marker.exists())
 
 
+class SettingsSaveRestartDriveSyncSmoke(unittest.TestCase):
+    def run_save_restart(self, drive_result: dict) -> tuple[dict, dict, mock.Mock, mock.Mock]:
+        with tempfile.TemporaryDirectory() as temporary:
+            result_path = Path(temporary) / "settings-save-restart-result.json"
+            spec = dict(action_runtime.ACTIONS["settings_save_and_restart"])
+            spec["result_path"] = str(result_path)
+            handoff_result = {
+                "schema": "v5.settings_action_result.v1",
+                "action": "settings_save_and_restart",
+                "owner": "settings_restart",
+                "ok": True,
+                "code": "SETTINGS_SAVE_RESTART_BOARD_REBOOT_SCHEDULED",
+                "restart_commit_required": True,
+            }
+            with mock.patch.dict(
+                action_runtime.ACTIONS,
+                {"settings_save_and_restart": spec},
+            ), mock.patch.object(
+                action_runtime.v5_drive_bus_action,
+                "preload_resident_state",
+                return_value={
+                    "ok": True,
+                    "settings_runtime_loaded": True,
+                    "runtime_ini_loaded": True,
+                    "self_slave_bindings_loaded": True,
+                    "drive_snapshot_loaded": True,
+                },
+            ), mock.patch.object(
+                action_runtime.v5_drive_bus_action,
+                "write_json",
+            ), mock.patch.object(
+                action_runtime.v5_drive_bus_action,
+                "run_action",
+                return_value=dict(drive_result),
+            ) as drive_action, mock.patch.object(
+                action_runtime,
+                "run_restart_handoff",
+                return_value=dict(handoff_result),
+            ) as restart_handoff:
+                result = action_runtime.execute_action(
+                    "settings_save_and_restart",
+                    {"action": "settings_save_and_restart", "_run_id": "run-1"},
+                )
+            persisted = json.loads(result_path.read_text(encoding="utf-8"))
+        return result, persisted, drive_action, restart_handoff
+
+    def test_drive_fresh_readback_precedes_restart_handoff(self) -> None:
+        drive_result = {
+            "ok": True,
+            "code": "SET_DRIVE_READBACK_OK",
+            "message_cn": "电子齿轮和必需驱动参数 fresh readback 一致。",
+            "write_executed": True,
+            "motion_executed": False,
+        }
+        result, persisted, drive_action, restart_handoff = self.run_save_restart(drive_result)
+        self.assertTrue(result["ok"])
+        self.assertEqual("SETTINGS_SAVE_RESTART_BOARD_REBOOT_SCHEDULED", result["code"])
+        self.assertTrue(result["drive_sync"]["ok"])
+        self.assertEqual("SET_DRIVE_READBACK_OK", result["drive_sync"]["code"])
+        self.assertIn("设置驱动校验完成", result["display_message_cn"])
+        self.assertEqual(result, persisted)
+        drive_action.assert_called_once()
+        self.assertEqual("set-drive", drive_action.call_args.args[0])
+        self.assertEqual("settings_save_and_restart", drive_action.call_args.args[3]["trigger"])
+        restart_handoff.assert_called_once()
+
+    def test_drive_failure_keeps_restart_handoff_closed(self) -> None:
+        drive_result = {
+            "ok": False,
+            "code": "DRIVE_EGEAR_READBACK_MISMATCH",
+            "message_cn": "电子齿轮读回不一致。",
+            "write_executed": True,
+            "motion_executed": False,
+        }
+        result, persisted, drive_action, restart_handoff = self.run_save_restart(drive_result)
+        self.assertFalse(result["ok"])
+        self.assertEqual("SETTINGS_SAVE_RESTART_DRIVE_SYNC_FAILED", result["code"])
+        self.assertEqual("DRIVE_EGEAR_READBACK_MISMATCH", result["drive_sync"]["code"])
+        self.assertFalse(result["restart_executed"])
+        self.assertFalse(result["restart_commit_required"])
+        self.assertIn("电子齿轮读回不一致", result["display_message_cn"])
+        self.assertEqual(result, persisted)
+        drive_action.assert_called_once()
+        restart_handoff.assert_not_called()
+
+
+class SettingsDriveOwnerReloadSmoke(unittest.TestCase):
+    def test_drive_action_reloads_current_model_mapping_before_execution(self) -> None:
+        events: list[str] = []
+
+        def preload() -> dict:
+            events.append("reload")
+            return {
+                "ok": True,
+                "settings_runtime_loaded": True,
+                "runtime_ini_loaded": True,
+                "self_slave_bindings_loaded": True,
+                "drive_snapshot_loaded": True,
+            }
+
+        def run_action(*_args, **_kwargs) -> dict:
+            events.append("drive")
+            return {"ok": True, "code": "DRIVE_SET_OK", "motion_executed": False}
+
+        with mock.patch.object(
+            action_runtime.v5_drive_bus_action,
+            "preload_resident_state",
+            side_effect=preload,
+        ), mock.patch.object(
+            action_runtime.v5_drive_bus_action,
+            "run_action",
+            side_effect=run_action,
+        ), mock.patch.object(
+            action_runtime.v5_drive_bus_action,
+            "write_json",
+        ):
+            result = action_runtime.run_drive_action_from_current_owners(
+                "set-drive", 8.0, {"trigger": "motion_model_changed"})
+
+        self.assertEqual(["reload", "drive"], events)
+        self.assertTrue(result["owner_reload"]["ok"])
+
+    def test_drive_action_rejects_incomplete_owner_reload(self) -> None:
+        with mock.patch.object(
+            action_runtime.v5_drive_bus_action,
+            "preload_resident_state",
+            return_value={"ok": False, "runtime_ini_loaded": False},
+        ), mock.patch.object(
+            action_runtime.v5_drive_bus_action,
+            "run_action",
+        ) as run_action, mock.patch.object(
+            action_runtime.v5_drive_bus_action,
+            "write_json",
+        ):
+            result = action_runtime.run_drive_action_from_current_owners(
+                "set-drive", 8.0, {"trigger": "motion_model_changed"})
+
+        self.assertFalse(result["ok"])
+        self.assertEqual("DRIVE_ACTION_OWNER_RELOAD_FAILED", result["code"])
+        self.assertFalse(result["write_executed"])
+        self.assertFalse(result["motion_executed"])
+        run_action.assert_not_called()
+
+
 class SettingsAxisZeroRuntimeSmoke(unittest.TestCase):
     def run_axis_zero(self, drive_result: dict) -> tuple[dict, dict | None]:
         with tempfile.TemporaryDirectory() as temporary:
@@ -121,6 +265,19 @@ class SettingsAxisZeroRuntimeSmoke(unittest.TestCase):
             with mock.patch.dict(
                 action_runtime.ACTIONS,
                 {"settings_axis_zero": spec},
+            ), mock.patch.object(
+                action_runtime.v5_drive_bus_action,
+                "preload_resident_state",
+                return_value={
+                    "ok": True,
+                    "settings_runtime_loaded": True,
+                    "runtime_ini_loaded": True,
+                    "self_slave_bindings_loaded": True,
+                    "drive_snapshot_loaded": True,
+                },
+            ), mock.patch.object(
+                action_runtime.v5_drive_bus_action,
+                "write_json",
             ), mock.patch.object(
                 action_runtime.v5_drive_bus_action,
                 "run_action",
@@ -153,7 +310,9 @@ class SettingsAxisZeroRuntimeSmoke(unittest.TestCase):
         self.assertEqual(drive_result["code"], result["code"])
         self.assertNotIn("position_publisher_reload", result)
         self.assertIsNotNone(persisted)
-        self.assertEqual(drive_result, persisted)
+        for key, value in drive_result.items():
+            self.assertEqual(value, persisted[key])
+        self.assertTrue(persisted["owner_reload"]["ok"])
         self.assertEqual(1234, persisted["drive_position"]["readback"]["actual_position_counts"])
 
     def test_axis_zero_preserves_drive_failure_without_restart_override(self) -> None:

@@ -49,6 +49,7 @@ typedef struct V5PositionRotaryCheckpoint {
 typedef struct V5PositionSourceSnapshot {
     double actual[V5_POSITION_AXIS_COUNT];
     double commanded[V5_POSITION_AXIS_COUNT];
+    double following_error[V5_POSITION_AXIS_COUNT];
     double spindle_speed_rpm;
     double linear_velocity_mm_per_min;
     double feed_override_percent;
@@ -58,25 +59,12 @@ typedef struct V5PositionSourceSnapshot {
     V5PositionRotaryCheckpoint checkpoint[V5_POSITION_ROTARY_AXIS_COUNT];
 } V5PositionSourceSnapshot;
 
-typedef struct V5PositionDisplayStabilizer {
-    int64_t stable[V5_POSITION_AXIS_COUNT * 2u];
-    int64_t candidate[V5_POSITION_AXIS_COUNT * 2u];
-    uint8_t stable_valid[V5_POSITION_AXIS_COUNT * 2u];
-    uint8_t candidate_valid[V5_POSITION_AXIS_COUNT * 2u];
-    uint64_t last_generation;
-    int last_generation_valid;
-} V5PositionDisplayStabilizer;
-
-void v5_position_display_stabilizer_reset(
-    V5PositionDisplayStabilizer *stabilizer);
-
 int v5_position_status_build(
     const V5PositionSourceSnapshot *source,
     uint32_t writer_identity,
     uint32_t sequence,
     uint64_t source_acquired_mono_ns,
     uint64_t source_generation,
-    V5PositionDisplayStabilizer *stabilizer,
     V5NativePositionStatusBlock *block);
 
 int v5_position_status_display_equal(

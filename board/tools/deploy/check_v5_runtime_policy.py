@@ -2623,21 +2623,18 @@ def check_cc_golden_model_specific_motion() -> int:
         if token not in hal_text:
             print(f"CC_GOLDEN_RTCP_HAL_CONTRACT_MISSING: {hal.relative_to(ROOT)} lacks {token}", file=sys.stderr)
             rc = 1
-    for joint in range(5):
-        suffix = f"{joint:02d}"
-        limiter_tokens = (
-            f"v5-bus-axis-router.joint-max-velocity-{suffix} [JOINT_{joint}]MAX_VELOCITY",
-            f"v5-bus-axis-router.joint-max-acceleration-{suffix} [JOINT_{joint}]MAX_ACCELERATION",
-            f"v5-bus-axis-router.joint-scale-{suffix} [JOINT_{joint}]SCALE",
-            f"cia402.{joint}.enable v5-bus-axis-router.joint-drive-enable-{suffix}",
-        )
-        for token in limiter_tokens:
-            if token not in hal_text:
-                print(
-                    f"CC_GOLDEN_TARGET_ENVELOPE_MISSING: {hal.relative_to(ROOT)} lacks {token}",
-                    file=sys.stderr,
-                )
-                rc = 1
+    for retired in (
+        "joint-max-velocity-",
+        "joint-max-acceleration-",
+        "joint-scale-",
+        "joint-drive-enable-",
+    ):
+        if retired in hal_text:
+            print(
+                f"CC_GOLDEN_RETIRED_PDO_LIMITER_SURVIVOR: {hal.relative_to(ROOT)} contains {retired}",
+                file=sys.stderr,
+            )
+            rc = 1
 
     owner_text = native_hal_owner.read_text(encoding="utf-8", errors="ignore")
     required_owner = (

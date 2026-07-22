@@ -2,11 +2,9 @@
 
 #include <math.h>
 #include <stddef.h>
-#include <stdlib.h>
 #include <string.h>
 
 #define V5_DISPLAY_EXPECTED_MASK ((1u << V5_POSITION_AXIS_COUNT) - 1u)
-#define V5_DISPLAY_BOUNDARY_HYSTERESIS_BUCKETS 0.1
 #define V5_INTEGER_TOLERANCE 1.0e-6
 
 static int axis_code_valid(uint32_t code)
@@ -98,149 +96,19 @@ static double display_projection(double value)
     return projected == 0.0 ? 0.0 : projected;
 }
 
-static int64_t bucket_distance(
-    int rotary,
-    int64_t left,
-    int64_t right)
+static double rotary_display_projection(double value)
 {
-    int64_t distance = llabs(left - right);
-    if (rotary) {
-        distance %= V5_POSITION_ROTARY_PERIOD_BUCKETS;
-        if (distance > V5_POSITION_ROTARY_PERIOD_BUCKETS - distance) {
-            distance = V5_POSITION_ROTARY_PERIOD_BUCKETS - distance;
-        }
-    }
-    return distance;
-}
+    double scaled = value * V5_POSITION_DISPLAY_SCALE;
+    int64_t bucket;
 
-static double boundary_distance(
-    int rotary,
-    int64_t stable,
-    int64_t bucket,
-    double source)
-{
-    double scaled_source = source * V5_POSITION_DISPLAY_SCALE;
-    if (rotary) {
-        int64_t forward = (bucket - stable) % V5_POSITION_ROTARY_PERIOD_BUCKETS;
-        double direction;
-        double boundary;
-        double distance;
-        if (forward < 0) forward += V5_POSITION_ROTARY_PERIOD_BUCKETS;
-        direction = forward == 1 ? 1.0 : -1.0;
-        boundary = fmod((double)stable + 0.5 * direction,
-            (double)V5_POSITION_ROTARY_PERIOD_BUCKETS);
-        if (boundary < 0.0) boundary += V5_POSITION_ROTARY_PERIOD_BUCKETS;
-        scaled_source = positive_phase(
-            scaled_source, (double)V5_POSITION_ROTARY_PERIOD_BUCKETS);
-        distance = fabs(scaled_source - boundary);
-        return fmin(distance,
-            (double)V5_POSITION_ROTARY_PERIOD_BUCKETS - distance);
-    }
-    return fabs(scaled_source - ((double)stable + (double)bucket) * 0.5);
-}
-
-void v5_position_display_stabilizer_reset(
-    V5PositionDisplayStabilizer *stabilizer)
-{
-    if (stabilizer) memset(stabilizer, 0, sizeof(*stabilizer));
-}
-
-static int stabilize_positions(
-    V5PositionDisplayStabilizer *stabilizer,
-    double mcs[V5_POSITION_AXIS_COUNT],
-    double commanded[V5_POSITION_AXIS_COUNT],
-    const double source_mcs[V5_POSITION_AXIS_COUNT],
-    const double source_commanded[V5_POSITION_AXIS_COUNT],
-    const double unit_per_count[V5_POSITION_AXIS_COUNT],
-    const uint32_t axis_code[V5_POSITION_AXIS_COUNT],
-    uint64_t generation)
-{
-    double *values[2] = {mcs, commanded};
-    const double *sources[2] = {source_mcs, source_commanded};
-    size_t group;
-    size_t axis;
-
-    if (!stabilizer || !generation) return 0;
-    if (stabilizer->last_generation_valid) {
-        if (generation == stabilizer->last_generation) {
-            for (group = 0u; group < 2u; ++group) {
-                for (axis = 0u; axis < V5_POSITION_AXIS_COUNT; ++axis) {
-                    size_t index = group * V5_POSITION_AXIS_COUNT + axis;
-                    if (!stabilizer->stable_valid[index]) return 0;
-                    values[group][axis] =
-                        (double)stabilizer->stable[index] /
-                        V5_POSITION_DISPLAY_SCALE;
-                }
-            }
-            return 1;
-        }
-        if (generation < stabilizer->last_generation) {
-            v5_position_display_stabilizer_reset(stabilizer);
-        } else if (generation != stabilizer->last_generation + 1u) {
-            memset(stabilizer->candidate_valid, 0,
-                sizeof(stabilizer->candidate_valid));
-        }
-    }
-    for (group = 0u; group < 2u; ++group) {
-        for (axis = 0u; axis < V5_POSITION_AXIS_COUNT; ++axis) {
-            size_t index = group * V5_POSITION_AXIS_COUNT + axis;
-            int64_t bucket;
-            int64_t distance;
-            int rotary = rotary_index(axis_code[axis]) >= 0;
-            double threshold;
-            if (!isfinite(values[group][axis]) ||
-                !isfinite(sources[group][axis]) ||
-                !isfinite(unit_per_count[axis]) || unit_per_count[axis] <= 0.0) {
-                return 0;
-            }
-            bucket = (int64_t)llround(
-                values[group][axis] * V5_POSITION_DISPLAY_SCALE);
-            if (rotary) {
-                bucket %= V5_POSITION_ROTARY_PERIOD_BUCKETS;
-                if (bucket < 0) bucket += V5_POSITION_ROTARY_PERIOD_BUCKETS;
-            }
-            if (!stabilizer->stable_valid[index]) {
-                stabilizer->stable[index] = bucket;
-                stabilizer->stable_valid[index] = 1u;
-                stabilizer->candidate_valid[index] = 0u;
-                continue;
-            }
-            distance = bucket_distance(
-                rotary, bucket, stabilizer->stable[index]);
-            if (bucket == stabilizer->stable[index]) {
-                stabilizer->candidate_valid[index] = 0u;
-            } else if (distance == 1) {
-                threshold = fmax(
-                    V5_DISPLAY_BOUNDARY_HYSTERESIS_BUCKETS,
-                    unit_per_count[axis] * V5_POSITION_DISPLAY_SCALE);
-                if (boundary_distance(
-                        rotary, stabilizer->stable[index], bucket,
-                        sources[group][axis]) <= threshold + 1.0e-9) {
-                    stabilizer->candidate_valid[index] = 0u;
-                } else if (stabilizer->candidate_valid[index] &&
-                           stabilizer->candidate[index] == bucket) {
-                    stabilizer->stable[index] = bucket;
-                    stabilizer->candidate_valid[index] = 0u;
-                } else {
-                    stabilizer->candidate[index] = bucket;
-                    stabilizer->candidate_valid[index] = 1u;
-                }
-            } else {
-                stabilizer->stable[index] = bucket;
-                stabilizer->candidate_valid[index] = 0u;
-            }
-        }
-    }
-    stabilizer->last_generation = generation;
-    stabilizer->last_generation_valid = 1;
-    for (group = 0u; group < 2u; ++group) {
-        for (axis = 0u; axis < V5_POSITION_AXIS_COUNT; ++axis) {
-            size_t index = group * V5_POSITION_AXIS_COUNT + axis;
-            values[group][axis] = (double)stabilizer->stable[index] /
-                V5_POSITION_DISPLAY_SCALE;
-        }
-    }
-    return 1;
+    if (!isfinite(scaled)) return value;
+    bucket = (int64_t)(scaled >= 0.0 ?
+        floor(scaled + 0.5 + 1.0e-9) :
+        ceil(scaled - 0.5 - 1.0e-9));
+    bucket %= V5_POSITION_ROTARY_PERIOD_BUCKETS;
+    if (bucket < 0) bucket += V5_POSITION_ROTARY_PERIOD_BUCKETS;
+    return bucket == 0 ? 0.0 :
+        (double)bucket / V5_POSITION_DISPLAY_SCALE;
 }
 
 static int project_positions(
@@ -325,24 +193,22 @@ int v5_position_status_build(
     uint32_t sequence,
     uint64_t source_acquired_mono_ns,
     uint64_t source_generation,
-    V5PositionDisplayStabilizer *stabilizer,
     V5NativePositionStatusBlock *block)
 {
     double mcs[V5_POSITION_AXIS_COUNT];
     double commanded[V5_POSITION_AXIS_COUNT];
-    double source_mcs[V5_POSITION_AXIS_COUNT];
-    double source_commanded[V5_POSITION_AXIS_COUNT];
     int positions_valid;
     size_t axis;
 
-    if (!source || !stabilizer || !block || !writer_identity || !sequence ||
+    if (!source || !block || !writer_identity || !sequence ||
         (sequence & 1u) || !source_acquired_mono_ns || !source_generation ||
         !display_metadata_valid(&source->display)) {
         return 0;
     }
     for (axis = 0u; axis < V5_POSITION_AXIS_COUNT; ++axis) {
         if (!isfinite(source->actual[axis]) ||
-            !isfinite(source->commanded[axis])) return 0;
+            !isfinite(source->commanded[axis]) ||
+            !isfinite(source->following_error[axis])) return 0;
     }
     if (!isfinite(source->spindle_speed_rpm) ||
         !isfinite(source->linear_velocity_mm_per_min) ||
@@ -369,17 +235,14 @@ int v5_position_status_build(
         block->display_digits[axis] = 3u;
     }
     if (positions_valid) {
-        memcpy(source_mcs, mcs, sizeof(source_mcs));
-        memcpy(source_commanded, commanded, sizeof(source_commanded));
         for (axis = 0u; axis < V5_POSITION_AXIS_COUNT; ++axis) {
-            mcs[axis] = display_projection(mcs[axis]);
-            commanded[axis] = display_projection(commanded[axis]);
-        }
-        if (!stabilize_positions(
-                stabilizer, mcs, commanded, source_mcs, source_commanded,
-                source->display.unit_per_count,
-                source->display.axis_code, source_generation)) {
-            return 0;
+            if (rotary_index(source->display.axis_code[axis]) >= 0) {
+                mcs[axis] = rotary_display_projection(mcs[axis]);
+                commanded[axis] = rotary_display_projection(commanded[axis]);
+            } else {
+                mcs[axis] = display_projection(mcs[axis]);
+                commanded[axis] = display_projection(commanded[axis]);
+            }
         }
         block->valid_mask |=
             V5_POSITION_VALID_MCS | V5_POSITION_VALID_CMD_MCS;
@@ -387,11 +250,8 @@ int v5_position_status_build(
             block->mcs[axis] = mcs[axis];
             block->cmd_mcs[axis] = commanded[axis];
             block->following_error[axis] =
-                mcs[axis] == commanded[axis] ? 0.0 :
-                mcs[axis] - commanded[axis];
+                display_projection(source->following_error[axis]);
         }
-    } else {
-        v5_position_display_stabilizer_reset(stabilizer);
     }
     block->spindle_speed_rpm = source->spindle_speed_rpm;
     block->linear_velocity_mm_per_min =

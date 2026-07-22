@@ -263,6 +263,87 @@ def drive_timeout_for_action(drive_action: str) -> float:
     return DRIVE_ACTION_TIMEOUTS.get(str(drive_action or ""), DRIVE_TIMEOUT_S)
 
 
+def drive_sync_evidence(result: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "ok": bool(result.get("ok")),
+        "code": str(result.get("code") or ""),
+        "message_cn": str(result.get("display_message_cn") or result.get("message_cn") or ""),
+        "write_executed": bool(result.get("write_executed")),
+        "motion_executed": bool(result.get("motion_executed")),
+    }
+
+
+def run_drive_action_from_current_owners(
+        drive_action: str,
+        timeout_s: float,
+        request: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    reload_result = v5_drive_bus_action.preload_resident_state()
+    reload_evidence = {
+        "ok": bool(reload_result.get("ok")),
+        "settings_runtime_loaded": bool(reload_result.get("settings_runtime_loaded")),
+        "runtime_ini_loaded": bool(reload_result.get("runtime_ini_loaded")),
+        "self_slave_bindings_loaded": bool(reload_result.get("self_slave_bindings_loaded")),
+        "drive_snapshot_loaded": bool(reload_result.get("drive_snapshot_loaded")),
+    }
+    if not reload_evidence["ok"]:
+        result = {
+            "schema": "v5.drive_bus_action.v1",
+            "generated_at": now_utc(),
+            "action": drive_action,
+            "ok": False,
+            "code": "DRIVE_ACTION_OWNER_RELOAD_FAILED",
+            "message_cn": "当前运动模型、逻辑轴从站映射或驱动参数未能同代重载，未写驱动并保持 Machine Off。",
+            "write_executed": False,
+            "drive_write_executed": False,
+            "motion_executed": False,
+            "owner_reload": reload_evidence,
+        }
+        v5_drive_bus_action.write_json(v5_drive_bus_action.result_path(drive_action), result)
+        return result
+    result = v5_drive_bus_action.run_action(
+        drive_action, timeout_s, False, request or {"action": drive_action})
+    result["owner_reload"] = reload_evidence
+    v5_drive_bus_action.write_json(v5_drive_bus_action.result_path(drive_action), result)
+    return result
+
+
+def run_save_restart_with_drive_sync(
+        action: str,
+        spec: Dict[str, Any],
+        request: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    drive_request = dict(request or {})
+    drive_request["action"] = "drive_set_parameters"
+    drive_request["trigger"] = "settings_save_and_restart"
+    drive_result = run_drive_action_from_current_owners(
+        "set-drive",
+        drive_timeout_for_action("set-drive"),
+        drive_request,
+    )
+    drive_evidence = drive_sync_evidence(drive_result)
+    if not drive_evidence["ok"]:
+        return {
+            "schema": "v5.settings_action_result.v1",
+            "generated_at": now_utc(),
+            "action": action,
+            "owner": spec.get("owner", ""),
+            "ok": False,
+            "code": "SETTINGS_SAVE_RESTART_DRIVE_SYNC_FAILED",
+            "message_cn": "保存并重启前设置驱动未闭合，电子齿轮或必需驱动参数 fresh readback 未一致，已保持不重启。",
+            "display_message_cn": drive_evidence["message_cn"] or "设置驱动失败，已保持不重启。",
+            "write_executed": drive_evidence["write_executed"],
+            "motion_executed": drive_evidence["motion_executed"],
+            "restart_executed": False,
+            "restart_commit_required": False,
+            "drive_sync": drive_evidence,
+        }
+    result = run_restart_handoff(action, spec)
+    result["drive_sync"] = drive_evidence
+    if result.get("ok"):
+        result["message_cn"] = "设置驱动及电子齿轮 fresh readback 已一致，系统级重启已准备，等待关闭结果窗后提交。"
+        result["display_message_cn"] = "设置驱动校验完成，点击关闭后黑屏并重启。"
+    return result
+
+
 def execute_action(action: str, request: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     spec = ACTIONS.get(action)
     if not spec:
@@ -279,14 +360,18 @@ def execute_action(action: str, request: Optional[Dict[str, Any]] = None) -> Dic
     try:
         if spec.get("handler") == "drive":
             drive_action = str(spec.get("drive_action", ""))
-            result = v5_drive_bus_action.run_action(drive_action, drive_timeout_for_action(drive_action), True, request or {"action": action})
+            result = run_drive_action_from_current_owners(
+                drive_action,
+                drive_timeout_for_action(drive_action),
+                request or {"action": action},
+            )
             if action == "settings_axis_zero" and bool(result.get("ok")):
                 write_json(result_path, result)
         elif spec.get("handler") == "auth":
             result = run_auth_action(action, spec)
             write_json(result_path, result)
         elif spec.get("handler") == "restart":
-            result = run_restart_handoff(action, spec)
+            result = run_save_restart_with_drive_sync(action, spec, request)
             write_json(result_path, result)
         else:
             result = {

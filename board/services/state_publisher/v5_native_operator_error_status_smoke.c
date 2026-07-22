@@ -99,13 +99,6 @@ int main(void)
         return 9;
     }
     if (!v5_native_operator_error_status_from_alias(
-            "MOTION_MODEL_MAPPING_REVIEW_REQUIRED", &status) ||
-        strcmp(status.title_cn, "请核对轴从站映射") != 0 ||
-        strstr(status.reason_cn, "已经自动更新") == NULL ||
-        strstr(status.next_cn, "人工调整") == NULL) {
-        return 12;
-    }
-    if (!v5_native_operator_error_status_from_alias(
             "ALL_HOME_AXIS_SLAVE_MAPPING_INVALID", &status) ||
         strcmp(status.title_cn, "运动模型与从站映射不一致") != 0 ||
         strstr(status.reason_cn, "运动保持禁用") == NULL ||

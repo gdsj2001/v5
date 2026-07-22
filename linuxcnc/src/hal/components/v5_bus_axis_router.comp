@@ -52,14 +52,6 @@ pin in u32 joint-controlword-##[5]
     "Controlword requested by logical joint ##";
 pin in s32 joint-target-position-##[5]
     "Target position count requested by logical joint ##";
-pin in bit joint-drive-enable-##[5]
-    "Final realtime safety-gated enable for logical joint ##";
-pin in float joint-max-velocity-##[5]
-    "Runtime owner maximum mechanical velocity in units per second";
-pin in float joint-max-acceleration-##[5]
-    "Runtime owner maximum mechanical acceleration in units per second squared";
-pin in float joint-scale-##[5]
-    "Runtime owner signed drive counts per mechanical unit";
 
 pin out u32 joint-statusword-##[5]
     "Statusword routed back to logical joint ##";
@@ -71,8 +63,14 @@ pin out u32 slave-controlword-##[5]
     "Controlword routed to physical slave position ##";
 pin out s32 slave-target-position-##[5]
     "Target position count routed to physical slave position ##";
-pin out bit joint-limit-ok-##[5]
-    "True when the physical-count velocity/acceleration envelope is valid";
+pin out s32 desired-raw-##[5]
+    "Same-cycle physical target requested by logical joint ##";
+pin out s32 accepted-raw-##[5]
+    "Same-cycle physical target written unchanged to slave output by logical joint ##";
+pin out s32 actual-raw-##[5]
+    "Same-cycle physical feedback count used by logical joint ##";
+pin out u32 diagnostic-seq
+    "Even non-zero sequence after one complete desired/accepted/actual diagnostic commit";
 pin out float wcp-base-##[3]
     "Resident software window base in exact integer counts for A/B/C";
 pin out s32 wcp-runtime-##[3]
@@ -104,10 +102,7 @@ variable hal_u32_t generation_state = 0;
 variable hal_u32_t commit_seq_state = 0;
 variable hal_u32_t last_seen_commit_seq = 0;
 variable hal_bit_t mapping_latched = 0;
-variable double target_limiter_input_old_state[5] = 0;
-variable double target_limiter_output_state[5] = 0;
-variable double target_limiter_output_old_state[5] = 0;
-variable int target_limiter_initialized_state[5] = 0;
+variable hal_u32_t diagnostic_seq_state = 0;
 
 function read fp;
 function write fp;
@@ -117,8 +112,6 @@ author "V5 project";
 ;;
 
 #include <stdint.h>
-#include "rtapi_math.h"
-#include "hal/components/v5_bus_axis_target_limiter.h"
 
 #define V5_BUS_AXIS_ROUTER_JOINTS 5
 #define V5_BUS_AXIS_ROUTER_ROTARY_AXES 3
@@ -245,9 +238,6 @@ FUNCTION(read) {
             wcheckpoint_generation_state[axis] = 0;
             wcheckpoint_valid_state[axis] = 0;
         }
-        for (joint = 0; joint < V5_BUS_AXIS_ROUTER_JOINTS; joint++) {
-            target_limiter_initialized_state[joint] = 0;
-        }
         for (axis = 0; axis < V5_BUS_AXIS_ROUTER_ROTARY_AXES; axis++) {
             wcp_base(axis) = wcheckpoint_base_state[axis];
             wcp_gen(axis) = wcheckpoint_generation_state[axis];
@@ -344,9 +334,6 @@ FUNCTION(read) {
             generation_state = candidate_generation;
             commit_seq_state = mapping_commit_seq;
             mapping_latched = 1;
-            for (joint = 0; joint < V5_BUS_AXIS_ROUTER_JOINTS; joint++) {
-                target_limiter_initialized_state[joint] = 0;
-            }
             rejected_commit_seq = 0;
             for (axis = 0; axis < V5_BUS_AXIS_ROUTER_ROTARY_AXES; axis++) {
                 wcheckpoint_base_state[axis] = 0.0;
@@ -446,7 +433,11 @@ FUNCTION(write) {
     int slave;
     int axis;
     hal_s32_t physical_target;
-    hal_s32_t limited_target;
+
+    diagnostic_seq_state++;
+    if (diagnostic_seq_state == 0)
+        diagnostic_seq_state = 1;
+    diagnostic_seq = diagnostic_seq_state;
 
     /*
      * The write phase runs after cia402.write.  Establish safe physical
@@ -457,10 +448,16 @@ FUNCTION(write) {
         slave_target_position(slave) = slave_actual_position(slave);
     }
     for (joint = 0; joint < V5_BUS_AXIS_ROUTER_JOINTS; joint++) {
-        joint_limit_ok(joint) = 0;
+        desired_raw(joint) = 0;
+        accepted_raw(joint) = 0;
+        actual_raw(joint) = 0;
     }
 
     if (!table_mapping_valid || !mapping_latched) {
+        diagnostic_seq_state++;
+        if (diagnostic_seq_state == 0)
+            diagnostic_seq_state = 2;
+        diagnostic_seq = diagnostic_seq_state;
         return;
     }
 
@@ -470,6 +467,7 @@ FUNCTION(write) {
         }
 
         slave = (int)slave_for_joint_state[joint];
+        actual_raw(joint) = slave_actual_position(slave);
         physical_target = joint_target_position(joint);
         axis = v5_bus_router_rotary_index(axis_for_joint_state[joint]);
         if (axis >= 0 && wcheckpoint_valid_state[axis]) {
@@ -479,23 +477,14 @@ FUNCTION(write) {
         }
         physical_target = v5_bus_router_add_offset(
             physical_target, zero_for_joint_state[joint]);
-        if (!v5_bus_axis_target_limiter_step(
-                joint_drive_enable(joint),
-                physical_target,
-                slave_actual_position(slave),
-                joint_max_velocity(joint),
-                joint_max_acceleration(joint),
-                joint_scale(joint),
-                fperiod,
-                &target_limiter_input_old_state[joint],
-                &target_limiter_output_state[joint],
-                &target_limiter_output_old_state[joint],
-                &target_limiter_initialized_state[joint],
-                &limited_target)) {
-            continue;
-        }
-        joint_limit_ok(joint) = 1;
+        desired_raw(joint) = physical_target;
+        accepted_raw(joint) = physical_target;
         slave_controlword(slave) = joint_controlword(joint);
-        slave_target_position(slave) = limited_target;
+        slave_target_position(slave) = physical_target;
     }
+
+    diagnostic_seq_state++;
+    if (diagnostic_seq_state == 0)
+        diagnostic_seq_state = 2;
+    diagnostic_seq = diagnostic_seq_state;
 }

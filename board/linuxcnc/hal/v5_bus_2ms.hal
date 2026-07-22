@@ -32,23 +32,6 @@ setp v5-bus-axis-router.wcp-red-den-02 [AXIS_C]LOAD_REV
 setp v5-bus-axis-router.wcp-raw-bits-00 [AXIS_A]WCHECKPOINT_COMMAND_RAW_BITS
 setp v5-bus-axis-router.wcp-raw-bits-01 [AXIS_B]WCHECKPOINT_COMMAND_RAW_BITS
 setp v5-bus-axis-router.wcp-raw-bits-02 [AXIS_C]WCHECKPOINT_COMMAND_RAW_BITS
-# The physical PDO envelope consumes the same runtime INI owners as motion.
-# It is transparent to valid trajectories and only shapes discontinuities.
-setp v5-bus-axis-router.joint-max-velocity-00 [JOINT_0]MAX_VELOCITY
-setp v5-bus-axis-router.joint-max-velocity-01 [JOINT_1]MAX_VELOCITY
-setp v5-bus-axis-router.joint-max-velocity-02 [JOINT_2]MAX_VELOCITY
-setp v5-bus-axis-router.joint-max-velocity-03 [JOINT_3]MAX_VELOCITY
-setp v5-bus-axis-router.joint-max-velocity-04 [JOINT_4]MAX_VELOCITY
-setp v5-bus-axis-router.joint-max-acceleration-00 [JOINT_0]MAX_ACCELERATION
-setp v5-bus-axis-router.joint-max-acceleration-01 [JOINT_1]MAX_ACCELERATION
-setp v5-bus-axis-router.joint-max-acceleration-02 [JOINT_2]MAX_ACCELERATION
-setp v5-bus-axis-router.joint-max-acceleration-03 [JOINT_3]MAX_ACCELERATION
-setp v5-bus-axis-router.joint-max-acceleration-04 [JOINT_4]MAX_ACCELERATION
-setp v5-bus-axis-router.joint-scale-00 [JOINT_0]SCALE
-setp v5-bus-axis-router.joint-scale-01 [JOINT_1]SCALE
-setp v5-bus-axis-router.joint-scale-02 [JOINT_2]SCALE
-setp v5-bus-axis-router.joint-scale-03 [JOINT_3]SCALE
-setp v5-bus-axis-router.joint-scale-04 [JOINT_4]SCALE
 loadrt bitslice names=j0-din,j1-din,j2-din,j3-din,j4-din personality=31,31,31,31,31
 loadrt mux2 count=1
 loadrt or2 count=2
@@ -406,11 +389,11 @@ net j1-enable-request joint.1.amp-enable-out => and2.2.in0
 net j2-enable-request joint.2.amp-enable-out => and2.3.in0
 net j3-enable-request joint.3.amp-enable-out => and2.4.in0
 net j4-enable-request joint.4.amp-enable-out => and2.5.in0
-net j0-enable and2.1.out => cia402.0.enable v5-bus-axis-router.joint-drive-enable-00
-net j1-enable and2.2.out => cia402.1.enable v5-bus-axis-router.joint-drive-enable-01
-net j2-enable and2.3.out => cia402.2.enable v5-bus-axis-router.joint-drive-enable-02
-net j3-enable and2.4.out => cia402.3.enable v5-bus-axis-router.joint-drive-enable-03
-net j4-enable and2.5.out => cia402.4.enable v5-bus-axis-router.joint-drive-enable-04
+net j0-enable and2.1.out => cia402.0.enable
+net j1-enable and2.2.out => cia402.1.enable
+net j2-enable and2.3.out => cia402.2.enable
+net j3-enable and2.4.out => cia402.3.enable
+net j4-enable and2.5.out => cia402.4.enable
 net j0-pos-cmd joint.0.motor-pos-cmd => cia402.0.pos-cmd
 net j1-pos-cmd joint.1.motor-pos-cmd => cia402.1.pos-cmd
 net j2-pos-cmd joint.2.motor-pos-cmd => cia402.2.pos-cmd

@@ -4,7 +4,6 @@
 #include "v5_settings_axis_table.h"
 #include "v5_lvgl_remote_display.h"
 #include "v5_motion_model_registry.h"
-#include "v5_native_operator_error_status.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -41,32 +40,6 @@ static void settings_motion_model_close_dropdown_async(void *object)
     if (object) {
         lv_dropdown_close((lv_obj_t *)object);
     }
-}
-
-static void settings_motion_model_show_mapping_review(V5SettingsPage *page)
-{
-    V5NativeOperatorErrorStatus prompt;
-    char body[1024];
-    if (!page ||
-        !v5_native_operator_error_status_from_alias(
-            "MOTION_MODEL_MAPPING_REVIEW_REQUIRED",
-            &prompt)) {
-        return;
-    }
-    snprintf(
-        body,
-        sizeof(body),
-        "提示: %s\n\n原因: %s\n\n下一步: %s",
-        prompt.title_cn,
-        prompt.reason_cn,
-        prompt.next_cn);
-    v5_settings_page_popup_show(
-        page,
-        "motion_model_mapping_review",
-        "运动模型",
-        body,
-        1,
-        0);
 }
 
 static void settings_motion_model_changed_cb(lv_event_t *event)
@@ -107,7 +80,11 @@ static void settings_motion_model_changed_cb(lv_event_t *event)
             "运动模型: %s",
             v5_settings_axis_table_motion_model_value());
         if (actual_change) {
-            settings_motion_model_show_mapping_review(page);
+            V5MainPageActionReport drive_report;
+            (void)v5_settings_page_trigger_action(
+                page,
+                V5_MAIN_PAGE_ACTION_SETTINGS_SET_DRIVE,
+                &drive_report);
         }
     } else {
         v5_settings_page_set_status_text(page, 245, 214, 82, "运动模型: owner readback 未确认");

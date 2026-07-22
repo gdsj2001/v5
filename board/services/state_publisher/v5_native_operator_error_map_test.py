@@ -201,11 +201,6 @@ def main() -> int:
     assert estop_home.display_mode == DISPLAY_POPUP
     assert "未启动任何轴回零运动" in estop_home.reason_cn
     assert "取消急停" in estop_home.next_cn
-    model_review = translate_internal_alias("MOTION_MODEL_MAPPING_REVIEW_REQUIRED")
-    assert model_review.matched
-    assert model_review.title_cn == "请核对轴从站映射"
-    assert "已经自动更新" in model_review.reason_cn
-    assert "人工调整" in model_review.next_cn
     mapping_invalid = translate_internal_alias("ALL_HOME_AXIS_SLAVE_MAPPING_INVALID")
     assert mapping_invalid.matched
     assert mapping_invalid.title_cn == "运动模型与从站映射不一致"

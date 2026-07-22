@@ -175,14 +175,31 @@ def main() -> int:
 
     for token in (
         "pin in u32 joint-axis-code-##[5]",
+        "pin out s32 desired-raw-##[5]",
+        "pin out s32 accepted-raw-##[5]",
+        "pin out s32 actual-raw-##[5]",
         "pin out float wcp-base-##[3]",
         "pin out s32 wcp-runtime-##[3]",
         "pin out u32 wcp-gen-##[3]",
         "v5_bus_router_wcheckpoint_quantum",
         "v5_bus_router_nearest_quantized",
         "physical_target = v5_bus_router_add_offset",
+        "accepted_raw(joint) = physical_target;",
+        "slave_target_position(slave) = physical_target;",
     ):
         require(router, token)
+    for retired in (
+        "v5_bus_axis_target_limiter_step",
+        "target_limiter_",
+        "limiter-active",
+        "lag-counts",
+        "joint-limit-ok",
+        "joint-max-velocity",
+        "joint-max-acceleration",
+        "joint-drive-enable",
+    ):
+        if retired in router or retired in hal:
+            raise AssertionError(f"retired PDO target limiter survived: {retired}")
     for token in (
         "v5-bus-axis-router.wcp-base-00 => motion.v5-wcheckpoint-a-router-base-counts",
         "v5-bus-axis-router.wcp-runtime-00 => motion.v5-wcheckpoint-a-router-runtime-counts",
@@ -223,7 +240,7 @@ def main() -> int:
         if dead in router:
             raise AssertionError(f"retired router pin survived: {dead}")
     require(router, "function read fp;")
-    require(router, "function write nofp;")
+    require(router, "function write fp;")
     require(router, "option singleton yes;")
     require(router, "rejected-commit-seq")
     require(router, "last_seen_commit_seq")
