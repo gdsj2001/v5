@@ -1,0 +1,126 @@
+83-    *degrees = phase / fabs(counts_per_unit);
+84-    return isfinite(*degrees);
+85-}
+86-
+87:static double display_projection(double value)
+88-{
+89-    double scaled = value * V5_POSITION_DISPLAY_SCALE;
+90-    double bucket;
+91-    double projected;
+--
+95-    projected = bucket / V5_POSITION_DISPLAY_SCALE;
+96-    return projected == 0.0 ? 0.0 : projected;
+97-}
+98-
+99:static double rotary_display_projection(double value)
+100-{
+101-    double scaled = value * V5_POSITION_DISPLAY_SCALE;
+102-    int64_t bucket;
+103-
+--
+119-    size_t axis;
+120-    int rotary_records = 0;
+121-    uint32_t seen_slots = 0u;
+122-
+123:    memcpy(mcs, source->actual, sizeof(source->actual));
+124:    memcpy(commanded, source->commanded, sizeof(source->commanded));
+125:    if (source->mapping.state == V5_POSITION_MAPPING_ABSENT) {
+126-        for (axis = 0u; axis < V5_POSITION_AXIS_COUNT; ++axis) {
+127:            if (rotary_index(source->display.axis_code[axis]) >= 0) {
+128-                mcs[axis] = positive_phase(mcs[axis], 360.0);
+129-                commanded[axis] = positive_phase(commanded[axis], 360.0);
+130-            }
+131-        }
+132-        return 1;
+133-    }
+134:    if (source->mapping.state != V5_POSITION_MAPPING_VALID ||
+135:        !source->mapping.generation || !source->mapping.commit_seq ||
+136:        !source->mapping.active_mask ||
+137:        (source->mapping.active_mask & ~V5_DISPLAY_EXPECTED_MASK)) {
+138-        return 0;
+139-    }
+140-    for (axis = 0u; axis < V5_POSITION_AXIS_COUNT; ++axis) {
+141-        const V5PositionHomeJoint *joint;
+--
+143-        int64_t counts_per_revolution;
+144-        const V5PositionRotaryCheckpoint *checkpoint;
+145-        int64_t base_counts;
+146-        double command_counts;
+147:        if (!(source->mapping.active_mask & (1u << axis))) continue;
+148:        joint = &source->mapping.joints[axis];
+149:        if (joint->generation != source->mapping.generation ||
+150-            joint->status_slot >= V5_POSITION_AXIS_COUNT ||
+151-            !isfinite(joint->counts_per_unit) || joint->counts_per_unit <= 0.0) {
+152-            return 0;
+153-        }
+154-        index = rotary_index(joint->axis_code);
+155-        if (index < 0) continue;
+156-        if ((seen_slots & (1u << joint->status_slot)) ||
+157:            source->display.axis_code[joint->status_slot] != joint->axis_code ||
+158-            !exact_count(fabs(joint->counts_per_unit) * 360.0,
+159-                &counts_per_revolution) || counts_per_revolution <= 0) {
+160-            return 0;
+161-        }
+162-        seen_slots |= 1u << joint->status_slot;
+163:        checkpoint = &source->checkpoint[index];
+164-        if (!checkpoint->valid || !checkpoint->generation ||
+165-            !isfinite(checkpoint->logical_counts) ||
+166-            !exact_count(checkpoint->base_counts, &base_counts) ||
+167-            !isfinite(checkpoint->runtime_counts) ||
+--
+201-    size_t axis;
+202-
+203-    if (!source || !block || !writer_identity || !sequence ||
+204-        (sequence & 1u) || !source_acquired_mono_ns || !source_generation ||
+205:        !display_metadata_valid(&source->display)) {
+206-        return 0;
+207-    }
+208-    for (axis = 0u; axis < V5_POSITION_AXIS_COUNT; ++axis) {
+209:        if (!isfinite(source->actual[axis]) ||
+210:            !isfinite(source->commanded[axis]) ||
+211:            !isfinite(source->following_error[axis])) return 0;
+212-    }
+213:    if (!isfinite(source->spindle_speed_rpm) ||
+214:        !isfinite(source->linear_velocity_mm_per_min) ||
+215:        !isfinite(source->feed_override_percent) ||
+216:        !isfinite(source->spindle_override_percent)) {
+217-        return 0;
+218-    }
+219-    positions_valid = project_positions(source, mcs, commanded);
+220-    memset(block, 0, sizeof(*block));
+--
+230-        V5_POSITION_VALID_LINEAR_VELOCITY |
+231-        V5_POSITION_VALID_FEED_OVERRIDE |
+232-        V5_POSITION_VALID_SPINDLE_OVERRIDE;
+233-    for (axis = 0u; axis < V5_POSITION_AXIS_COUNT; ++axis) {
+234:        block->unit_per_count[axis] = source->display.unit_per_count[axis];
+235-        block->display_digits[axis] = 3u;
+236-    }
+237-    if (positions_valid) {
+238-        for (axis = 0u; axis < V5_POSITION_AXIS_COUNT; ++axis) {
+239:            if (rotary_index(source->display.axis_code[axis]) >= 0) {
+240-                mcs[axis] = rotary_display_projection(mcs[axis]);
+241-                commanded[axis] = rotary_display_projection(commanded[axis]);
+242-            } else {
+243:                mcs[axis] = display_projection(mcs[axis]);
+244-                commanded[axis] = display_projection(commanded[axis]);
+245-            }
+246-        }
+247-        block->valid_mask |=
+--
+249-        for (axis = 0u; axis < V5_POSITION_AXIS_COUNT; ++axis) {
+250-            block->mcs[axis] = mcs[axis];
+251-            block->cmd_mcs[axis] = commanded[axis];
+252-            block->following_error[axis] =
+253:                display_projection(source->following_error[axis]);
+254-        }
+255-    }
+256:    block->spindle_speed_rpm = source->spindle_speed_rpm;
+257-    block->linear_velocity_mm_per_min =
+258:        source->linear_velocity_mm_per_min;
+259:    block->feedrate_override = source->feed_override_percent;
+260:    block->spindle_override = source->spindle_override_percent;
+261-    block->crc32 = v5_native_position_status_crc32(block);
+262-    return 1;
+263-}
+264-

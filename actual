@@ -1,0 +1,65 @@
+board\services\state_publisher\v5_position_status_publisher_core.c:123:    memcpy(mcs, source->actual, sizeof(source->actual));
+board\services\state_publisher\v5_position_status_publisher_core.c:124:    memcpy(commanded, source->commanded, sizeof(source->commanded));
+board\services\state_publisher\v5_position_status_publisher_core.c:125:    if (source->mapping.state == V5_POSITION_MAPPING_ABSENT) {
+board\services\state_publisher\v5_position_status_publisher_core.c:127:            if (rotary_index(source->display.axis_code[axis]) >= 0) {
+board\services\state_publisher\v5_position_status_publisher_core.c:134:    if (source->mapping.state != V5_POSITION_MAPPING_VALID ||
+board\services\state_publisher\v5_position_status_publisher_core.c:135:        !source->mapping.generation || !source->mapping.commit_seq ||
+board\services\state_publisher\v5_position_status_publisher_core.c:136:        !source->mapping.active_mask ||
+board\services\state_publisher\v5_position_status_publisher_core.c:137:        (source->mapping.active_mask & ~V5_DISPLAY_EXPECTED_MASK)) {
+board\services\state_publisher\v5_position_status_publisher_core.c:147:        if (!(source->mapping.active_mask & (1u << axis))) continue;
+board\services\state_publisher\v5_position_status_publisher_core.c:148:        joint = &source->mapping.joints[axis];
+board\services\state_publisher\v5_position_status_publisher_core.c:149:        if (joint->generation != source->mapping.generation ||
+board\services\state_publisher\v5_position_status_publisher_core.c:157:            source->display.axis_code[joint->status_slot] != joint->axis_code ||
+board\services\state_publisher\v5_position_status_publisher_core.c:163:        checkpoint = &source->checkpoint[index];
+board\services\state_publisher\v5_position_status_publisher_core.c:205:        !display_metadata_valid(&source->display)) {
+board\services\state_publisher\v5_position_status_publisher_core.c:209:        if (!isfinite(source->actual[axis]) ||
+board\services\state_publisher\v5_position_status_publisher_core.c:210:            !isfinite(source->commanded[axis]) ||
+board\services\state_publisher\v5_position_status_publisher_core.c:211:            !isfinite(source->following_error[axis])) return 0;
+board\services\state_publisher\v5_position_status_publisher_core.c:213:    if (!isfinite(source->spindle_speed_rpm) ||
+board\services\state_publisher\v5_position_status_publisher_core.c:214:        !isfinite(source->linear_velocity_mm_per_min) ||
+board\services\state_publisher\v5_position_status_publisher_core.c:215:        !isfinite(source->feed_override_percent) ||
+board\services\state_publisher\v5_position_status_publisher_core.c:216:        !isfinite(source->spindle_override_percent)) {
+board\services\state_publisher\v5_position_status_publisher_core.c:234:        block->unit_per_count[axis] = source->display.unit_per_count[axis];
+board\services\state_publisher\v5_position_status_publisher_core.c:239:            if (rotary_index(source->display.axis_code[axis]) >= 0) {
+board\services\state_publisher\v5_position_status_publisher_core.c:253:                display_projection(source->following_error[axis]);
+board\services\state_publisher\v5_position_status_publisher_core.c:256:    block->spindle_speed_rpm = source->spindle_speed_rpm;
+board\services\state_publisher\v5_position_status_publisher_core.c:258:        source->linear_velocity_mm_per_min;
+board\services\state_publisher\v5_position_status_publisher_core.c:259:    block->feedrate_override = source->feed_override_percent;
+board\services\state_publisher\v5_position_status_publisher_core.c:260:    block->spindle_override = source->spindle_override_percent;
+board\services\state_publisher\v5_position_status_publisher_smoke.c:58:    source.actual[0] = 29.9825;
+board\services\state_publisher\v5_position_status_publisher_smoke.c:61:    source.actual[3] = 359.9999;
+board\services\state_publisher\v5_position_status_publisher_smoke.c:134:    source.actual[0] = 0.00051;
+board\services\state_publisher\v5_position_status_publisher_smoke.c:137:    source.actual[0] = 0.00049;
+board\services\state_publisher\v5_position_status_publisher_smoke.c:140:    source.actual[0] = 0.2504;
+board\services\state_publisher\v5_position_status_publisher_smoke.c:156:    source.actual[0] = 359.9999;
+board\services\state_publisher\v5_position_status_publisher_smoke.c:168:    source.actual[3] = 360.0;
+board\services\state_publisher\v5_position_status_publisher_smoke.c:170:    source.actual[4] = -360.0;
+board\services\state_publisher\v5_position_status_publisher_smoke.c:178:    source.actual[3] = 359.9995;
+board\services\state_publisher\v5_position_status_publisher_smoke.c:192:    source.actual[0] = 10.0;
+board\services\state_publisher\v5_position_status_sampler.c:288:        source->display.axis_code[axis] =
+board\services\state_publisher\v5_position_status_sampler.c:290:        source->display.unit_per_count[axis] =
+board\services\state_publisher\v5_position_status_sampler.c:292:        source->actual[axis] = pin_float(&pins->actual[axis]);
+board\services\state_publisher\v5_position_status_sampler.c:293:        source->commanded[axis] = pin_float(&pins->commanded[axis]);
+board\services\state_publisher\v5_position_status_sampler.c:297:    source->spindle_speed_rpm = pin_float(&pins->spindle_speed_rps) * 60.0;
+board\services\state_publisher\v5_position_status_sampler.c:298:    source->linear_velocity_mm_per_min =
+board\services\state_publisher\v5_position_status_sampler.c:300:    source->feed_override_percent =
+board\services\state_publisher\v5_position_status_sampler.c:302:    source->spindle_override_percent =
+board\services\state_publisher\v5_position_status_sampler.c:314:    source->display.generation = display_generation;
+board\services\state_publisher\v5_position_status_sampler.c:315:    source->display.active_mask = display_mask;
+board\services\state_publisher\v5_position_status_sampler.c:316:    source->display.commit_seq = display_commit;
+board\services\state_publisher\v5_position_status_sampler.c:323:        source->mapping.state = V5_POSITION_MAPPING_ABSENT;
+board\services\state_publisher\v5_position_status_sampler.c:326:        source->mapping.state = V5_POSITION_MAPPING_INVALID;
+board\services\state_publisher\v5_position_status_sampler.c:328:        source->mapping.state = V5_POSITION_MAPPING_VALID;
+board\services\state_publisher\v5_position_status_sampler.c:329:        source->mapping.generation = mapping_generation;
+board\services\state_publisher\v5_position_status_sampler.c:330:        source->mapping.active_mask = mapping_mask;
+board\services\state_publisher\v5_position_status_sampler.c:331:        source->mapping.commit_seq = mapping_commit;
+board\services\state_publisher\v5_position_status_sampler.c:333:            source->mapping.joints[axis].generation =
+board\services\state_publisher\v5_position_status_sampler.c:335:            source->mapping.joints[axis].status_slot =
+board\services\state_publisher\v5_position_status_sampler.c:337:            source->mapping.joints[axis].axis_code =
+board\services\state_publisher\v5_position_status_sampler.c:339:            source->mapping.joints[axis].counts_per_unit =
+board\services\state_publisher\v5_position_status_sampler.c:347:            source->mapping.state = V5_POSITION_MAPPING_INVALID;
+board\services\state_publisher\v5_position_status_sampler.c:351:        sample_checkpoint(pins, (unsigned int)axis, &source->checkpoint[axis]);
+board\services\state_publisher\v5_position_status_sampler.c:356:        if (source->mapping.state == V5_POSITION_MAPPING_VALID) {
+board\services\state_publisher\v5_position_status_sampler.c:357:            slot = source->mapping.joints[axis].status_slot;
+board\services\state_publisher\v5_position_status_sampler.c:362:        source->following_error[slot] =
+board\services\state_publisher\v5_position_status_sampler.c:363:            (double)delta * source->display.unit_per_count[slot];
