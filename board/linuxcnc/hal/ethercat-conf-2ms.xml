@@ -5,19 +5,6 @@
       <sdoConfig idx="6060" subIdx="00">
         <sdoDataRaw data="08"/>
       </sdoConfig>
-      <!-- Generated projection of driver profile commissioning_parameters and drive_parameter_table.tsv. -->
-      <sdoConfig idx="2001" subIdx="3e">
-        <sdoDataRaw data="0000"/>
-      </sdoConfig>
-      <sdoConfig idx="2005" subIdx="14">
-        <sdoDataRaw data="0100"/>
-      </sdoConfig>
-      <sdoConfig idx="2008" subIdx="13">
-        <sdoDataRaw data="3200"/>
-      </sdoConfig>
-      <sdoConfig idx="2008" subIdx="14">
-        <sdoDataRaw data="e803"/>
-      </sdoConfig>
       <syncManager idx="2" dir="out">
         <pdo idx="1701">
           <pdoEntry idx="6040" subIdx="00" bitLen="16" halPin="controlword" halType="u32"/>
@@ -44,19 +31,6 @@
       <dcConf assignActivate="300" sync0Cycle="*1" sync0Shift="0"/>
       <sdoConfig idx="6060" subIdx="00">
         <sdoDataRaw data="08"/>
-      </sdoConfig>
-      <!-- Generated projection of driver profile commissioning_parameters and drive_parameter_table.tsv. -->
-      <sdoConfig idx="2001" subIdx="3e">
-        <sdoDataRaw data="0000"/>
-      </sdoConfig>
-      <sdoConfig idx="2005" subIdx="14">
-        <sdoDataRaw data="0100"/>
-      </sdoConfig>
-      <sdoConfig idx="2008" subIdx="13">
-        <sdoDataRaw data="3200"/>
-      </sdoConfig>
-      <sdoConfig idx="2008" subIdx="14">
-        <sdoDataRaw data="e803"/>
       </sdoConfig>
       <syncManager idx="2" dir="out">
         <pdo idx="1701">
@@ -85,19 +59,6 @@
       <sdoConfig idx="6060" subIdx="00">
         <sdoDataRaw data="08"/>
       </sdoConfig>
-      <!-- Generated projection of driver profile commissioning_parameters and drive_parameter_table.tsv. -->
-      <sdoConfig idx="2001" subIdx="3e">
-        <sdoDataRaw data="0000"/>
-      </sdoConfig>
-      <sdoConfig idx="2005" subIdx="14">
-        <sdoDataRaw data="0100"/>
-      </sdoConfig>
-      <sdoConfig idx="2008" subIdx="13">
-        <sdoDataRaw data="3200"/>
-      </sdoConfig>
-      <sdoConfig idx="2008" subIdx="14">
-        <sdoDataRaw data="e803"/>
-      </sdoConfig>
       <syncManager idx="2" dir="out">
         <pdo idx="1701">
           <pdoEntry idx="6040" subIdx="00" bitLen="16" halPin="controlword" halType="u32"/>
@@ -125,19 +86,6 @@
       <sdoConfig idx="6060" subIdx="00">
         <sdoDataRaw data="08"/>
       </sdoConfig>
-      <!-- Generated projection of driver profile commissioning_parameters and drive_parameter_table.tsv. -->
-      <sdoConfig idx="2001" subIdx="3e">
-        <sdoDataRaw data="0000"/>
-      </sdoConfig>
-      <sdoConfig idx="2005" subIdx="14">
-        <sdoDataRaw data="0100"/>
-      </sdoConfig>
-      <sdoConfig idx="2008" subIdx="13">
-        <sdoDataRaw data="3200"/>
-      </sdoConfig>
-      <sdoConfig idx="2008" subIdx="14">
-        <sdoDataRaw data="e803"/>
-      </sdoConfig>
       <syncManager idx="2" dir="out">
         <pdo idx="1701">
           <pdoEntry idx="6040" subIdx="00" bitLen="16" halPin="controlword" halType="u32"/>
@@ -164,19 +112,6 @@
       <dcConf assignActivate="300" sync0Cycle="*1" sync0Shift="0"/>
       <sdoConfig idx="6060" subIdx="00">
         <sdoDataRaw data="08"/>
-      </sdoConfig>
-      <!-- Generated projection of driver profile commissioning_parameters and drive_parameter_table.tsv. -->
-      <sdoConfig idx="2001" subIdx="3e">
-        <sdoDataRaw data="0000"/>
-      </sdoConfig>
-      <sdoConfig idx="2005" subIdx="14">
-        <sdoDataRaw data="0100"/>
-      </sdoConfig>
-      <sdoConfig idx="2008" subIdx="13">
-        <sdoDataRaw data="3200"/>
-      </sdoConfig>
-      <sdoConfig idx="2008" subIdx="14">
-        <sdoDataRaw data="e803"/>
       </sdoConfig>
       <syncManager idx="2" dir="out">
         <pdo idx="1701">

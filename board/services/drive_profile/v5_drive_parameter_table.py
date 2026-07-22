@@ -11,12 +11,6 @@ from v5_drive_bus_contract import AXIS_ORDER, DriveActionError, finite_float
 from v5_drive_sdo import parse_slave_position_token
 
 DRIVE_DISPLAY_FIELDS = {"egear_numerator", "egear_denominator", "write_status"}
-DRIVE_COMMISSIONING_FIELDS = {
-    "csp_command_scheduler_raw",
-    "csp_velocity_feedforward_source_raw",
-    "csp_velocity_feedforward_filter_0p01_ms",
-    "csp_velocity_feedforward_gain_0p1_percent",
-}
 
 def read_parameter_tsv(path: Path) -> List[Tuple[str, str, str]]:
     rows: List[Tuple[str, str, str]] = []
@@ -33,73 +27,6 @@ def read_parameter_tsv(path: Path) -> List[Tuple[str, str, str]]:
         if axis and field and value:
             rows.append((axis, field, value))
     return rows
-
-
-def drive_commissioning_plan(target: Dict[str, Any]) -> List[Dict[str, Any]]:
-    profile = target.get("profile") if isinstance(target.get("profile"), dict) else {}
-    parameters = profile.get("commissioning_parameters")
-    if not isinstance(parameters, dict) or not parameters:
-        return []
-    position = parse_slave_position_token(target.get("position"))
-    axis = str(target.get("axis") or "").upper()
-    slave_key = "SLAVE_%s" % position
-    table = {(row_axis.upper(), field): value for row_axis, field, value in read_parameter_tsv(contract.DRIVE_PARAMETER_TABLE)}
-    plan: List[Dict[str, Any]] = []
-    for name in sorted(parameters):
-        descriptor = parameters.get(name)
-        if not isinstance(descriptor, dict):
-            raise DriveActionError(
-                "DRIVE_COMMISSIONING_DESCRIPTOR_INVALID",
-                "驱动 commissioning 参数描述非法，未写驱动。",
-                {"profile_id": profile.get("profile_id", ""), "parameter": name},
-            )
-        field = str(descriptor.get("field") or "").strip()
-        obj = descriptor.get("object") if isinstance(descriptor.get("object"), dict) else {}
-        data_type = str(descriptor.get("data_type") or "").strip().lower()
-        index = str(obj.get("index") or "").strip()
-        subindex = str(obj.get("subindex") or "").strip()
-        if field not in DRIVE_COMMISSIONING_FIELDS or not index or not subindex or data_type != "uint16":
-            raise DriveActionError(
-                "DRIVE_COMMISSIONING_DESCRIPTOR_INVALID",
-                "驱动 commissioning 参数缺少受支持的字段、对象或类型，未写驱动。",
-                {"profile_id": profile.get("profile_id", ""), "parameter": name, "field": field, "data_type": data_type},
-            )
-        raw_value = table.get((slave_key, field))
-        source = "drive_parameter_table.%s.%s" % (slave_key, field)
-        if raw_value is None and axis:
-            raw_value = table.get((axis, field))
-            source = "drive_parameter_table.%s.%s" % (axis, field)
-        if raw_value is None:
-            raw_value = descriptor.get("default_raw")
-            source = "drive_profile.default_raw"
-        try:
-            expected_raw = int(str(raw_value), 0)
-        except Exception:
-            raise DriveActionError(
-                "DRIVE_COMMISSIONING_VALUE_INVALID",
-                "驱动 commissioning 目标值不是整数，未写驱动。",
-                {"axis": axis, "position": position, "parameter": name, "value": raw_value, "source": source},
-            )
-        if expected_raw < 0 or expected_raw > 65535:
-            raise DriveActionError(
-                "DRIVE_COMMISSIONING_VALUE_RANGE",
-                "驱动 commissioning 目标值超出 UINT16 范围，未写驱动。",
-                {"axis": axis, "position": position, "parameter": name, "value": expected_raw, "source": source},
-            )
-        plan.append({
-            "name": name,
-            "field": field,
-            "object": {"index": index, "subindex": subindex},
-            "data_type": data_type,
-            "expected_raw": expected_raw,
-            "expected_source": source,
-            "requires_disabled": bool(descriptor.get("requires_disabled", True)),
-            "readback_required": bool(descriptor.get("readback_required", True)),
-            "vendor_parameter": str(descriptor.get("vendor_parameter") or ""),
-            "unit": str(descriptor.get("unit") or ""),
-            "scale": descriptor.get("scale"),
-        })
-    return plan
 
 
 def write_parameter_tsv(path: Path, rows: List[Tuple[str, str, str]]) -> None:

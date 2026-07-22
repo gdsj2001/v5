@@ -7,11 +7,11 @@
 <!-- AI_FAST_READ_BEGIN -->
 owner_reqs: [REQ-DRIVE-PROFILE-AUTH-CHAIN, REQ-REMOTE-SSH-MAINTENANCE]
 read_when: [VPS 登录, 授权, private/public 下载, drive profile, OTA package, remote relay, 厂家远程 SSH]
-truth: [授权身份 -> package/profile 或当前设备反向 SSH 登记 -> 板端校验/加载或 VPS tunnel/host-key readback -> consumer]
-forbidden: [public fallback 冒充授权, 客户分叉产品代码, 未验 hash 的下载, 把访问记录 IP 当 SSH 地址, Cloudflare 代理 SSH, 自动接受 host key, SSH/FIFO 产品控制旁路]
+truth: [授权身份 -> package/profile 或当前设备反向 SSH 登记 -> 板端校验/加载或 VPS tunnel/host-key readback -> consumer, 驱动整定 SDO 保持厂家默认且不进入参数映射, 只有显式复位驱动允许按型号 profile 恢复厂家默认, PDO 固定布局不进入用户参数表]
+forbidden: [public fallback 冒充授权, 客户分叉产品代码, 未验 hash 的下载, 把访问记录 IP 当 SSH 地址, Cloudflare 代理 SSH, 自动接受 host key, SSH/FIFO 产品控制旁路, 启动或设置驱动自动写 H01/H05/H08 整定 SDO, 用驱动参数表生成或改写 HAL/XML/PDO, 把复位驱动例外扩成普通 SDO 写入口]
 readback: [license/entitlement, package/profile hash/version, 板端加载 identity, relay health, device tunnel status, SSH host-key/device readback]
 impact: [dealer/factory client, IP访问记录弹窗, drive mapping, OTA, settings actiond]
-acceptance: [身份与产物 hash 闭合；远程 SSH 必须证明当前设备弹窗 -> 同一设备 ID 的 VPS loopback 隧道 -> 板端 SSH 主机身份与命令回读]
+acceptance: [身份与产物 hash 闭合；远程 SSH 必须证明当前设备弹窗 -> 同一设备 ID 的 VPS loopback 隧道 -> 板端 SSH 主机身份与命令回读；普通链路无整定 SDO 写路径且 XML 不含 H01/H05/H08 初始化写入；复位驱动仅在 Machine Off/无运动窗口执行厂家恢复默认并保持 Machine Off]
 detail_sections: [2. Remote Relay 健康, 3. 板端诊断、G-code 上传与 OTA 升级入口, 4. 厂家远程 SSH 维护通道, 6. VPS 登录, 7. VPS 数据, 9. 核对项, 10. 禁止事项]
 <!-- AI_FAST_READ_END -->
 
@@ -257,6 +257,9 @@ it.cjwsjzyy.xyz
 驱动 profile 规则：
 
 - VPS profile 真源分为 public 和当前 DNA private 两类，二者都是 `driver_profile_map.json`。
+- 驱动内部 H01/H05/H08 等 SDO 整定参数保持驱动器自身默认/NVM 值，不进入 profile commissioning 或 `drive_parameter_table.tsv`；V5 不在启动、模型切换、`设置驱动` 或 EtherCAT XML 初始化中写入这些参数。
+- 唯一 SDO 恢复写入例外是操作员明确点击 `复位驱动`：只能使用当前型号 profile 已有证据的 `drive.restore_factory_defaults` 对象，在 Machine Off/无运动窗口恢复厂家默认；成功后保持 Machine Off、旧电子齿轮/设零证据失效，并要求重新设置必要的电子齿轮/CSP 模式。该对象不能复用为普通参数写入口。
+- PDO 只保留控制字、状态字、目标位置、实际位置等实时运行必需的固定 ESI/XML/profile 布局，不进入用户可编辑驱动参数表；参数表变化不得生成或改写 HAL/XML/PDO 布局。
 - VPS 不发布第三张合成产品表。
 - 板端不得把 public/private 合并成新的产品真源。
 - public/private scope 都必须经过 DNA、device authorization、request signature、challenge 门禁。

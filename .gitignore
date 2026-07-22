@@ -48,6 +48,7 @@ node_modules/
 # Known .NET generated output directories
 /8ax-win/**/bin/
 /8ax-win/**/obj/
+/8ax-win/publish/win-x64/.update_backup/
 /8ax-dealer-client-source/**/bin/
 /8ax-dealer-client-source/**/obj/
 /8ax-factory-client-source/**/bin/

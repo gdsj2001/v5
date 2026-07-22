@@ -21,7 +21,6 @@ from v5_drive_bus_contract import (
 )
 from v5_drive_result import (
     write_json,
-    compact_sdo_io,
     compact_health,
     compact_readback,
     compact_error_detail,
@@ -65,7 +64,6 @@ from v5_drive_sdo import (
     parse_integer_token,
     parse_upload_value,
     ethercat_upload,
-    ethercat_download,
     command_write_supported,
     write_command,
     read_command,
@@ -82,7 +80,6 @@ from v5_drive_parameter_table import (
     format_drive_display_int,
     write_drive_parameter_display_rows,
     drive_display_update_from_health,
-    drive_commissioning_plan,
     format_scan_slave_display,
     DRIVE_DISPLAY_FIELDS,
 )
@@ -117,63 +114,6 @@ from v5_drive_bus_context import reset_resident_preload_caches
 import v5_drive_enable_window
 
 FACTORY_RESET_FAULT_CLEAR_RETRY_DELAY_S = 10.0
-
-
-def apply_target_commissioning(target: Dict[str, Any], timeout_s: float) -> Dict[str, Any]:
-    position = str(target.get("position") or "")
-    operations: List[Dict[str, Any]] = []
-    changed: List[Tuple[Dict[str, Any], int]] = []
-    try:
-        for entry in drive_commissioning_plan(target):
-            before = ethercat_upload(position, entry["object"], entry["data_type"], timeout_s)
-            item: Dict[str, Any] = {
-                "name": entry["name"],
-                "field": entry["field"],
-                "vendor_parameter": entry["vendor_parameter"],
-                "expected_raw": entry["expected_raw"],
-                "expected_source": entry["expected_source"],
-                "before": compact_sdo_io(before),
-                "write_executed": False,
-            }
-            if not before.get("ok"):
-                raise DriveActionError("DRIVE_COMMISSIONING_READ_FAILED", "驱动 commissioning 写前 SDO 读回失败。", item)
-            before_raw = int(before.get("value"))
-            if before_raw != int(entry["expected_raw"]):
-                write = ethercat_download(position, entry["object"], entry["data_type"], entry["expected_raw"], timeout_s)
-                item["write"] = compact_sdo_io(write)
-                item["write_executed"] = True
-                if not write.get("ok"):
-                    raise DriveActionError("DRIVE_COMMISSIONING_WRITE_FAILED", "驱动 commissioning SDO 写入失败。", item)
-                changed.append((entry, before_raw))
-            after = ethercat_upload(position, entry["object"], entry["data_type"], timeout_s)
-            item["after"] = compact_sdo_io(after)
-            if not after.get("ok") or int(after.get("value")) != int(entry["expected_raw"]):
-                raise DriveActionError("DRIVE_COMMISSIONING_READBACK_MISMATCH", "驱动 commissioning SDO 写后读回不一致。", item)
-            operations.append(item)
-    except DriveActionError as exc:
-        rollback: List[Dict[str, Any]] = []
-        for entry, old_raw in reversed(changed):
-            restore = ethercat_download(position, entry["object"], entry["data_type"], old_raw, timeout_s)
-            verify = ethercat_upload(position, entry["object"], entry["data_type"], timeout_s)
-            rollback.append({
-                "name": entry["name"],
-                "restore_raw": old_raw,
-                "restore": compact_sdo_io(restore),
-                "verify": compact_sdo_io(verify),
-                "ok": bool(restore.get("ok") and verify.get("ok") and int(verify.get("value")) == old_raw),
-            })
-        raise DriveActionError(exc.code, exc.message_cn, {
-            "position": position,
-            "failure": compact_error_detail(exc.detail),
-            "rollback": rollback,
-            "rollback_ok": all(bool(item.get("ok")) for item in rollback),
-        })
-    return {
-        "ok": True,
-        "code": "DRIVE_COMMISSIONING_OK",
-        "operations": operations,
-        "write_executed": any(bool(item.get("write_executed")) for item in operations),
-    }
 
 
 def _run_factory_reset_impl(timeout_s: float, request: Dict[str, Any] | None = None) -> Dict[str, Any]:
@@ -430,7 +370,6 @@ def _run_set_drive_impl(timeout_s: float, request: Dict[str, Any] | None = None)
         for target in targets:
             egear = target_egear(target)
             planned[str(target.get("position") or "")] = ((egear[0], egear[1]), egear[2])
-            drive_commissioning_plan(target)
         mode_pre_by_position: Dict[str, Dict[str, Any]] = {}
         for target in targets:
             position = str(target.get("position") or "")
@@ -463,8 +402,6 @@ def _run_set_drive_impl(timeout_s: float, request: Dict[str, Any] | None = None)
             "target_mode": CANONICAL_CSP_MODE,
         }
         try:
-            item["commissioning"] = apply_target_commissioning(target, timeout_s)
-            write_executed = write_executed or bool(item["commissioning"].get("write_executed"))
             egear_command = commands.get("drive.set_egear", {})
             mode_command = commands.get("drive.write_mode", {})
             egear_write = write_command(position, "drive.set_egear", egear_command, {"numerator": egear[0], "denominator": egear[1]})
@@ -542,7 +479,7 @@ def _run_set_drive_impl(timeout_s: float, request: Dict[str, Any] | None = None)
     result: Dict[str, Any] = {
         "ok": ok,
         "code": "DRIVE_SET_OK" if ok else "DRIVE_SET_PARTIAL",
-        "message_cn": "设置驱动完成，电子齿轮、CSP 模式和逐轴 commissioning SDO 已按 profile/drive-only 参数写入并 fresh readback 一致，正在恢复动作入口使能状态。" if ok else "设置驱动未完整闭合。",
+        "message_cn": "设置驱动完成，电子齿轮和 CSP 模式已按 profile 写入并 fresh readback 一致；驱动内部整定 SDO 保持默认值，正在恢复动作入口使能状态。" if ok else "设置驱动未完整闭合。",
         "targets": target_results,
         "failures": failures,
         "prechecks": prechecks,
