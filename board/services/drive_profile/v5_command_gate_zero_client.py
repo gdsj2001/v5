@@ -13,6 +13,7 @@ from typing import Any, Dict
 MAGIC = 0x56354347
 VERSION = 6
 OP_SETTINGS_AXIS_ZERO_LIVE_APPLY = 7
+OP_PROBE_AXIS_SLAVE_MAPPING = 6
 DEFAULT_SOCKET = "/run/8ax_v5_product_ui/v5_command_gate.sock"
 
 
@@ -88,25 +89,7 @@ def _text(value: bytes) -> str:
     return value.split(b"\0", 1)[0].decode("utf-8", errors="replace")
 
 
-def apply_axis_zero_live(axis: str, slave_position: int, run_id: str,
-                         timeout_s: float = 1.0,
-                         expected_mcs_position: float = 0.0) -> Dict[str, Any]:
-    axis = str(axis or "").upper()
-    if len(axis) != 1 or axis not in "XYZABC":
-        raise ValueError("axis must be one of XYZABC")
-    if not 0 <= int(slave_position) < 5:
-        raise ValueError("slave_position must be in 0..4")
-    if not run_id:
-        raise ValueError("run_id is required")
-    request = Request()
-    request.magic = MAGIC
-    request.version = VERSION
-    request.size = ctypes.sizeof(Request)
-    request.op = OP_SETTINGS_AXIS_ZERO_LIVE_APPLY
-    request.index_value = int(slave_position)
-    request.axis_value = float(expected_mcs_position)
-    request.text_value = str(run_id).encode("utf-8")[:511]
-    request.settings_axis = axis.encode("ascii")
+def _transact(request: Request, timeout_s: float) -> Response:
     path = os.environ.get("V5_COMMAND_GATE_SOCKET", DEFAULT_SOCKET)
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
         client.settimeout(max(0.1, float(timeout_s)))
@@ -130,6 +113,52 @@ def apply_axis_zero_live(axis: str, slave_position: int, run_id: str,
     response = Response.from_buffer_copy(payload)
     if response.magic != MAGIC or response.version != VERSION or response.size != len(payload):
         raise RuntimeError("command gate response envelope invalid")
+    return response
+
+
+def probe_axis_slave_mapping(timeout_s: float = 1.0) -> Dict[str, Any]:
+    request = Request()
+    request.magic = MAGIC
+    request.version = VERSION
+    request.size = ctypes.sizeof(Request)
+    request.op = OP_PROBE_AXIS_SLAVE_MAPPING
+    response = _transact(request, timeout_s)
+    available = bool(response.axis_slave_mapping_status_available)
+    applicable = bool(response.axis_slave_mapping_applicable)
+    valid = bool(response.axis_slave_mapping_valid)
+    generation = int(response.axis_slave_mapping_generation)
+    return {
+        "ok": response.send_status == 1 and available and applicable and valid and generation != 0,
+        "send_status": int(response.send_status),
+        "available": available,
+        "applicable": applicable,
+        "valid": valid,
+        "generation": generation,
+        "code": _text(bytes(response.axis_slave_mapping_code)),
+        "readback_code": _text(bytes(response.readback_code)),
+    }
+
+
+def apply_axis_zero_live(axis: str, slave_position: int, run_id: str,
+                         timeout_s: float = 1.0,
+                         expected_mcs_position: float = 0.0) -> Dict[str, Any]:
+    axis = str(axis or "").upper()
+    if len(axis) != 1 or axis not in "XYZABC":
+        raise ValueError("axis must be one of XYZABC")
+    if not 0 <= int(slave_position) < 5:
+        raise ValueError("slave_position must be in 0..4")
+    if not run_id:
+        raise ValueError("run_id is required")
+    request = Request()
+    request.magic = MAGIC
+    request.version = VERSION
+    request.size = ctypes.sizeof(Request)
+    request.op = OP_SETTINGS_AXIS_ZERO_LIVE_APPLY
+    request.index_value = int(slave_position)
+    request.axis_value = float(expected_mcs_position)
+    request.text_value = str(run_id).encode("utf-8")[:511]
+    request.settings_axis = axis.encode("ascii")
+    response = _transact(request, timeout_s)
     return {
         "ok": response.send_status == 1 and bool(response.executed) and
               bool(response.zero_display_verified) and response.zero_commit_seq != 0,

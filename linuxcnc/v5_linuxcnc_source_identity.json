@@ -10,7 +10,7 @@
     "tree": "cbadbb8d029aefe7a8d0e3218885aaa59798337b"
   },
   "v5_source_tree": "c1f4c53315c8e614fafbe48992afa91e8aef8014",
-  "content_sha256": "c9fc15d06800aa83d294ff6ed681cb967b5f302ea256b2e86925bf8094c6263d",
+  "content_sha256": "ee1672e08ae971ef33b39628cb492caf87b83e0fd58cb93017aadbd756d93370",
   "implementation": "in_tree",
   "changed_files": [
     "scripts/linuxcnc.in",
@@ -409,7 +409,14 @@
       "popen(",
       "system(",
       "halcmd",
-      "ethercat domains"
+      "ethercat domains",
+      "drive_generation",
+      "DRIVE_GENERATION",
+      "v5_native_drive_generation_contract"
+    ],
+    "src/hal/user_comps/v5_native_hal_owner_protocol.h": [
+      "drive_generation",
+      "DRIVE_GENERATION"
     ],
     "src/emc/task/taskintf.cc": [
       "z20_wrap_public_degrees",

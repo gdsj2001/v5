@@ -12,4 +12,9 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="Update\winremote-update-signing-public.pem"
+                      LogicalName="EightAxis.WinRemote.Update.winremote-update-signing-public.pem" />
+  </ItemGroup>
+
 </Project>

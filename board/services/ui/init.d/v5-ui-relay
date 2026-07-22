@@ -27,6 +27,7 @@ UI_DAEMON=/usr/libexec/8ax/v5_lvgl_shell
 RELAY_DAEMON=/usr/libexec/8ax/v5_remote_ui_relay.py
 REMOTE_PACKER=/usr/libexec/8ax/v5_remote_ui_packer.so
 BOOT_READY=/usr/libexec/8ax/v5_ui_boot_ready.py
+RELAY_LOCAL_CLIENT=/usr/libexec/8ax/v5_remote_ui_local_client.py
 BACKEND_READINESS_PROBE=/usr/libexec/8ax/v5_backend_readiness_probe
 PIDFILE=/run/8ax/v5_ui_relay.pid
 UI_PIDFILE=/run/8ax/v5_ui_shell.pid
@@ -42,6 +43,10 @@ REMOTE_ALLOW_CIDRS=${V5_UI_REMOTE_ALLOW_CIDRS:-127.0.0.1/32,192.168.1.0/24}
 REMOTE_INPUT=${V5_UI_REMOTE_INPUT:-layout_only}
 REMOTE_WIDTH=${V5_UI_REMOTE_WIDTH:-1024}
 REMOTE_HEIGHT=${V5_UI_REMOTE_HEIGHT:-600}
+REMOTE_TLS_CERT=${V5_UI_REMOTE_TLS_CERT:-/etc/6x-cnc/remote-relay/server-cert.pem}
+REMOTE_TLS_KEY=${V5_UI_REMOTE_TLS_KEY:-/etc/6x-cnc/remote-relay/server-key.pem}
+REMOTE_AUTH_CLIENTS=${V5_UI_REMOTE_AUTH_CLIENTS:-/etc/6x-cnc/remote-relay/clients.json}
+REMOTE_LOCAL_CLIENT_ID=${V5_UI_REMOTE_LOCAL_CLIENT_ID:-local-bootstrap}
 PROJECT_ROOT=${V5_PROJECT_ROOT:-/opt/8ax/v5}
 UI_INPUT_NICE=0
 
@@ -274,6 +279,12 @@ start_service() {
   test -x "$RELAY_DAEMON"
   test -r "$REMOTE_PACKER"
   test -x "$BOOT_READY"
+  test -x "$RELAY_LOCAL_CLIENT"
+  test -r "$REMOTE_TLS_CERT"
+  test -r "$REMOTE_TLS_KEY"
+  test -r "$REMOTE_AUTH_CLIENTS"
+  case "$(stat -c '%a' "$REMOTE_TLS_KEY")" in 400|600) ;; *) return 1 ;; esac
+  case "$(stat -c '%a' "$REMOTE_AUTH_CLIENTS")" in 400|600) ;; *) return 1 ;; esac
   cpu1_available
   command -v taskset >/dev/null 2>&1
   command -v nice >/dev/null 2>&1
@@ -300,9 +311,13 @@ start_service() {
   V5_UI_READY_PATH="$UI_READY_PATH" V5_UI_REMOTE_INPUT="$REMOTE_INPUT" \
     V5_UI_REMOTE_BIND="$REMOTE_BIND" V5_UI_REMOTE_ALLOW_CIDRS="$REMOTE_ALLOW_CIDRS" \
     V5_UI_REMOTE_PORT="$PORT" V5_UI_REMOTE_WIDTH="$REMOTE_WIDTH" V5_UI_REMOTE_HEIGHT="$REMOTE_HEIGHT" \
+    V5_UI_REMOTE_TLS_CERT="$REMOTE_TLS_CERT" V5_UI_REMOTE_TLS_KEY="$REMOTE_TLS_KEY" \
+    V5_UI_REMOTE_AUTH_CLIENTS="$REMOTE_AUTH_CLIENTS" \
     setsid taskset -c 1 nice -n "$UI_INPUT_NICE" "$RELAY_DAEMON" --host "$REMOTE_BIND" --port "$PORT" \
       --allow-cidrs "$REMOTE_ALLOW_CIDRS" --width "$REMOTE_WIDTH" --height "$REMOTE_HEIGHT" \
-      --ready-path "$UI_READY_PATH" --program-root "$PROJECT_ROOT/gcode/golden" >>"$LOGFILE" 2>&1 &
+      --ready-path "$UI_READY_PATH" --program-root "$PROJECT_ROOT/gcode/golden" \
+      --tls-cert "$REMOTE_TLS_CERT" --tls-key "$REMOTE_TLS_KEY" \
+      --auth-clients "$REMOTE_AUTH_CLIENTS" >>"$LOGFILE" 2>&1 &
   echo "$!" >"$PIDFILE"
   if ! record_process_identity "$(read_pidfile "$PIDFILE")" "$RELAY_STARTFILE"; then
     echo "v5_remote_ui_relay process identity unavailable" >&2
@@ -313,7 +328,8 @@ start_service() {
   i=0
   while [ "$i" -lt 50 ]; do
     if is_relay_running && [ -p /run/8ax_v5_product_ui/remote_dirty ] && \
-       wget -q -O /tmp/v5_ui_boot_diagnostics.json "http://127.0.0.1:$PORT/remote/diagnostics"; then
+       "$RELAY_LOCAL_CLIENT" --base-url "https://127.0.0.1:$PORT/" \
+         --ca-cert "$REMOTE_TLS_CERT" --health-only >/tmp/v5_ui_boot_health.json; then
       break
     fi
     i=$((i + 1))
@@ -364,7 +380,10 @@ start_service() {
       --publisher-snapshot-path "$PUBLISHER_SNAPSHOT_PATH" \
       --backend-readiness-probe "$BACKEND_READINESS_PROBE" \
       --expected-ini "$PROJECT_ROOT/linuxcnc/ini/v5_bus.ini" \
-      --diagnostics-url "http://127.0.0.1:$PORT/remote/diagnostics" \
+      --diagnostics-url "https://127.0.0.1:$PORT/remote/diagnostics" \
+      --diagnostics-ca-cert "$REMOTE_TLS_CERT" \
+      --diagnostics-clients-file "$REMOTE_AUTH_CLIENTS" \
+      --diagnostics-client-id "$REMOTE_LOCAL_CLIENT_ID" \
       --startup-instance-id "$STARTUP_INSTANCE_ID" \
       --failure-owner-role relay \
       --failure-owner-pid "$(read_pidfile "$PIDFILE")" \
@@ -379,7 +398,10 @@ start_service() {
     rm -f "$PUBLISHER_SNAPSHOT_PATH"
     return 1
   fi
-  if ! wget -q -O /tmp/v5_ui_ready_info.json "http://127.0.0.1:$PORT/remote/info"; then
+  if ! "$RELAY_LOCAL_CLIENT" --base-url "https://127.0.0.1:$PORT/" \
+      --ca-cert "$REMOTE_TLS_CERT" --clients-file "$REMOTE_AUTH_CLIENTS" \
+      --client-id "$REMOTE_LOCAL_CLIENT_ID" --scope viewer --path /remote/info \
+      >/tmp/v5_ui_ready_info.json; then
     echo "v5 remote UI remained gated after ready metadata" >&2
     publish_startup_failure remote_info_ready "relay rejected committed UI ready identity" || true
     stop_ui_only

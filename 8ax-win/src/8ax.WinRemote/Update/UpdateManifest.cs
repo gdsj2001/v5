@@ -4,11 +4,23 @@ namespace EightAxis.WinRemote.Update;
 
 public sealed record UpdateManifest
 {
+    [JsonPropertyName("schema")]
+    public string Schema { get; init; } = "";
+
     [JsonPropertyName("app_id")]
     public string AppId { get; init; } = "";
 
+    [JsonPropertyName("channel")]
+    public string Channel { get; init; } = "";
+
     [JsonPropertyName("version")]
     public string Version { get; init; } = "";
+
+    [JsonPropertyName("release_sequence")]
+    public long ReleaseSequence { get; init; }
+
+    [JsonPropertyName("key_id")]
+    public string KeyId { get; init; } = "";
 
     [JsonPropertyName("file_name")]
     public string FileName { get; init; } = "";
@@ -16,19 +28,37 @@ public sealed record UpdateManifest
     [JsonPropertyName("package_url")]
     public string PackageUrl { get; init; } = "";
 
-    [JsonPropertyName("sha256")]
-    public string Sha256 { get; init; } = "";
-
     [JsonPropertyName("size")]
     public long Size { get; init; }
+
+    [JsonPropertyName("sha256")]
+    public string Sha256 { get; init; } = "";
 
     [JsonPropertyName("published_at_utc")]
     public string PublishedAtUtc { get; init; } = "";
 }
 
-public sealed record PreparedUpdate(UpdateManifest Manifest, Uri ManifestUri, string PackagePath, string ScriptPath);
+public sealed record VerifiedUpdateManifest(
+    UpdateManifest Manifest,
+    Uri ManifestUri,
+    Uri SignatureUri,
+    byte[] ManifestBytes,
+    byte[] SignatureBytes);
 
-public sealed record UpdateCheckResult(string LocalVersion, UpdateManifest Manifest, Uri ManifestUri, bool IsUpdateAvailable);
+public sealed record PreparedUpdate(
+    UpdateManifest Manifest,
+    Uri ManifestUri,
+    string ManifestPath,
+    string SignaturePath,
+    string PackagePath,
+    string InstallerPath,
+    string EvidenceDirectory);
+
+public sealed record UpdateCheckResult(
+    string LocalVersion,
+    UpdateManifest Manifest,
+    Uri ManifestUri,
+    bool IsUpdateAvailable);
 
 public sealed class UpdateNotNeededException : Exception
 {

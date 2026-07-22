@@ -218,7 +218,6 @@ static uint32_t g_home_rtcp_seen_transaction;
 static int g_gcode_rearm_seen_low;
 static int g_previous_gcode_request;
 static BackendReadinessState g_backend_readiness;
-
 static void fill_wcheckpoint_response(
     unsigned int target,
     V5NativeHalOwnerResponse *response)

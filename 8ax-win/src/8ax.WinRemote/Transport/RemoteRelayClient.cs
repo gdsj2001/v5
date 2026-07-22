@@ -5,6 +5,7 @@ using System.Net.WebSockets;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using EightAxis.WinRemote.Config;
 using EightAxis.WinRemote.Protocol;
 
 namespace EightAxis.WinRemote.Transport;
@@ -14,46 +15,35 @@ public sealed class RemoteRelayClient : IRemoteTransport, IDisposable
     private const long MaxProgramFileBytes = 2L * 1024 * 1024;
     private static readonly TimeSpan StreamConnectTimeout = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan InputConnectTimeout = TimeSpan.FromSeconds(2);
-    private static readonly TimeSpan NetworkTimeProbeTimeout = TimeSpan.FromMilliseconds(700);
-    private static readonly TimeSpan NetworkTimeCacheDuration = TimeSpan.FromMinutes(5);
-    private static readonly TimeSpan NetworkTimeRetryDelay = TimeSpan.FromMinutes(1);
     private const string ClientTimeUnixMsHeader = "X-8ax-Client-Time-Unix-Ms";
     private const string ClientTimeSourceHeader = "X-8ax-Client-Time-Source";
-    private const string ClientTimeNetworkSource = "winremote-network-time";
-    private const string ClientTimeLocalSource = "winremote-local-time";
-    private static readonly Uri[] NetworkTimeUris =
-    [
-        new("https://license.cjwsjzyy.xyz/8ax-winremote/win-x64/manifest.json"),
-        new("https://license.3dtouch.top/8ax-winremote/win-x64/manifest.json"),
-    ];
-    private static readonly HttpClient NetworkTimeHttpClient = new();
-    private static readonly SemaphoreSlim NetworkTimeGate = new(1, 1);
-    private static TimeSpan? s_networkTimeOffset;
-    private static DateTimeOffset s_networkTimeOffsetUpdatedUtc = DateTimeOffset.MinValue;
-    private static DateTimeOffset s_lastNetworkTimeFailureUtc = DateTimeOffset.MinValue;
 
-    private readonly HttpClient _httpClient = new(new HttpClientHandler
-    {
-        UseProxy = false,
-    });
+    private readonly HttpClient _httpClient;
+    private readonly RelayAuthenticationSession _authentication;
     private readonly SemaphoreSlim _inputGate = new(1, 1);
     private ClientWebSocket? _inputSocket;
     private string? _inputSessionId;
 
-    public RemoteRelayClient(Uri baseUri)
+    public RemoteRelayClient(RelaySecurityProfile security)
     {
-        BaseUri = baseUri;
+        ArgumentNullException.ThrowIfNull(security);
+        BaseUri = security.RelayBaseUri;
+        _httpClient = new HttpClient(security.CreateHttpClientHandler(), disposeHandler: true);
+        _authentication = new RelayAuthenticationSession(security, _httpClient);
     }
 
     public Uri BaseUri { get; }
 
     public async Task<RemoteInfoMessage> GetInfoAsync(CancellationToken cancellationToken)
     {
-        ClientTimeStamp clientTime = await ResolveClientTimeAsync(cancellationToken).ConfigureAwait(false);
-        using HttpRequestMessage request = new(HttpMethod.Get, new Uri(BaseUri, "remote/info"));
-        request.Headers.TryAddWithoutValidation(ClientTimeUnixMsHeader, clientTime.UnixTimeMs.ToString(System.Globalization.CultureInfo.InvariantCulture));
-        request.Headers.TryAddWithoutValidation(ClientTimeSourceHeader, clientTime.Source);
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        ClientNetworkTime.ClientTimeStamp clientTime = await ClientNetworkTime.ResolveAsync(cancellationToken).ConfigureAwait(false);
+        using HttpResponseMessage response = await _authentication.SendAsync(() =>
+        {
+            HttpRequestMessage request = new(HttpMethod.Get, new Uri(BaseUri, "remote/info"));
+            request.Headers.TryAddWithoutValidation(ClientTimeUnixMsHeader, clientTime.UnixTimeMs.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            request.Headers.TryAddWithoutValidation(ClientTimeSourceHeader, clientTime.Source);
+            return request;
+        }, HttpCompletionOption.ResponseContentRead, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
         string json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         return RemoteProtocolJson.Deserialize<RemoteInfoMessage>(json);
@@ -61,7 +51,10 @@ public sealed class RemoteRelayClient : IRemoteTransport, IDisposable
 
     public async Task<RemoteFramePacket> GetFullFrameAsync(CancellationToken cancellationToken)
     {
-        using HttpResponseMessage response = await _httpClient.GetAsync(new Uri(BaseUri, "remote/frame/full"), cancellationToken).ConfigureAwait(false);
+        using HttpResponseMessage response = await _authentication.SendAsync(
+            () => new HttpRequestMessage(HttpMethod.Get, new Uri(BaseUri, "remote/frame/full")),
+            HttpCompletionOption.ResponseContentRead,
+            cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
         byte[] envelope = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
         return RemoteProtocolJson.DecodeFrameEnvelope(envelope);
@@ -69,13 +62,19 @@ public sealed class RemoteRelayClient : IRemoteTransport, IDisposable
 
     public async Task<string> GetDiagnosticsJsonAsync(CancellationToken cancellationToken)
     {
-        using HttpResponseMessage response = await _httpClient.GetAsync(new Uri(BaseUri, "remote/diagnostics"), cancellationToken).ConfigureAwait(false);
+        using HttpResponseMessage response = await _authentication.SendAsync(
+            () => new HttpRequestMessage(HttpMethod.Get, new Uri(BaseUri, "remote/diagnostics")),
+            HttpCompletionOption.ResponseContentRead,
+            cancellationToken).ConfigureAwait(false);
         return await ReadRelayJsonAsync(response, "读取板端日志", cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<ProgramListResult> GetProgramListAsync(CancellationToken cancellationToken)
     {
-        using HttpResponseMessage response = await _httpClient.GetAsync(new Uri(BaseUri, "remote/program/list"), cancellationToken).ConfigureAwait(false);
+        using HttpResponseMessage response = await _authentication.SendAsync(
+            () => new HttpRequestMessage(HttpMethod.Get, new Uri(BaseUri, "remote/program/list")),
+            HttpCompletionOption.ResponseContentRead,
+            cancellationToken).ConfigureAwait(false);
         string json = await ReadRelayJsonAsync(response, "读取板端 G-code 列表", cancellationToken).ConfigureAwait(false);
         return RemoteProtocolJson.Deserialize<ProgramListResult>(json);
     }
@@ -83,7 +82,10 @@ public sealed class RemoteRelayClient : IRemoteTransport, IDisposable
     public async Task<ProgramFileInfo> GetProgramFileInfoAsync(string fileName, CancellationToken cancellationToken)
     {
         string safeFileName = SafeProgramFileName(fileName);
-        using HttpResponseMessage response = await _httpClient.GetAsync(new Uri(BaseUri, $"remote/program/file?filename={Uri.EscapeDataString(safeFileName)}"), cancellationToken).ConfigureAwait(false);
+        using HttpResponseMessage response = await _authentication.SendAsync(
+            () => new HttpRequestMessage(HttpMethod.Get, new Uri(BaseUri, $"remote/program/file?filename={Uri.EscapeDataString(safeFileName)}")),
+            HttpCompletionOption.ResponseContentRead,
+            cancellationToken).ConfigureAwait(false);
         string json = await ReadRelayJsonAsync(response, "检查板端 G-code 文件", cancellationToken).ConfigureAwait(false);
         return RemoteProtocolJson.Deserialize<ProgramFileInfo>(json);
     }
@@ -91,7 +93,10 @@ public sealed class RemoteRelayClient : IRemoteTransport, IDisposable
     public async Task<ProgramFileContentResult> GetProgramFileContentAsync(string fileName, CancellationToken cancellationToken)
     {
         string safeFileName = SafeProgramFileName(fileName);
-        using HttpResponseMessage response = await _httpClient.GetAsync(new Uri(BaseUri, $"remote/program/file?filename={Uri.EscapeDataString(safeFileName)}&content=1"), cancellationToken).ConfigureAwait(false);
+        using HttpResponseMessage response = await _authentication.SendAsync(
+            () => new HttpRequestMessage(HttpMethod.Get, new Uri(BaseUri, $"remote/program/file?filename={Uri.EscapeDataString(safeFileName)}&content=1")),
+            HttpCompletionOption.ResponseContentRead,
+            cancellationToken).ConfigureAwait(false);
         string json = await ReadRelayJsonAsync(response, "读取板端 G-code 文件", cancellationToken).ConfigureAwait(false);
         return RemoteProtocolJson.Deserialize<ProgramFileContentResult>(json);
     }
@@ -99,8 +104,10 @@ public sealed class RemoteRelayClient : IRemoteTransport, IDisposable
     public async Task<ProgramDeleteResult> DeleteProgramFileAsync(string fileName, CancellationToken cancellationToken)
     {
         string safeFileName = SafeProgramFileName(fileName);
-        using HttpRequestMessage request = new(HttpMethod.Delete, new Uri(BaseUri, $"remote/program/file?filename={Uri.EscapeDataString(safeFileName)}"));
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        using HttpResponseMessage response = await _authentication.SendAsync(
+            () => new HttpRequestMessage(HttpMethod.Delete, new Uri(BaseUri, $"remote/program/file?filename={Uri.EscapeDataString(safeFileName)}")),
+            HttpCompletionOption.ResponseContentRead,
+            cancellationToken).ConfigureAwait(false);
         string json = await ReadRelayJsonAsync(response, "删除板端 G-code 文件", cancellationToken).ConfigureAwait(false);
         return RemoteProtocolJson.Deserialize<ProgramDeleteResult>(json);
     }
@@ -121,15 +128,30 @@ public sealed class RemoteRelayClient : IRemoteTransport, IDisposable
             throw new ArgumentException("G-code 文件 SHA256 无效。", nameof(sha256));
         }
 
+        byte[] uploadBytes = new byte[checked((int)contentLength)];
+        int readOffset = 0;
+        while (readOffset < uploadBytes.Length)
+        {
+            int read = await content.ReadAsync(
+                uploadBytes.AsMemory(readOffset, uploadBytes.Length - readOffset),
+                cancellationToken).ConfigureAwait(false);
+            if (read == 0)
+            {
+                throw new InvalidOperationException("G-code upload stream ended before the declared length.");
+            }
+            readOffset += read;
+        }
         Uri requestUri = new(BaseUri, $"remote/program/upload?filename={Uri.EscapeDataString(safeFileName)}&overwrite={(overwrite ? "1" : "0")}");
-        using HttpRequestMessage request = new(HttpMethod.Post, requestUri);
-        using StreamContent streamContent = new(content);
-        streamContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
-        streamContent.Headers.ContentLength = contentLength;
-        streamContent.Headers.TryAddWithoutValidation("X-8ax-File-Sha256", sha256);
-        request.Content = streamContent;
-
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+        using HttpResponseMessage response = await _authentication.SendAsync(() =>
+        {
+            HttpRequestMessage request = new(HttpMethod.Post, requestUri);
+            ByteArrayContent requestContent = new(uploadBytes);
+            requestContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+            requestContent.Headers.ContentLength = contentLength;
+            requestContent.Headers.TryAddWithoutValidation("X-8ax-File-Sha256", sha256);
+            request.Content = requestContent;
+            return request;
+        }, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         string json = await ReadRelayJsonAsync(response, "上传 G-code 到板端", cancellationToken).ConfigureAwait(false);
         return RemoteProtocolJson.Deserialize<ProgramUploadResult>(json);
     }
@@ -141,9 +163,13 @@ public sealed class RemoteRelayClient : IRemoteTransport, IDisposable
             "winremote_bottom_button",
             DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
             "dna_private_first_no_public_when_private_present");
-        using HttpRequestMessage request = new(HttpMethod.Post, new Uri(BaseUri, "remote/ota/upgrade"));
-        request.Content = new StringContent(RemoteProtocolJson.Serialize(payload), Encoding.UTF8, "application/json");
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        string requestJson = RemoteProtocolJson.Serialize(payload);
+        using HttpResponseMessage response = await _authentication.SendAsync(() =>
+        {
+            HttpRequestMessage request = new(HttpMethod.Post, new Uri(BaseUri, "remote/ota/upgrade"));
+            request.Content = new StringContent(requestJson, Encoding.UTF8, "application/json");
+            return request;
+        }, HttpCompletionOption.ResponseContentRead, cancellationToken).ConfigureAwait(false);
         string json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
@@ -237,9 +263,10 @@ public sealed class RemoteRelayClient : IRemoteTransport, IDisposable
 
     public async IAsyncEnumerable<RemoteFramePacket> ReadFrameStreamAsync([EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        using ClientWebSocket socket = new();
-        socket.Options.Proxy = null;
-        await ConnectWebSocketAsync(socket, ToWebSocketUri(new Uri(BaseUri, "remote/stream")), StreamConnectTimeout, cancellationToken).ConfigureAwait(false);
+        using ClientWebSocket socket = await _authentication.ConnectWebSocketAsync(
+            ToWebSocketUri(new Uri(BaseUri, "remote/stream")),
+            StreamConnectTimeout,
+            cancellationToken).ConfigureAwait(false);
 
         while (!cancellationToken.IsCancellationRequested && socket.State == WebSocketState.Open)
         {
@@ -286,9 +313,10 @@ public sealed class RemoteRelayClient : IRemoteTransport, IDisposable
             }
 
             _inputSocket?.Dispose();
-            ClientWebSocket socket = new();
-            socket.Options.Proxy = null;
-            await ConnectWebSocketAsync(socket, ToWebSocketUri(new Uri(BaseUri, "remote/input")), InputConnectTimeout, cancellationToken).ConfigureAwait(false);
+            ClientWebSocket socket = await _authentication.ConnectWebSocketAsync(
+                ToWebSocketUri(new Uri(BaseUri, "remote/input")),
+                InputConnectTimeout,
+                cancellationToken).ConfigureAwait(false);
             _inputSocket = socket;
             _inputSessionId = sessionId;
 
@@ -345,6 +373,7 @@ public sealed class RemoteRelayClient : IRemoteTransport, IDisposable
     {
         ResetInputSocketLocked();
         _inputGate.Dispose();
+        _authentication.Dispose();
         _httpClient.Dispose();
     }
 
@@ -357,23 +386,13 @@ public sealed class RemoteRelayClient : IRemoteTransport, IDisposable
 
     private static Uri ToWebSocketUri(Uri uri)
     {
+        if (uri.Scheme != Uri.UriSchemeHttps)
+        {
+            throw new InvalidOperationException("WinRemote relay transport requires HTTPS/WSS.");
+        }
         UriBuilder builder = new(uri);
-        builder.Scheme = uri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase) ? "wss" : "ws";
+        builder.Scheme = "wss";
         return builder.Uri;
-    }
-
-    private static async Task ConnectWebSocketAsync(ClientWebSocket socket, Uri uri, TimeSpan timeout, CancellationToken cancellationToken)
-    {
-        using CancellationTokenSource timeoutToken = new(timeout);
-        using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutToken.Token);
-        try
-        {
-            await socket.ConnectAsync(uri, linked.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && timeoutToken.IsCancellationRequested)
-        {
-            throw new TimeoutException($"WebSocket connect timed out after {timeout.TotalSeconds:0.#}s: {uri}");
-        }
     }
 
     private async Task<PointerAckMessage> SendInputMessageAndReadAckLockedAsync<T>(T message, CancellationToken cancellationToken)
@@ -401,77 +420,6 @@ public sealed class RemoteRelayClient : IRemoteTransport, IDisposable
 
     private static long UnixTimeMs() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-    private static async Task<ClientTimeStamp> ResolveClientTimeAsync(CancellationToken cancellationToken)
-    {
-        DateTimeOffset now = DateTimeOffset.UtcNow;
-        if (s_networkTimeOffset is { } offset && now - s_networkTimeOffsetUpdatedUtc < NetworkTimeCacheDuration)
-        {
-            return new ClientTimeStamp((now + offset).ToUnixTimeMilliseconds(), ClientTimeNetworkSource);
-        }
-
-        if (now - s_lastNetworkTimeFailureUtc < NetworkTimeRetryDelay)
-        {
-            return new ClientTimeStamp(now.ToUnixTimeMilliseconds(), ClientTimeLocalSource);
-        }
-
-        await NetworkTimeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            now = DateTimeOffset.UtcNow;
-            if (s_networkTimeOffset is { } refreshedOffset && now - s_networkTimeOffsetUpdatedUtc < NetworkTimeCacheDuration)
-            {
-                return new ClientTimeStamp((now + refreshedOffset).ToUnixTimeMilliseconds(), ClientTimeNetworkSource);
-            }
-
-            foreach (Uri uri in NetworkTimeUris)
-            {
-                if (await TryReadNetworkTimeOffsetAsync(uri, cancellationToken).ConfigureAwait(false) is { } networkOffset)
-                {
-                    s_networkTimeOffset = networkOffset;
-                    s_networkTimeOffsetUpdatedUtc = DateTimeOffset.UtcNow;
-                    return new ClientTimeStamp((DateTimeOffset.UtcNow + networkOffset).ToUnixTimeMilliseconds(), ClientTimeNetworkSource);
-                }
-            }
-
-            s_lastNetworkTimeFailureUtc = DateTimeOffset.UtcNow;
-            return new ClientTimeStamp(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), ClientTimeLocalSource);
-        }
-        finally
-        {
-            NetworkTimeGate.Release();
-        }
-    }
-
-    private static async Task<TimeSpan?> TryReadNetworkTimeOffsetAsync(Uri uri, CancellationToken cancellationToken)
-    {
-        DateTimeOffset before = DateTimeOffset.UtcNow;
-        try
-        {
-            using CancellationTokenSource timeout = new(NetworkTimeProbeTimeout);
-            using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
-            using HttpRequestMessage request = new(HttpMethod.Head, uri);
-            using HttpResponseMessage response = await NetworkTimeHttpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, linked.Token).ConfigureAwait(false);
-            DateTimeOffset after = DateTimeOffset.UtcNow;
-            DateTimeOffset? networkDate = response.Headers.Date;
-            if (networkDate is null)
-            {
-                return null;
-            }
-
-            TimeSpan roundTrip = after - before;
-            DateTimeOffset midpoint = before + TimeSpan.FromTicks(roundTrip.Ticks / 2);
-            return networkDate.Value - midpoint;
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
     private static async Task<WebSocketMessage> ReceiveMessageAsync(ClientWebSocket socket, CancellationToken cancellationToken)
     {
         byte[] buffer = new byte[64 * 1024];
@@ -494,5 +442,4 @@ public sealed class RemoteRelayClient : IRemoteTransport, IDisposable
     }
 
     private sealed record WebSocketMessage(WebSocketMessageType Type, byte[] Payload);
-    private sealed record ClientTimeStamp(long UnixTimeMs, string Source);
 }

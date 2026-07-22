@@ -40,10 +40,10 @@ def main() -> int:
             "[AXIS_Y]\nPITCH = 5\nMOTOR_REV = 1\nLOAD_REV = 1\nMIN_LIMIT = -500\nMAX_LIMIT = 500\n"
             "[JOINT_1]\nSCALE = 10000\nMIN_LIMIT = -500\nMAX_LIMIT = 500\n"
             "[AXIS_A]\nPITCH = 360\nMOTOR_REV = 50\nLOAD_REV = 1\n"
-            "[JOINT_3]\nSCALE = 1000\n"
-            "[AXIS_C]\nPITCH = 360\nMOTOR_REV = 10\nLOAD_REV = 1\nMIN_LIMIT = -100\nMAX_LIMIT = 100\n"
-            "WCHECKPOINT_COUNTS_PER_REV = 360000\n"
-            "[JOINT_4]\nSCALE = 1000\nMIN_LIMIT = -100\nMAX_LIMIT = 100\n",
+            "[JOINT_3]\nSCALE = 10000\n"
+            "[AXIS_C]\nPITCH = 360\nMOTOR_REV = 50\nLOAD_REV = 1\nMIN_LIMIT = -100\nMAX_LIMIT = 100\n"
+            "WCHECKPOINT_COUNTS_PER_REV = 3600000\n"
+            "[JOINT_4]\nSCALE = 10000\nMIN_LIMIT = -100\nMAX_LIMIT = 100\n",
         )
         write_text(contract.SELF_PARAMETER_TABLE, "X\tslave\t0\n")
         first = action.preload_resident_state()
@@ -60,6 +60,13 @@ def main() -> int:
         if not context.resident_preload_active or action.load_settings_runtime().get("axes") != [{"axis": "X"}, {"axis": "Y"}]:
             print("successful preload did not leave guarded resident owner active")
             return 3
+        writeback = runtime_store.persist_settings_runtime(
+            action.load_settings_runtime())
+        if (not writeback.get("ok") or
+                writeback.get("code") != "SETTINGS_RUNTIME_WRITEBACK_OK" or
+                writeback.get("axis_count") != 2):
+            print("settings runtime writeback did not return a successful typed receipt", writeback)
+            return 33
         sections = runtime_store.read_runtime_ini_sections(contract.RUNTIME_SETTINGS_INI)
         mappings = {
             axis: runtime_store.runtime_ini_joint_index(sections, axis, configured)[0]
@@ -82,7 +89,7 @@ def main() -> int:
         else:
             print("missing coordinates reused configured settings row index")
             return 7
-        expected_egear = {"X": (16384, 3125), "A": (8192, 225), "C": (8192, 1125)}
+        expected_egear = {"X": (16384, 3125), "A": (4096, 1125), "C": (4096, 1125)}
         for axis, configured in (("X", 0), ("A", 3), ("C", 5)):
             numerator, denominator, evidence = axis_model.target_egear_from_runtime_ini(
                 axis, configured, {"encoder_bits": 18}
@@ -93,12 +100,39 @@ def main() -> int:
             if evidence.get("axis_index") != mappings[axis]:
                 print("runtime INI egear evidence used settings row index", axis, evidence)
                 return 9
-        counts_per_unit, scale_evidence = axis_model.derive_counts_per_unit("C", {}, 5)
-        if counts_per_unit != 1000 or scale_evidence.get("joint_section") != "JOINT_4":
+        legacy_ratio_axis = {
+            "axis": "C",
+            "motor_rev": 10,
+            "load_rev": 1,
+            "motor_revs_per_load_rev": 10,
+            "reducer_ratio": 10,
+        }
+        counts_per_unit, scale_evidence = axis_model.derive_counts_per_unit(
+            "C", legacy_ratio_axis, 5)
+        if (counts_per_unit != 10000 or
+                scale_evidence.get("joint_section") != "JOINT_4" or
+                scale_evidence.get("motor_revs_per_load_rev") != 50):
             print("C count-domain scale used settings row index", counts_per_unit, scale_evidence)
             return 10
+        sanitized = runtime_store.sanitize_settings_runtime_drive_only({
+            "schema": contract.SETTINGS_RUNTIME_SCHEMA,
+            "axes": [{
+                **legacy_ratio_axis,
+                "zero_model": {"scale_evidence": dict(legacy_ratio_axis)},
+                "electronic_gear": {"motor_revs_per_load_rev": 10},
+                "drive_set_evidence": {"motor_revs_per_load_rev": 10},
+            }],
+        })
+        sanitized_axis = sanitized["axes"][0]
+        if (any(key in sanitized_axis for key in runtime_store.LEGACY_AXIS_RATIO_KEYS) or
+                any(key in sanitized_axis["zero_model"]["scale_evidence"]
+                    for key in runtime_store.LEGACY_AXIS_RATIO_KEYS) or
+                "motor_revs_per_load_rev" in sanitized_axis["electronic_gear"] or
+                "motor_revs_per_load_rev" in sanitized_axis["drive_set_evidence"]):
+            print("legacy settings_runtime ratio copies survived sanitization", sanitized)
+            return 32
         raw_limits = runtime_store.update_runtime_ini_raw_limits(
-            "C", 5, 0.0, 10.0, 1000.0)
+            "C", 5, 0.0, 10.0, 10000.0)
         if raw_limits.get("joint_section") != "JOINT_4" or "JOINT_5" in raw_limits.get("updated_sections", []):
             print("C raw limit update used settings row index", raw_limits)
             return 11

@@ -1436,7 +1436,18 @@ def check_ready_identity_cache(relay_module, root: Path) -> int:
     response = {}
     handler = object.__new__(relay_module.RemoteRelayHandler)
     handler.path = "/remote/info"
-    handler.server = type("FailureServer", (), {"state": ready_state})()
+    handler.headers = {}
+
+    class AllowAllAuthStore:
+        def authorize(self, _authorization, _peer, _scope):
+            return object()
+
+    handler.server = type(
+        "FailureServer",
+        (),
+        {"state": ready_state, "auth_store": AllowAllAuthStore()},
+    )()
+    handler.client_address = ("127.0.0.1", 10000)
     handler.check_peer = lambda: True
     handler.write_json = lambda status, body: response.update(status=status, body=body)
     handler.do_GET()
@@ -1450,6 +1461,41 @@ def check_ready_identity_cache(relay_module, root: Path) -> int:
     if ready_state.lifecycle_snapshot() != ("booting", None):
         print("failure metadata accepted a reused owner PID")
         return 69
+    return 0
+
+
+def check_remote_security_contract(relay_module) -> int:
+    expected_scopes = {
+        ("GET", "/remote/info"): "viewer",
+        ("GET", "/remote/frame/full"): "viewer",
+        ("GET", "/remote/stream"): "viewer",
+        ("GET", "/remote/input"): "operator",
+        ("GET", "/remote/diagnostics"): "diagnostics",
+        ("GET", "/remote/program/list"): "program_manager",
+        ("POST", "/remote/program/upload"): "program_manager",
+        ("DELETE", "/remote/program/file"): "program_manager",
+        ("POST", "/remote/ota/apply"): "ota_admin",
+    }
+    actual_scopes = {
+        key: relay_module.required_remote_scope(*key) for key in expected_scopes
+    }
+    if actual_scopes != expected_scopes:
+        print("remote relay scope mapping changed", actual_scopes)
+        return 73
+    for path in (
+        "/remote/info?token=secret",
+        "/remote/info?session_token=secret",
+        "/remote/info?Authorization=secret",
+        "/remote/info?auth=secret",
+    ):
+        if not relay_module.url_contains_auth_token(
+                relay_module.urllib.parse.urlparse(path)):
+            print("remote relay accepted an authorization token in URL", path)
+            return 74
+    if relay_module.url_contains_auth_token(
+            relay_module.urllib.parse.urlparse("/remote/auth/challenge?client_id=test")):
+        print("remote relay rejected the challenge client_id as a URL token")
+        return 75
     return 0
 
 
@@ -1472,6 +1518,9 @@ def main() -> int:
     if rc != 0:
         return rc
     rc = check_startup_lifecycle_sources()
+    if rc != 0:
+        return rc
+    rc = check_remote_security_contract(relay)
     if rc != 0:
         return rc
 

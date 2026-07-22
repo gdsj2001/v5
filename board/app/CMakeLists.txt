@@ -408,6 +408,7 @@ add_executable(v5_state_publisher_cadence_smoke
 
 target_include_directories(v5_state_publisher_cadence_smoke PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${V5_ROOT_DIR}/services/command_gate"
     "${V5_ROOT_DIR}/services/state_publisher"
 )
 
@@ -1002,6 +1003,71 @@ target_compile_definitions(v5_lvgl_shell PRIVATE
 )
 
 target_link_libraries(v5_lvgl_shell PRIVATE lvgl v5_button_visuals v5_lvgl_clock v5_status_shm_projection v5_microkernel_contract v5_program_commands v5_command_gate_client Threads::Threads m)
+
+if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
+    set(V5_LOCAL_REGRESSION_TARGETS)
+
+    macro(v5_register_local_smoke V5_TEST_TARGET)
+        if(NOT TARGET "${V5_TEST_TARGET}")
+            message(FATAL_ERROR "Local regression target is missing: ${V5_TEST_TARGET}")
+        endif()
+        add_test(NAME "${V5_TEST_TARGET}" COMMAND $<TARGET_FILE:${V5_TEST_TARGET}>)
+        set_tests_properties("${V5_TEST_TARGET}" PROPERTIES
+            WORKING_DIRECTORY "${V5_ROOT_DIR}/.."
+            LABELS "v5_local;${ARGN}"
+            TIMEOUT 30
+        )
+        list(APPEND V5_LOCAL_REGRESSION_TARGETS "${V5_TEST_TARGET}")
+    endmacro()
+
+    v5_register_local_smoke(v5_microkernel_manifest_smoke architecture_contract lifeline_01_startup)
+    v5_register_local_smoke(v5_position_status_publisher_smoke state_projection lifeline_01_startup lifeline_07_model_rtcp lifeline_08_axis_drive)
+    v5_register_local_smoke(v5_state_publisher_cadence_smoke state_projection)
+    v5_register_local_smoke(v5_drive_write_window_smoke control lifeline_02_safety lifeline_08_axis_drive)
+    v5_register_local_smoke(v5_estop_clean_state_smoke control lifeline_02_safety)
+    v5_register_local_smoke(v5_program_command_smoke control lifeline_05_program)
+    v5_register_local_smoke(v5_program_scene_producer_smoke state_projection lifeline_05_program lifeline_07_model_rtcp)
+    v5_register_local_smoke(v5_coordinate_digits_smoke ui lifeline_10_ui_remote)
+    v5_register_local_smoke(v5_lvgl_remote_display_delta_smoke ui lifeline_10_ui_remote)
+    v5_register_local_smoke(v5_ui_display_models_smoke ui state_projection lifeline_07_model_rtcp lifeline_10_ui_remote)
+    v5_register_local_smoke(v5_ui_shell_operator_error_smoke ui lifeline_02_safety lifeline_10_ui_remote)
+    v5_register_local_smoke(v5_ui_shell_refresh_smoke ui lifeline_10_ui_remote)
+    v5_register_local_smoke(v5_ui_first_frame_guard_smoke ui lifeline_01_startup lifeline_10_ui_remote)
+    v5_register_local_smoke(v5_ui_page_cache_registry_smoke ui lifeline_10_ui_remote)
+    v5_register_local_smoke(v5_native_operator_error_status_smoke state_projection lifeline_02_safety lifeline_10_ui_remote)
+
+    if(UNIX)
+        v5_register_local_smoke(v5_remote_ui_native_packer_smoke ui lifeline_10_ui_remote)
+        v5_register_local_smoke(v5_program_page_double_click_smoke ui lifeline_05_program lifeline_10_ui_remote)
+        v5_register_local_smoke(v5_ui_shell_program_delete_smoke ui lifeline_05_program lifeline_10_ui_remote)
+        v5_register_local_smoke(v5_cpu_usage_snapshot_smoke state_projection)
+        v5_register_local_smoke(v5_state_publisher_smoke state_projection lifeline_01_startup lifeline_07_model_rtcp lifeline_10_ui_remote)
+        v5_register_local_smoke(v5_main_page_actions_smoke ui control lifeline_02_safety lifeline_03_home lifeline_04_jog lifeline_05_program lifeline_06_coordinates lifeline_07_model_rtcp lifeline_10_ui_remote)
+        v5_register_local_smoke(v5_main_page_smoke ui lifeline_10_ui_remote)
+        v5_register_local_smoke(v5_ui_shm_refresh_smoke ui state_projection lifeline_01_startup lifeline_10_ui_remote)
+        v5_register_local_smoke(v5_command_gate_smoke control lifeline_02_safety lifeline_03_home lifeline_04_jog lifeline_05_program lifeline_06_coordinates lifeline_07_model_rtcp)
+        v5_register_local_smoke(v5_command_gate_validator_smoke control architecture_contract)
+        v5_register_local_smoke(v5_native_motion_parameters_smoke control lifeline_03_home lifeline_04_jog lifeline_07_model_rtcp lifeline_08_axis_drive)
+        v5_register_local_smoke(v5_native_axis_zero_live_smoke control lifeline_08_axis_drive)
+        v5_register_local_smoke(v5_program_runtime_smoke control lifeline_05_program)
+        v5_register_local_smoke(v5_command_wrappers_smoke control lifeline_02_safety lifeline_03_home lifeline_04_jog lifeline_05_program lifeline_06_coordinates lifeline_07_model_rtcp)
+        v5_register_local_smoke(v5_native_rtcp_status_smoke control lifeline_07_model_rtcp)
+        v5_register_local_smoke(v5_native_wcs_status_smoke control lifeline_06_coordinates)
+        v5_register_local_smoke(v5_native_g53_geometry_status_smoke control lifeline_06_coordinates)
+        v5_register_local_smoke(v5_native_modal_tool_status_smoke control lifeline_05_program)
+        v5_register_local_smoke(v5_native_work_zero_smoke control lifeline_06_coordinates)
+        v5_register_local_smoke(v5_parameter_table_smoke settings lifeline_08_axis_drive lifeline_09_restart)
+        v5_register_local_smoke(v5_settings_axis_table_smoke ui settings lifeline_08_axis_drive lifeline_09_restart)
+    endif()
+
+    add_custom_target(v5_local_regression
+        COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -L "^v5_local$" -C "$<CONFIG>"
+        DEPENDS ${V5_LOCAL_REGRESSION_TARGETS}
+        WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+        COMMENT "Build and run the platform-local V5 smoke regression set"
+        USES_TERMINAL
+    )
+endif()
 
 # The deploy manifest is the single product-runtime inventory.  Derive the
 # aggregate ARM build target from every board/app binary row so build, deploy

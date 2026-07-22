@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Validate the off-screen page queue and publish the one-shot UI ready gate."""
 from __future__ import annotations
-import argparse, binascii, ctypes, errno, json, math, os, re, select, struct, subprocess, tempfile, time, urllib.error, urllib.request, uuid
+import argparse, binascii, ctypes, errno, json, math, os, re, select, struct, subprocess, tempfile, time, urllib.error, urllib.parse, urllib.request, uuid
 from pathlib import Path
+from v5_remote_ui_local_client import fetch_authenticated_json
 from v5_status_shm_reader import status_shm_payload_valid
 from v5_ui_main_cache_contract import validate_main_cache_trace
 BOOT_CACHE_POLICY = "main_first_navigation_lazy_v1"
@@ -539,9 +540,20 @@ def read_status_field(pid: int, field: str) -> str:
         if line.startswith(prefix):
             return line.split(":", 1)[1].strip()
     return ""
-def read_diagnostics(url: str) -> dict:
-    with urllib.request.urlopen(url, timeout=1.0) as response:
-        payload = json.load(response)
+def read_diagnostics(url: str, ca_cert=None, clients_file=None, client_id=None) -> dict:
+    if all((ca_cert, clients_file, client_id)):
+        parsed = urllib.parse.urlsplit(url)
+        payload = fetch_authenticated_json(
+            f"{parsed.scheme}://{parsed.netloc}/",
+            Path(ca_cert),
+            Path(clients_file),
+            str(client_id),
+            ["diagnostics"],
+            parsed.path,
+        )
+    else:
+        with urllib.request.urlopen(url, timeout=1.0) as response:
+            payload = json.load(response)
     if not isinstance(payload, dict):
         raise ReadyError("relay diagnostics is not an object")
     return payload
@@ -729,7 +741,12 @@ def wait_and_publish(args: argparse.Namespace) -> dict:
         if not Path(f"/proc/{args.ui_pid}/status").exists():
             raise ReadyError(f"UI process exited before ready pid={args.ui_pid}")
         try:
-            diagnostics = read_diagnostics(args.diagnostics_url)
+            diagnostics = read_diagnostics(
+                args.diagnostics_url,
+                args.diagnostics_ca_cert,
+                args.diagnostics_clients_file,
+                args.diagnostics_client_id,
+            )
             payload = build_ready_payload(
                 args.ui_pid,
                 args.ui_log,
@@ -768,6 +785,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Validate the v5 boot Main cache and publish ui_ready metadata."); parser.add_argument("--pre-ui-inputs", action="store_true"); parser.add_argument("--publish-failure", action="store_true"); parser.add_argument("--expected-ini")
     parser.add_argument("--ui-pid", type=int); parser.add_argument("--ui-log", type=Path)
     parser.add_argument("--ready-path", type=Path); parser.add_argument("--diagnostics-url")
+    parser.add_argument("--diagnostics-ca-cert", type=Path)
+    parser.add_argument("--diagnostics-clients-file", type=Path)
+    parser.add_argument("--diagnostics-client-id", default="local-bootstrap")
     parser.add_argument("--publisher-snapshot-path", type=Path)
     parser.add_argument("--backend-readiness-probe", type=Path)
     parser.add_argument("--startup-instance-id"); parser.add_argument("--failure-owner-pid", type=int)
@@ -804,6 +824,8 @@ def main() -> int:
             print("v5_ui_boot_inputs PASS " + json.dumps(result, sort_keys=True, separators=(",", ":")))
             return 0
         if not all((args.ui_pid, args.ui_log, args.ready_path, args.diagnostics_url,
+                    args.diagnostics_ca_cert, args.diagnostics_clients_file,
+                    args.diagnostics_client_id,
                     args.publisher_snapshot_path, args.expected_ini,
                     args.backend_readiness_probe)):
             raise ReadyError("UI ready mode requires UI, diagnostics and publisher snapshot identity")

@@ -47,8 +47,16 @@ BC_RUNTIME = {
 PROFILE = {
     "profile_id": "sv630n",
     "commands": {
-        "drive.set_egear": {"supported": True, "requires_save_parameters": False},
-        "drive.write_mode": {"supported": True, "requires_save_parameters": False},
+        "drive.set_egear": {
+            "supported": True,
+            "access": "write",
+            "requires_save_parameters": False,
+        },
+        "drive.write_mode": {
+            "supported": True,
+            "access": "write",
+            "requires_save_parameters": False,
+        },
     },
 }
 AC_SECTIONS = {
@@ -163,8 +171,18 @@ def run_set_drive_with(targets: List[Dict[str, Any]]) -> tuple[Dict[str, Any], L
         "initial_machine_enabled": False, "final_machine_enabled": False,
     }
     action.configured_drive_targets = lambda _timeout: (targets, RUNTIME, SCAN)
+    action.capture_drive_transaction_identity = lambda *_args, **_kwargs: {
+        "transaction_generation": "resident-mapping-smoke"}
+    action.verify_drive_transaction_identity = lambda _frozen, _current, stage: {
+        "ok": True, "stage": stage}
     action.precheck_targets_for_write = lambda *_args, **_kwargs: {"ok": True}
     action.target_egear = lambda _target: (100, 1, {"source": "smoke"})
+    action._planned_drive_transaction = lambda current_targets: {
+        str(target["position"]): ((100, 1), {"source": "smoke"})
+        for target in current_targets
+    }
+    action._reload_drive_transaction_identity = lambda _timeout: {
+        "transaction_generation": "resident-mapping-smoke"}
     action.read_required_state = lambda *_args: {"ok": True, "reads": {"drive.read_mode": {"upload": {"value": 8}}}}
 
     def fake_write(position: str, command_name: str, _command: Dict[str, Any], _values: Any = None) -> Dict[str, Any]:
@@ -293,12 +311,10 @@ def main() -> int:
         raise AssertionError(aux_targets)
 
     result, writes = run_set_drive_with(targets)
-    if not result.get("ok") or writes != [
-            ("2", "drive.set_egear"),
-            ("1", "drive.set_egear"),
-            ("0", "drive.set_egear"),
-            ("4", "drive.set_egear"),
-            ("3", "drive.set_egear")]:
+    if (not result.get("ok") or
+            result.get("code") != "DRIVE_SET_RESTART_REQUIRED" or writes or
+            [item.get("position") for item in result.get("targets", [])] !=
+            ["2", "1", "0", "4", "3"]):
         raise AssertionError((result, writes))
 
     bc_bindings = complete_bindings(X="2", Y="1", Z="0", B="4", C="3")
@@ -312,12 +328,11 @@ def main() -> int:
     if bc_scan.get("active_model") != "XYZBC_TRT":
         raise AssertionError(bc_scan)
     bc_result, bc_writes = run_set_drive_with(bc_targets)
-    if not bc_result.get("ok") or bc_writes != [
-            ("2", "drive.set_egear"),
-            ("1", "drive.set_egear"),
-            ("0", "drive.set_egear"),
-            ("4", "drive.set_egear"),
-            ("3", "drive.set_egear")]:
+    if (not bc_result.get("ok") or
+            bc_result.get("code") != "DRIVE_SET_RESTART_REQUIRED" or
+            bc_writes or
+            [item.get("position") for item in bc_result.get("targets", [])] !=
+            ["2", "1", "0", "4", "3"]):
         raise AssertionError((bc_result, bc_writes))
 
     context.resident_preload_active = True

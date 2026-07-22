@@ -63,6 +63,7 @@ void execute_request(const V5CommandGateIpcRequestFrame *frame, V5CommandGateIpc
     if (request.kind == V5_COMMAND_ESTOP_RESET && strcmp(prepared.owner, "native_safety") == 0) {
         V5NativeSafetyResult native_result;
         V5EstopCleanStatus clean_status;
+        memset(&native_result, 0, sizeof(native_result));
         if (!v5_estop_clean_state_wait_latest_terminal(1000U, &clean_status) ||
             !clean_status.terminal || !clean_status.ok) {
             copy_estop_clean_status(response, &clean_status);
@@ -78,7 +79,10 @@ void execute_request(const V5CommandGateIpcRequestFrame *frame, V5CommandGateIpc
             return;
         }
         copy_estop_clean_status(response, &clean_status);
-        v5_command_gate_response_copy_text(response->command_line, sizeof(response->command_line), "native_safety.estop_reset | Set Machine On");
+        v5_command_gate_response_copy_text(
+            response->command_line,
+            sizeof(response->command_line),
+            "native_safety.estop_reset");
         linuxcncrsh_lock();
         if (v5_drive_write_window_blocks_kind(V5_COMMAND_ESTOP_RESET)) {
             linuxcncrsh_unlock();
@@ -96,14 +100,23 @@ void execute_request(const V5CommandGateIpcRequestFrame *frame, V5CommandGateIpc
             v5_command_gate_response_fill_safety(response);
             response->send_status = V5_COMMAND_GATE_SEND_INVALID;
             response->executed = 0;
+            response->machine_on_requested = 0;
+            response->machine_on_status = V5_LINUXCNCRSH_SEND_INVALID;
             v5_command_gate_response_copy_text(
                 response->readback_code,
                 sizeof(response->readback_code),
-                "ALL_HOME_AXIS_SLAVE_MAPPING_INVALID");
+                g_machine_on_axis_slave_mapping_invalid_code);
             return;
         }
         status = v5_native_safety_estop_reset_latch(&native_result);
         if (status == V5_NATIVE_SAFETY_SEND_SENT) {
+            status = wait_estop_latch_cleared(&native_result, 100U, 10000U);
+        }
+        if (status == V5_NATIVE_SAFETY_SEND_SENT) {
+            v5_command_gate_response_copy_text(
+                response->command_line,
+                sizeof(response->command_line),
+                "native_safety.estop_reset | Set Machine On");
             status = restore_machine_on_after_estop_reset_locked(&native_result);
         }
         linuxcncrsh_unlock();
@@ -311,7 +324,19 @@ void execute_settings_axis_commit(
     request.value_text = frame->settings_value_text;
     request.owner_generation = frame->settings_owner_generation;
     request.readback_token = frame->settings_readback_token;
+    linuxcncrsh_lock();
+    if (v5_drive_write_window_is_active()) {
+        linuxcncrsh_unlock();
+        response->send_status = V5_COMMAND_GATE_SEND_INVALID;
+        response->executed = 0;
+        v5_command_gate_response_copy_text(
+            response->readback_code,
+            sizeof(response->readback_code),
+            "SETTINGS_AXIS_COMMIT_DRIVE_WINDOW_ACTIVE");
+        return;
+    }
     ok = v5_settings_apply_commit_axis_value(&request, &result);
+    linuxcncrsh_unlock();
     v5_command_gate_response_copy_settings(response, &result);
     if (ok && result.source_readback_confirmed) {
         response->send_status = V5_COMMAND_GATE_SEND_SENT;

@@ -345,6 +345,15 @@ int v5_drive_write_window_blocks_kind(V5CommandKind kind)
     return blocked;
 }
 
+int v5_drive_write_window_is_active(void)
+{
+    int active;
+    DRIVE_WINDOW_LOCK();
+    active = g_drive_write_window.active ? 1 : 0;
+    DRIVE_WINDOW_UNLOCK();
+    return active;
+}
+
 void v5_drive_write_window_reset_for_test(void)
 {
     DRIVE_WINDOW_LOCK();

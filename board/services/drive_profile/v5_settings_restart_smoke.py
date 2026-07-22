@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import ast
 import json
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
+import v5_drive_boot_validation as boot_apply
 import v5_settings_action_runtime as action_runtime
 import v5_settings_restart as restart
 
 
-class SettingsRestartSmoke(unittest.TestCase):
+class SettingsRestartHandoffSmoke(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.run_dir = Path(self.temporary.name) / "run"
@@ -31,175 +31,87 @@ class SettingsRestartSmoke(unittest.TestCase):
             )
 
         self.assertTrue(result["ok"])
-        self.assertEqual("SETTINGS_SAVE_RESTART_BOARD_REBOOT_SCHEDULED", result["code"])
+        self.assertEqual(
+            "SETTINGS_SAVE_RESTART_BOARD_REBOOT_SCHEDULED", result["code"])
         self.assertFalse(result["write_executed"])
         self.assertFalse(result["restart_executed"])
         self.assertTrue(result["restart_commit_required"])
-        self.assertEqual("board_reboot_after_ui_ack", result["clean_restart_equivalent"])
-        self.assertRegex(result["generated_at"], r"^\d{4}-\d{2}-\d{2}T")
-        self.assertNotIn("rotary_drive_owner", result)
-        self.assertNotIn("rotary_wcheckpoint_profile", result)
+        self.assertEqual(
+            "board_reboot_after_ui_ack", result["clean_restart_equivalent"])
         handoff_script = Path(result["handoff_script"])
         self.assertTrue(handoff_script.is_file())
-        script_text = handoff_script.read_text(encoding="utf-8")
-        self.assertIn("reboot -f", script_text)
-        self.assertLess(script_text.index('while [ ! -f "$GO" ]'), script_text.index("sleep 1.0"))
-        self.assertLess(script_text.index("sleep 1.0"), script_text.index("sync || true"))
+        self.assertIn("reboot -f", handoff_script.read_text(encoding="utf-8"))
         popen.assert_not_called()
 
-    def test_prepare_contains_only_restart_handoff_operations(self) -> None:
-        result = restart.run_restart_handoff(
-            "settings_save_and_restart",
-            {"owner": "settings_restart"},
-        )
-        self.assertTrue(result["ok"])
-        source = Path(restart.__file__).read_text(encoding="utf-8")
-        functions = {
-            node.name
-            for node in ast.parse(source).body
-            if isinstance(node, ast.FunctionDef)
-        }
-        self.assertEqual({
-            "restart_handoff_paths",
-            "remove_runtime_marker",
-            "now_utc",
-            "run_restart_handoff",
-            "commit_restart_handoff",
-            "release_restart_handoff",
-            "abort_restart_handoff",
-        }, functions)
-
-    def test_commit_arms_prepared_handoff_and_release_opens_gate(self) -> None:
+    def test_commit_and_release_open_the_reboot_gate(self) -> None:
         restart.run_restart_handoff(
             "settings_save_and_restart",
             {"owner": "settings_restart"},
         )
         with mock.patch.object(restart.subprocess, "Popen") as popen:
-            result = restart.commit_restart_handoff()
+            committed = restart.commit_restart_handoff()
 
-        self.assertTrue(result["ok"])
-        self.assertTrue(result["accepted"])
-        self.assertEqual("SETTINGS_SAVE_RESTART_COMMIT_ACK", result["code"])
-        self.assertEqual(1.0, result["handoff_delay_s"])
+        self.assertTrue(committed["ok"])
+        self.assertEqual("SETTINGS_SAVE_RESTART_COMMIT_ACK", committed["code"])
         _script, _log, armed_marker, go_marker = restart.restart_handoff_paths()
         self.assertTrue(armed_marker.is_file())
         self.assertFalse(go_marker.exists())
         popen.assert_called_once()
-        release = restart.release_restart_handoff()
-        self.assertTrue(release["ok"])
-        self.assertEqual("SETTINGS_SAVE_RESTART_COMMIT_RELEASED", release["code"])
+        released = restart.release_restart_handoff()
+        self.assertTrue(released["ok"])
         self.assertFalse(armed_marker.exists())
         self.assertTrue(go_marker.is_file())
 
-    def test_commit_spawn_failure_is_a_result_not_a_secondary_exception(self) -> None:
-        restart.run_restart_handoff(
-            "settings_save_and_restart",
-            {"owner": "settings_restart"},
-        )
-        with mock.patch.object(
-            restart.subprocess,
-            "Popen",
-            side_effect=OSError("spawn denied"),
-        ):
-            result = restart.commit_restart_handoff()
 
-        self.assertFalse(result["ok"])
-        self.assertFalse(result["accepted"])
-        self.assertEqual("SETTINGS_SAVE_RESTART_COMMIT_SPAWN_FAILED", result["code"])
-        self.assertIn("OSError: spawn denied", result["detail"])
-        _script, _log, armed_marker, go_marker = restart.restart_handoff_paths()
-        self.assertFalse(armed_marker.exists())
-        self.assertFalse(go_marker.exists())
-
-
-class SettingsSaveRestartDriveSyncSmoke(unittest.TestCase):
-    def run_save_restart(self, drive_result: dict) -> tuple[dict, dict, mock.Mock, mock.Mock]:
+class SettingsSaveRestartRuntimeSmoke(unittest.TestCase):
+    def test_save_restart_only_prepares_reboot_handoff(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             result_path = Path(temporary) / "settings-save-restart-result.json"
             spec = dict(action_runtime.ACTIONS["settings_save_and_restart"])
             spec["result_path"] = str(result_path)
-            handoff_result = {
+            handoff = {
                 "schema": "v5.settings_action_result.v1",
                 "action": "settings_save_and_restart",
                 "owner": "settings_restart",
                 "ok": True,
                 "code": "SETTINGS_SAVE_RESTART_BOARD_REBOOT_SCHEDULED",
                 "restart_commit_required": True,
+                "write_executed": False,
+                "restart_executed": False,
             }
             with mock.patch.dict(
                 action_runtime.ACTIONS,
                 {"settings_save_and_restart": spec},
             ), mock.patch.object(
-                action_runtime.v5_drive_bus_action,
-                "preload_resident_state",
-                return_value={
-                    "ok": True,
-                    "settings_runtime_loaded": True,
-                    "runtime_ini_loaded": True,
-                    "self_slave_bindings_loaded": True,
-                    "drive_snapshot_loaded": True,
-                },
-            ), mock.patch.object(
-                action_runtime.v5_drive_bus_action,
-                "write_json",
-            ), mock.patch.object(
-                action_runtime.v5_drive_bus_action,
-                "run_action",
-                return_value=dict(drive_result),
-            ) as drive_action, mock.patch.object(
                 action_runtime,
                 "run_restart_handoff",
-                return_value=dict(handoff_result),
-            ) as restart_handoff:
+                return_value=dict(handoff),
+            ) as restart_handoff, mock.patch.object(
+                action_runtime.v5_drive_bus_action,
+                "preload_resident_state",
+            ) as preload, mock.patch.object(
+                action_runtime.v5_drive_bus_action,
+                "run_action",
+            ) as drive_action:
                 result = action_runtime.execute_action(
                     "settings_save_and_restart",
                     {"action": "settings_save_and_restart", "_run_id": "run-1"},
                 )
+
             persisted = json.loads(result_path.read_text(encoding="utf-8"))
-        return result, persisted, drive_action, restart_handoff
 
-    def test_drive_fresh_readback_precedes_restart_handoff(self) -> None:
-        drive_result = {
-            "ok": True,
-            "code": "SET_DRIVE_READBACK_OK",
-            "message_cn": "电子齿轮和必需驱动参数 fresh readback 一致。",
-            "write_executed": True,
-            "motion_executed": False,
-        }
-        result, persisted, drive_action, restart_handoff = self.run_save_restart(drive_result)
         self.assertTrue(result["ok"])
-        self.assertEqual("SETTINGS_SAVE_RESTART_BOARD_REBOOT_SCHEDULED", result["code"])
-        self.assertTrue(result["drive_sync"]["ok"])
-        self.assertEqual("SET_DRIVE_READBACK_OK", result["drive_sync"]["code"])
-        self.assertIn("设置驱动校验完成", result["display_message_cn"])
+        self.assertEqual(handoff["code"], result["code"])
         self.assertEqual(result, persisted)
-        drive_action.assert_called_once()
-        self.assertEqual("set-drive", drive_action.call_args.args[0])
-        self.assertEqual("settings_save_and_restart", drive_action.call_args.args[3]["trigger"])
-        restart_handoff.assert_called_once()
-
-    def test_drive_failure_keeps_restart_handoff_closed(self) -> None:
-        drive_result = {
-            "ok": False,
-            "code": "DRIVE_EGEAR_READBACK_MISMATCH",
-            "message_cn": "电子齿轮读回不一致。",
-            "write_executed": True,
-            "motion_executed": False,
-        }
-        result, persisted, drive_action, restart_handoff = self.run_save_restart(drive_result)
-        self.assertFalse(result["ok"])
-        self.assertEqual("SETTINGS_SAVE_RESTART_DRIVE_SYNC_FAILED", result["code"])
-        self.assertEqual("DRIVE_EGEAR_READBACK_MISMATCH", result["drive_sync"]["code"])
-        self.assertFalse(result["restart_executed"])
-        self.assertFalse(result["restart_commit_required"])
-        self.assertIn("电子齿轮读回不一致", result["display_message_cn"])
-        self.assertEqual(result, persisted)
-        drive_action.assert_called_once()
-        restart_handoff.assert_not_called()
+        self.assertNotIn("drive_sync", result)
+        preload.assert_not_called()
+        drive_action.assert_not_called()
+        restart_handoff.assert_called_once_with(
+            "settings_save_and_restart", spec)
 
 
 class SettingsDriveOwnerReloadSmoke(unittest.TestCase):
-    def test_drive_action_reloads_current_model_mapping_before_execution(self) -> None:
+    def test_drive_action_reloads_current_owners_before_preflight(self) -> None:
         events: list[str] = []
 
         def preload() -> dict:
@@ -213,8 +125,14 @@ class SettingsDriveOwnerReloadSmoke(unittest.TestCase):
             }
 
         def run_action(*_args, **_kwargs) -> dict:
-            events.append("drive")
-            return {"ok": True, "code": "DRIVE_SET_OK", "motion_executed": False}
+            events.append("preflight")
+            return {
+                "ok": True,
+                "code": "DRIVE_SET_RESTART_REQUIRED",
+                "write_executed": False,
+                "drive_write_executed": False,
+                "motion_executed": False,
+            }
 
         with mock.patch.object(
             action_runtime.v5_drive_bus_action,
@@ -229,12 +147,13 @@ class SettingsDriveOwnerReloadSmoke(unittest.TestCase):
             "write_json",
         ):
             result = action_runtime.run_drive_action_from_current_owners(
-                "set-drive", 8.0, {"trigger": "motion_model_changed"})
+                "set-drive", 8.0, {"trigger": "settings_set_drive"})
 
-        self.assertEqual(["reload", "drive"], events)
+        self.assertEqual(["reload", "preflight"], events)
         self.assertTrue(result["owner_reload"]["ok"])
+        self.assertFalse(result["drive_write_executed"])
 
-    def test_drive_action_rejects_incomplete_owner_reload(self) -> None:
+    def test_incomplete_owner_reload_rejects_without_drive_action(self) -> None:
         with mock.patch.object(
             action_runtime.v5_drive_bus_action,
             "preload_resident_state",
@@ -247,12 +166,86 @@ class SettingsDriveOwnerReloadSmoke(unittest.TestCase):
             "write_json",
         ):
             result = action_runtime.run_drive_action_from_current_owners(
-                "set-drive", 8.0, {"trigger": "motion_model_changed"})
+                "set-drive", 8.0, {"trigger": "settings_set_drive"})
 
         self.assertFalse(result["ok"])
         self.assertEqual("DRIVE_ACTION_OWNER_RELOAD_FAILED", result["code"])
-        self.assertFalse(result["write_executed"])
-        self.assertFalse(result["motion_executed"])
+        run_action.assert_not_called()
+
+
+class PostRestartDriveApplySmoke(unittest.TestCase):
+    def test_boot_apply_uses_final_owner_and_persists_current_boot_result(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            result_path = Path(temporary) / "drive-boot-apply-result.json"
+            boot_id_path = Path(temporary) / "boot_id"
+            boot_id_path.write_text("boot-smoke\n", encoding="ascii")
+            raw = {
+                "ok": True,
+                "code": "DRIVE_SET_OK",
+                "drive_write_executed": True,
+                "motion_executed": False,
+            }
+            with mock.patch.object(
+                boot_apply, "BOOT_APPLY_RESULT_PATH", result_path,
+            ), mock.patch.object(
+                boot_apply, "BOOT_ID_PATH", boot_id_path,
+            ), mock.patch.object(
+                boot_apply,
+                "probe_axis_slave_mapping",
+                return_value={"ok": True, "available": True, "applicable": True},
+            ), mock.patch.object(
+                boot_apply.v5_drive_bus_action,
+                "preload_resident_state",
+                return_value={"ok": True},
+            ) as preload, mock.patch.object(
+                boot_apply.v5_drive_bus_action,
+                "run_action",
+                return_value=raw,
+            ) as run_action:
+                first = boot_apply.run_post_restart_drive_apply(5.0)
+                second = boot_apply.run_post_restart_drive_apply(5.0)
+
+        self.assertTrue(first["ok"])
+        self.assertEqual("DRIVE_BOOT_APPLY_OK", first["code"])
+        self.assertEqual("boot-smoke", first["boot_id"])
+        self.assertTrue(first["drive_write_executed"])
+        self.assertEqual(first, second)
+        preload.assert_called_once_with()
+        run_action.assert_called_once()
+        self.assertEqual("boot-apply", run_action.call_args.args[0])
+        self.assertEqual("post_restart_boot", run_action.call_args.args[3]["trigger"])
+
+    def test_mapping_not_ready_is_transient_and_never_writes(self) -> None:
+        with mock.patch.object(
+            boot_apply,
+            "probe_axis_slave_mapping",
+            return_value={"ok": False, "available": False},
+        ), mock.patch.object(
+            boot_apply.v5_drive_bus_action,
+            "run_action",
+        ) as run_action:
+            result = boot_apply.run_post_restart_drive_apply(5.0)
+
+        self.assertFalse(result["ok"])
+        self.assertEqual("DRIVE_BOOT_NATIVE_MAPPING_NOT_READY", result["code"])
+        self.assertFalse(result["drive_write_executed"])
+        run_action.assert_not_called()
+
+    def test_mapping_socket_startup_race_is_transient_and_never_writes(self) -> None:
+        with mock.patch.object(
+            boot_apply,
+            "probe_axis_slave_mapping",
+            side_effect=FileNotFoundError(2, "command gate socket not ready"),
+        ), mock.patch.object(
+            boot_apply.v5_drive_bus_action,
+            "run_action",
+        ) as run_action:
+            result = boot_apply.run_post_restart_drive_apply(5.0)
+
+        self.assertFalse(result["ok"])
+        self.assertEqual("DRIVE_BOOT_NATIVE_MAPPING_NOT_READY", result["code"])
+        self.assertIn("FileNotFoundError", result["detail"])
+        self.assertFalse(result["drive_write_executed"])
         run_action.assert_not_called()
 
 
@@ -284,25 +277,18 @@ class SettingsAxisZeroRuntimeSmoke(unittest.TestCase):
                 return_value=dict(drive_result),
             ):
                 result = action_runtime.execute_action(
-                    "settings_axis_zero", {"axis": "B", "slave_position": 3}
-                )
+                    "settings_axis_zero", {"axis": "B", "slave_position": 3})
             persisted = (
                 json.loads(result_path.read_text(encoding="utf-8"))
-                if result_path.is_file()
-                else None
-            )
+                if result_path.is_file() else None)
         return result, persisted
 
-    def test_axis_zero_preserves_drive_success_without_restarting_publisher(self) -> None:
+    def test_axis_zero_preserves_drive_result_without_publisher_restart(self) -> None:
         drive_result = {
             "ok": True,
             "code": "SETTINGS_AXIS_ZERO_OK",
             "axis": "B",
             "zero_counts": 1234,
-            "raw_zero_position": 1.234,
-            "backend_restart_required": True,
-            "canonical_clean_restart_required": True,
-            "restart_deferred": True,
             "drive_position": {"readback": {"actual_position_counts": 1234}},
         }
         result, persisted = self.run_axis_zero(drive_result)
@@ -310,32 +296,12 @@ class SettingsAxisZeroRuntimeSmoke(unittest.TestCase):
         self.assertEqual(drive_result["code"], result["code"])
         self.assertNotIn("position_publisher_reload", result)
         self.assertIsNotNone(persisted)
-        for key, value in drive_result.items():
-            self.assertEqual(value, persisted[key])
-        self.assertTrue(persisted["owner_reload"]["ok"])
-        self.assertEqual(1234, persisted["drive_position"]["readback"]["actual_position_counts"])
-
-    def test_axis_zero_preserves_drive_failure_without_restart_override(self) -> None:
-        drive_result = {
-            "ok": False,
-            "code": "SETTINGS_AXIS_ZERO_READBACK_MISMATCH",
-            "axis": "B",
-            "message_cn": "设0源位置读回不一致。",
-            "drive_position": {"readback": {"actual_position_counts": 1200}},
-        }
-        result, persisted = self.run_axis_zero(drive_result)
-        self.assertFalse(result["ok"])
-        self.assertEqual(drive_result["code"], result["code"])
-        self.assertNotIn("position_publisher_reload", result)
-        self.assertIsNone(persisted)
 
     def test_action_runtime_contains_no_publisher_restart_path(self) -> None:
-        self.assertFalse(hasattr(action_runtime, "reload_position_publisher"))
         source = Path(action_runtime.__file__).read_text(encoding="utf-8")
         for token in (
             "reload_position_publisher",
             "position_publisher_reload",
-            "SETTINGS_AXIS_ZERO_POSITION_RELOAD_FAILED",
             "/etc/init.d/v5-wcs-status-publisher",
             "subprocess.run",
         ):

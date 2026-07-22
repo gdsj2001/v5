@@ -208,6 +208,7 @@ int v5_native_hal_owner_stage_home_joint(
     request.home_counts_per_unit = record->counts_per_unit;
     return exchange_request(&request, timeout_ms, response);
 }
+
 #else
 int v5_native_hal_owner_exchange(
     unsigned int operation,
@@ -239,4 +240,5 @@ int v5_native_hal_owner_stage_home_joint(
     }
     return V5_NATIVE_HAL_OWNER_CLIENT_UNAVAILABLE;
 }
+
 #endif

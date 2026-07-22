@@ -14,6 +14,8 @@ binary	build/board/app/v5_command_gate_server	/usr/libexec/8ax/v5_command_gate_s
 binary	build/board/app/v5_command_gate_drive_window	/usr/libexec/8ax/v5_command_gate_drive_window	0755
 binary	build/board/app/v5_linuxcncrsh_golden_run	/usr/libexec/8ax/v5_linuxcncrsh_golden_run	0755
 script	services/ui/v5_remote_ui_relay.py	/usr/libexec/8ax/v5_remote_ui_relay.py	0755
+module	services/ui/v5_remote_ui_auth.py	/usr/libexec/8ax/v5_remote_ui_auth.py	0644
+script	services/ui/v5_remote_ui_local_client.py	/usr/libexec/8ax/v5_remote_ui_local_client.py	0755
 binary	build/board/app/v5_remote_ui_packer	/usr/libexec/8ax/v5_remote_ui_packer.so	0755
 module	services/ui/v5_remote_ui_native_packer.py	/usr/libexec/8ax/v5_remote_ui_native_packer.py	0644
 module	services/ui/v5_remote_ui_programs.py	/usr/libexec/8ax/v5_remote_ui_programs.py	0644
@@ -56,7 +58,7 @@ config	config/ui/v5_native_operator_error_map.tsv	/opt/8ax/v5/config/ui/v5_nativ
 config	config/safe_ui/re_touch_calibration.json	/opt/8ax/safe_ui/re_touch_calibration.json	0644
 config	config/auth/device_auth_public.pem	/etc/6x-cnc/device_auth_public.pem	0644
 runtime_seed_merge	config/settings/self_parameter_table.tsv	/opt/8ax/v5/config/settings/self_parameter_table.tsv	0644
-runtime_seed	config/settings/drive_parameter_table.tsv	/opt/8ax/v5/config/settings/drive_parameter_table.tsv	0644
+runtime_seed_merge	config/settings/drive_parameter_table.tsv	/opt/8ax/v5/config/settings/drive_parameter_table.tsv	0644
 runtime_seed	config/settings/settings_runtime.json	/opt/8ax/phase0_bus5/settings_runtime.json	0644
 gcode	gcode/golden/cc-ac.ngc	/opt/8ax/v5/gcode/golden/cc-ac.ngc	0644
 gcode	gcode/golden/cc-bc.ngc	/opt/8ax/v5/gcode/golden/cc-bc.ngc	0644
@@ -89,6 +91,8 @@ module	services/drive_profile/v5_drive_enable_window.py	/usr/libexec/8ax/drive_p
 module	services/drive_profile/v5_drive_axis_model.py	/usr/libexec/8ax/drive_profile/v5_drive_axis_model.py	0644
 module	services/drive_profile/v5_drive_bus_context.py	/usr/libexec/8ax/drive_profile/v5_drive_bus_context.py	0644
 module	services/drive_profile/v5_drive_bus_contract.py	/usr/libexec/8ax/drive_profile/v5_drive_bus_contract.py	0644
+module	services/drive_profile/v5_drive_transaction_identity.py	/usr/libexec/8ax/drive_profile/v5_drive_transaction_identity.py	0644
+module	services/drive_profile/v5_drive_boot_validation.py	/usr/libexec/8ax/drive_profile/v5_drive_boot_validation.py	0644
 module	services/drive_profile/v5_drive_health.py	/usr/libexec/8ax/drive_profile/v5_drive_health.py	0644
 module	services/drive_profile/v5_drive_parameter_table.py	/usr/libexec/8ax/drive_profile/v5_drive_parameter_table.py	0644
 module	services/drive_profile/v5_drive_query.py	/usr/libexec/8ax/drive_profile/v5_drive_query.py	0644

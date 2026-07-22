@@ -8,7 +8,7 @@ RULE_SOURCE=AGENTS.md
 
 HIGHEST_RULE_1:
 - 项目真实可交付结果和用户当前目标是项目内最高目标；规则、文档、门禁、identity、构建梯级和状态词只用于减少错误与证明受影响闭环，不得成为独立工作目标。与当前 owner/输入/target/风险无关的流程必须短路；若通用工具强制执行无关全树扫描、无关子系统验证或重复证明，视为工具/规则缺陷，立即改用或补出最小入口后继续推进，不得让“遵守规则”阻塞项目。
-- 日常开发默认目标是最快把当前需求落实到 canonical source 并取得最近的 focused compile/unit/package 结果；`local_verified_only` 是可正常交付并继续下一缺陷的阶段，不得自动追求最高验证等级。rootfs/image、板端部署和 operator 验收默认按相关改动批量集成，只在用户明确要求立即上板、当前任务本身是板端验收、集成里程碑或发布前执行。
+- 日常开发默认目标是最快把当前需求落实到 canonical source 并取得受影响闭环。任何会进入板端产物或影响板端运行的代码、配置、脚本、服务、recipe 或部署项修改，在 Windows focused gate 后必须继续完成最小受影响 target/package 编译、必要 canonical artifact 生成与部署、板端启动就绪检查，以及受影响原始 operator/control 路径的最小测试和 fresh owner readback；`local_verified_only` 只允许作为进行中的中间状态，不得作为这类修改的正常关闭点。只改文档/规则、真正不进入板端且不依赖板端协议的独立主机工具、用户明确要求仅本地修改或真实安全/外部 blocker 才可不做上板；rootfs/image 仅在最小受影响部署确实需要时生成，不得把本规则扩成无关全量重建。
 - Windows 是默认执行主机。能在 Windows 正确完成的 compile/check/codegen/package/manifest/schema/test 步骤必须留在 Windows；VM 只承担 Windows 无法提供所需 Linux ABI、PetaLinux/Yocto、ARM 交叉环境、Linux 内核行为或 vendor 能力的最小步骤。
 - 正式构建输入必须落到 Windows `D:\v5` 的唯一 canonical owner，并有固定 identity/hash/provenance。VM/BitBake 发现缺项时必须输出 inventory 绑定的机器可读报告并停止；只允许 Windows importer 下载报告中已登记、checksum/许可证齐全的包到 canonical owner，复核后再让 VM 只读消费。VM、BitBake、代理、sstate 或构建脚本不得自行联网补下载，未知输入必须 `blocked`。
 - 每份源码只允许 Windows `D:\v5` 内一个持久 owner。VM 只允许 `${VM_BUILD_ROOT}/temp_source/current` 一套由 Windows identity 派生、不可编辑的加速投影；identity 一致可跨任务复用，不一致只按文件 identity/hash 原地更新新增、修改、删除集合，未变文件必须保持 inode/mtime。禁止因总 identity 变化删除重建整棵投影、全量强制复制、第二投影、VM checkout、手工 patch、反向覆盖 Windows 或把投影当 owner。
@@ -39,7 +39,7 @@ CONFLICT_PRIORITY:
 TASK_ROUTER:
 | 任务 | 第一读取 | 第一修改 | 最低关闭 |
 | --- | --- | --- | --- |
-| 产品行为/需求 | 需求索引 -> 唯一 owner 快读卡/命中章节 | 需求变化先改唯一 owner；现有需求的实现缺陷直接改 canonical source | source/config + focused gates；板端行为再走板端闭环 |
+| 产品行为/需求 | 需求索引 -> 唯一 owner 快读卡/命中章节 | 需求变化先改唯一 owner；现有需求的实现缺陷直接改 canonical source | source/config + focused gates；涉及板端代码或运行行为必须完成最小编译、部署、上板测试和 readback |
 | 指定 `待做工作/*.md` | 指定 workdoc -> 需求索引 -> owner | 行为变化先改 owner | 按 owner 实施；workdoc 不替代真源 |
 | 规则/文档结构 | 本文件对应节、需求索引 | 唯一 canonical 文档 | 文档路由校验 + `git diff --check` |
 | 板端源码 | owner + Windows canonical source | Windows owner | focused -> affected target -> current artifact -> deploy -> operator path |
@@ -137,7 +137,7 @@ FILE_LOCK_PROTOCOL:
 
 FAST_INCREMENTAL_SLICE:
 - 先推进当前可交付闭环，再做证明该闭环所必需的最小流程。任何 gate 必须说明其失败如何影响当前 target；不能说明直接影响的 gate 本切片跳过。通用入口若强制验证未触碰的 Linux/kernel/PetaLinux/其它 owner，必须修出 target-only 路径或调用已登记的更低层入口，不得重复运行错误的大入口。
-- owner 和直接源码入口一旦明确，下一步必须是编辑或最近 focused command；同一问题在首次具体动作前最多允许两轮只读定位，不得持续扩展架构分析、全仓分类或方案比较。focused gate 通过后立即交付该阶段结果，不为追求 `board_verified` 自动新建 deploy bundle、服务、协议、镜像路径或其它基础设施；缺少更高层部署能力时诚实停在 `local_verified_only`，基础设施作为用户明确触发的独立切片处理。
+- owner 和直接源码入口一旦明确，下一步必须是编辑或最近 focused command；同一问题在首次具体动作前最多允许两轮只读定位，不得持续扩展架构分析、全仓分类或方案比较。focused gate 通过后，真正非板端代码可交付当前阶段；任何会进入板端产物或影响板端运行的修改必须继续使用现有最小 build/deploy/operator 入口完成受影响上板闭环，不为追求全量 `board_verified` 新建无关 deploy bundle、服务、协议或镜像路径。缺少必要部署能力、板端不可达或存在安全 blocker 时，必须保留实际最高状态并报告未闭合条件，不得把 `local_verified_only` 当作已关闭。
 - 日常修复默认一个切片只关闭一个具体缺陷、一个 owner 链和一个最小可部署 target；用户一次提出多个问题时按依赖顺序逐个关闭、逐个验证、逐个交付，除非源码证明它们是同一不可拆原子变更。不得把多个 P0/P1、架构整理、顺手重构或文档清扫打包成几十文件的大切片。
 - 进入 VM 前冻结当前缺陷、owner、允许修改文件集和最小 build target。进入 VM 后只修改当前明确失败层直接依赖的 owner/source/config/test/build tool；新发现的独立问题留到下一切片。受影响单包未通过前禁止 rootfs/image。
 - 耗时 gate 绑定“受影响输入 identity + gate 实现 identity + 命令参数”。三者未变时复用已通过的 source identity/hash、唯一投影、文档路由、runtime policy 和上游构建层；变化时只重跑受影响 gate 及其下游，不得重复全树扫描制造进度。
@@ -177,18 +177,19 @@ LOCAL_FIRST:
 BUILD_LADDER:
 1. 日常 focused 只证明 Windows 受影响 owner diff、当前 target 直接输入和 VM read-only/唯一 projection 可用；完整 source identity/inventory 留给 full-current、发布或离线构建。
 2. 构建最小受影响 target/recipe/package；失败先修该层。
-3. 只有用户明确要求立即上板、任务本身是板端验收、批量集成里程碑或发布，且部署内容变化时，才生成必要 rootfs/manifest。
-4. 需要 current artifact 时只生成一套；日常 source/focused/package 切片不自动生成镜像，不清未受影响缓存。
+3. 任何会进入板端产物或影响板端运行的修改都必须部署；只生成该最小部署所需的 manifest/rootfs/current artifact，已有 package/hot-deploy 闭包足够时不得追加整张镜像。
+4. 需要 current artifact 时只生成一套；不得清未受影响缓存，也不得把最小上板扩成无关 owner、全量 rootfs/image 或发布级认证。
 5. 检查 ARM/Linux ELF/ABI（`file`/`readelf -h`）；host/x86/Windows artifact 不得覆盖板端。
-6. 部署 canonical artifact，走原始 UI/operator/control path，并取得 owner actual/readback。
+6. 原子部署 canonical artifact，确认 source/artifact/deploy identity 和受影响服务/runtime readiness。
+7. 走受影响的原始 UI/operator/control path 做最小上板测试，取得 fresh owner actual/readback；运动/安全修改还必须按 owner 完成对应运动证据并恢复 ESTOP/safe state。
 
 FINISH_LINE:
-以下表格定义各状态词需要的证据，不要求每个日常切片自动达到最高状态。默认先交付 `local_verified_only` 并继续项目；只有用户当前目标要求真实板端结果时才继续 `board_verified`。
+以下表格定义各状态词需要的证据。纯文档和真正非板端代码不强制上板；任何会进入板端产物或影响板端运行的修改默认必须完成最小编译、部署、受影响原始路径测试和 fresh readback，不能以 `local_verified_only` 关闭。完整回归、整张镜像和发布认证仍只按受影响 owner 或里程碑触发。
 | Slice | 必须执行 | 允许的正向状态 |
 | --- | --- | --- |
 | doc/rule only | focused 文档结构/文本检查 | 文档已更新；不是板端功能通过 |
 | local non-board code | nearest compile/unit/contract/static gate | `local_verified_only` |
-| board program/visible behavior | local gates + build ladder + deploy + original operator path | `board_verified` |
+| board program/runtime/visible behavior | local gates + 最小受影响 build + 必要 artifact + deploy/readiness + 受影响 original operator/control path + fresh readback | owner 验收满足后为 `board_verified`；仅到 `local_verified_only` 是未关闭中间状态 |
 | motion/Home/Jog/Start/MDI/E-stop/axis/rotary | board closure + fresh native actual + active model 对应 `cc-ac.ngc` 或 `cc-bc.ngc` golden motion | `board_verified` |
 | 缺验证/真实 blocker | 明确缺失 test、原因和下一条件 | `source_only` 或 `blocked` |
 

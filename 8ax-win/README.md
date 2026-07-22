@@ -1,6 +1,6 @@
 # 8ax Windows Remote UI
 
-Windows lightweight remote display client for the v3 board UI.
+Windows lightweight remote display client for the V5 board UI.
 
 ## Current Scope
 
@@ -9,8 +9,8 @@ Current slice:
 - .NET 8 WPF application.
 - 1024 x 600 remote framebuffer canvas.
 - W2 protocol DTOs and dirty-rect frame assembly.
-- W3 local mock relay for Windows-only protocol testing.
-- W4 read-only HTTP/WebSocket relay client.
+- W3 Windows-only certificate pinning and challenge/session/scope protocol tests.
+- W4 authenticated HTTPS/WSS relay client.
 - W5 runtime metrics and event evidence output.
 - Formal board relay direction: board-side `remote_ui_relay` serves one full frame and LVGL flush dirty rectangles.
 - FPS, frame id, capture/relay state, full/dirty/repair/reject counters, and mapped pointer coordinates.
@@ -20,8 +20,8 @@ Current slice:
 - Bottom `娴肩嚌娴狅絿鐖渀 button opens a local file picker, checks the board program directory for a same-name file, asks before overwrite, and uploads the selected G-code file through `/remote/program/upload` into the board program-open directory.
 - Bottom `閹垫挸绱戠化鑽ょ埠G娴狅絿鐖渀 button opens the board program directory in a local-directory style window backed by `/remote/program/list` and `/remote/program/file`; the operator can refresh, upload, open for edit, save, and delete board G-code files.
 - Bottom `OTA閸楀洨楠嘸 button sends `POST /remote/ota/upgrade` to the board relay. Current board code returns `OTA_NOT_IMPLEMENTED` fail-closed until the board OTA client, Broker action, and VPS package selector exist.
-- Default runtime path: direct/no-argument startup uses the formal board relay at `http://192.168.1.221:18080/` with relay input enabled.
-- Formal relay input path: relay mode sends mouse down/up over `WS /remote/input` and waits for board `pointer_ack`.
+- Default relay origin is `https://192.168.1.221:18080/`, but startup requires an explicitly selected device profile under `D:\授权私钥`; missing credentials fail closed.
+- Formal relay input path: relay mode sends mouse down/up over authenticated `WSS /remote/input` and waits for board `pointer_ack`.
 - Local verification console with no external NuGet dependency.
 - No LinuxCNC, HAL, G-code execution, or motion command path. G-code transfer only writes the selected file into the board program directory through the relay.
 
@@ -77,18 +77,18 @@ the Windows client display/input path.
 | File | Step | Status |
 | --- | --- | --- |
 | `src/8ax.WinRemote/Config/AppSettings.cs` | W4/W8 | Used by `MainWindow` to select formal relay/input mode, evidence path, and formal remote input enablement; direct fb0 capture flags are retired and ignored. |
-| `src/8ax.WinRemote/Protocol/RemoteMessage.cs` | W2/W8 | Shared message constants, info DTO, diagnostics/upload DTOs, frame packet DTO, and input control/ACK constants; used by tests, assembler, transport, and mock relay. |
-| `src/8ax.WinRemote/Protocol/FrameMetadata.cs` | W2 | `full_frame` and `dirty_rects` metadata; used by tests, assembler, transport, and mock relay. |
-| `src/8ax.WinRemote/Protocol/DirtyRectMetadata.cs` | W2 | Dirty rect DTO; used by tests, assembler, and mock relay. |
+| `src/8ax.WinRemote/Config/RelaySecurityProfile.cs` | W3/W4 | Strict device profile loader, TLS 1.2+ certificate fingerprint/device-ID verifier, and HMAC canonicalizer. |
+| `src/8ax.WinRemote/Protocol/RemoteMessage.cs` | W2/W8 | Shared message constants, info DTO, diagnostics/upload DTOs, frame packet DTO, and input control/ACK constants; used by tests, assembler, and transport. |
+| `src/8ax.WinRemote/Protocol/FrameMetadata.cs` | W2 | `full_frame` and `dirty_rects` metadata; used by tests, assembler, and transport. |
+| `src/8ax.WinRemote/Protocol/DirtyRectMetadata.cs` | W2 | Dirty rect DTO; used by tests and assembler. |
 | `src/8ax.WinRemote/Protocol/PointerEventMessage.cs` | W2/W8 | Pointer, control request, and ACK DTOs; covered by serialization tests and sent by relay input mode. |
-| `src/8ax.WinRemote/Protocol/RemoteProtocolJson.cs` | W2 | JSON and binary frame envelope helper; used by tests, transport, and mock relay. |
+| `src/8ax.WinRemote/Protocol/RemoteProtocolJson.cs` | W2 | JSON and binary frame envelope helper; used by tests and transport. |
 | `src/8ax.WinRemote/Rendering/PixelFormatConverter.cs` | W2 | Converts `bgra32` and `rgb565` to WPF BGRA32; covered by tests and used by assembler. |
 | `src/8ax.WinRemote/Rendering/RemoteFramebuffer.cs` | W2 | Local backbuffer and dirty rect application; used by `MainWindow` relay mode and tests. |
 | `src/8ax.WinRemote/Rendering/RemoteFrameAssembler.cs` | W2 | Validates frame/base ids, rect bounds, payload length, and applies full/dirty frames; used by `MainWindow` and tests. |
 | `src/8ax.WinRemote/Transport/IRemoteTransport.cs` | W4 | Read-only transport contract; implemented by `RemoteRelayClient`. |
-| `src/8ax.WinRemote/Transport/RemoteRelayClient.cs` | W4/W8 | HTTP diagnostics, HTTP program list/read/delete/upload, HTTP full-frame, WebSocket dirty stream, and WebSocket remote input client; used by `MainWindow` relay mode. |
-| `tools/mock-relay/8ax.MockRelay.csproj` | W3 | Included in `8ax.WinRemote.sln`; references the Windows client project for shared protocol DTOs. |
-| `tools/mock-relay/Program.cs` | W3 | Local-only mock relay implementing `/remote/info`, `/remote/diagnostics`, `/remote/program/list`, `/remote/program/file`, `/remote/program/upload`, `/remote/frame/full`, and `WS /remote/stream`; not a board implementation. |
+| `src/8ax.WinRemote/Transport/RelayAuthenticationSession.cs` | W3/W4 | One-time challenge-response, short RAM session cache, HTTP/WSS authorization headers, and bounded reauthentication. |
+| `src/8ax.WinRemote/Transport/RemoteRelayClient.cs` | W4/W8 | Authenticated HTTPS diagnostics/program/full-frame client plus authenticated WSS dirty stream and remote input. |
 
 ## Commands
 
@@ -96,17 +96,16 @@ the Windows client display/input path.
 dotnet restore .\8ax.WinRemote.sln --ignore-failed-sources
 dotnet build .\8ax.WinRemote.sln --no-restore
 dotnet run --project .\tests\8ax.WinRemote.Tests\8ax.WinRemote.Tests.csproj
-dotnet run --project .\src\8ax.WinRemote\8ax.WinRemote.csproj
+dotnet run --project .\src\8ax.WinRemote\8ax.WinRemote.csproj -- --relay-security-profile D:\授权私钥\remote-relay-390529\winremote\relay-security.json
 ```
 
-The verification console starts the local mock relay on a random localhost port and validates the read-only client against `/remote/info`, `/remote/frame/full`, and the WebSocket dirty-rect stream. It also verifies that a deliberately dropped dirty frame triggers full-frame repair.
+The verification console validates strict profile parsing, HTTPS-only routing, certificate fingerprint/device-ID checks, challenge HMAC canonicalization, scope mapping, and the frame assembler without introducing a plaintext test fallback.
 
 Runtime evidence defaults to `%TEMP%\8ax-win\evidence` and can be redirected:
 
 ```powershell
-.\publish\win-x64\8ax.WinRemote.exe --evidence-dir .\repo_ignored\evidence\manual_8ax_win
-.\publish\win-x64\8ax.WinRemote.exe --relay http://192.168.1.221:18080/ --evidence-dir .\repo_ignored\evidence\manual_8ax_win
-.\publish\win-x64\8ax.WinRemote.exe --view-only true --evidence-dir .\repo_ignored\evidence\manual_8ax_win
+.\publish\win-x64\8ax.WinRemote.exe --relay-security-profile D:\授权私钥\remote-relay-390529\winremote\relay-security.json --evidence-dir .\repo_ignored\evidence\manual_8ax_win
+.\publish\win-x64\8ax.WinRemote.exe --relay-security-profile D:\授权私钥\remote-relay-390529\winremote\relay-security.json --view-only true --evidence-dir .\repo_ignored\evidence\manual_8ax_win
 ```
 
 The client writes:
@@ -158,16 +157,27 @@ or restart the board. The request declares the fixed package policy
 `dna_private_first_no_public_when_private_present`: the board OTA client must
 select a current-DNA private OTA package when one exists and must not download
 the public OTA package in that case. With the current source state, the board
-relay and mock relay return `status=rejected`, `code=OTA_NOT_IMPLEMENTED`, and
+relay returns `status=rejected`, `code=OTA_NOT_IMPLEMENTED`, and
 no job id.
 
 ## Upgrade
+
+WinRemote accepts only signed VPS release sets. It verifies the raw
+UTF-8-without-BOM `manifest.json` bytes with the embedded ECDSA P-256 public key
+and detached DER `manifest.sig` before parsing or using any field. The fixed
+identity is `schema=v5.winremote_update_manifest.v2` and
+`key_id=winremote-update-p256-2026-01`. Unknown keys, malformed or duplicate
+fields, a BOM, an invalid signature, or disagreeing primary/backup bytes are
+rejected. SHA-256 is used only for the package identity bound by that trusted
+manifest.
 
 The top-bar `閸楀洨楠嘸 button checks these VPS manifests in order:
 
 ```text
 https://license.cjwsjzyy.xyz/8ax-winremote/win-x64/manifest.json
+https://license.cjwsjzyy.xyz/8ax-winremote/win-x64/manifest.sig
 https://license.3dtouch.top/8ax-winremote/win-x64/manifest.json
+https://license.3dtouch.top/8ax-winremote/win-x64/manifest.sig
 ```
 
 The executable name must stay fixed across every update:
@@ -176,17 +186,23 @@ The executable name must stay fixed across every update:
 8ax.WinRemote.exe
 ```
 
-Publish the zip and manifest to:
+Publish the zip, manifest, and detached signature to:
 
 ```text
 /var/www/html/updates/8ax-winremote/win-x64/
 ```
 
-Use `tools/publish_winremote_update.ps1 -Version <version>` for normal VPS releases.
-The script must not stop after local package generation: once the zip and
-manifest are generated, the formal path uploads them directly to the VPS and
-verifies the VPS package hash plus both HTTPS manifest URLs. `-SkipUpload` is
-only a local diagnostic switch and is not a release.
+Use `tools/publish_winremote_update.ps1 -Version <version> -ReleaseSequence
+<monotonic-integer>` for normal VPS releases. The signing private key remains
+outside the repository at `D:\授权私钥\winremote-update-signing-private.pem` and
+must never be copied to the client, VPS, board, VM, logs, or release package.
+The script must not stop after local package generation: every version that
+creates or replaces `publish\win-x64\8ax.WinRemote.exe` must upload all three
+release files in the same run, read them back from the VPS, download both HTTPS
+release sets, and verify raw-byte identity, signature, package size, and package
+hash. `-SkipUpload` is allowed only when both publish and release output stay in
+isolated `repo_ignored` directories; it must never update the formal publish
+directory or be handed off as a client release.
 
 Every WinRemote release is single-file only. The local publish directory and the
 VPS update zip must contain only:
@@ -196,19 +212,30 @@ VPS update zip must contain only:
 ```
 
 Do not publish `8ax.WinRemote.dll`, `.deps.json`, `.runtimeconfig.json`, `.pdb`,
-or any other sidecar runtime files. The client updater downloads the single-exe
-zip and removes old sidecar files from earlier multi-file releases during
-installation.
+or any other sidecar runtime files. The signed zip must contain exactly one
+entry named `8ax.WinRemote.exe`.
 
-The release version passed to `publish_winremote_update.ps1 -Version` is written
-to both `manifest.json` and the generated `8ax.WinRemote.exe` version metadata.
-The `閸楀洨楠嘸 button compares the local executable version with the VPS manifest
-version before downloading. If the server version is not newer, the client does
-not download, install, or restart. After a real update is installed, the installer
-must restart `8ax.WinRemote.exe` automatically and write `.update_install.log`.
-On startup the client performs a read-only VPS manifest check. If the server
-version is newer than the local executable, the fixed-size top-bar upgrade button
-is shown as `鍗囩骇`; it must not download or install until the user clicks the button.
+The release version passed to `-Version` is written to both the signed manifest
+and the generated executable metadata. `-ReleaseSequence` is a separate,
+strictly increasing rollback barrier persisted only after a verified install.
+The upgrade button compares the local executable version with the verified
+manifest before downloading. If the server version is not newer, the client
+does not download, install, or restart.
+
+After download, the client verifies the signed size and SHA-256, copies the
+current executable into a protected random directory, and launches that same
+program with `--apply-update`; it never launches a replaceable PowerShell
+installer or uses `ExecutionPolicy Bypass`. After the UI parent exits, the
+installer verifies the original manifest/signature again, opens the zip with
+`FileShare.None`, re-verifies size/hash on that same handle, checks the sole
+executable product/version identity, atomically replaces the installed exe,
+restarts it, and only then records the trusted release sequence. Failure leaves
+the prior executable in place or rolls it back. Events are appended to
+`winremote_update_events.jsonl` in the configured evidence directory.
+
+On startup the client performs a read-only signed VPS manifest check. If the
+server version is newer than the local executable, the fixed-size top-bar
+upgrade button is shown; it must not download or install until the user clicks it.
 If no newer server version exists, the top-bar upgrade button is hidden.
 When the local version is already current, the upgrade dialog must say that no
 download, install, or restart is needed; the download/restart warning is only
@@ -230,7 +257,8 @@ Configuration can be supplied with `--config` or by placing `8ax.WinRemote.json`
 
 ```json
 {
-  "relay_url": "http://192.168.1.221:18080/",
+  "relay_url": "https://192.168.1.221:18080/",
+  "relay_security_profile": "D:\\授权私钥\\remote-relay-390529\\winremote\\relay-security.json",
   "evidence_dir": ".\\repo_ignored\\evidence\\manual_8ax_win",
   "view_only": false,
   "enable_pointer": false,
@@ -242,31 +270,21 @@ Configuration can be supplied with `--config` or by placing `8ax.WinRemote.json`
 .\publish\win-x64\8ax.WinRemote.exe --config .\8ax.WinRemote.json
 ```
 
-Run the local mock relay and connect the client explicitly:
+Connect only to the real board identity selected by the device profile:
 
 ```powershell
-dotnet run --project .\tools\mock-relay\8ax.MockRelay.csproj -- --prefix http://127.0.0.1:18080/
-dotnet run --project .\src\8ax.WinRemote\8ax.WinRemote.csproj -- --relay http://127.0.0.1:18080/
+dotnet run --project .\src\8ax.WinRemote\8ax.WinRemote.csproj -- --relay-security-profile D:\授权私钥\remote-relay-390529\winremote\relay-security.json
 ```
 
 The board product UI starts the formal relay and relay input by default. Normal
-WinRemote operation expects `/remote/info` to report `view_only=false` and
-`input_enabled=true`. Board-side opt-out remains available through
-`/run/8ax_v3_product_ui/disable_remote_input`.
-
-For older board images the compatibility enable files can still be created
-manually:
-
-```sh
-touch /run/8ax_v3_product_ui/enable_remote_relay
-touch /run/8ax_v3_product_ui/enable_remote_input
-/opt/8ax/v3_product_ui/re-v3-lvgl-ui.init restart
-```
+WinRemote operation expects authenticated `/remote/info` to report
+`view_only=false` and `input_enabled=true`; marker-file and plaintext
+compatibility paths are retired.
 
 Then connect the Windows client:
 
 ```powershell
-.\publish\win-x64\8ax.WinRemote.exe
+.\publish\win-x64\8ax.WinRemote.exe --relay-security-profile D:\授权私钥\remote-relay-390529\winremote\relay-security.json
 ```
 
 In relay input mode, a normal click sends `down -> up`; holding the left mouse
@@ -279,29 +297,26 @@ relay input grant and sends the click after the grant succeeds.
 The board relay files are:
 
 ```text
-/run/8ax_v3_product_ui/remote_info.json
-/run/8ax_v3_product_ui/remote_framebuffer.bgra
-/run/8ax_v3_product_ui/remote_dirty
-/run/8ax_v3_product_ui/remote_input.sock
-/run/8ax_v3_product_ui/remote_input_status.json
-/run/8ax_v3_product_ui/remote_ui_relay_status.json
+/run/8ax_v5_product_ui/remote_framebuffer.bgra
+/run/8ax_v5_product_ui/remote_dirty
+/run/8ax_v5_product_ui/remote_input
+/run/8ax_v5_product_ui/ui_ready.json
 ```
 
 ## Release Build
 
 ```powershell
-.\tools\publish_winremote_update.ps1 -Version YYYY.MMDD.HHMM
-.\publish\win-x64\8ax.WinRemote.exe
-.\publish\win-x64\8ax.WinRemote.exe --relay http://127.0.0.1:18080/
+.\tools\publish_winremote_update.ps1 -Version YYYY.MMDD.HHMM -ReleaseSequence <monotonic-integer>
+.\publish\win-x64\8ax.WinRemote.exe --relay-security-profile D:\授权私钥\remote-relay-390529\winremote\relay-security.json
 ```
 
 Do not hand off a newly generated WinRemote release package unless the publish
-script completed the VPS upload and manifest verification in the same run.
+script completed the VPS upload, detached-signature verification, raw three-file
+readback, and both primary/backup HTTPS release-set checks in the same run.
 
 ## Next Steps
 
 Follow `娴溿倖甯?md` and the active v5 work note:
 
-1. Add automated W3/W4 mock-relay client smoke coverage.
-2. Replace mock relay with a real board `remote_ui_relay` only after B-line source, deployment, and CPU evidence are ready.
-3. Keep closing relay input fixes with true Win mouse input, board `pointer_ack` under 50ms, and first Win-side button feedback under 200ms.
+1. Keep the TLS/challenge/scope negative tests and the real-board HTTPS/WSS acceptance current.
+2. Keep closing relay input fixes with true Win mouse input, board `pointer_ack` under 50ms, and first Win-side button feedback under 200ms.

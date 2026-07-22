@@ -79,6 +79,29 @@ def test_axis_zero_live_client_rejects_unverified_response() -> None:
     assert result["zero_display_verified"] is False
 
 
+def test_axis_slave_mapping_probe_decodes_native_generation() -> None:
+    response = client.Response()
+    response.magic = client.MAGIC
+    response.version = client.VERSION
+    response.size = ctypes.sizeof(client.Response)
+    response.send_status = 1
+    response.axis_slave_mapping_status_available = 1
+    response.axis_slave_mapping_applicable = 1
+    response.axis_slave_mapping_valid = 1
+    response.axis_slave_mapping_generation = 0x12345678
+    response.axis_slave_mapping_code = b"BUS_HOME_MAPPING_VALID"
+    response.readback_code = b"AXIS_SLAVE_MAPPING_STATUS_OK"
+    fake = FakeSocket(bytes(response))
+    with mock.patch.object(client.socket, "AF_UNIX", 1, create=True), \
+         mock.patch.object(client.socket, "socket", return_value=fake):
+        result = client.probe_axis_slave_mapping()
+    request = client.Request.from_buffer_copy(fake.sent)
+    assert request.op == client.OP_PROBE_AXIS_SLAVE_MAPPING
+    assert result["ok"] is True
+    assert result["generation"] == 0x12345678
+    assert result["code"] == "BUS_HOME_MAPPING_VALID"
+
+
 def _axis_zero_runtime():
     return {"axes": [{"axis": "X", "zero_model": {
         "zero_counts": 10.0, "zero_anchor_counts": 10.0,

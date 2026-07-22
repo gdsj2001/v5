@@ -22,6 +22,38 @@ from v5_drive_bus_contract import (
 )
 from v5_drive_result import write_json
 
+
+LEGACY_AXIS_RATIO_KEYS = (
+    "motor_rev",
+    "load_rev",
+    "motor_revs_per_load_rev",
+    "reducer_ratio",
+)
+
+
+def drop_legacy_axis_ratio_copies(payload: Dict[str, Any]) -> None:
+    axes = payload.get("axes") if isinstance(payload.get("axes"), list) else []
+    for axis_cfg in axes:
+        if not isinstance(axis_cfg, dict):
+            continue
+        for key in LEGACY_AXIS_RATIO_KEYS:
+            axis_cfg.pop(key, None)
+        zero_model = axis_cfg.get("zero_model")
+        scale_evidence = zero_model.get("scale_evidence") if isinstance(
+            zero_model, dict) else None
+        if isinstance(scale_evidence, dict):
+            for key in LEGACY_AXIS_RATIO_KEYS:
+                scale_evidence.pop(key, None)
+        for evidence_key in ("electronic_gear", "drive_set_evidence"):
+            evidence = axis_cfg.get(evidence_key)
+            if not isinstance(evidence, dict):
+                continue
+            identity = evidence.get("drive_transaction_identity")
+            if not isinstance(identity, dict) or not identity.get(
+                    "transaction_generation"):
+                for key in LEGACY_AXIS_RATIO_KEYS:
+                    evidence.pop(key, None)
+
 def settings_runtime_key(raw_key: Any) -> str:
     return str(raw_key or "").strip().lower()
 
@@ -121,6 +153,7 @@ def sanitize_settings_runtime_drive_only(payload: Dict[str, Any]) -> Dict[str, A
     if not isinstance(clean, dict):
         raise DriveActionError("SETTINGS_RUNTIME_SCHEMA_NOT_OBJECT", "settings_runtime drive-only schema 顶层不是对象，已 fail-closed。", type(clean).__name__)
     clean["schema"] = SETTINGS_RUNTIME_SCHEMA
+    drop_legacy_axis_ratio_copies(clean)
     validate_settings_runtime_drive_only(clean)
     return clean
 
@@ -132,10 +165,6 @@ def drive_only_scale_evidence(scale_evidence: Dict[str, Any]) -> Dict[str, Any]:
         "source",
         "pitch_mm_per_rev",
         "inferred_pitch_mm_per_rev",
-        "motor_rev",
-        "load_rev",
-        "motor_revs_per_load_rev",
-        "reducer_ratio",
         "encoder_bits",
         "bit_counts_per_motor_rev",
         "egear_numerator",
@@ -213,6 +242,7 @@ def _read_settings_runtime_owner() -> Dict[str, Any]:
     except Exception as exc:
         raise DriveActionError("SETTINGS_AXIS_ZERO_RUNTIME_INVALID", "settings_runtime resident owner 损坏，不能校验设0。", "%s: %s" % (type(exc).__name__, exc))
     validate_settings_runtime_drive_only(payload)
+    drop_legacy_axis_ratio_copies(payload)
     axes = payload.get("axes") if isinstance(payload, dict) else None
     if not isinstance(axes, list):
         raise DriveActionError("SETTINGS_AXIS_ZERO_AXES_MISSING", "settings_runtime resident owner 缺少 axes，不能校验设0。", payload)
@@ -552,6 +582,8 @@ def persist_settings_runtime(runtime: Dict[str, Any]) -> Dict[str, Any]:
     context.settings_runtime_cache = runtime_for_write
     reread = load_settings_runtime()
     return {
+        "ok": True,
+        "code": "SETTINGS_RUNTIME_WRITEBACK_OK",
         "settings_runtime_json": str(contract.SETTINGS_RUNTIME_JSON),
         "schema": reread.get("schema"),
         "axis_count": len(reread.get("axes", [])) if isinstance(reread.get("axes"), list) else 0,

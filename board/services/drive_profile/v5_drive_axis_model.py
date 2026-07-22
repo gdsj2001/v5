@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 import re
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import v5_drive_bus_contract as contract
 from v5_drive_bus_contract import DriveActionError, axis_unit, finite_float, now_utc
@@ -182,10 +182,14 @@ def derive_counts_per_unit(axis: str, axis_cfg: Dict[str, Any], axis_index: int)
     axis_name = "AXIS_%s" % str(axis or "").upper()
     scale = runtime_ini_value(sections, [joint_name, axis_name], ["SCALE"])
     pitch = runtime_ini_value(sections, [axis_name, joint_name], ["LEAD_PITCH_MM_PER_REV", "SCREW_PITCH_MM_PER_REV", "PITCH"])
-    ratio = finite_float(axis_cfg.get("motor_revs_per_load_rev")) or finite_float(axis_cfg.get("reducer_ratio"))
-    motor_rev = finite_float(axis_cfg.get("motor_rev"))
-    load_rev = finite_float(axis_cfg.get("load_rev"))
-    if ratio is None and motor_rev and load_rev and load_rev != 0.0:
+    ratio = runtime_ini_value(
+        sections, [axis_name, joint_name],
+        ["MOTOR_REVS_PER_LOAD_REV", "REDUCER_RATIO", "GEAR_RATIO"])
+    motor_rev = runtime_ini_value(
+        sections, [axis_name, joint_name], ["MOTOR_REV"])
+    load_rev = runtime_ini_value(
+        sections, [axis_name, joint_name], ["LOAD_REV"])
+    if ratio is None and motor_rev and load_rev and load_rev > 0.0:
         ratio = motor_rev / load_rev
     actual_counts_per_motor_rev = finite_float(axis_cfg.get("actual_counts_per_motor_rev")) or finite_float(axis_cfg.get("drive_command_counts_per_motor_rev")) or finite_float(axis_cfg.get("target_command_counts_per_motor_rev"))
     encoder_bits = finite_float(axis_cfg.get("encoder_bits")) or finite_float(axis_cfg.get("encoder_resolution_bits")) or finite_float(axis_cfg.get("raw_encoder_bits"))
@@ -235,7 +239,7 @@ def derive_counts_per_unit(axis: str, axis_cfg: Dict[str, Any], axis_index: int)
         "motor_rev": motor_rev,
         "load_rev": load_rev,
         "motor_revs_per_load_rev": ratio,
-        "reducer_ratio": finite_float(axis_cfg.get("reducer_ratio")),
+        "ratio_source": "active_runtime_ini",
         "encoder_bits": encoder_bits,
         "bit_counts_per_motor_rev": bit_counts,
         "egear_numerator": egear_num,
@@ -504,7 +508,8 @@ def update_axis_drive_set_evidence(axis_cfg: Dict[str, Any],
                                    target: Dict[str, Any],
                                    egear: Tuple[int, int],
                                    readback: Dict[str, Any],
-                                   egear_source: Dict[str, Any]) -> None:
+                                   egear_source: Dict[str, Any],
+                                   transaction_identity: Optional[Dict[str, Any]] = None) -> None:
     health = readback.get("health", {}) if isinstance(readback.get("health"), dict) else {}
     read_num = int(health.get("egear_numerator") or egear[0])
     read_den = int(health.get("egear_denominator") or egear[1])
@@ -516,25 +521,22 @@ def update_axis_drive_set_evidence(axis_cfg: Dict[str, Any],
     ratio = finite_float(egear_source.get("motor_revs_per_load_rev"))
     motor_rev = finite_float(egear_source.get("motor_rev"))
     load_rev = finite_float(egear_source.get("load_rev"))
-    if ratio is None:
-        ratio = finite_float(axis_cfg.get("motor_revs_per_load_rev")) or finite_float(axis_cfg.get("reducer_ratio"))
-    if motor_rev is None:
-        motor_rev = finite_float(axis_cfg.get("motor_rev"))
-    if load_rev is None:
-        load_rev = finite_float(axis_cfg.get("load_rev"))
     if ratio is None and motor_rev and load_rev and load_rev > 0.0:
         ratio = motor_rev / load_rev
+    if ratio is None or ratio <= 0.0:
+        raise DriveActionError(
+            "DRIVE_EGEAR_RUNTIME_RATIO_MISSING",
+            "设置驱动证据缺少 active runtime INI 比例，不能写回重复比例。",
+            {"axis": axis_cfg.get("axis"), "source": egear_source.get("source")},
+        )
     rotary_load_counts = feedback_counts * ratio if ratio and ratio > 0.0 else None
     apply_wcheckpoint_profile(axis_cfg, target.get("profile") or {})
+    for legacy_key in (
+            "motor_rev", "load_rev", "motor_revs_per_load_rev",
+            "reducer_ratio"):
+        axis_cfg.pop(legacy_key, None)
     axis_cfg["encoder_bits"] = encoder_bits
     axis_cfg["encoder_resolution_bits"] = encoder_bits
-    if motor_rev is not None:
-        axis_cfg["motor_rev"] = motor_rev
-    if load_rev is not None:
-        axis_cfg["load_rev"] = load_rev
-    if ratio is not None:
-        axis_cfg["motor_revs_per_load_rev"] = ratio
-        axis_cfg["reducer_ratio"] = ratio
     axis_cfg["drive_internal_counts_per_motor_rev"] = drive_internal_counts
     axis_cfg["encoder_single_turn_counts"] = int(round(drive_internal_counts))
     axis_cfg["egear_numerator"] = read_num
@@ -571,6 +573,8 @@ def update_axis_drive_set_evidence(axis_cfg: Dict[str, Any],
         "write_verified_at": now_utc(),
         "target_source": egear_source.get("source", ""),
     })
+    if isinstance(transaction_identity, dict) and transaction_identity:
+        electronic["drive_transaction_identity"] = dict(transaction_identity)
     if rotary_load_counts is not None:
         electronic["rotary_load_counts_per_rev"] = axis_cfg["rotary_load_counts_per_rev"]
     axis_cfg["electronic_gear"] = electronic
@@ -590,6 +594,9 @@ def update_axis_drive_set_evidence(axis_cfg: Dict[str, Any],
         "egear_denominator": read_den,
         "errors": [],
     }
+    if isinstance(transaction_identity, dict) and transaction_identity:
+        axis_cfg["drive_transaction_identity"] = dict(transaction_identity)
+        axis_cfg["drive_readback"]["drive_transaction_identity"] = dict(transaction_identity)
     axis_cfg["drive_set_evidence"] = {
         "ok": True,
         "code": "DRIVE_SET_TARGET_OK",
@@ -609,3 +616,5 @@ def update_axis_drive_set_evidence(axis_cfg: Dict[str, Any],
         "pitch_units_per_load_rev": egear_source.get("pitch_units_per_load_rev"),
         "motor_revs_per_load_rev": ratio,
     }
+    if isinstance(transaction_identity, dict) and transaction_identity:
+        axis_cfg["drive_set_evidence"]["drive_transaction_identity"] = dict(transaction_identity)

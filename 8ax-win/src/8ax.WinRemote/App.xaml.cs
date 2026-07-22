@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Threading;
+using EightAxis.WinRemote.Update;
 
 namespace EightAxis.WinRemote;
 
@@ -11,6 +12,13 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        if (UpdateInstaller.IsApplyUpdateInvocation(e.Args))
+        {
+            int exitCode = UpdateInstaller.Run(e.Args);
+            Shutdown(exitCode);
+            return;
+        }
+
         _singleInstanceMutex = new Mutex(initiallyOwned: true, SingleInstanceMutexName, out bool ownsMutex);
         _ownsSingleInstanceMutex = ownsMutex;
         if (!_ownsSingleInstanceMutex)

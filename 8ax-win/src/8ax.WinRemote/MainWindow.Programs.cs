@@ -46,6 +46,8 @@ public partial class MainWindow
             _evidence.RecordEvent("update_ready", new Dictionary<string, object?>
             {
                 ["version"] = update.Manifest.Version,
+                ["key_id"] = update.Manifest.KeyId,
+                ["release_sequence"] = update.Manifest.ReleaseSequence,
                 ["manifest"] = update.ManifestUri,
                 ["package"] = update.PackagePath,
                 ["exe_name"] = WinRemoteUpdater.ExecutableName,
@@ -368,7 +370,7 @@ public partial class MainWindow
             throw new InvalidOperationException("Relay base URI is not configured.");
         }
 
-        using RemoteRelayClient client = new(_settings.RelayBaseUri);
+        using RemoteRelayClient client = new(_settings.RelaySecurity);
         return await client.GetDiagnosticsJsonAsync(_shutdown.Token);
     }
 
@@ -379,7 +381,7 @@ public partial class MainWindow
             throw new InvalidOperationException("Relay base URI is not configured.");
         }
 
-        using RemoteRelayClient client = new(_settings.RelayBaseUri);
+        using RemoteRelayClient client = new(_settings.RelaySecurity);
         return await client.GetProgramListAsync(_shutdown.Token);
     }
 
@@ -390,7 +392,7 @@ public partial class MainWindow
             throw new InvalidOperationException("Relay base URI is not configured.");
         }
 
-        using RemoteRelayClient client = new(_settings.RelayBaseUri);
+        using RemoteRelayClient client = new(_settings.RelaySecurity);
         return await client.GetProgramFileInfoAsync(fileName, _shutdown.Token);
     }
 
@@ -401,7 +403,7 @@ public partial class MainWindow
             throw new InvalidOperationException("Relay base URI is not configured.");
         }
 
-        using RemoteRelayClient client = new(_settings.RelayBaseUri);
+        using RemoteRelayClient client = new(_settings.RelaySecurity);
         return await client.GetProgramFileContentAsync(fileName, _shutdown.Token);
     }
 
@@ -412,7 +414,7 @@ public partial class MainWindow
             throw new InvalidOperationException("Relay base URI is not configured.");
         }
 
-        using RemoteRelayClient client = new(_settings.RelayBaseUri);
+        using RemoteRelayClient client = new(_settings.RelaySecurity);
         return await client.DeleteProgramFileAsync(fileName, _shutdown.Token);
     }
 
@@ -423,7 +425,7 @@ public partial class MainWindow
             throw new InvalidOperationException("Relay base URI is not configured.");
         }
 
-        using RemoteRelayClient client = new(_settings.RelayBaseUri);
+        using RemoteRelayClient client = new(_settings.RelaySecurity);
         return await client.UploadProgramAsync(fileName, stream, length, sha256, overwrite, _shutdown.Token);
     }
 

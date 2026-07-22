@@ -76,6 +76,7 @@ int main(void)
     if (!v5_drive_write_window_begin("settings:run-1", &ops, &result) ||
         !result.ok || !result.initial_machine_enabled ||
         result.final_machine_enabled || fake.off_calls != 1 ||
+        !v5_drive_write_window_is_active() ||
         !v5_drive_write_window_blocks_kind(V5_COMMAND_START) ||
         !v5_drive_write_window_blocks_kind(V5_COMMAND_HOME) ||
         !v5_drive_write_window_blocks_kind(V5_COMMAND_JOG_CONTINUOUS) ||
@@ -98,7 +99,8 @@ int main(void)
     }
     if (!v5_drive_write_window_finish("settings:run-1", 0, &ops, &result) ||
         !result.ok || result.final_machine_enabled || fake.on_calls != 0 ||
-        v5_drive_write_window_blocks_kind(V5_COMMAND_START)) {
+        v5_drive_write_window_blocks_kind(V5_COMMAND_START) ||
+        v5_drive_write_window_is_active()) {
         return 3;
     }
     if (v5_drive_write_window_check_owner(

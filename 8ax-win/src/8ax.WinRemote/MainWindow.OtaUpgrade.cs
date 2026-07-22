@@ -64,7 +64,7 @@ public partial class MainWindow
             throw new InvalidOperationException("Relay base URI is not configured.");
         }
 
-        using RemoteRelayClient client = new(_settings.RelayBaseUri);
+        using RemoteRelayClient client = new(_settings.RelaySecurity);
         return await client.RequestOtaUpgradeAsync(_shutdown.Token);
     }
 

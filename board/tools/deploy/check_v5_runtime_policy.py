@@ -24,11 +24,12 @@ FORBIDDEN_SHM_FIELD_RE = re.compile(
 )
 FORBIDDEN_CPU_RE = re.compile(r"\b(CPU_SET\s*\(\s*0\b|taskset\b.*(?:-c\s*0\b|-pc\s*0\b|\b0x1\b)|SCHED_FIFO)\b")
 SOURCE_SUFFIXES = {".c", ".h", ".py", ".sh"}
-SELF_PARAMETER_TABLE_DEPLOY_ROW = {
+MERGED_PARAMETER_TABLE_DEPLOY_ROWS = {
     "config/settings/self_parameter_table.tsv": "/opt/8ax/v5/config/settings/self_parameter_table.tsv",
+    "config/settings/drive_parameter_table.tsv": "/opt/8ax/v5/config/settings/drive_parameter_table.tsv",
 }
 BOARD_OWNER_DEPLOY_ROWS = {
-    "config/settings/drive_parameter_table.tsv": ("runtime_seed", "/opt/8ax/v5/config/settings/drive_parameter_table.tsv", "0644"),
+    "config/settings/drive_parameter_table.tsv": ("runtime_seed_merge", "/opt/8ax/v5/config/settings/drive_parameter_table.tsv", "0644"),
     "config/settings/settings_runtime.json": ("runtime_seed", "/opt/8ax/phase0_bus5/settings_runtime.json", "0644"),
     "linuxcnc/ini/v5_bus.ini": ("runtime_seed", "/opt/8ax/v5/linuxcnc/ini/v5_bus.ini", "0644"),
     "linuxcnc/runtime/var/linuxcnc.var": ("runtime_seed", "/opt/8ax/v5/linuxcnc/var/linuxcnc.var", "0644"),
@@ -158,8 +159,13 @@ def check_remote_relay_access_control() -> int:
     relay_smoke = (
         ROOT / "services" / "ui" / "v5_remote_ui_relay_coalesce_smoke.py"
     )
+    auth_smoke = ROOT / "services" / "ui" / "v5_remote_ui_auth_smoke.py"
+    tls_smoke = ROOT / "services" / "ui" / "v5_remote_ui_tls_smoke.py"
+    manifest = ROOT / "config" / "deploy" / "v5_runtime_deploy_manifest.tsv"
     relay_modules = (
         relay,
+        ROOT / "services" / "ui" / "v5_remote_ui_auth.py",
+        ROOT / "services" / "ui" / "v5_remote_ui_local_client.py",
         ROOT / "services" / "ui" / "v5_remote_ui_state.py",
         ROOT / "services" / "ui" / "v5_remote_ui_dirty_geometry.py",
         ROOT / "services" / "ui" / "v5_remote_ui_shared_payload.py",
@@ -173,6 +179,9 @@ def check_remote_relay_access_control() -> int:
         not source.exists()
         or not all(path.exists() for path in relay_modules)
         or not relay_smoke.exists()
+        or not auth_smoke.exists()
+        or not tls_smoke.exists()
+        or not manifest.exists()
         or not init.exists()
     ):
         print("REMOTE_RELAY_ACCESS_CONTROL_MISSING_SOURCE", file=sys.stderr)
@@ -181,6 +190,9 @@ def check_remote_relay_access_control() -> int:
     relay_text = "\n".join(path.read_text(encoding="utf-8", errors="ignore") for path in relay_modules)
     relay_source_text = relay.read_text(encoding="utf-8", errors="ignore")
     relay_smoke_text = relay_smoke.read_text(encoding="utf-8", errors="ignore")
+    auth_smoke_text = auth_smoke.read_text(encoding="utf-8", errors="ignore")
+    tls_smoke_text = tls_smoke.read_text(encoding="utf-8", errors="ignore")
+    manifest_text = manifest.read_text(encoding="utf-8", errors="ignore")
     init_text = init.read_text(encoding="utf-8", errors="ignore")
     required_source = (
         "remote_framebuffer.bgra",
@@ -243,6 +255,16 @@ def check_remote_relay_access_control() -> int:
         "stream_idle_pings",
         "stream_send_failures",
         "input_active_sessions",
+        "build_server_tls_context",
+        "AuthStore.from_file",
+        "tls_context.wrap_socket",
+        "/local/health",
+        "/remote/auth/challenge",
+        "/remote/auth/session",
+        "remote_auth_token_in_url_forbidden",
+        "session_is_current",
+        "TLSVersion.TLSv1_2",
+        "V5Session",
     )
     for token in required_relay:
         if token not in relay_text:
@@ -255,6 +277,30 @@ def check_remote_relay_access_control() -> int:
         if token in relay_text:
             print(
                 f"REMOTE_RELAY_RUNTIME_FULL_REPAIR_SURVIVOR: {token}",
+                file=sys.stderr,
+            )
+            rc = 1
+    for token in (
+        "v5_remote_ui_tls_smoke PASS",
+        "context.wrap_socket(listener, server_side=True)",
+        "check_plaintext_rejected",
+        "certificate/device mismatch was accepted",
+    ):
+        if token not in tls_smoke_text:
+            print(
+                f"REMOTE_RELAY_TLS_SMOKE_CONTRACT_MISSING: {token}",
+                file=sys.stderr,
+            )
+            rc = 1
+    for token in (
+        "v5_remote_ui_auth_smoke PASS",
+        "world-readable credential file accepted",
+        "remote_scope_denied",
+        "remote_session_invalid",
+    ):
+        if token not in auth_smoke_text:
+            print(
+                f"REMOTE_RELAY_AUTH_SMOKE_CONTRACT_MISSING: {token}",
                 file=sys.stderr,
             )
             rc = 1
@@ -300,11 +346,34 @@ def check_remote_relay_access_control() -> int:
         "V5_UI_REMOTE_ALLOW_CIDRS",
         "REMOTE_ALLOW_CIDRS",
         "v5_remote_ui_relay.py",
+        "v5_remote_ui_local_client.py",
+        "REMOTE_TLS_CERT",
+        "REMOTE_TLS_KEY",
+        "REMOTE_AUTH_CLIENTS",
+        "https://127.0.0.1",
         "v5_ui_shell.pid",
     )
     for token in required_init:
         if token not in init_text:
             print(f"REMOTE_RELAY_INIT_ALLOWLIST_MISSING: {init.relative_to(ROOT)} lacks {token}", file=sys.stderr)
+            rc = 1
+    required_manifest_rows = (
+        "module\tservices/ui/v5_remote_ui_auth.py\t/usr/libexec/8ax/v5_remote_ui_auth.py\t0644",
+        "script\tservices/ui/v5_remote_ui_local_client.py\t/usr/libexec/8ax/v5_remote_ui_local_client.py\t0755",
+    )
+    for row in required_manifest_rows:
+        if manifest_text.splitlines().count(row) != 1:
+            print(
+                f"REMOTE_RELAY_SECURITY_DEPLOY_ROW_INVALID: {row}",
+                file=sys.stderr,
+            )
+            rc = 1
+    for forbidden in ("http://127.0.0.1", "ws://127.0.0.1"):
+        if forbidden in relay_source_text or forbidden in init_text:
+            print(
+                f"REMOTE_RELAY_PLAINTEXT_FALLBACK_SURVIVOR: {forbidden}",
+                file=sys.stderr,
+            )
             rc = 1
     return rc
 
@@ -1151,7 +1220,7 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         "apply_cpu_policy_after_install()",
         "apply_network_cpu_isolation",
         "enforce_dropbear_cpu1_affinity",
-        "/etc/init.d/v5-linuxcnc-command-gate restart-native",
+        "/etc/init.d/v5-linuxcnc-command-gate restart",
         "/etc/init.d/v5-position-status-publisher restart",
         "/etc/init.d/v5-wcs-status-publisher restart",
         "/etc/init.d/v5-state-publisher restart",
@@ -1202,8 +1271,9 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
     required_native_protocol_installer = (
         "manifest_native_protocol_command_gate=0",
         "manifest_native_protocol_command_gate=1",
-        "Command Gate native protocol deploy requires the LinuxCNC native owner/router bundle",
-        "LinuxCNC native owner/router deploy requires the Command Gate native protocol client",
+        "manifest_native_protocol_zero_client=0",
+        "manifest_native_protocol_zero_client=1",
+        "native protocol deploy requires Command Gate server, Python zero client, and LinuxCNC owner/router as one atomic bundle",
         "$linuxcnc_package_root/usr/bin/v5_native_hal_owner",
         "$linuxcnc_package_root/usr/lib/linuxcnc/modules/v5_bus_axis_router.so",
         "LinuxCNC deploy bundle is missing native protocol owner",
@@ -1234,8 +1304,16 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
     cpu_scope_start = installer_text.find('elif [ "$restart_scope" = "cpu_policy" ]')
     cpu_scope_end = installer_text.find('elif [ "$restart_scope" = "settings" ]', cpu_scope_start)
     cpu_scope = installer_text[cpu_scope_start:cpu_scope_end] if cpu_scope_start >= 0 and cpu_scope_end > cpu_scope_start else ""
-    if not cpu_scope or "/etc/init.d/v5-linuxcnc-command-gate restart\n" in cpu_scope:
-        print("CPU_POLICY_SCOPE_RESTARTS_LINUXCNC_BACKEND", file=sys.stderr)
+    if (
+        not cpu_scope
+        or cpu_scope.count("/etc/init.d/v5-linuxcnc-command-gate restart\n") != 1
+        or "restart-native" in cpu_scope
+        or cpu_scope.find("stop_position_publisher_before_backend") >
+           cpu_scope.find("/etc/init.d/v5-linuxcnc-command-gate restart")
+        or cpu_scope.find("/etc/init.d/v5-linuxcnc-command-gate restart") >
+           cpu_scope.find("ensure_position_publisher_after_backend")
+    ):
+        print("CPU_POLICY_SCOPE_BACKEND_RESTART_INVALID", file=sys.stderr)
         rc = 1
     all_scope_start = installer_text.find("    enable_auxiliary_boot_services\n")
     all_cpu_policy_index = installer_text.find(
@@ -1247,7 +1325,7 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         print("ALL_SCOPE_CPU_POLICY_BEFORE_BACKEND_MISSING", file=sys.stderr)
         rc = 1
     barrier_call = "\n    wait_publisher_actual_barrier\n"
-    if installer_text.count(barrier_call) != 4:
+    if installer_text.count(barrier_call) != 5:
         print("PUBLISHER_ACTUAL_BARRIER_CALL_COUNT_INVALID", file=sys.stderr)
         rc = 1
     if installer_text.count("\n  wait_publisher_actual_barrier\n") != 1:
@@ -2685,18 +2763,18 @@ def check_settings_parameter_table_deploy_kind() -> int:
             print(f"RETIRED_MICROKERNEL_PARAMETER_TABLE_DEPLOYED: {manifest.relative_to(ROOT)}:{line_no}", file=sys.stderr)
             rc = 1
         if kind == "runtime_seed_merge" and (
-            source not in SELF_PARAMETER_TABLE_DEPLOY_ROW or
-            SELF_PARAMETER_TABLE_DEPLOY_ROW.get(source) != destination or
+            source not in MERGED_PARAMETER_TABLE_DEPLOY_ROWS or
+            MERGED_PARAMETER_TABLE_DEPLOY_ROWS.get(source) != destination or
             mode != "0644"
         ):
             print(
-                "SETTINGS_TABLE_DEPLOY_MERGE_NOT_SELF_TABLE: "
+                "SETTINGS_TABLE_DEPLOY_MERGE_NOT_REGISTERED: "
                 f"{manifest.relative_to(ROOT)}:{line_no} {source} -> {destination} mode={mode}",
                 file=sys.stderr,
             )
             rc = 1
         rows[source] = (kind, destination, mode, line_no)
-    for source, destination in SELF_PARAMETER_TABLE_DEPLOY_ROW.items():
+    for source, destination in MERGED_PARAMETER_TABLE_DEPLOY_ROWS.items():
         row = rows.get(source)
         if row is None:
             print(f"SETTINGS_TABLE_DEPLOY_ROW_MISSING: {source}", file=sys.stderr)
@@ -2730,7 +2808,7 @@ def check_settings_parameter_table_deploy_kind() -> int:
     return rc
 
 
-def check_settings_parameter_table_backup_before_merge() -> int:
+def check_settings_parameter_table_transaction_merge() -> int:
     script = ROOT / "tools" / "deploy" / "install_v5_runtime.sh"
     if not script.exists():
         print("SETTINGS_TABLE_INSTALL_SCRIPT_MISSING: tools/deploy/install_v5_runtime.sh", file=sys.stderr)
@@ -2738,7 +2816,11 @@ def check_settings_parameter_table_backup_before_merge() -> int:
     text = script.read_text(encoding="utf-8", errors="ignore")
     forbidden = (
         "config/settings/microkernel_parameter_table.tsv:/opt/8ax/v5/config/settings/microkernel_parameter_table.tsv:0644",
-        "config/settings/drive_parameter_table.tsv:/opt/8ax/v5/config/settings/drive_parameter_table.tsv:0644\") ;;",
+        "parameter_table_backup_dir",
+        "V5_PARAMETER_TABLE_BACKUP_DIR",
+        "$project_root/bak",
+        ".bak.",
+        'read_rows(dst, False)',
     )
     for token in forbidden:
         if token in text:
@@ -2746,30 +2828,42 @@ def check_settings_parameter_table_backup_before_merge() -> int:
             return 1
     required = (
         "config/settings/self_parameter_table.tsv:/opt/8ax/v5/config/settings/self_parameter_table.tsv:0644",
-        "parameter_table_backup_dir",
-        "project_root=\"${project_root%/board}\"",
-        "backup_dir.mkdir(parents=True, exist_ok=True)",
-        "backup = backup_dir /",
-        "shutil.copy2(dst, backup)",
-        ".bak.",
+        "config/settings/drive_parameter_table.tsv:/opt/8ax/v5/config/settings/drive_parameter_table.tsv:0644",
+        'vm_build_root="${VM_BUILD_ROOT:-/root/v5-build}"',
+        'parameter_table_snapshot_root="$vm_build_root/temp_parameter_snapshot"',
+        "parameter_table_transaction_snapshot()",
+        "parameter_table_transaction_restore()",
+        "parameter_table_transaction_cleanup()",
+        "parameter_table_transaction_on_exit()",
+        "parameter_table_transaction_complete()",
+        'trap \'parameter_table_transaction_on_exit "$?"\' 0',
+        'merged_artifact="$parameter_table_transaction_entry/merged.tsv"',
+        'read_rows(dst, "board")',
+        "if (axis, field) in template_keys",
+        "malformed %s parameter table row",
+        "duplicate %s parameter key",
         "expected_text",
-        "tmp.write_text",
-        "os.replace(tmp, dst)",
+        "artifact.write_text",
+        "os.replace(temporary, dst)",
         "actual_text = dst.read_text",
         "actual_keys",
         "expected_keys",
-        "shutil.copy2(backup, dst)",
+        'parameter_table_transaction_snapshot "$destination"',
+        "parameter_table_transaction_complete",
         "format=ok",
     )
     for token in required:
         if token not in text:
-            print(f"SETTINGS_TABLE_BACKUP_BEFORE_MERGE_MISSING: {script.relative_to(ROOT)} lacks {token}", file=sys.stderr)
+            print(f"SETTINGS_TABLE_TRANSACTION_MERGE_MISSING: {script.relative_to(ROOT)} lacks {token}", file=sys.stderr)
             return 1
-    if text.index("shutil.copy2(dst, backup)") > text.index("tmp.write_text"):
-        print("SETTINGS_TABLE_BACKUP_AFTER_WRITE: backup must happen before tmp write", file=sys.stderr)
+    if text.index('parameter_table_transaction_snapshot "$destination"') > text.index("artifact.write_text"):
+        print("SETTINGS_TABLE_SNAPSHOT_AFTER_ARTIFACT: snapshot must happen before artifact write", file=sys.stderr)
         return 1
-    if text.index("shutil.copy2(dst, backup)") > text.index("os.replace(tmp, dst)"):
-        print("SETTINGS_TABLE_BACKUP_AFTER_REPLACE: backup must happen before replace", file=sys.stderr)
+    if text.index('parameter_table_transaction_snapshot "$destination"') > text.index("os.replace(temporary, dst)"):
+        print("SETTINGS_TABLE_SNAPSHOT_AFTER_REPLACE: snapshot must happen before replace", file=sys.stderr)
+        return 1
+    if text.rindex("parameter_table_transaction_complete") < text.index("done < \"$manifest\""):
+        print("SETTINGS_TABLE_TRANSACTION_COMPLETES_BEFORE_INSTALL_LOOP", file=sys.stderr)
         return 1
     return 0
 
@@ -2966,7 +3060,7 @@ def check_product_runtime_closure_policy() -> int:
         "manifest_command_gate_only=1",
         "restart_scope=command_gate",
         "Command-gate restart scope requires a non-empty command-gate-only manifest and no LinuxCNC bundle",
-        "/etc/init.d/v5-linuxcnc-command-gate restart-native",
+        "/etc/init.d/v5-linuxcnc-command-gate restart",
         "disable_unconditional_ethercat_autostart",
         "enable_runtime_startup_boot_graph",
         "enable_auxiliary_boot_service v5-runtime-startup 05 14",
@@ -3052,15 +3146,43 @@ def check_product_runtime_closure_policy() -> int:
         return 1
     command_gate_scope_start = installer.find('elif [ "$restart_scope" = "command_gate" ]')
     command_gate_scope_end = installer.find(
-        'elif [ "$restart_scope" = "wcs" ]', command_gate_scope_start
+        'elif [ "$restart_scope" = "backend" ]', command_gate_scope_start
     )
     command_gate_scope = (
         installer[command_gate_scope_start:command_gate_scope_end]
         if command_gate_scope_start >= 0 and command_gate_scope_end > command_gate_scope_start
         else ""
     )
-    if not command_gate_scope or "/etc/init.d/v5-linuxcnc-command-gate restart\n" in command_gate_scope:
-        print("DRIVE_ENABLE_WINDOW_COMMAND_GATE_SCOPE_RESTARTS_BACKEND", file=sys.stderr)
+    if (
+        not command_gate_scope
+        or command_gate_scope.count("/etc/init.d/v5-linuxcnc-command-gate restart\n") != 1
+        or "restart-native" in command_gate_scope
+        or command_gate_scope.find("stop_position_publisher_before_backend") >
+           command_gate_scope.find("/etc/init.d/v5-linuxcnc-command-gate restart")
+        or command_gate_scope.find("/etc/init.d/v5-linuxcnc-command-gate restart") >
+           command_gate_scope.find("ensure_position_publisher_after_backend")
+    ):
+        print("DRIVE_GENERATION_COMMAND_GATE_SCOPE_BACKEND_RESTART_INVALID", file=sys.stderr)
+        return 1
+    cpu_policy_scope_start = installer.find('elif [ "$restart_scope" = "cpu_policy" ]')
+    cpu_policy_scope_end = installer.find(
+        'elif [ "$restart_scope" = "settings" ]', cpu_policy_scope_start
+    )
+    cpu_policy_scope = (
+        installer[cpu_policy_scope_start:cpu_policy_scope_end]
+        if cpu_policy_scope_start >= 0 and cpu_policy_scope_end > cpu_policy_scope_start
+        else ""
+    )
+    if (
+        not cpu_policy_scope
+        or cpu_policy_scope.count("/etc/init.d/v5-linuxcnc-command-gate restart\n") != 1
+        or "restart-native" in cpu_policy_scope
+        or cpu_policy_scope.find("stop_position_publisher_before_backend") >
+           cpu_policy_scope.find("/etc/init.d/v5-linuxcnc-command-gate restart")
+        or cpu_policy_scope.find("/etc/init.d/v5-linuxcnc-command-gate restart") >
+           cpu_policy_scope.find("ensure_position_publisher_after_backend")
+    ):
+        print("DRIVE_GENERATION_CPU_POLICY_SCOPE_BACKEND_RESTART_INVALID", file=sys.stderr)
         return 1
     for script in (closure_path, file_manifest_path):
         compile(
@@ -3088,7 +3210,7 @@ def main() -> int:
         check_rotary_native_target_policy() |
         check_linuxcnc_source_rebuild_policy() |
         check_settings_parameter_table_deploy_kind() |
-        check_settings_parameter_table_backup_before_merge() |
+        check_settings_parameter_table_transaction_merge() |
         check_unique_windows_source_delivery() |
         check_product_runtime_closure_policy()
     )

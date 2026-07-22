@@ -52,7 +52,8 @@ int g_axis_slave_mapping_applicable;
 int g_axis_slave_mapping_valid;
 unsigned int g_axis_slave_mapping_generation;
 char g_axis_slave_mapping_code[64];
-
+const char g_machine_on_axis_slave_mapping_invalid_code[] =
+    "ALL_HOME_AXIS_SLAVE_MAPPING_INVALID";
 static void handle_transport_frame(
     const V5CommandGateIpcRequestFrame *request,
     V5CommandGateIpcResponseFrame *response,

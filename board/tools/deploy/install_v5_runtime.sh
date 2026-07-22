@@ -6,12 +6,12 @@ default_repo_root=$(CDPATH= cd -- "$script_dir/../.." && pwd)
 repo_root="${V5_REPO_ROOT:-$default_repo_root}"
 manifest="${1:-$repo_root/config/deploy/v5_runtime_deploy_manifest.tsv}"
 apply=0
-project_root="$repo_root"
-case "$project_root" in
-  */board) project_root="${project_root%/board}" ;;
-  *\\board) project_root="${project_root%\\board}" ;;
-esac
-parameter_table_backup_dir="${V5_PARAMETER_TABLE_BACKUP_DIR:-$project_root/bak}"
+vm_build_root="${VM_BUILD_ROOT:-/root/v5-build}"
+parameter_table_snapshot_root="$vm_build_root/temp_parameter_snapshot"
+parameter_table_transaction_dir=
+parameter_table_transaction_active=0
+parameter_table_transaction_count=0
+parameter_table_transaction_entry=
 linuxcnc_package_root="$repo_root/linuxcnc-package-root"
 linuxcnc_bundle_allowlist="$repo_root/config/deploy/v5_linuxcnc_runtime_allowlist.tsv"
 linuxcnc_bundle_hashes="$repo_root/config/deploy/v5_linuxcnc_deploy_bundle.sha256"
@@ -152,92 +152,248 @@ install_linuxcnc_deploy_bundle() {
   echo "V5_LINUXCNC_DEPLOY_INSTALL_OK files=$linuxcnc_bundle_count"
 }
 
+parameter_table_transaction_cleanup() {
+  [ -n "$parameter_table_transaction_dir" ] || return 0
+  case "$parameter_table_transaction_dir" in
+    "$parameter_table_snapshot_root"/v5-runtime-*) ;;
+    *)
+      echo "refusing unsafe parameter snapshot cleanup: $parameter_table_transaction_dir" >&2
+      return 1
+      ;;
+  esac
+  rm -rf "$parameter_table_transaction_dir"
+  [ ! -e "$parameter_table_transaction_dir" ] || {
+    echo "parameter snapshot cleanup failed: $parameter_table_transaction_dir" >&2
+    return 1
+  }
+  rmdir "$parameter_table_snapshot_root" 2>/dev/null || true
+  parameter_table_transaction_dir=
+}
+
+parameter_table_transaction_restore() {
+  restore_failed=0
+  [ -n "$parameter_table_transaction_dir" ] || return 0
+  for snapshot_entry in "$parameter_table_transaction_dir"/entry-*; do
+    [ -d "$snapshot_entry" ] || continue
+    IFS= read -r snapshot_destination < "$snapshot_entry/destination" || {
+      echo "parameter snapshot destination metadata is unreadable: $snapshot_entry" >&2
+      restore_failed=1
+      continue
+    }
+    case "$snapshot_destination" in
+      /*|[A-Za-z]:/*) ;;
+      *)
+        echo "parameter snapshot destination is unsafe: $snapshot_destination" >&2
+        restore_failed=1
+        continue
+        ;;
+    esac
+    IFS= read -r snapshot_state < "$snapshot_entry/state" || {
+      echo "parameter snapshot state metadata is unreadable: $snapshot_entry" >&2
+      restore_failed=1
+      continue
+    }
+    if [ "$snapshot_state" = "present" ]; then
+      restore_temporary="$snapshot_destination.v5-restore.$$"
+      rm -f "$restore_temporary"
+      if ! cp -p "$snapshot_entry/original" "$restore_temporary" ||
+         ! mv -f "$restore_temporary" "$snapshot_destination" ||
+         ! cmp -s "$snapshot_entry/original" "$snapshot_destination" ||
+         [ "$(stat -c '%u:%g:%a' "$snapshot_entry/original")" != "$(stat -c '%u:%g:%a' "$snapshot_destination")" ]; then
+        rm -f "$restore_temporary"
+        echo "parameter owner rollback failed: $snapshot_destination" >&2
+        restore_failed=1
+      else
+        echo "restored parameter owner after failed deploy: $snapshot_destination" >&2
+      fi
+    elif [ "$snapshot_state" = "absent" ]; then
+      rm -f "$snapshot_destination"
+      if [ -e "$snapshot_destination" ] || [ -L "$snapshot_destination" ]; then
+        echo "new parameter owner rollback failed: $snapshot_destination" >&2
+        restore_failed=1
+      fi
+    else
+      echo "parameter snapshot state is invalid: $snapshot_entry/state" >&2
+      restore_failed=1
+    fi
+  done
+  [ "$restore_failed" -eq 0 ]
+}
+
+parameter_table_transaction_on_exit() {
+  transaction_status="$1"
+  trap - 0 1 2 15
+  transaction_restore_status=0
+  transaction_cleanup_status=0
+  if [ "$transaction_status" -ne 0 ]; then
+    parameter_table_transaction_restore || transaction_restore_status=$?
+  fi
+  parameter_table_transaction_cleanup || transaction_cleanup_status=$?
+  if [ "$transaction_restore_status" -ne 0 ] || [ "$transaction_cleanup_status" -ne 0 ]; then
+    transaction_status=9
+  fi
+  exit "$transaction_status"
+}
+
+parameter_table_transaction_begin() {
+  [ "$parameter_table_transaction_active" -eq 0 ] || return 0
+  case "$parameter_table_snapshot_root" in
+    */temp_parameter_snapshot) ;;
+    *)
+      echo "parameter snapshot root must end in temp_parameter_snapshot: $parameter_table_snapshot_root" >&2
+      return 1
+      ;;
+  esac
+  transaction_run_id="v5-runtime-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+  parameter_table_transaction_dir="$parameter_table_snapshot_root/$transaction_run_id"
+  (umask 077; mkdir -p "$parameter_table_snapshot_root"; mkdir "$parameter_table_transaction_dir")
+  parameter_table_transaction_active=1
+  trap 'parameter_table_transaction_on_exit "$?"' 0
+  trap 'exit 129' 1
+  trap 'exit 130' 2
+  trap 'exit 143' 15
+}
+
+parameter_table_transaction_snapshot() {
+  snapshot_destination="$1"
+  parameter_table_transaction_begin
+  for existing_entry in "$parameter_table_transaction_dir"/entry-*; do
+    [ -d "$existing_entry" ] || continue
+    IFS= read -r existing_destination < "$existing_entry/destination" || return 1
+    if [ "$existing_destination" = "$snapshot_destination" ]; then
+      parameter_table_transaction_entry="$existing_entry"
+      return 0
+    fi
+  done
+  parameter_table_transaction_count=$((parameter_table_transaction_count + 1))
+  snapshot_entry="$parameter_table_transaction_dir/entry-$parameter_table_transaction_count"
+  snapshot_staging="$parameter_table_transaction_dir/.entry-$parameter_table_transaction_count.tmp"
+  (umask 077; mkdir "$snapshot_staging")
+  printf '%s\n' "$snapshot_destination" > "$snapshot_staging/destination"
+  if [ -L "$snapshot_destination" ]; then
+    echo "parameter owner must not be a symlink: $snapshot_destination" >&2
+    return 1
+  elif [ -e "$snapshot_destination" ]; then
+    [ -f "$snapshot_destination" ] || {
+      echo "parameter owner must be a regular file: $snapshot_destination" >&2
+      return 1
+    }
+    cp -p "$snapshot_destination" "$snapshot_staging/original"
+    printf 'present\n' > "$snapshot_staging/state"
+  else
+    printf 'absent\n' > "$snapshot_staging/state"
+  fi
+  mv "$snapshot_staging" "$snapshot_entry"
+  parameter_table_transaction_entry="$snapshot_entry"
+}
+
+parameter_table_transaction_complete() {
+  [ "$parameter_table_transaction_active" -eq 1 ] || return 0
+  parameter_table_transaction_cleanup
+  trap - 0 1 2 15
+  parameter_table_transaction_active=0
+}
+
 merge_runtime_seed_tsv() {
   source_path="$1"
   destination="$2"
   mode="$3"
-  if [ ! -e "$destination" ]; then
-    install -d "$(dirname "$destination")"
-    install -m "$mode" "$source_path" "$destination"
-    return
-  fi
   if ! command -v python3 >/dev/null 2>&1; then
     echo "python3 required to merge runtime seed table: $destination" >&2
-    exit 5
+    return 5
   fi
+  [ -f "$source_path" ] && [ ! -L "$source_path" ] || {
+    echo "runtime seed template must be a regular file: $source_path" >&2
+    return 5
+  }
   install -d "$(dirname "$destination")"
-  source_path="$source_path" destination="$destination" mode="$mode" parameter_table_backup_dir="$parameter_table_backup_dir" python3 - <<'PY'
+  parameter_table_transaction_snapshot "$destination"
+  merged_artifact="$parameter_table_transaction_entry/merged.tsv"
+  source_path="$source_path" destination="$destination" mode="$mode" merged_artifact="$merged_artifact" python3 - <<'PY'
 import os
 import shutil
-import time
+import stat
 from pathlib import Path
 
 src = Path(os.environ["source_path"])
 dst = Path(os.environ["destination"])
+artifact = Path(os.environ["merged_artifact"])
 mode = int(os.environ["mode"], 8)
-backup_dir = Path(os.environ["parameter_table_backup_dir"])
 
 
-def read_text(path, strict):
+def read_rows(path: Path, owner: str):
     try:
-        return path.read_text(encoding="utf-8")
-    except UnicodeDecodeError:
-        if strict:
-            raise
-        return ""
-
-
-def read_rows(path, strict):
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise SystemExit("%s parameter table is not UTF-8: %s" % (owner, path)) from exc
     rows = []
     seen = set()
-    for line_no, line in enumerate(read_text(path, strict).splitlines(), 1):
+    for line_no, line in enumerate(text.splitlines(), 1):
         if not line or line.startswith("#"):
             continue
-        parts = [part.strip() for part in line.split("\t")]
-        if len(parts) != 3 or not parts[0] or not parts[1] or not parts[2]:
-            if strict:
-                raise SystemExit("bad local parameter table row: %s:%d" % (path, line_no))
-            continue
+        parts = line.split("\t")
+        if (len(parts) != 3 or any(not part for part in parts) or
+                any(part != part.strip() for part in parts)):
+            raise SystemExit(
+                "malformed %s parameter table row: %s:%d" %
+                (owner, path, line_no))
         key = (parts[0], parts[1])
-        if strict and key in seen:
-            raise SystemExit("duplicate local parameter key: %s:%d %s/%s" % (path, line_no, key[0], key[1]))
+        if key in seen:
+            raise SystemExit(
+                "duplicate %s parameter key: %s:%d %s/%s" %
+                (owner, path, line_no, key[0], key[1]))
         seen.add(key)
         rows.append((key[0], key[1], parts[2]))
-    if strict and not rows:
-        raise SystemExit("empty local parameter table: %s" % path)
+    if not rows:
+        raise SystemExit("empty %s parameter table: %s" % (owner, path))
     return rows
 
 
-local_rows = read_rows(src, True)
-local_keys = {(axis, field) for axis, field, _ in local_rows}
-board_values = {}
-for axis, field, value in read_rows(dst, False):
-    if (axis, field) in local_keys:
-        board_values[(axis, field)] = value
-
+template_rows = read_rows(src, "template")
+template_keys = {(axis, field) for axis, field, _ in template_rows}
+board_rows = read_rows(dst, "board") if dst.exists() else []
+board_values = {
+    (axis, field): value
+    for axis, field, value in board_rows
+    if (axis, field) in template_keys
+}
 lines = ["# schema=v5.settings.parameter_table.tsv.v1"]
-for axis, field, default in local_rows:
-    lines.append("%s\t%s\t%s" % (axis, field, board_values.get((axis, field), default)))
+for axis, field, default in template_rows:
+    lines.append(
+        "%s\t%s\t%s" %
+        (axis, field, board_values.get((axis, field), default)))
 expected_text = "\n".join(lines) + "\n"
+expected_keys = [(axis, field) for axis, field, _ in template_rows]
 
-tmp = dst.with_name(dst.name + ".tmp")
-stamp = time.strftime("%Y%m%dT%H%M%S")
-backup_dir.mkdir(parents=True, exist_ok=True)
-backup = backup_dir / ("%s.bak.%s" % (dst.name, stamp))
-if backup.exists():
-    backup = backup_dir / ("%s.bak.%s.%s" % (dst.name, stamp, os.getpid()))
-shutil.copy2(dst, backup)
-tmp.write_text(expected_text, encoding="utf-8")
-os.chmod(tmp, mode)
-os.replace(tmp, dst)
-actual_text = dst.read_text(encoding="utf-8")
-actual_rows = read_rows(dst, True)
-actual_keys = [(axis, field) for axis, field, _ in actual_rows]
-expected_keys = [(axis, field) for axis, field, _ in local_rows]
-if actual_text != expected_text or actual_keys != expected_keys:
-    shutil.copy2(backup, dst)
-    raise SystemExit("merged parameter table validation failed; restored backup: %s" % backup)
-print("merged runtime seed table %s -> %s rows=%d kept=%d backup=%s format=ok" % (src, dst, len(local_rows), len(board_values), backup))
+artifact.write_text(expected_text, encoding="utf-8")
+os.chmod(artifact, mode)
+artifact_rows = read_rows(artifact, "merged artifact")
+if (artifact.read_text(encoding="utf-8") != expected_text or
+        [(axis, field) for axis, field, _ in artifact_rows] != expected_keys):
+    raise SystemExit("merged parameter deployment artifact validation failed: %s" % artifact)
+
+temporary = dst.with_name(dst.name + ".v5-new.%s" % os.getpid())
+try:
+    shutil.copyfile(artifact, temporary)
+    os.chmod(temporary, mode)
+    os.replace(temporary, dst)
+    actual_text = dst.read_text(encoding="utf-8")
+    actual_rows = read_rows(dst, "installed board")
+    actual_keys = [(axis, field) for axis, field, _ in actual_rows]
+    actual_mode = stat.S_IMODE(dst.stat().st_mode)
+    if (actual_text != expected_text or actual_keys != expected_keys or
+            actual_mode != mode):
+        raise SystemExit("installed parameter table readback validation failed: %s" % dst)
+finally:
+    try:
+        temporary.unlink()
+    except FileNotFoundError:
+        pass
+
+print(
+    "merged runtime seed table %s -> %s rows=%d kept=%d retired=%d format=ok" %
+    (src, dst, len(template_rows), len(board_values),
+     len(board_rows) - len(board_values)))
 PY
 }
 
@@ -253,9 +409,11 @@ fi
 manifest_ui_only=1
 manifest_state_only=1
 manifest_actiond_only=1
+manifest_actiond_touched=0
 manifest_settings_only=1
 manifest_command_gate_only=1
 manifest_native_protocol_command_gate=0
+manifest_native_protocol_zero_client=0
 manifest_wcs_only=1
 manifest_backend_only=1
 manifest_ethercat_only=1
@@ -316,6 +474,14 @@ while IFS="$tab" read -r scope_kind scope_source scope_destination scope_mode sc
         exit 6
       }
       manifest_native_protocol_command_gate=1
+      ;;
+    /usr/libexec/8ax/drive_profile/v5_command_gate_zero_client.py)
+      [ "$scope_kind:$scope_source:$scope_mode" = \
+        "module:services/drive_profile/v5_command_gate_zero_client.py:0644" ] || {
+        echo "Command Gate Python protocol client requires the registered source and mode 0644" >&2
+        exit 6
+      }
+      manifest_native_protocol_zero_client=1
       ;;
   esac
   case "$scope_destination" in
@@ -528,15 +694,20 @@ while IFS="$tab" read -r scope_kind scope_source scope_destination scope_mode sc
     /usr/libexec/8ax/auth_download/*|\
     /etc/init.d/v5-settings-actiond)
       manifest_ui_only=0
+      manifest_actiond_touched=1
       manifest_command_gate_only=0
       ;;
     /opt/8ax/v5/config/drive-profiles/*)
       manifest_ui_only=0
+      manifest_actiond_touched=1
       manifest_drive_profiles=1
       manifest_command_gate_only=0
       ;;
+    /opt/8ax/v5/config/settings/self_parameter_table.tsv|\
+    /opt/8ax/v5/config/settings/drive_parameter_table.tsv|\
     /opt/8ax/phase0_bus5/settings_runtime.json)
       manifest_ui_only=0
+      manifest_actiond_touched=1
       manifest_actiond_only=0
       manifest_command_gate_only=0
       ;;
@@ -563,14 +734,15 @@ while IFS="$tab" read -r scope_kind scope_source scope_destination scope_mode sc
   esac
 done < "$manifest"
 
-if [ "$manifest_native_protocol_command_gate" -eq 1 ] &&
-   [ "$linuxcnc_bundle_enabled" -ne 1 ]; then
-  echo "Command Gate native protocol deploy requires the LinuxCNC native owner/router bundle" >&2
-  exit 8
-fi
-if [ "$linuxcnc_bundle_enabled" -eq 1 ] &&
-   [ "$manifest_native_protocol_command_gate" -ne 1 ]; then
-  echo "LinuxCNC native owner/router deploy requires the Command Gate native protocol client" >&2
+native_protocol_participants=$((
+  manifest_native_protocol_command_gate +
+  manifest_native_protocol_zero_client +
+  linuxcnc_bundle_enabled))
+if [ "$native_protocol_participants" -ne 0 ] &&
+   { [ "$manifest_native_protocol_command_gate" -ne 1 ] ||
+     [ "$manifest_native_protocol_zero_client" -ne 1 ] ||
+     [ "$linuxcnc_bundle_enabled" -ne 1 ]; }; then
+  echo "native protocol deploy requires Command Gate server, Python zero client, and LinuxCNC owner/router as one atomic bundle" >&2
   exit 8
 fi
 
@@ -927,6 +1099,12 @@ stop_affected_writers_before_install() {
   fi
 }
 
+stop_settings_actiond_before_install() {
+  stop_writer_before_upgrade \
+    v5-settings-actiond \
+    /usr/libexec/8ax/drive_profile/v5_settings_actiond.py
+}
+
 stop_shm_abi_domain_before_install() {
   if [ -x /etc/init.d/v5-ui-relay ]; then
     /etc/init.d/v5-ui-relay stop
@@ -1102,6 +1280,9 @@ if [ "$apply" -eq 1 ]; then
   else
     stop_affected_writers_before_install
   fi
+  if [ "$manifest_actiond_touched" -eq 1 ]; then
+    stop_settings_actiond_before_install
+  fi
 fi
 if [ "$apply" -eq 1 ] && [ "$manifest_ethercat_complete" -eq 1 ]; then
   stop_ethercat_modules_before_install
@@ -1133,8 +1314,9 @@ while IFS="$tab" read -r kind source destination mode extra; do
   if [ "$kind" = "runtime_seed_merge" ]; then
     case "$source:$destination:$mode" in
       "config/settings/self_parameter_table.tsv:/opt/8ax/v5/config/settings/self_parameter_table.tsv:0644") ;;
+      "config/settings/drive_parameter_table.tsv:/opt/8ax/v5/config/settings/drive_parameter_table.tsv:0644") ;;
       *)
-        echo "runtime_seed_merge is only allowed for self_parameter_table.tsv: $source -> $destination mode=$mode" >&2
+        echo "runtime_seed_merge is only allowed for registered parameter templates: $source -> $destination mode=$mode" >&2
         exit 6
         ;;
     esac
@@ -1384,9 +1566,13 @@ if [ "$apply" -eq 1 ]; then
     /etc/init.d/v5-state-publisher restart
   elif [ "$restart_scope" = "actiond" ]; then
     [ "$manifest_drive_profiles" -eq 0 ] || install_runtime_drive_profiles
+    parameter_table_transaction_complete
     /etc/init.d/v5-settings-actiond restart
   elif [ "$restart_scope" = "command_gate" ]; then
-    /etc/init.d/v5-linuxcnc-command-gate restart-native
+    stop_position_publisher_before_backend
+    /etc/init.d/v5-linuxcnc-command-gate restart
+    ensure_position_publisher_after_backend
+    wait_publisher_actual_barrier
   elif [ "$restart_scope" = "backend" ]; then
     /etc/init.d/v5-linuxcnc-command-gate start
     ensure_position_publisher_after_backend
@@ -1401,8 +1587,9 @@ if [ "$apply" -eq 1 ]; then
     wait_publisher_actual_barrier
   elif [ "$restart_scope" = "cpu_policy" ]; then
     apply_cpu_policy_after_install
-    /etc/init.d/v5-linuxcnc-command-gate restart-native
-    /etc/init.d/v5-position-status-publisher restart
+    stop_position_publisher_before_backend
+    /etc/init.d/v5-linuxcnc-command-gate restart
+    ensure_position_publisher_after_backend
     /etc/init.d/v5-wcs-status-publisher restart
     /etc/init.d/v5-state-publisher restart
     /etc/init.d/v5-ui-relay restart
@@ -1414,6 +1601,7 @@ if [ "$apply" -eq 1 ]; then
     /etc/init.d/v5-wcs-status-publisher restart
     /etc/init.d/v5-state-publisher restart
     wait_publisher_actual_barrier
+    parameter_table_transaction_complete
     /etc/init.d/v5-settings-actiond restart
   else
     enable_auxiliary_boot_services
@@ -1429,10 +1617,12 @@ if [ "$apply" -eq 1 ]; then
       /etc/init.d/v5-state-publisher restart
       /etc/init.d/v5-ui-relay restart
     fi
-    /etc/init.d/v5-settings-actiond restart
     /etc/init.d/v5-touch-diagnostics restart
     /etc/init.d/v5-remote-ssh restart
+    parameter_table_transaction_complete
+    /etc/init.d/v5-settings-actiond restart
   fi
+  parameter_table_transaction_complete
 else
   echo "dry-run only; pass --apply to install files and restart scope=$restart_scope"
 fi

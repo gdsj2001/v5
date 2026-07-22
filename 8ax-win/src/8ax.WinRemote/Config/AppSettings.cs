@@ -4,9 +4,17 @@ using System.Text.Json.Serialization;
 
 namespace EightAxis.WinRemote.Config;
 
-public sealed record AppSettings(RemoteSourceMode SourceMode, Uri? RelayBaseUri, string EvidenceDirectory, bool ViewOnly, bool EnablePointer, bool EnableRemoteInput)
+public sealed record AppSettings(
+    RemoteSourceMode SourceMode,
+    RelaySecurityProfile RelaySecurity,
+    string EvidenceDirectory,
+    bool ViewOnly,
+    bool EnablePointer,
+    bool EnableRemoteInput)
 {
-    public const string DefaultRelayUrl = "http://192.168.1.221:18080/";
+    public const string DefaultRelayUrl = "https://192.168.1.221:18080/";
+
+    public Uri RelayBaseUri => RelaySecurity.RelayBaseUri;
 
     public static AppSettings LoadFromEnvironment()
     {
@@ -14,7 +22,11 @@ public sealed record AppSettings(RemoteSourceMode SourceMode, Uri? RelayBaseUri,
         return Load(args, Environment.GetEnvironmentVariables(), AppContext.BaseDirectory);
     }
 
-    public static AppSettings Load(IReadOnlyList<string> args, System.Collections.IDictionary environment, string baseDirectory)
+    public static AppSettings Load(
+        IReadOnlyList<string> args,
+        System.Collections.IDictionary environment,
+        string baseDirectory,
+        string? authorizedSecurityRoot = null)
     {
         ConfigFileSettings config = LoadConfigFile(ReadOption(args, "--config"), baseDirectory);
         string evidenceDirectory = ReadOption(args, "--evidence-dir")
@@ -22,30 +34,54 @@ public sealed record AppSettings(RemoteSourceMode SourceMode, Uri? RelayBaseUri,
             ?? config.EvidenceDirectory
             ?? Path.Combine(Path.GetTempPath(), "8ax-win", "evidence");
 
-        string? relayUrl = ReadOption(args, "--relay")
+        string? securityProfilePath = ReadOption(args, "--relay-security-profile")
+            ?? ReadEnvironment(environment, "8AX_REMOTE_SECURITY_PROFILE")
+            ?? config.RelaySecurityProfile;
+        if (String.IsNullOrWhiteSpace(securityProfilePath))
+        {
+            throw new InvalidOperationException(
+                "WinRemote requires an explicit --relay-security-profile under D:\\授权私钥; anonymous relay fallback is disabled.");
+        }
+        RelaySecurityProfile relaySecurity = RelaySecurityProfile.Load(
+            securityProfilePath,
+            authorizedSecurityRoot);
+
+        string relayUrl = ReadOption(args, "--relay")
             ?? ReadEnvironment(environment, "8AX_REMOTE_RELAY_URL")
             ?? config.RelayUrl
-            ?? DefaultRelayUrl;
+            ?? relaySecurity.RelayBaseUri.ToString();
 
-        if (Uri.TryCreate(relayUrl, UriKind.Absolute, out Uri? relayUri))
+        if (!Uri.TryCreate(relayUrl, UriKind.Absolute, out Uri? relayUri)
+            || relayUri.Scheme != Uri.UriSchemeHttps)
         {
-            bool viewOnly = ReadBoolOption(args, "--view-only")
-                ?? ReadBoolEnvironment(environment, "8AX_REMOTE_VIEW_ONLY")
-                ?? config.ViewOnly
-                ?? false;
-            bool enablePointer = ReadBoolOption(args, "--enable-pointer")
-                ?? ReadBoolEnvironment(environment, "8AX_REMOTE_ENABLE_POINTER")
-                ?? config.EnablePointer
-                ?? false;
-            bool enableRemoteInput = ReadBoolOption(args, "--enable-remote-input")
-                ?? ReadBoolEnvironment(environment, "8AX_REMOTE_ENABLE_REMOTE_INPUT")
-                ?? config.EnableRemoteInput
-                ?? !viewOnly;
-
-            return new AppSettings(RemoteSourceMode.Relay, NormalizeRelayBaseUri(relayUri), evidenceDirectory, viewOnly, enablePointer, enableRemoteInput);
+            throw new InvalidOperationException("WinRemote relay URL must use HTTPS.");
         }
+        relayUri = NormalizeRelayBaseUri(relayUri);
+        if (relayUri != relaySecurity.RelayBaseUri)
+        {
+            throw new InvalidOperationException(
+                "WinRemote relay URL does not match the selected pinned security profile.");
+        }
+        bool viewOnly = ReadBoolOption(args, "--view-only")
+            ?? ReadBoolEnvironment(environment, "8AX_REMOTE_VIEW_ONLY")
+            ?? config.ViewOnly
+            ?? false;
+        bool enablePointer = ReadBoolOption(args, "--enable-pointer")
+            ?? ReadBoolEnvironment(environment, "8AX_REMOTE_ENABLE_POINTER")
+            ?? config.EnablePointer
+            ?? false;
+        bool enableRemoteInput = ReadBoolOption(args, "--enable-remote-input")
+            ?? ReadBoolEnvironment(environment, "8AX_REMOTE_ENABLE_REMOTE_INPUT")
+            ?? config.EnableRemoteInput
+            ?? !viewOnly;
 
-        return new AppSettings(RemoteSourceMode.Relay, new Uri(DefaultRelayUrl), evidenceDirectory, false, false, true);
+        return new AppSettings(
+            RemoteSourceMode.Relay,
+            relaySecurity,
+            evidenceDirectory,
+            viewOnly,
+            enablePointer,
+            enableRemoteInput);
     }
 
     private static string? ReadOption(IReadOnlyList<string> args, string optionName)
@@ -133,6 +169,9 @@ public sealed record ConfigFileSettings
 {
     [JsonPropertyName("relay_url")]
     public string? RelayUrl { get; init; }
+
+    [JsonPropertyName("relay_security_profile")]
+    public string? RelaySecurityProfile { get; init; }
 
     [JsonPropertyName("evidence_dir")]
     public string? EvidenceDirectory { get; init; }

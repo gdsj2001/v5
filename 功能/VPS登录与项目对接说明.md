@@ -6,13 +6,13 @@
 
 <!-- AI_FAST_READ_BEGIN -->
 owner_reqs: [REQ-DRIVE-PROFILE-AUTH-CHAIN, REQ-REMOTE-SSH-MAINTENANCE]
-read_when: [VPS 登录, 授权, private/public 下载, drive profile, OTA package, remote relay, 厂家远程 SSH]
-truth: [授权身份 -> package/profile 或当前设备反向 SSH 登记 -> 板端校验/加载或 VPS tunnel/host-key readback -> consumer, 驱动整定 SDO 保持厂家默认且不进入参数映射, 只有显式复位驱动允许按型号 profile 恢复厂家默认, PDO 固定布局不进入用户参数表]
-forbidden: [public fallback 冒充授权, 客户分叉产品代码, 未验 hash 的下载, 把访问记录 IP 当 SSH 地址, Cloudflare 代理 SSH, 自动接受 host key, SSH/FIFO 产品控制旁路, 启动或设置驱动自动写 H01/H05/H08 整定 SDO, 用驱动参数表生成或改写 HAL/XML/PDO, 把复位驱动例外扩成普通 SDO 写入口]
-readback: [license/entitlement, package/profile hash/version, 板端加载 identity, relay health, device tunnel status, SSH host-key/device readback]
-impact: [dealer/factory client, IP访问记录弹窗, drive mapping, OTA, settings actiond]
-acceptance: [身份与产物 hash 闭合；远程 SSH 必须证明当前设备弹窗 -> 同一设备 ID 的 VPS loopback 隧道 -> 板端 SSH 主机身份与命令回读；普通链路无整定 SDO 写路径且 XML 不含 H01/H05/H08 初始化写入；复位驱动仅在 Machine Off/无运动窗口执行厂家恢复默认并保持 Machine Off]
-detail_sections: [2. Remote Relay 健康, 3. 板端诊断、G-code 上传与 OTA 升级入口, 4. 厂家远程 SSH 维护通道, 6. VPS 登录, 7. VPS 数据, 9. 核对项, 10. 禁止事项]
+read_when: [VPS 登录, 授权, private/public 下载, drive profile, OTA package, remote relay, WinRemote更新, 厂家远程 SSH]
+truth: [授权身份 -> package/profile 或当前设备反向 SSH 登记 -> 板端校验/加载或 VPS tunnel/host-key readback -> consumer, remote relay使用设备独立TLS证书与客户端challenge-response/scoped RAM session, WinRemote更新先验ECDSA P-256分离签名再解析manifest且安装子进程二次验签验hash, WinRemote正式EXE一旦更新必须在同一次发布上传VPS并完成主备域签名三件套回读, 驱动整定 SDO 保持厂家默认且不进入参数映射, 只有显式复位驱动允许按型号 profile 恢复厂家默认, PDO 固定布局不进入用户参数表]
+forbidden: [public fallback 冒充授权, 客户分叉产品代码, 未验签manifest或只验hash的下载, 复用设备授权/SSH/relay私钥作更新签名, 正式publish目录用-SkipUpload生成新EXE或本地更新后不上传VPS, relay明文/匿名/URL token/证书忽略fallback, PowerShell ExecutionPolicy Bypass更新器, 下载验证后安装前不复核的TOCTOU, 把访问记录 IP 当 SSH 地址, Cloudflare 代理 SSH, 自动接受 host key, SSH/FIFO 产品控制旁路, 启动或设置驱动自动写 H01/H05/H08 整定 SDO, 用驱动参数表生成或改写 HAL/XML/PDO, 把复位驱动例外扩成普通 SDO 写入口]
+readback: [license/entitlement, package/profile hash/version, 板端加载 identity, relay certificate fingerprint/device_id/client_id/scopes/session, WinRemote manifest key_id/signature/release_sequence/package size/hash/installer reverify, device tunnel status, SSH host-key/device readback]
+impact: [WinRemote与更新发布脚本, remote relay, dealer/factory client, IP访问记录弹窗, drive mapping, OTA, settings actiond]
+acceptance: [身份与产物 hash 闭合；relay明文/匿名/错误MAC/重放/过期/越权/错误证书均fail-closed且正确WinRemote证书固定与scope可走原始路径；WinRemote在解析manifest字段前验证分离签名，包下载后与安装前都验证同一签名manifest绑定的size/hash，篡改manifest/signature/package或回退release_sequence均拒绝；每次正式EXE更新同次上传VPS且VPS原始文件与主备HTTPS的zip/manifest/signature完全一致并验签通过；远程 SSH 必须证明当前设备弹窗 -> 同一设备 ID 的 VPS loopback 隧道 -> 板端 SSH 主机身份与命令回读；普通链路无整定 SDO 写路径且 XML 不含 H01/H05/H08 初始化写入；复位驱动仅在 Machine Off/无运动窗口执行厂家恢复默认并保持 Machine Off]
+detail_sections: [2. Remote Relay 健康, 3. 板端诊断、G-code 上传与 OTA 升级入口, 4. 厂家远程 SSH 维护通道, 5. WinRemote签名更新链, 6. VPS 登录, 7. VPS 数据, 9. 核对项, 10. 禁止事项]
 <!-- AI_FAST_READ_END -->
 
 - 启动内存/热路径通用规则：见 `REQ-PARAM-MEMORY-LIGHTWEIGHT-SAVE` / `功能/0-1开机参数入内存.md`，本文只保留本功能特有边界。
@@ -45,10 +45,11 @@ board remote_input.sock framed JSON
 产品 UI 启动时远程显示和输入按 canonical runtime manifest 常驻开启；产品源码、部署项和板端不得保留 disable/enable marker、环境变量或备用启动入口作为 fallback。
 
 
-- HTTP/WS 已监听。
-- `/remote/info` 可返回。
-- frame/input 路径可用。
-- relay 进程、本地 mmap/FIFO/socket、`/remote/info` 和实际 frame/input 事件共同证明 ready；不得用周期性 status JSON 作为 steady-state actual。
+- 18080只监听TLS 1.2+的HTTPS/WSS；明文HTTP/WS握手必须失败。
+- WinRemote严格固定当前设备证书SHA256 fingerprint与证书中的6位device ID后，使用设备专用client_id/256位secret完成`v5.remote.auth.v1`一次性challenge-response。
+- relay只在RAM签发最长10分钟session，并按`viewer`、`diagnostics`、`program_manager`、`operator`、`ota_admin`逐请求和逐WebSocket握手授权；CIDR只作第二层防护。
+- 正确scope下`/remote/info`、frame/input/program路径可用；错误证书、未知client、错误MAC、challenge重放、过期session或缺scope必须在进入处理链前失败。
+- relay 进程、本地 mmap/FIFO/socket、TLS listener、认证后的 `/remote/info` 和实际 frame/input 事件共同证明 ready；不得用周期性 status JSON 作为 steady-state actual。启动器只可用同一设备证书访问loopback-only `/local/health`，该入口不得暴露frame、诊断、程序或输入能力。
 
 一次性诊断文件只能用于明确的启动/故障诊断，不能参与控制链路、heartbeat 或 steady-state ready；正常运行状态使用进程/socket health 和 `/remote/info`。
 
@@ -100,7 +101,7 @@ OTA 升级按钮规则：
 
 Windows 客户端不得为这些按钮新增 SSH、shell、SFTP、直接读写 `/run`、直接调用 LinuxCNC/HAL 或远程点击替代路径。
 
-WinRemote 远程画面只允许使用板端 `remote_ui_relay` 的 HTTP 首帧初始化和 `WS /remote/stream` dirty-rect 流。`WS /remote/stream` 无法连接、升级失败或运行中断开时，客户端必须记录 `relay_stream_unavailable` 并进入重连/失败状态，不得降级为低频 HTTP 全帧轮询、旧 `/dev/fb0` 抓屏、SSH/SFTP 文件读取、FIFO 或其它显示 fallback；远程输入仍只允许 `WS /remote/input`。
+WinRemote 远程画面只允许使用板端 `remote_ui_relay` 的认证后HTTPS repair和`WSS /remote/stream` dirty-rect流；远程输入只允许认证后的`WSS /remote/input`。`WSS /remote/stream` 无法连接、升级失败、session过期或运行中断开时，客户端必须重新执行TLS证书固定与challenge-response后重连；失败则记录`relay_stream_unavailable`，不得降级为HTTP/WS、低频HTTPS全帧轮询、旧`/dev/fb0`抓屏、SSH/SFTP文件读取、FIFO或其它显示/认证fallback。
 
 ## 4. 厂家远程 SSH 维护通道
 
@@ -132,9 +133,17 @@ Factory Client 设备行 -> IP访问记录弹窗 -> 6 位设备 ID
 
 验收必须从设备表的 `IP访问记录` 原始入口开始，证明：弹窗属于当前设备、按钮显示同一 6 位设备 ID 和 VPS 路由、访问记录选择不改变目标、VPS 状态返回同一设备 ID/唯一 loopback 端口且在线，点击后系统 SSH 通过 `vps3` 进入该端口，并读取同一板端的 `uname -m` 和 6 位登记 ID。只看到终端启动、VPS TCP 连接、隧道进程或端口监听不能代替板端身份回读。
 
+## 5. WinRemote签名更新链
 
+WinRemote发布与自更新使用独立离线更新签名身份，不复用工厂设备授权、板端设备、远程SSH、relay TLS或relay客户端secret。私钥固定人工保管在`D:\授权私钥\winremote-update-signing-private.pem`，不得进入Git、VPS、客户端、板端、VM、日志、截图或发布包；对应公钥`winremote-update-signing-public.pem`可以进入源码，客户端固定`key_id=winremote-update-p256-2026-01`与P-256 SubjectPublicKeyInfo公钥。换钥必须新增key_id并发布能同时信任旧/新公钥的过渡客户端，不能远程用未受信manifest替换公钥。
 
-规则：
+VPS每个发布包含UTF-8无BOM的`manifest.json`和对其原始字节做`ECDSA P-256 + SHA-256`的DER分离签名`manifest.sig`。manifest固定schema`v5.winremote_update_manifest.v2`，签名覆盖全部原始字节，必备字段为`schema`、`app_id`、`channel`、`version`、单调递增`release_sequence`、`key_id`、`file_name`、`package_url`、`size`、`sha256`与`published_at_utc`。客户端必须先下载原始manifest字节与signature并按固定公钥验签，验签成功后才允许JSON反序列化、URL解析、版本比较、进度文案或任何字段使用；未知key_id、BOM/编码异常、重复/缺失字段、HTTP重定向到非HTTPS、主备域返回同version但字节或签名不同均fail-closed。
+
+下载包后必须验证签名manifest绑定的精确字节数和SHA256，再把原始manifest、signature与zip放入只供当前用户访问的随机更新目录。安装不再生成或启动`ExecutionPolicy Bypass` PowerShell脚本；当前单文件exe复制自身到随机目录，并以同一程序的`--apply-update`模式启动安装子进程。安装子进程在等待父进程退出后必须再次用内置公钥验证原始manifest/signature，并以`FileShare.None`打开zip，在同一个独占句柄上二次验证size/hash后直接读取zip；包内只允许一个`8ax.WinRemote.exe`，其产品名/版本必须与签名manifest一致，随后才可备份、原子替换和重启。任一复核失败保持原exe与备份不变并显示错误，不得继续复制、删除旧文件或执行包内脚本。
+
+客户端本地版本等于或高于服务器版本不下载、不安装、不重启；`release_sequence`不得小于当前已受信安装记录。安装成功后只持久记录已验证的key_id、release_sequence、version与package SHA256，不保存私钥、signature以外的凭据或把manifest当授权真值。任何生成或替换`8ax-win/publish/win-x64/8ax.WinRemote.exe`的版本更新都属于正式发布，必须在同一次脚本运行中先本地生成/验签，再上传zip、manifest和signature，随后逐项回读VPS文件hash与主备HTTPS原始字节并重新验签；主备域三件套任一不一致即发布失败。`-SkipUpload`只允许把一次性诊断产物同时写入`repo_ignored`下的隔离publish/output目录，不得写入正式publish目录、不得替换当前客户端、不得作为交付或升级版本。
+
+远程时间同步规则：
 
 - 客户端优先用可访问网络的 HTTPS `Date` 响应头。
 - 网络时间不可用时立即回退 Windows 本机 UTC。
@@ -146,6 +155,7 @@ Factory Client 设备行 -> IP访问记录弹窗 -> 6 位设备 ID
 Windows 客户端程序名固定：
 
 ```text
+8ax.WinRemote.exe
 ```
 
 发布包只允许包含同名单文件 exe，不发布 `.dll`、`.deps.json`、`.runtimeconfig.json`、`.pdb` 等多文件产物。
@@ -153,14 +163,19 @@ Windows 客户端程序名固定：
 VPS manifest：
 
 ```text
+https://license.cjwsjzyy.xyz/8ax-winremote/win-x64/manifest.json
+https://license.cjwsjzyy.xyz/8ax-winremote/win-x64/manifest.sig
+https://license.3dtouch.top/8ax-winremote/win-x64/manifest.json
+https://license.3dtouch.top/8ax-winremote/win-x64/manifest.sig
 ```
 
 VPS 静态目录：
 
 ```text
+/var/www/html/updates/8ax-winremote/win-x64
 ```
 
-升级规则：
+升级显示规则：
 
 - manifest 版本和 exe 文件版本必须一致。
 - 服务器版本高于本地版本才下载。
@@ -173,9 +188,10 @@ VPS 静态目录：
 常规发布命令：
 
 ```powershell
+powershell -NoProfile -File D:\v5\8ax-win\tools\publish_winremote_update.ps1 -Version <version> -ReleaseSequence <monotonic-integer>
 ```
 
-正式发布必须上传到 VPS 并校验：本地 zip SHA256、VPS 文件 SHA256、manifest `sha256`、HTTPS 下载后 SHA256。四者不一致即发布失败。任何证据进入 `repo_ignored/` 前必须脱敏。
+正式发布必须上传到 VPS 并校验：本地zip SHA256/size、manifest分离签名、本地公钥验签、VPS zip/manifest/signature原始文件hash、主备HTTPS三件套原始字节、主备公钥验签以及manifest绑定的size/hash。任一不一致即发布失败。任何证据进入`repo_ignored/`前必须脱敏。
 
 ## 6. VPS 登录
 
@@ -301,7 +317,8 @@ OTA package 规则：
 - private profile 存在或有明确 absent/skipped/failed reason。
 - endpoint 配置里的主/备域名可访问。
 - OTA private/public manifest 解析、`selected_scope`、选择 reason、package SHA256/签名和板端 staging hash 一致。
-- 板端 relay `/remote/info`、WS frame、input granted、frame applied 证据齐全。
+- 板端relay证书fingerprint/device ID、challenge/client ID、session scope与CIDR证据齐全；无认证/缺scope/重放/过期负向测试失败，认证后的`/remote/info`、WSS frame、input granted、frame applied证据齐全。
+- WinRemote更新必须核对固定`key_id`、manifest原始字节分离签名、release_sequence、zip size/hash、安装子进程二次验签验hash，以及主备域三件套完全一致。
 - 板端一次性诊断 `/run/8ax_v5_product_ui/remote_time_sync_status.json` 能说明时间同步来源和结果，但不作为 ready、heartbeat 或控制真源。
 - 远程 SSH 需核对按钮只出现在当前设备的 `IP访问记录` 弹窗、访问记录 IP 不参与路由、设备 ID/授权/分配端口/在线状态闭合、VPS 端口只监听 loopback、系统 SSH 严格校验板端 host key，并且登记 ID 回读一致。
 
@@ -311,6 +328,8 @@ OTA package 规则：
 - 用 SSH、shell、SFTP、临时 JSON 或远程点击绕过正式 UI/operator 路径。
 - 在标题栏保留第二个远程连接入口、把访问记录 IP 当入站 SSH 地址、隧道失败后回退直连 IP、让 Cloudflare 代理 SSH、公开监听分配端口，或自动接受 SSH host key。
 - 在 Factory Client、VPS、仓库、日志或通用镜像中保存设备私钥、SSH 密码，或多个设备共用同一设备私钥。
+- 把更新签名私钥上传VPS或打入客户端，复用设备授权/SSH/relay密钥，解析未验签manifest，只有SHA256无来源签名，或用PowerShell `ExecutionPolicy Bypass`执行可替换脚本。
+- relay使用HTTP/WS、匿名接口、URL token、忽略证书、自动接受新证书、长期磁盘session、scope越权或CIDR冒充身份认证。
 - 把 profile public fallback 写成 private 授权成功。
 - 有当前 DNA private OTA 包时继续下载 public OTA 包，或用 public 包替代 private 包失败。
 - 让资源指标、时间同步、诊断接口参与业务控制。

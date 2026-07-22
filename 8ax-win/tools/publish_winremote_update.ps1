@@ -1,5 +1,7 @@
 param(
     [Parameter(Mandatory=$true)][string]$Version,
+    [Parameter(Mandatory=$true)][long]$ReleaseSequence,
+    [string]$Channel = "stable",
     [string]$Configuration = "Release",
     [string]$Runtime = "win-x64",
     [string]$Vps = "vps3",
@@ -8,11 +10,14 @@ param(
     [string]$PrimaryDomain = "https://license.cjwsjzyy.xyz",
     [string]$BackupDomain = "https://license.3dtouch.top",
     [string]$PublishDir = "",
+    [string]$SigningPrivateKey = "D:\授权私钥\winremote-update-signing-private.pem",
+    [string]$Python = "python",
     [switch]$SkipUpload
 )
 
 $ErrorActionPreference = "Stop"
-
+$keyId = "winremote-update-p256-2026-01"
+$manifestSchema = "v5.winremote_update_manifest.v2"
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 if ([string]::IsNullOrWhiteSpace($PublishDir)) {
     $PublishDir = Join-Path $repo "8ax-win\publish\$Runtime"
@@ -20,10 +25,23 @@ if ([string]::IsNullOrWhiteSpace($PublishDir)) {
 if ([string]::IsNullOrWhiteSpace($OutDir)) {
     $OutDir = Join-Path $repo "repo_ignored\release\winremote_update"
 }
+$officialPublishDir = [System.IO.Path]::GetFullPath((Join-Path $repo "8ax-win\publish\$Runtime")).TrimEnd('\', '/')
+$diagnosticRoot = [System.IO.Path]::GetFullPath((Join-Path $repo "repo_ignored")).TrimEnd('\', '/')
+$PublishDir = [System.IO.Path]::GetFullPath($PublishDir).TrimEnd('\', '/')
+$OutDir = [System.IO.Path]::GetFullPath($OutDir).TrimEnd('\', '/')
+if ($SkipUpload -and
+    ($PublishDir.Equals($officialPublishDir, [System.StringComparison]::OrdinalIgnoreCase) -or
+     -not $PublishDir.StartsWith($diagnosticRoot + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase) -or
+     -not $OutDir.StartsWith($diagnosticRoot + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase))) {
+    throw "-SkipUpload is limited to isolated repo_ignored publish/output directories and cannot update the formal WinRemote executable."
+}
 $project = Join-Path $repo "8ax-win\src\8ax.WinRemote\8ax.WinRemote.csproj"
+$publicKey = Join-Path $repo "8ax-win\src\8ax.WinRemote\Update\winremote-update-signing-public.pem"
+$signTool = Join-Path $repo "8ax-win\tools\sign_winremote_update_manifest.py"
 $packageName = "8ax-winremote-win-x64.zip"
 $packagePath = Join-Path $OutDir $packageName
 $manifestPath = Join-Path $OutDir "manifest.json"
+$signaturePath = Join-Path $OutDir "manifest.sig"
 $exeName = "8ax.WinRemote.exe"
 $requiredFiles = @($exeName)
 $forbiddenSidecars = @(
@@ -32,6 +50,18 @@ $forbiddenSidecars = @(
     "8ax.WinRemote.runtimeconfig.json",
     "8ax.WinRemote.pdb"
 )
+
+if ($ReleaseSequence -le 0) {
+    throw "ReleaseSequence must be a positive monotonic integer."
+}
+if ($Channel -ne "stable") {
+    throw "This WinRemote client release owner is fixed to channel=stable."
+}
+foreach ($required in @($SigningPrivateKey, $publicKey, $signTool)) {
+    if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+        throw "missing update signing input: $required"
+    }
+}
 
 $versionParts = @([regex]::Matches($Version, '\d+') | ForEach-Object { [int]$_.Value })
 if ($versionParts.Count -lt 1) {
@@ -43,7 +73,6 @@ while ($versionParts.Count -lt 4) {
 $assemblyVersion = ($versionParts[0..3] -join ".")
 
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-
 Remove-Item -LiteralPath $PublishDir -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $PublishDir | Out-Null
 
@@ -62,13 +91,15 @@ dotnet publish $project `
     -p:InformationalVersion=$Version `
     -p:AssemblyVersion=$assemblyVersion `
     -p:FileVersion=$assemblyVersion
+if ($LASTEXITCODE -ne 0) {
+    throw "WinRemote single-file publish failed."
+}
 
 foreach ($file in $requiredFiles) {
     if (-not (Test-Path -LiteralPath (Join-Path $PublishDir $file))) {
         throw "publish output missing required file: $file"
     }
 }
-
 $publishedFiles = @(Get-ChildItem -LiteralPath $PublishDir -File)
 if ($publishedFiles.Count -ne 1 -or $publishedFiles[0].Name -ne $exeName) {
     $names = ($publishedFiles | ForEach-Object { $_.Name }) -join ", "
@@ -97,108 +128,148 @@ if ($lastZipError -ne $null) {
 }
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-$zipFileNames = [System.IO.Compression.ZipFile]::OpenRead($packagePath).Entries | ForEach-Object { $_.FullName }
-foreach ($file in $requiredFiles) {
-    if ($zipFileNames -notcontains $file) {
-        throw "update package missing required file: $file"
-    }
+$archive = [System.IO.Compression.ZipFile]::OpenRead($packagePath)
+try {
+    $zipFileNames = @($archive.Entries | ForEach-Object { $_.FullName })
+} finally {
+    $archive.Dispose()
 }
-if ($zipFileNames.Count -ne 1) {
+if ($zipFileNames.Count -ne 1 -or $zipFileNames[0] -ne $exeName) {
     throw "update package must contain only $exeName"
 }
 
-$hash = (Get-FileHash -LiteralPath $packagePath -Algorithm SHA256).Hash
+$hash = (Get-FileHash -LiteralPath $packagePath -Algorithm SHA256).Hash.ToLowerInvariant()
 $size = (Get-Item -LiteralPath $packagePath).Length
 $manifest = [ordered]@{
+    schema = $manifestSchema
     app_id = "8ax.WinRemote"
+    channel = $Channel
     version = $Version
+    release_sequence = $ReleaseSequence
+    key_id = $keyId
     file_name = $packageName
     package_url = $packageName
-    sha256 = $hash
     size = $size
+    sha256 = $hash
     published_at_utc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 }
 $manifestJson = $manifest | ConvertTo-Json
-$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false, $true)
 [System.IO.File]::WriteAllText($manifestPath, $manifestJson, $utf8NoBom)
+Remove-Item -LiteralPath $signaturePath -Force -ErrorAction SilentlyContinue
+& $Python $signTool sign --private-key $SigningPrivateKey --public-key $publicKey --manifest $manifestPath --signature $signaturePath
+if ($LASTEXITCODE -ne 0) {
+    throw "WinRemote manifest signing failed."
+}
+& $Python $signTool verify --public-key $publicKey --manifest $manifestPath --signature $signaturePath
+if ($LASTEXITCODE -ne 0) {
+    throw "WinRemote local manifest signature verification failed."
+}
 
-$primaryManifestUrl = "$PrimaryDomain/8ax-winremote/win-x64/manifest.json"
-$backupManifestUrl = "$BackupDomain/8ax-winremote/win-x64/manifest.json"
-$uploadStatus = "pending"
+$localHashes = @{
+    package = (Get-FileHash -LiteralPath $packagePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    manifest = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    signature = (Get-FileHash -LiteralPath $signaturePath -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+$primaryBaseUrl = "$PrimaryDomain/8ax-winremote/win-x64"
+$backupBaseUrl = "$BackupDomain/8ax-winremote/win-x64"
 
 function Assert-ManifestMatchesRelease {
     param(
-        [Parameter(Mandatory=$true)][string]$Json,
+        [Parameter(Mandatory=$true)][string]$Path,
         [Parameter(Mandatory=$true)][string]$Context
     )
-
-    $Json = $Json.TrimStart([char]0xFEFF)
-    if ($Json.Length -ge 3 -and $Json[0] -eq [char]0x00EF -and $Json[1] -eq [char]0x00BB -and $Json[2] -eq [char]0x00BF) {
-        $Json = $Json.Substring(3)
+    $raw = [System.IO.File]::ReadAllBytes($Path)
+    if ($raw.Length -ge 3 -and $raw[0] -eq 0xEF -and $raw[1] -eq 0xBB -and $raw[2] -eq 0xBF) {
+        throw "$Context manifest contains a forbidden UTF-8 BOM"
     }
-    $parsed = $Json | ConvertFrom-Json
-    if ($parsed.app_id -ne "8ax.WinRemote") {
-        throw "$Context manifest app_id mismatch: $($parsed.app_id)"
-    }
-    if ($parsed.version -ne $Version) {
-        throw "$Context manifest version mismatch: $($parsed.version) != $Version"
-    }
-    if ($parsed.file_name -ne $packageName) {
-        throw "$Context manifest file_name mismatch: $($parsed.file_name) != $packageName"
-    }
-    if ($parsed.package_url -ne $packageName) {
-        throw "$Context manifest package_url mismatch: $($parsed.package_url) != $packageName"
-    }
-    if ($parsed.sha256 -ne $hash) {
-        throw "$Context manifest sha256 mismatch: $($parsed.sha256) != $hash"
-    }
-    if ([int64]$parsed.size -ne [int64]$size) {
-        throw "$Context manifest size mismatch: $($parsed.size) != $size"
+    $json = $utf8NoBom.GetString($raw)
+    $parsed = $json | ConvertFrom-Json
+    if ($parsed.schema -ne $manifestSchema -or $parsed.app_id -ne "8ax.WinRemote" -or
+        $parsed.channel -ne $Channel -or $parsed.version -ne $Version -or
+        [int64]$parsed.release_sequence -ne $ReleaseSequence -or $parsed.key_id -ne $keyId -or
+        $parsed.file_name -ne $packageName -or $parsed.package_url -ne $packageName -or
+        [int64]$parsed.size -ne [int64]$size -or $parsed.sha256 -ne $hash) {
+        throw "$Context signed manifest fields do not match the release"
     }
 }
 
-function Test-ManifestEndpoint {
-    param([Parameter(Mandatory=$true)][string]$Uri)
-
-    try {
-        $response = Invoke-WebRequest -UseBasicParsing -TimeoutSec 15 -Uri $Uri
-        Assert-ManifestMatchesRelease -Json $response.Content -Context $Uri
-        return $true
-    } catch {
-        Write-Warning "manifest verification failed for ${Uri}: $($_.Exception.Message)"
-        return $false
+function Assert-SignedReleaseSet {
+    param(
+        [Parameter(Mandatory=$true)][string]$Package,
+        [Parameter(Mandatory=$true)][string]$Manifest,
+        [Parameter(Mandatory=$true)][string]$Signature,
+        [Parameter(Mandatory=$true)][string]$Context
+    )
+    Assert-ManifestMatchesRelease -Path $Manifest -Context $Context
+    & $Python $signTool verify --public-key $publicKey --manifest $Manifest --signature $Signature
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Context detached signature verification failed"
+    }
+    $actualPackage = (Get-FileHash -LiteralPath $Package -Algorithm SHA256).Hash.ToLowerInvariant()
+    $actualManifest = (Get-FileHash -LiteralPath $Manifest -Algorithm SHA256).Hash.ToLowerInvariant()
+    $actualSignature = (Get-FileHash -LiteralPath $Signature -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actualPackage -ne $localHashes.package -or $actualManifest -ne $localHashes.manifest -or
+        $actualSignature -ne $localHashes.signature) {
+        throw "$Context package/manifest/signature raw bytes differ from the local signed release"
     }
 }
 
+function Download-SignedReleaseSet {
+    param(
+        [Parameter(Mandatory=$true)][string]$BaseUrl,
+        [Parameter(Mandatory=$true)][string]$Destination,
+        [Parameter(Mandatory=$true)][string]$Context
+    )
+    New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+    $downloadedPackage = Join-Path $Destination $packageName
+    $downloadedManifest = Join-Path $Destination "manifest.json"
+    $downloadedSignature = Join-Path $Destination "manifest.sig"
+    Invoke-WebRequest -UseBasicParsing -TimeoutSec 120 -Uri "$BaseUrl/$packageName" -OutFile $downloadedPackage
+    Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 -Uri "$BaseUrl/manifest.json" -OutFile $downloadedManifest
+    Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 -Uri "$BaseUrl/manifest.sig" -OutFile $downloadedSignature
+    Assert-SignedReleaseSet -Package $downloadedPackage -Manifest $downloadedManifest -Signature $downloadedSignature -Context $Context
+}
+
+$uploadStatus = "pending"
 if (-not $SkipUpload) {
     # Formal release path: package generation must be followed by direct VPS upload and verification.
     $remotePackagePath = "$RemoteDir/$packageName"
     $remoteManifestPath = "$RemoteDir/manifest.json"
+    $remoteSignaturePath = "$RemoteDir/manifest.sig"
     ssh $Vps "mkdir -p '$RemoteDir'"
     scp $packagePath "${Vps}:$remotePackagePath"
     scp $manifestPath "${Vps}:$remoteManifestPath"
+    scp $signaturePath "${Vps}:$remoteSignaturePath"
 
-    $remoteHash = (& ssh $Vps "sha256sum '$remotePackagePath' | cut -d ' ' -f 1")
-    $remoteHash = ($remoteHash | Select-Object -First 1).Trim()
-    if ($remoteHash.ToUpperInvariant() -ne $hash.ToUpperInvariant()) {
-        throw "VPS package sha256 mismatch: $remoteHash != $hash"
-    }
-
-    $remoteManifestJson = ((& ssh $Vps "cat '$remoteManifestPath'") -join "`n")
-    Assert-ManifestMatchesRelease -Json $remoteManifestJson -Context "VPS remote file"
-
-    $httpsVerified = $false
-    for ($attempt = 1; $attempt -le 6; $attempt++) {
-        $primaryOk = Test-ManifestEndpoint -Uri $primaryManifestUrl
-        $backupOk = Test-ManifestEndpoint -Uri $backupManifestUrl
-        if ($primaryOk -and $backupOk) {
-            $httpsVerified = $true
-            break
+    foreach ($remotePair in @(
+        @($remotePackagePath, $localHashes.package, "package"),
+        @($remoteManifestPath, $localHashes.manifest, "manifest"),
+        @($remoteSignaturePath, $localHashes.signature, "signature")
+    )) {
+        $remoteHash = (& ssh $Vps "sha256sum '$($remotePair[0])' | cut -d ' ' -f 1" | Select-Object -First 1).Trim().ToLowerInvariant()
+        if ($remoteHash -ne $remotePair[1]) {
+            throw "VPS $($remotePair[2]) SHA-256 mismatch: $remoteHash != $($remotePair[1])"
         }
-        Start-Sleep -Seconds 2
     }
-    if (-not $httpsVerified) {
-        throw "VPS HTTPS manifest verification failed for primary or backup domain"
+
+    $verifyRoot = Join-Path $OutDir ("verify-" + [Guid]::NewGuid().ToString("N"))
+    try {
+        $remoteReadback = Join-Path $verifyRoot "vps"
+        New-Item -ItemType Directory -Force -Path $remoteReadback | Out-Null
+        scp "${Vps}:$remotePackagePath" (Join-Path $remoteReadback $packageName)
+        scp "${Vps}:$remoteManifestPath" (Join-Path $remoteReadback "manifest.json")
+        scp "${Vps}:$remoteSignaturePath" (Join-Path $remoteReadback "manifest.sig")
+        Assert-SignedReleaseSet `
+            -Package (Join-Path $remoteReadback $packageName) `
+            -Manifest (Join-Path $remoteReadback "manifest.json") `
+            -Signature (Join-Path $remoteReadback "manifest.sig") `
+            -Context "VPS readback"
+
+        Download-SignedReleaseSet -BaseUrl $primaryBaseUrl -Destination (Join-Path $verifyRoot "primary") -Context "primary HTTPS"
+        Download-SignedReleaseSet -BaseUrl $backupBaseUrl -Destination (Join-Path $verifyRoot "backup") -Context "backup HTTPS"
+    } finally {
+        Remove-Item -LiteralPath $verifyRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
     $uploadStatus = "uploaded and verified"
 } else {
@@ -206,13 +277,13 @@ if (-not $SkipUpload) {
     $uploadStatus = "skipped (diagnostic only)"
 }
 
-Write-Host "Published WinRemote update:"
-Write-Host "  primary: $primaryManifestUrl"
-Write-Host "  backup:  $backupManifestUrl"
+Write-Host "Published WinRemote signed update:"
+Write-Host "  primary: $primaryBaseUrl/manifest.json + manifest.sig"
+Write-Host "  backup:  $backupBaseUrl/manifest.json + manifest.sig"
 Write-Host "  exe:     $exeName"
 Write-Host "  version: $Version"
-Write-Host "  filever: $assemblyVersion"
+Write-Host "  release_sequence: $ReleaseSequence"
+Write-Host "  key_id:  $keyId"
 Write-Host "  sha256:  $hash"
-Write-Host "  source:  $PublishDir"
 Write-Host "  package contains single executable only: $exeName"
 Write-Host "  upload:  $uploadStatus"

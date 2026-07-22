@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import os
+import shlex
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -38,10 +40,94 @@ def audit_state_upgrade(text: str) -> None:
         assert token in dispatch, 'STATE_WRITER_DISPATCH_MISSING:' + token
 
 
+def audit_parameter_table_merge_behavior(text: str) -> None:
+    transaction = section(
+        text, 'parameter_table_transaction_cleanup() {',
+        '\ntab=$(printf')
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        template = root / 'template.tsv'
+        destination = root / 'board.tsv'
+        snapshot_root = root / 'vm-build' / 'temp_parameter_snapshot'
+
+        def run_merge(*, fail_after: bool = False) -> subprocess.CompletedProcess:
+            completion = 'false' if fail_after else 'parameter_table_transaction_complete'
+            script = f'''set -eu
+parameter_table_snapshot_root={shlex.quote(snapshot_root.as_posix())}
+parameter_table_transaction_dir=
+parameter_table_transaction_active=0
+parameter_table_transaction_count=0
+parameter_table_transaction_entry=
+PYTHON_EXE={shlex.quote(Path(sys.executable).as_posix())}
+python3() {{ "$PYTHON_EXE" "$@"; }}
+{transaction}
+merge_runtime_seed_tsv {shlex.quote(template.as_posix())} {shlex.quote(destination.as_posix())} 0666
+{completion}
+'''
+            return subprocess.run(
+                ['sh'], input=script.encode('utf-8'), check=False,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+        def assert_snapshot_clean() -> None:
+            assert not snapshot_root.exists() or not any(snapshot_root.iterdir())
+
+        template.write_text(
+            '# schema=v5.settings.parameter_table.tsv.v1\n'
+            'X\tencoder_bits\t18\n'
+            'C\tencoder_bits\t18\n', encoding='utf-8')
+        destination.write_text(
+            '# schema=v5.settings.parameter_table.tsv.v1\n'
+            'C\tencoder_bits\t19\n'
+            'X\tencoder_bits\t20\n'
+            'C\tegear_numerator\t4096\n', encoding='utf-8')
+        merged = run_merge()
+        assert merged.returncode == 0, merged.stderr.decode(errors='replace')
+        assert destination.read_text(encoding='utf-8') == (
+            '# schema=v5.settings.parameter_table.tsv.v1\n'
+            'X\tencoder_bits\t20\n'
+            'C\tencoder_bits\t19\n')
+        assert 'egear_numerator' not in destination.read_text(encoding='utf-8')
+        assert_snapshot_clean()
+
+        for invalid_board, expected_error in (
+            ('X\tencoder_bits\t18\textra\n',
+             'malformed board parameter table row'),
+            ('X\tencoder_bits\t18\nX\tencoder_bits\t19\n',
+             'duplicate board parameter key'),
+        ):
+            destination.write_text(invalid_board, encoding='utf-8')
+            before = destination.read_bytes()
+            rejected = run_merge()
+            assert rejected.returncode != 0
+            assert expected_error.encode() in rejected.stderr
+            assert destination.read_bytes() == before
+            assert_snapshot_clean()
+
+        destination.write_text(
+            '# schema=v5.settings.parameter_table.tsv.v1\n'
+            'X\tencoder_bits\t21\n'
+            'C\tencoder_bits\t22\n'
+            'RETIRED\twrite_status\told\n', encoding='utf-8')
+        before = destination.read_bytes()
+        later_failure = run_merge(fail_after=True)
+        assert later_failure.returncode != 0
+        assert destination.read_bytes() == before
+        assert b'restored parameter owner after failed deploy' in later_failure.stderr
+        assert_snapshot_clean()
+
+        destination.unlink()
+        absent_failure = run_merge(fail_after=True)
+        assert absent_failure.returncode != 0
+        assert not destination.exists()
+        assert_snapshot_clean()
+
+
 def main() -> int:
     text = INSTALLER.read_text(encoding='utf-8')
     manifest = MANIFEST.read_text(encoding='utf-8')
     audit_state_upgrade(text)
+    audit_parameter_table_merge_behavior(text)
     for token in (
         'disable_unconditional_ethercat_autostart',
         'rm -f "$dir"/S??ethercat',
@@ -139,9 +225,15 @@ def main() -> int:
     # Spawn-only publisher services are joined once per non-UI install batch.
     # The UI/cpu-policy/all scopes reuse the UI-owned barrier and must not add
     # a second wait after each individual restart.
-    assert text.count('\n    wait_publisher_actual_barrier\n') == 4
+    assert text.count('\n    wait_publisher_actual_barrier\n') == 5
     assert text.count('\n  wait_publisher_actual_barrier\n') == 1
     scopes = {
+        'actiond': section(
+            text, 'elif [ "$restart_scope" = "actiond" ]',
+            'elif [ "$restart_scope" = "command_gate" ]'),
+        'command_gate': section(
+            text, 'elif [ "$restart_scope" = "command_gate" ]',
+            'elif [ "$restart_scope" = "backend" ]'),
         'backend': section(text, 'elif [ "$restart_scope" = "backend" ]',
                            'elif [ "$restart_scope" = "ethercat" ]'),
         'ethercat': section(text, 'elif [ "$restart_scope" = "ethercat" ]',
@@ -152,9 +244,11 @@ def main() -> int:
                               'elif [ "$restart_scope" = "settings" ]'),
         'settings': section(text, 'elif [ "$restart_scope" = "settings" ]',
                             '\n  else\n'),
-        'all': section(text, '\n  else\n    enable_auxiliary_boot_services', '\n  fi\nelse\n'),
+        'all': section(
+            text, '\n  else\n    enable_auxiliary_boot_services',
+            '\n  fi\n  parameter_table_transaction_complete\nelse\n'),
     }
-    for name in ('backend', 'ethercat', 'wcs', 'settings'):
+    for name in ('command_gate', 'backend', 'ethercat', 'wcs', 'settings'):
         assert scopes[name].count('wait_publisher_actual_barrier') == 1, name
     for name in ('cpu_policy', 'all'):
         assert 'wait_publisher_actual_barrier' not in scopes[name], name
@@ -162,6 +256,16 @@ def main() -> int:
     assert scopes['ethercat'].index('ensure_position_publisher_after_backend') < scopes['ethercat'].index('wait_publisher_actual_barrier')
     assert scopes['wcs'].index('/etc/init.d/v5-wcs-status-publisher restart') < scopes['wcs'].index('wait_publisher_actual_barrier')
     assert scopes['settings'].index('/etc/init.d/v5-state-publisher restart') < scopes['settings'].index('wait_publisher_actual_barrier') < scopes['settings'].index('/etc/init.d/v5-settings-actiond restart')
+    for name in ('actiond', 'settings', 'all'):
+        assert scopes[name].index('parameter_table_transaction_complete') < \
+            scopes[name].index('/etc/init.d/v5-settings-actiond restart'), name
+    for name in ('command_gate', 'cpu_policy'):
+        assert '/etc/init.d/v5-linuxcnc-command-gate restart-native' not in scopes[name]
+        assert scopes[name].count(
+            '/etc/init.d/v5-linuxcnc-command-gate restart\n') == 1
+        assert scopes[name].index('stop_position_publisher_before_backend') < scopes[name].index(
+            '/etc/init.d/v5-linuxcnc-command-gate restart') < scopes[name].index(
+            'ensure_position_publisher_after_backend')
     for token in ('active_ini=conflict', '--pre-ui-inputs',
                   '--expected-ini "$expected_ini"', '--timeout 120'):
         assert token in actual_barrier
@@ -267,20 +371,26 @@ def main() -> int:
         assert b'complete ec_master/ec_generic/lcec/lifecycle atomic bundle' in incomplete.stderr
 
     # The versioned native owner protocol is one atomic deployment domain:
-    # neither the Command Gate client nor the LinuxCNC owner/router bundle may
-    # be rolled out without the other side.
+    # C server, Python zero client, and LinuxCNC owner/router move together.
     command_gate_row = (
         'binary\tbuild/board/app/v5_command_gate_server\t'
         '/usr/libexec/8ax/v5_command_gate_server\t0755')
+    zero_client_row = (
+        'module\tservices/drive_profile/v5_command_gate_zero_client.py\t'
+        '/usr/libexec/8ax/drive_profile/v5_command_gate_zero_client.py\t0644')
     assert manifest.splitlines().count(command_gate_row) == 1
+    assert manifest.splitlines().count(zero_client_row) == 1
     gate_without_owner = run_manifest_scan([command_gate_row])
     assert gate_without_owner.returncode == 8, gate_without_owner.stderr
-    assert b'requires the LinuxCNC native owner/router bundle' in gate_without_owner.stderr
+    assert b'as one atomic bundle' in gate_without_owner.stderr
+    zero_without_owner = run_manifest_scan([zero_client_row])
+    assert zero_without_owner.returncode == 8, zero_without_owner.stderr
+    assert b'as one atomic bundle' in zero_without_owner.stderr
     owner_without_gate = run_manifest_scan([], linuxcnc_bundle_enabled=1)
     assert owner_without_gate.returncode == 8, owner_without_gate.stderr
-    assert b'requires the Command Gate native protocol client' in owner_without_gate.stderr
+    assert b'as one atomic bundle' in owner_without_gate.stderr
     atomic_native_protocol = run_manifest_scan(
-        [command_gate_row], linuxcnc_bundle_enabled=1)
+        [command_gate_row, zero_client_row], linuxcnc_bundle_enabled=1)
     assert atomic_native_protocol.returncode == 0, atomic_native_protocol.stderr
     unregistered_gate = run_manifest_scan([
         command_gate_row.replace(
@@ -289,6 +399,14 @@ def main() -> int:
     ], linuxcnc_bundle_enabled=1)
     assert unregistered_gate.returncode == 6, unregistered_gate.stderr
     assert b'registered ARM artifact and mode 0755' in unregistered_gate.stderr
+    unregistered_zero_client = run_manifest_scan([
+        command_gate_row,
+        zero_client_row.replace(
+            'services/drive_profile/v5_command_gate_zero_client.py',
+            'services/drive_profile/stale_zero_client.py'),
+    ], linuxcnc_bundle_enabled=1)
+    assert unregistered_zero_client.returncode == 6, unregistered_zero_client.stderr
+    assert b'registered source and mode 0644' in unregistered_zero_client.stderr
     linuxcnc_bundle_verifier = section(
         text, 'verify_linuxcnc_deploy_bundle() {',
         '\ninstall_linuxcnc_deploy_bundle() {')
@@ -313,6 +431,10 @@ def main() -> int:
     install_loop_index = text.index(
         'while IFS="$tab" read -r kind source destination mode extra; do',
         ethercat_stop)
+    actiond_stop_index = text.index(
+        'if [ "$manifest_actiond_touched" -eq 1 ]; then\n'
+        '    stop_settings_actiond_before_install')
+    assert actiond_stop_index < install_loop_index
     depmod_index = text.index(
         'if [ "$apply" -eq 1 ] && [ "$manifest_ethercat_complete" -eq 1 ]; then\n'
         '  [ -x /sbin/depmod ] || {', install_loop_index)

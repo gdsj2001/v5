@@ -288,7 +288,7 @@ for expected in measure.WCS_PUBLISHER_ARGV:
 
 # Executable response parser: complete frame succeeds, EOF and oversized
 # declared length fail without looping.
-response = struct.pack("<III8i", 0x56354347, 6, 44, *([0] * 8))
+response = struct.pack("<III8i", 0x56354347, 7, 44, *([0] * 8))
 chunks = iter((response[:7], response[7:]))
 assert receive_declared_response(lambda _size: next(chunks, b"")) == response
 for broken in (struct.pack("<III", 1, 1, 44),

@@ -6,6 +6,8 @@ endif()
 
 project(v5_clean_mainline C)
 
+include(CTest)
+
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 find_package(Threads REQUIRED)

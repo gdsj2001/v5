@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import argparse
-import json
 import os
 import time
 from pathlib import Path
@@ -109,6 +107,14 @@ from v5_drive_axis_model import (
 from v5_drive_query import (
     read_drive,
     configured_drive_targets,
+)
+from v5_drive_transaction_identity import (
+    capture_drive_transaction_identity,
+    verify_drive_transaction_identity,
+    compact_drive_transaction_identity,
+    invalidate_stale_drive_transaction_evidence,
+    planned_drive_transaction as _planned_drive_transaction,
+    reload_drive_transaction_identity as _reload_drive_transaction_identity,
 )
 from v5_drive_bus_context import reset_resident_preload_caches
 import v5_drive_enable_window
@@ -351,13 +357,145 @@ def run_fault_reset(timeout_s: float) -> Dict[str, Any]:
     }
 
 
-def _run_set_drive_impl(timeout_s: float, request: Dict[str, Any] | None = None) -> Dict[str, Any]:
+def _run_set_drive_preflight_impl(
+        timeout_s: float,
+        request: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    request_payload = request if isinstance(request, dict) else {}
+    frozen_identity: Dict[str, Any] = {}
+    identity_check: Dict[str, Any] = {}
+    stale_evidence_invalidation: Dict[str, Any] = {}
+    try:
+        targets, runtime, scan = configured_drive_targets(timeout_s)
+        planned = _planned_drive_transaction(targets)
+        frozen_identity = capture_drive_transaction_identity(
+            targets, planned, scan, timeout_s)
+        identity_check = verify_drive_transaction_identity(
+            frozen_identity,
+            _reload_drive_transaction_identity(timeout_s),
+            "settings_drive_preflight")
+        stale_rows = invalidate_stale_drive_transaction_evidence(
+            targets, frozen_identity)
+        if stale_rows:
+            runtime_writeback = persist_settings_runtime(runtime)
+            display_writeback = write_drive_parameter_display_rows([{
+                "axis": item.get("axis"),
+                "position": item.get("position"),
+                "write_status": "待重启写入",
+            } for item in stale_rows])
+            stale_evidence_invalidation = {
+                "ok": bool(runtime_writeback.get("ok")) and bool(
+                    display_writeback.get("ok")),
+                "code": "DRIVE_STALE_EVIDENCE_INVALIDATED",
+                "targets": stale_rows,
+                "settings_runtime_writeback": runtime_writeback,
+                "drive_parameter_display_writeback": display_writeback,
+            }
+            if not stale_evidence_invalidation["ok"]:
+                raise DriveActionError(
+                    "DRIVE_STALE_EVIDENCE_INVALIDATION_FAILED",
+                    "旧电子齿轮证据失效写回未闭合，未形成待重启结果。",
+                    stale_evidence_invalidation)
+        target_results: List[Dict[str, Any]] = []
+        for target in targets:
+            position = str(target.get("position") or "")
+            commands = target.get("commands") if isinstance(
+                target.get("commands"), dict) else {}
+            command_write_supported(
+                "drive.set_egear", commands.get("drive.set_egear", {}))
+            command_write_supported(
+                "drive.write_mode", commands.get("drive.write_mode", {}))
+            egear, source = planned[position]
+            target_results.append({
+                "ok": True,
+                "code": "DRIVE_SET_PREFLIGHT_TARGET_OK",
+                "axis": str(target.get("axis") or ""),
+                "position": position,
+                "status_slot": int(target.get("status_slot") or 0),
+                "profile_id": str((target.get("profile") or {}).get(
+                    "profile_id") or ""),
+                "target_egear": {
+                    "numerator": int(egear[0]),
+                    "denominator": int(egear[1]),
+                    "source": source,
+                },
+                "target_mode": CANONICAL_CSP_MODE,
+            })
+        return {
+            "ok": True,
+            "code": "DRIVE_SET_RESTART_REQUIRED",
+            "message_cn": "驱动最终参数已校验并保存，重启后统一写入并回读。",
+            "display_message_cn": "参数已保存，重启后统一写入并回读。",
+            "targets": target_results,
+            "scan": scan,
+            "trigger": str(request_payload.get("trigger") or
+                           "settings_set_drive"),
+            "drive_transaction_identity": compact_drive_transaction_identity(
+                frozen_identity),
+            "drive_transaction_checks": {"preflight": identity_check},
+            "stale_evidence_invalidation": stale_evidence_invalidation,
+            "write_executed": False,
+            "drive_write_executed": False,
+            "motion_executed": False,
+            "restart_required": True,
+            "restart_deferred": True,
+        }
+    except DriveActionError as exc:
+        return {
+            "ok": False,
+            "code": exc.code,
+            "message_cn": exc.message_cn,
+            "display_message_cn": exc.message_cn,
+            "detail": compact_error_detail(exc.detail),
+            "drive_transaction_identity": compact_drive_transaction_identity(
+                frozen_identity),
+            "drive_transaction_checks": {"preflight": identity_check},
+            "stale_evidence_invalidation": stale_evidence_invalidation,
+            "write_executed": False,
+            "drive_write_executed": False,
+            "motion_executed": False,
+            "restart_required": False,
+            "restart_deferred": False,
+            "failed_stage": "persistent_preflight",
+        }
+
+
+def _run_boot_drive_apply_impl(
+        timeout_s: float,
+        request: Dict[str, Any] | None = None) -> Dict[str, Any]:
     request_payload = request if isinstance(request, dict) else {}
     run_id = str(request_payload.get("_run_id") or request_payload.get("run_id") or "direct-%d-%d" % (os.getpid(), time.monotonic_ns()))
     window_begin, window_finish = {}, {}
     window_started = False
+    frozen_identity: Dict[str, Any] = {}
+    prewrite_identity_check: Dict[str, Any] = {}
+    postreadback_identity_check: Dict[str, Any] = {}
+    stale_evidence_invalidation: Dict[str, Any] = {}
     try:
         targets, runtime, scan = configured_drive_targets(timeout_s)
+        planned = _planned_drive_transaction(targets)
+        frozen_identity = capture_drive_transaction_identity(
+            targets, planned, scan, timeout_s)
+        stale_rows = invalidate_stale_drive_transaction_evidence(
+            targets, frozen_identity)
+        if stale_rows:
+            stale_runtime_writeback = persist_settings_runtime(runtime)
+            stale_display_writeback = write_drive_parameter_display_rows([{
+                "axis": item.get("axis"),
+                "position": item.get("position"),
+                "write_status": "待设置驱动",
+            } for item in stale_rows])
+            stale_evidence_invalidation = {
+                "ok": bool(stale_display_writeback.get("ok")),
+                "code": "DRIVE_STALE_EVIDENCE_INVALIDATED",
+                "targets": stale_rows,
+                "settings_runtime_writeback": stale_runtime_writeback,
+                "drive_parameter_display_writeback": stale_display_writeback,
+            }
+            if not stale_evidence_invalidation["ok"]:
+                raise DriveActionError(
+                    "DRIVE_STALE_EVIDENCE_INVALIDATION_FAILED",
+                    "旧电子齿轮证据失效写回未闭合，未写驱动。",
+                    stale_evidence_invalidation)
         window_begin = v5_drive_enable_window.begin(run_id, timeout_s)
         window_started = True
         prechecks = precheck_targets_for_write(
@@ -366,17 +504,20 @@ def _run_set_drive_impl(timeout_s: float, request: Dict[str, Any] | None = None)
             timeout_s,
             wait_disabled_transition=True,
         )
-        planned: Dict[str, Tuple[Tuple[int, int], Dict[str, Any]]] = {}
-        for target in targets:
-            egear = target_egear(target)
-            planned[str(target.get("position") or "")] = ((egear[0], egear[1]), egear[2])
-        mode_pre_by_position: Dict[str, Dict[str, Any]] = {}
+        prewrite_identity_check = verify_drive_transaction_identity(
+            frozen_identity,
+            _reload_drive_transaction_identity(timeout_s),
+            "before_first_write_sdo")
+        actual_pre_by_position: Dict[str, Dict[str, Any]] = {}
         for target in targets:
             position = str(target.get("position") or "")
-            mode_pre_state = read_required_state(target, timeout_s)
-            mode_pre_by_position[position] = {
-                "ok": bool(mode_pre_state.get("ok")),
-                "mode": read_scalar_value((mode_pre_state.get("reads") or {}).get("drive.read_mode", {})),
+            actual_pre_state = read_required_state(target, timeout_s)
+            reads = actual_pre_state.get("reads") or {}
+            egear_pre = read_pair_value(reads.get("drive.read_egear", {}))
+            actual_pre_by_position[position] = {
+                "ok": bool(actual_pre_state.get("ok")),
+                "mode": read_scalar_value(reads.get("drive.read_mode", {})),
+                "egear": egear_pre,
             }
     except DriveActionError as exc:
         if window_started:
@@ -385,6 +526,12 @@ def _run_set_drive_impl(timeout_s: float, request: Dict[str, Any] | None = None)
             "ok": False, "code": exc.code, "message_cn": exc.message_cn,
             "detail": compact_error_detail(exc.detail), "write_executed": False,
             "drive_write_executed": False, "motion_executed": False, "failed_stage": "precheck",
+            "drive_transaction_identity": compact_drive_transaction_identity(frozen_identity),
+            "drive_transaction_checks": {
+                "prewrite": prewrite_identity_check,
+                "postreadback": postreadback_identity_check,
+            },
+            "stale_evidence_invalidation": stale_evidence_invalidation,
             "drive_write_window": {"begin": window_begin, "finish": window_finish}}
     target_results: List[Dict[str, Any]] = []
     display_updates: List[Dict[str, Any]] = []
@@ -404,12 +551,22 @@ def _run_set_drive_impl(timeout_s: float, request: Dict[str, Any] | None = None)
         try:
             egear_command = commands.get("drive.set_egear", {})
             mode_command = commands.get("drive.write_mode", {})
-            egear_write = write_command(position, "drive.set_egear", egear_command, {"numerator": egear[0], "denominator": egear[1]})
-            write_executed = True
-            item["egear_write"] = egear_write
-            if not egear_write.get("ok"):
-                raise DriveActionError("DRIVE_EGEAR_WRITE_FAILED", "设置驱动电子齿轮 SDO 写入失败。", egear_write)
-            item["mode_pre_readback"] = dict(mode_pre_by_position[position])
+            item["actual_pre_readback"] = dict(
+                actual_pre_by_position[position])
+            if actual_pre_by_position[position].get("egear") == egear:
+                item["egear_write_status"] = "pre_write_readback_already_at_target"
+            else:
+                egear_write = write_command(
+                    position, "drive.set_egear", egear_command,
+                    {"numerator": egear[0], "denominator": egear[1]})
+                write_executed = True
+                item["egear_write"] = egear_write
+                if not egear_write.get("ok"):
+                    raise DriveActionError(
+                        "DRIVE_EGEAR_WRITE_FAILED",
+                        "启动时电子齿轮 SDO 写入失败。", egear_write)
+            item["mode_pre_readback"] = dict(
+                actual_pre_by_position[position])
             mode_pre = item["mode_pre_readback"].get("mode")
             if mode_pre == CANONICAL_CSP_MODE:
                 item["mode_write_status"] = "pre_write_readback_already_at_target"
@@ -447,6 +604,21 @@ def _run_set_drive_impl(timeout_s: float, request: Dict[str, Any] | None = None)
     if target_results and all(item.get("ok") for item in target_results):
         expectations = {position: (egear, CANONICAL_CSP_MODE) for position, (egear, _source) in planned.items()}
         batch_readback = set_drive_batch_readback(targets, timeout_s, expectations)
+        identity_failure = None
+        try:
+            postreadback_identity_check = verify_drive_transaction_identity(
+                frozen_identity,
+                _reload_drive_transaction_identity(timeout_s),
+                "after_batch_fresh_readback")
+        except DriveActionError as exc:
+            identity_failure = exc
+            postreadback_identity_check = {
+                "ok": False,
+                "stage": "after_batch_fresh_readback",
+                "code": exc.code,
+                "message_cn": exc.message_cn,
+                "detail": compact_error_detail(exc.detail),
+            }
         failed_positions = {str(position) for position in (batch_readback.get("failed_positions") or [])}
         recovery_positions = {
             str(position)
@@ -460,6 +632,22 @@ def _run_set_drive_impl(timeout_s: float, request: Dict[str, Any] | None = None)
             item["batch_readback_attempt_count"] = len(batch_readback.get("cycles", []))
             item["batch_recovery_attempted"] = position in recovery_positions
             item["readback"] = compact_readback(readback)
+            if identity_failure is not None:
+                mark_drive_parameters_invalid(
+                    target["axis_cfg"], "drive_transaction_identity_changed",
+                    "write_unverified_readback_failed")
+                display_updates.append({
+                    "axis": str(target.get("axis") or ""),
+                    "position": target.get("position"),
+                    "write_status": "待设置驱动",
+                })
+                item.update({
+                    "ok": False,
+                    "code": identity_failure.code,
+                    "message_cn": identity_failure.message_cn,
+                    "detail": compact_error_detail(identity_failure.detail),
+                })
+                continue
             target_ok = bool(readback.get("ok")) and position not in failed_positions
             if not target_ok:
                 mark_drive_parameters_invalid(target["axis_cfg"], "drive_set_batch_readback_failed", "write_unverified_readback_failed")
@@ -468,22 +656,34 @@ def _run_set_drive_impl(timeout_s: float, request: Dict[str, Any] | None = None)
                 continue
             if isinstance(item.get("mode_write"), dict) and not item["mode_write"].get("ok"):
                 item["mode_write_status"] = "download_sdo_error_but_readback_matched"
-            update_axis_drive_set_evidence(target["axis_cfg"], target, egear, readback, egear_source)
+            update_axis_drive_set_evidence(
+                target["axis_cfg"], target, egear, readback, egear_source,
+                compact_drive_transaction_identity(frozen_identity))
             health = readback.get("health", {}) if isinstance(readback.get("health"), dict) else {}
             display_updates.append(drive_display_update_from_health(str(target.get("axis") or ""), health, "已写入", target.get("position")))
             item["code"] = "DRIVE_SET_TARGET_OK"
-    persist = persist_settings_runtime(runtime) if write_executed else {}
+    trigger = str(request_payload.get("trigger") or "post_restart_boot")
+    evidence_updated = bool(
+        target_results and all(item.get("ok") for item in target_results))
+    persist = persist_settings_runtime(runtime) if evidence_updated else {}
     display_writeback = write_drive_parameter_display_rows(display_updates) if display_updates else {}
     failures = [item for item in target_results if not item.get("ok")]
     ok = not failures
     result: Dict[str, Any] = {
         "ok": ok,
         "code": "DRIVE_SET_OK" if ok else "DRIVE_SET_PARTIAL",
-        "message_cn": "设置驱动完成，电子齿轮和 CSP 模式已按 profile 写入并 fresh readback 一致；驱动内部整定 SDO 保持默认值，正在恢复动作入口使能状态。" if ok else "设置驱动未完整闭合。",
+        "message_cn": "启动时电子齿轮和 CSP 模式已与最终 INI/profile 一致并完成整批 fresh readback；当前保持 Machine Off。" if ok else "启动驱动应用未完整闭合，保持 Machine Off。",
         "targets": target_results,
         "failures": failures,
         "prechecks": prechecks,
         "scan": scan,
+        "trigger": trigger,
+        "drive_transaction_identity": compact_drive_transaction_identity(frozen_identity),
+        "drive_transaction_checks": {
+            "prewrite": prewrite_identity_check,
+            "postreadback": postreadback_identity_check,
+        },
+        "stale_evidence_invalidation": stale_evidence_invalidation,
         "settings_runtime_writeback": persist,
         "drive_parameter_display_writeback": display_writeback,
         "write_executed": write_executed,
@@ -492,27 +692,28 @@ def _run_set_drive_impl(timeout_s: float, request: Dict[str, Any] | None = None)
         "restart_required": False,
         "restart_deferred": False,
     }
-    restore_requested = bool(ok)
-    restore_expected = restore_requested and bool(window_begin.get("initial_machine_enabled"))
+    if postreadback_identity_check.get("code") == "DRIVE_TRANSACTION_IDENTITY_CHANGED":
+        result["code"] = "DRIVE_TRANSACTION_IDENTITY_CHANGED"
+        result["message_cn"] = "启动整批读回期间最终模型、映射或比例身份发生变化，旧电子齿轮证据已失效并保持 Machine Off。"
+    restore_requested = False
+    restore_expected = False
     window_finish = v5_drive_enable_window.finish_safely(
-        run_id, timeout_s, restore=restore_requested)
-    restore_confirmed = not restore_expected or bool(window_finish.get("final_machine_enabled"))
+        run_id, timeout_s, restore=False)
+    machine_off_confirmed = bool(window_finish.get("ok")) and not bool(
+        window_finish.get("final_machine_enabled"))
+    restore_confirmed = machine_off_confirmed
     if not window_finish.get("ok"):
         result["ok"] = False
-        result["code"] = (
-            "DRIVE_WRITE_WINDOW_RESTORE_NOT_CONFIRMED"
-            if restore_expected else "DRIVE_WRITE_WINDOW_CLOSE_FAILED")
-        result["message_cn"] = (
-            "设置驱动读回成功，但未确认恢复进入动作前的使能状态，已保持 Machine Off。"
-            if restore_expected else "设置驱动已保持去使能，但 native 写驱动窗口终态未确认。")
+        result["code"] = "DRIVE_WRITE_WINDOW_CLOSE_FAILED"
+        result["message_cn"] = "设置驱动已保持去使能，但 native 写驱动窗口终态未确认。"
         result["failures"] = list(result.get("failures") or []) + [{
             "ok": False, "code": str(window_finish.get("code") or result["code"]),
             "message_cn": str(window_finish.get("message_cn") or result["message_cn"]),
             "detail": compact_error_detail(window_finish.get("detail"))}]
-    elif not restore_confirmed:
+    elif not machine_off_confirmed:
         result["ok"] = False
-        result["code"] = "DRIVE_WRITE_WINDOW_RESTORE_NOT_CONFIRMED"
-        result["message_cn"] = "设置驱动读回成功，但 fresh actual 未确认恢复进入动作前的使能状态，已保持 Machine Off。"
+        result["code"] = "DRIVE_WRITE_WINDOW_MACHINE_OFF_NOT_CONFIRMED"
+        result["message_cn"] = "设置驱动读回成功，但 fresh actual 未确认 Machine Off，结果作废。"
         result["failures"] = list(result.get("failures") or []) + [{
             "ok": False,
             "code": str(window_finish.get("code") or result["code"]),
@@ -522,31 +723,40 @@ def _run_set_drive_impl(timeout_s: float, request: Dict[str, Any] | None = None)
                 "final_machine_enabled": window_finish.get("final_machine_enabled"),
             },
         }]
-    elif result["ok"]:
-        result["restart_required"] = True
-        result["restart_deferred"] = True
-        result["message_cn"] = (
-            "设置驱动完成，电子齿轮和 CSP 模式 fresh readback 一致，已恢复进入动作前的使能状态。"
-            if restore_expected else
-            "设置驱动完成，电子齿轮和 CSP 模式 fresh readback 一致；动作入口未使能，当前继续保持 Machine Off。")
+    else:
+        if result["ok"]:
+            result["restart_required"] = False
+            result["restart_deferred"] = False
+            result["message_cn"] = (
+                "启动时电子齿轮和 CSP 模式与最终参数一致，整批 fresh readback 完成；"
+                "当前继续保持 Machine Off。")
     result["drive_write_window"] = {
         "begin": window_begin,
         "finish": window_finish,
         "restore_requested": restore_requested,
         "restore_expected": restore_expected,
         "restore_confirmed": restore_confirmed,
+        "machine_off_confirmed": machine_off_confirmed,
     }
     return result
 
 
-def run_set_drive(timeout_s: float, request: Dict[str, Any] | None = None) -> Dict[str, Any]:
+def run_set_drive(
+        timeout_s: float,
+        request: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    return _run_set_drive_preflight_impl(timeout_s, request)
+
+
+def run_boot_drive_apply(
+        timeout_s: float,
+        request: Dict[str, Any] | None = None) -> Dict[str, Any]:
     request_payload = dict(request) if isinstance(request, dict) else {}
     run_id = str(request_payload.get("_run_id") or request_payload.get("run_id") or
                  "direct-%d-%d" % (os.getpid(), time.monotonic_ns()))
     request_payload["_run_id"] = run_id
     completed = False
     try:
-        result = _run_set_drive_impl(timeout_s, request_payload)
+        result = _run_boot_drive_apply_impl(timeout_s, request_payload)
         completed = True
         return result
     finally:
@@ -627,7 +837,7 @@ def preload_resident_state() -> Dict[str, Any]:
 
 
 def result_path(action: str) -> Path:
-    names = {"scan": "drive_scan_result.json", "factory-reset": "drive_factory_reset_result.json", "read": "drive_read_result.json", "fault-reset": "drive_fault_reset_result.json", "set-drive": "drive_set_result.json", "axis-zero": "settings_axis_zero_result.json"}
+    names = {"scan": "drive_scan_result.json", "factory-reset": "drive_factory_reset_result.json", "read": "drive_read_result.json", "fault-reset": "drive_fault_reset_result.json", "set-drive": "drive_set_result.json", "boot-apply": "drive_boot_apply_result.json", "axis-zero": "settings_axis_zero_result.json"}
     return contract.RUN_DIR / names.get(action, "drive_action_result.json")
 
 
@@ -647,6 +857,8 @@ def run_action(action: str, timeout_s: float = 8.0, write_result_file: bool = Tr
         result = run_fault_reset(timeout_s)
     elif action == "set-drive":
         result = run_set_drive(timeout_s, request)
+    elif action == "boot-apply":
+        result = run_boot_drive_apply(timeout_s, request)
     else:
         result = {
             "ok": False,
@@ -660,17 +872,3 @@ def run_action(action: str, timeout_s: float = 8.0, write_result_file: bool = Tr
     if write_result_file:
         write_json(result_path(action), result)
     return result
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser(description="v5 drive bus settings actions")
-    parser.add_argument("--action", required=True, choices=("scan", "factory-reset", "read", "fault-reset", "set-drive", "axis-zero"))
-    parser.add_argument("--timeout", type=float, default=8.0)
-    args = parser.parse_args()
-    preload_result = preload_resident_state()
-    if not preload_result.get("ok"):
-        print(json.dumps(preload_result, ensure_ascii=False, indent=2))
-        return 1
-    result = run_action(args.action, args.timeout, True, {"axis": os.environ.get("V5_AXIS_ZERO_AXIS", "X"), "slave_index": os.environ.get("V5_AXIS_ZERO_SLAVE", ""), "driver_mode": "bus", "target_scope": "bus_count_domain_zero", "apply_mode": "count_domain_zero"})
-    print(json.dumps(result, ensure_ascii=False, indent=2))
-    return 0 if result.get("ok") else 1

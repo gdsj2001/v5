@@ -688,24 +688,6 @@ case "${1:-}" in
     stop_backend
     start_runtime_transaction
     ;;
-  restart-native)
-    select_requested_backend
-    [ "$REQUESTED_DRIVER_MODE" = bus ] || {
-      echo "native gate restart requires the active BUS backend in the current product contract" >&2
-      exit 1
-    }
-    backend_readiness_require motion >/dev/null 2>&1 || {
-      echo "LinuxCNC/EtherCAT canonical readiness is not current; refusing native-gate-only restart" >&2
-      exit 1
-    }
-    gate_running || {
-      echo "linuxcncrsh gate is not running; refusing native-gate-only restart" >&2
-      exit 1
-    }
-    stop_native_gate
-    start_native_gate
-    backend_readiness_require motion >/dev/null 2>&1 && gate_running && native_gate_running
-    ;;
   status)
     select_requested_backend >/dev/null
     [ "$REQUESTED_DRIVER_MODE" = bus ]
@@ -715,7 +697,7 @@ case "${1:-}" in
     read_requested_driver_mode
     ;;
   *)
-    echo "usage: $0 {start|stop|restart|restart-native|status|requested-mode}" >&2
+    echo "usage: $0 {start|stop|restart|status|requested-mode}" >&2
     exit 2
     ;;
 esac

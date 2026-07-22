@@ -31,12 +31,17 @@ from v5_settings_action_runtime import (
     set_last_status,
     v5_drive_bus_action,
 )
+from v5_drive_boot_validation import (
+    run_boot_drive_apply_until_final,
+)
 from v5_settings_restart import abort_restart_handoff, commit_restart_handoff, release_restart_handoff
 import v5_drive_enable_window
 
 SOCKET_OWNER_NAME = "root"
 SOCKET_GROUP_NAME = "petalinux"
-DRIVE_WRITE_WINDOW_ACTIONS = frozenset({"drive_factory_reset", "drive_set_parameters"})
+DRIVE_WRITE_WINDOW_ACTIONS = frozenset({
+    "drive_factory_reset",
+})
 
 
 def secure_socket_permissions() -> None:
@@ -77,6 +82,26 @@ active_job_lock = threading.Lock()
 active_job: Dict[str, Any] = {}
 restart_commit_lock = threading.Lock()
 restart_committed_run_id = ""
+boot_apply_active = threading.Event()
+
+
+def post_restart_drive_apply_worker() -> None:
+    try:
+        result = run_boot_drive_apply_until_final(stop_event)
+        try:
+            append_event({
+                "event": "post_restart_drive_apply",
+                "ok": bool(result.get("ok")),
+                "code": str(result.get("code") or ""),
+                "boot_id": str(result.get("boot_id") or ""),
+                "drive_write_executed": bool(
+                    result.get("drive_write_executed")),
+                "message_cn": str(result.get("message_cn") or ""),
+            })
+        except Exception:
+            pass
+    finally:
+        boot_apply_active.clear()
 
 def write_pipe_payload(fd: int, payload: Dict[str, Any]) -> None:
     data = bounded_json_text(
@@ -204,6 +229,15 @@ def start_action_process(action: str, run_id: str, request: Dict[str, Any]) -> D
     axis_hint = str(request.get("axis") or "")
     worker_request = dict(request)
     worker_request["_run_id"] = run_id
+    if boot_apply_active.is_set():
+        return {
+            "ok": False,
+            "accepted": False,
+            "schema": "v5.settings_actiond_response.v1",
+            "action": action,
+            "run_id": run_id,
+            "code": "SETTINGS_BOOT_DRIVE_APPLY_ACTIVE",
+        }
     with restart_commit_lock:
         if restart_committed_run_id:
             return {
@@ -484,6 +518,11 @@ def serve() -> int:
         server.listen(8)
         server.settimeout(0.5)
         append_event({"event": "ready", "socket": str(SOCKET_PATH), "socket_owner": SOCKET_OWNER_NAME, "socket_group": SOCKET_GROUP_NAME, "socket_mode": "0660", "actions": sorted(ACTIONS), "drive_resident_preload": drive_resident_preload})
+        boot_apply_active.set()
+        threading.Thread(
+            target=post_restart_drive_apply_worker,
+            name="v5_drive_boot_apply",
+            daemon=True).start()
         while not stop_event.is_set():
             try:
                 conn, _addr = server.accept()

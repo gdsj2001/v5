@@ -119,9 +119,8 @@ def validate_init(text: str) -> None:
     assert transaction.count("rollback_runtime_start") == 5
     assert text.count("    start_runtime_transaction") == 2
 
-    restart_native = section(text, "  restart-native)", "\n  status)")
-    assert "backend_readiness_require motion" in restart_native
-    assert "set_linuxcnc_realtime_affinity" not in restart_native
+    assert "restart-native" not in text
+    assert "DRIVE_WINDOW_CLI" not in text
     status = section(text, "  status)", "\n  requested-mode)")
     assert "backend_readiness_require motion" in status
 

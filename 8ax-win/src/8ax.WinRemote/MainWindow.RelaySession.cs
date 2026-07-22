@@ -32,7 +32,7 @@ public partial class MainWindow
                 });
             }
 
-            using RemoteRelayClient relayClient = new(relayBaseUri);
+            using RemoteRelayClient relayClient = new(_settings.RelaySecurity);
             _activeRelayClient = relayClient;
             bool connectedBeforeEnd = false;
             try

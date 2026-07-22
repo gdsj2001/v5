@@ -46,6 +46,7 @@ void load_axis_slave_mapping_status(void)
                 ? "BUS_HOME_MAPPING_VALID"
                 : "BUS_HOME_MAPPING_INVALID"));
 }
+
 void publish_home_progress(const V5NativeHomeProgress *progress, void *user_data)
 {
     (void)user_data;
@@ -159,6 +160,11 @@ static int drive_window_set_machine_on(void *context)
 {
     unsigned int attempt;
     (void)context;
+    if (g_axis_slave_mapping_applicable &&
+        (!g_axis_slave_mapping_status_available ||
+         !g_axis_slave_mapping_valid)) {
+        return 0;
+    }
     if (v5_linuxcncrsh_send_machine_on_sequence(&g_linuxcncrsh_config) !=
         V5_LINUXCNCRSH_SEND_SENT) {
         return 0;
@@ -265,6 +271,42 @@ int restore_machine_on_after_estop_reset_locked(V5NativeSafetyResult *native_res
         return V5_NATIVE_SAFETY_SEND_IO_ERROR;
     }
     return v5_native_safety_wait_reset_confirmed(native_result, 100U, 50000U);
+}
+
+int wait_estop_latch_cleared(
+    V5NativeSafetyResult *native_result,
+    unsigned int attempts,
+    unsigned int delay_us)
+{
+    if (attempts == 0U) {
+        attempts = 1U;
+    }
+    while (attempts-- > 0U) {
+        V5NativeSafetyResult current;
+        int status = v5_native_safety_read_status(&current);
+        if (native_result) {
+            *native_result = current;
+            native_result->machine_on_requested = 0;
+            native_result->machine_on_status =
+                (int)V5_LINUXCNCRSH_SEND_UNAVAILABLE;
+        }
+        if (status == V5_NATIVE_SAFETY_SEND_SENT &&
+            current.safety_estop_known && !current.safety_estop_active) {
+            v5_command_gate_response_copy_text(
+                native_result ? native_result->code : 0,
+                native_result ? sizeof(native_result->code) : 0,
+                "NATIVE_SAFETY_ESTOP_RESET_LATCH_CLEARED");
+            return V5_NATIVE_SAFETY_SEND_SENT;
+        }
+        if (delay_us > 0U) {
+            usleep(delay_us);
+        }
+    }
+    v5_command_gate_response_copy_text(
+        native_result ? native_result->code : 0,
+        native_result ? sizeof(native_result->code) : 0,
+        "NATIVE_SAFETY_ESTOP_RESET_LATCH_NOT_CONFIRMED");
+    return V5_NATIVE_SAFETY_SEND_IO_ERROR;
 }
 
 int power_on_home_gate_accepts(

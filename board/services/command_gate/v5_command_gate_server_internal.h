@@ -29,6 +29,7 @@ extern int g_axis_slave_mapping_applicable;
 extern int g_axis_slave_mapping_valid;
 extern unsigned int g_axis_slave_mapping_generation;
 extern char g_axis_slave_mapping_code[64];
+extern const char g_machine_on_axis_slave_mapping_invalid_code[];
 
 void load_axis_slave_mapping_status(void);
 void publish_home_progress(
@@ -54,6 +55,10 @@ void estop_clean_linuxcncrsh_lock(void *context);
 void estop_clean_linuxcncrsh_unlock(void *context);
 int restore_machine_on_after_estop_reset_locked(
     V5NativeSafetyResult *native_result);
+int wait_estop_latch_cleared(
+    V5NativeSafetyResult *native_result,
+    unsigned int attempts,
+    unsigned int delay_us);
 int power_on_home_gate_accepts(
     const V5CommandRequest *request,
     V5CommandGateIpcResponseFrame *response);

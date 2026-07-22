@@ -3,7 +3,9 @@
 
 #include <string.h>
 
-void handle_frame(const V5CommandGateIpcRequestFrame *request, V5CommandGateIpcResponseFrame *response)
+void handle_frame(
+    const V5CommandGateIpcRequestFrame *request,
+    V5CommandGateIpcResponseFrame *response)
 {
     char reject_reason[64];
     v5_command_gate_response_init(response);

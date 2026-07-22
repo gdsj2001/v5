@@ -13,8 +13,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "8ax.WinRemote", "src\8ax.Wi
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{17F69600-6368-4730-8730-4460F042082F}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "8ax.MockRelay", "tools\mock-relay\8ax.MockRelay.csproj", "{69BFF069-B600-4B8B-8AAC-5B62E6E34C71}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -32,14 +30,9 @@ Global
 		{42124468-E2CC-4016-BD4E-F1AE374E10F5}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{42124468-E2CC-4016-BD4E-F1AE374E10F5}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{42124468-E2CC-4016-BD4E-F1AE374E10F5}.Release|Any CPU.Build.0 = Release|Any CPU
-		{69BFF069-B600-4B8B-8AAC-5B62E6E34C71}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{69BFF069-B600-4B8B-8AAC-5B62E6E34C71}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{69BFF069-B600-4B8B-8AAC-5B62E6E34C71}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{69BFF069-B600-4B8B-8AAC-5B62E6E34C71}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{341C39C6-14D9-4D9C-9C0E-71AFA7DF01C5} = {54255D42-C6A3-421C-B23D-C0905B926262}
 		{42124468-E2CC-4016-BD4E-F1AE374E10F5} = {96977D23-C47A-4899-B244-C3E429A9DB8B}
-		{69BFF069-B600-4B8B-8AAC-5B62E6E34C71} = {17F69600-6368-4730-8730-4460F042082F}
 	EndGlobalSection
 EndGlobal

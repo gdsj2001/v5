@@ -1,11 +1,9 @@
 using System.Collections;
-using System.Diagnostics;
 using System.IO;
-using System.Net;
-using System.Net.Http;
-using System.Net.Sockets;
+using System.Net.Security;
 using System.Reflection;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Windows;
 using EightAxis.WinRemote;
@@ -46,7 +44,9 @@ VerifyRuntimeEvidenceRecorder();
 VerifyFrameStatsThirtyHertz();
 VerifyAppSettingsDefaults();
 VerifyAppSettingsConfigFile();
+VerifyRelaySecurityProfile();
 VerifyUpdateDefaults();
+VerifySignedUpdateSecurity();
 VerifyRelayReconnectContract();
 VerifyRelayStreamFailureNoFallbackContract();
 VerifyRelayDisplayRefreshRateContract();
@@ -61,9 +61,8 @@ VerifyOperatorButtonsContract();
 VerifyDiagnosticsDisplaySanitization();
 VerifySingleInstanceContract();
 VerifySingleExePublishContract();
-await VerifyMockRelayReadOnlyClientAsync();
 
-Console.WriteLine("Relay protocol, evidence, mock relay, and read-only client checks passed.");
+Console.WriteLine("Relay protocol, pinned TLS authentication, evidence, and read-only client checks passed.");
 
 static void Require<T>(T expected, T actual, string label)
 {
@@ -71,6 +70,19 @@ static void Require<T>(T expected, T actual, string label)
     {
         throw new InvalidOperationException($"{label}: expected '{expected}', got '{actual}'");
     }
+}
+
+static void ExpectThrows<TException>(Action action, string label) where TException : Exception
+{
+    try
+    {
+        action();
+    }
+    catch (TException)
+    {
+        return;
+    }
+    throw new InvalidOperationException(label + ": expected " + typeof(TException).Name);
 }
 
 static void VerifyProtocolEnvelopeRoundTrip()
@@ -427,31 +439,45 @@ static void VerifyAppSettingsDefaults()
 {
     string configDir = Path.Combine(Path.GetTempPath(), "8ax-win-tests", Guid.NewGuid().ToString("N"));
     Directory.CreateDirectory(configDir);
+    bool missingProfileRejected = false;
+    try
+    {
+        _ = AppSettings.Load(new[] { "8ax.WinRemote.exe" }, new Hashtable(), configDir, configDir);
+    }
+    catch (InvalidOperationException ex) when (ex.Message.Contains("explicit --relay-security-profile", StringComparison.Ordinal))
+    {
+        missingProfileRejected = true;
+    }
+    Require(true, missingProfileRejected, "missing relay security profile fails closed");
+    string profilePath = WriteTestRelaySecurityProfile(configDir, AppSettings.DefaultRelayUrl);
 
     AppSettings defaultSettings = AppSettings.Load(
-        new[] { "8ax.WinRemote.exe" },
+        new[] { "8ax.WinRemote.exe", "--relay-security-profile", profilePath },
         new Hashtable(),
+        configDir,
         configDir);
     Require(RemoteSourceMode.Relay, defaultSettings.SourceMode, "default source mode");
-    Require(AppSettings.DefaultRelayUrl, defaultSettings.RelayBaseUri?.ToString(), "default relay uri");
+    Require(AppSettings.DefaultRelayUrl, defaultSettings.RelayBaseUri.ToString(), "default relay uri is HTTPS");
     Require(false, defaultSettings.ViewOnly, "default relay view-only");
     Require(false, defaultSettings.EnablePointer, "default relay temp pointer disabled");
     Require(true, defaultSettings.EnableRemoteInput, "default relay input enabled");
 
     AppSettings viewOnlySettings = AppSettings.Load(
-        new[] { "8ax.WinRemote.exe", "--view-only", "true" },
+        new[] { "8ax.WinRemote.exe", "--relay-security-profile", profilePath, "--view-only", "true" },
         new Hashtable(),
+        configDir,
         configDir);
     Require(RemoteSourceMode.Relay, viewOnlySettings.SourceMode, "view-only source mode");
     Require(true, viewOnlySettings.ViewOnly, "view-only relay flag");
     Require(false, viewOnlySettings.EnableRemoteInput, "view-only disables relay input by default");
 
     AppSettings retiredBoardFlagSettings = AppSettings.Load(
-        new[] { "8ax.WinRemote.exe", "--board-fb0", "true", "--enable-pointer", "true" },
+        new[] { "8ax.WinRemote.exe", "--relay-security-profile", profilePath, "--board-fb0", "true", "--enable-pointer", "true" },
         new Hashtable(),
+        configDir,
         configDir);
     Require(RemoteSourceMode.Relay, retiredBoardFlagSettings.SourceMode, "retired board-fb0 source mode");
-    Require(AppSettings.DefaultRelayUrl, retiredBoardFlagSettings.RelayBaseUri?.ToString(), "retired board-fb0 relay uri");
+    Require(AppSettings.DefaultRelayUrl, retiredBoardFlagSettings.RelayBaseUri.ToString(), "retired board-fb0 relay uri");
     Require(false, retiredBoardFlagSettings.ViewOnly, "retired board-fb0 view-only");
     Require(true, retiredBoardFlagSettings.EnablePointer, "retired board-fb0 pointer flag is ignored only by relay policy");
     Require(true, retiredBoardFlagSettings.EnableRemoteInput, "retired board-fb0 relay input remains default");
@@ -463,11 +489,14 @@ static void VerifyAppSettingsConfigFile()
     Directory.CreateDirectory(configDir);
     string configPath = Path.Combine(configDir, "client.json");
     string evidenceDir = Path.Combine(configDir, "evidence");
+    const string relayUrl = "https://127.0.0.1:18090/";
+    string profilePath = WriteTestRelaySecurityProfile(configDir, relayUrl);
     File.WriteAllText(
         configPath,
         $$"""
         {
-          "relay_url": "http://127.0.0.1:18090/",
+          "relay_url": "{{relayUrl}}",
+          "relay_security_profile": "{{profilePath.Replace("\\", "\\\\")}}",
           "evidence_dir": "{{evidenceDir.Replace("\\", "\\\\")}}",
           "view_only": false,
           "enable_pointer": true,
@@ -478,19 +507,21 @@ static void VerifyAppSettingsConfigFile()
     AppSettings configSettings = AppSettings.Load(
         new[] { "8ax.WinRemote.exe", "--config", configPath },
         new Hashtable(),
+        configDir,
         configDir);
     Require(RemoteSourceMode.Relay, configSettings.SourceMode, "config source mode");
-    Require("http://127.0.0.1:18090/", configSettings.RelayBaseUri?.ToString(), "config relay uri");
+    Require(relayUrl, configSettings.RelayBaseUri.ToString(), "config relay uri");
     Require(evidenceDir, configSettings.EvidenceDirectory, "config evidence dir");
     Require(false, configSettings.ViewOnly, "config view-only");
     Require(true, configSettings.EnablePointer, "config enable pointer");
     Require(true, configSettings.EnableRemoteInput, "config enable remote input");
 
     AppSettings overrideSettings = AppSettings.Load(
-        new[] { "8ax.WinRemote.exe", "--config", configPath, "--relay", "http://127.0.0.1:18091/", "--view-only", "true", "--enable-pointer", "false", "--enable-remote-input", "false" },
+        new[] { "8ax.WinRemote.exe", "--config", configPath, "--relay", relayUrl, "--view-only", "true", "--enable-pointer", "false", "--enable-remote-input", "false" },
         new Hashtable(),
+        configDir,
         configDir);
-    Require("http://127.0.0.1:18091/", overrideSettings.RelayBaseUri?.ToString(), "cli relay override");
+    Require(relayUrl, overrideSettings.RelayBaseUri.ToString(), "cli relay override");
     Require(true, overrideSettings.ViewOnly, "cli view-only override");
     Require(false, overrideSettings.EnablePointer, "cli enable pointer override");
     Require(false, overrideSettings.EnableRemoteInput, "cli enable remote input override");
@@ -498,11 +529,122 @@ static void VerifyAppSettingsConfigFile()
     AppSettings retiredBoardOverrideSettings = AppSettings.Load(
         new[] { "8ax.WinRemote.exe", "--config", configPath, "--board-fb0", "true", "--enable-pointer", "true" },
         new Hashtable(),
+        configDir,
         configDir);
     Require(RemoteSourceMode.Relay, retiredBoardOverrideSettings.SourceMode, "cli board-fb0 retired override");
-    Require("http://127.0.0.1:18090/", retiredBoardOverrideSettings.RelayBaseUri?.ToString(), "cli board-fb0 uses config relay uri");
+    Require(relayUrl, retiredBoardOverrideSettings.RelayBaseUri.ToString(), "cli board-fb0 uses config relay uri");
     Require(true, retiredBoardOverrideSettings.EnablePointer, "cli board-fb0 no longer disables relay pointer flag");
     Require(true, retiredBoardOverrideSettings.EnableRemoteInput, "cli board-fb0 keeps relay input");
+}
+
+static void VerifyRelaySecurityProfile()
+{
+    string root = Path.Combine(Path.GetTempPath(), "8ax-win-security-tests", Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(root);
+    const string deviceId = "359764";
+    using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+    CertificateRequest request = new($"CN=8ax-device-{deviceId}", key, HashAlgorithmName.SHA256);
+    using X509Certificate2 certificate = request.CreateSelfSigned(
+        DateTimeOffset.UtcNow.AddMinutes(-1),
+        DateTimeOffset.UtcNow.AddHours(1));
+    string fingerprint = Convert.ToHexString(SHA256.HashData(certificate.RawData)).ToLowerInvariant();
+    byte[] secret = Enumerable.Range(0, 32).Select(value => (byte)value).ToArray();
+    string profilePath = WriteTestRelaySecurityProfile(
+        root,
+        "https://192.168.1.221:18080/",
+        deviceId,
+        fingerprint,
+        secret);
+    RelaySecurityProfile profile = RelaySecurityProfile.Load(profilePath, root);
+    Require(deviceId, profile.DeviceId, "relay security device id");
+    Require(fingerprint, profile.CertificateSha256, "relay security certificate pin");
+
+    MethodInfo validator = typeof(RelaySecurityProfile).GetMethod(
+        "ValidateServerCertificate",
+        BindingFlags.Instance | BindingFlags.NonPublic)
+        ?? throw new MissingMethodException(nameof(RelaySecurityProfile), "ValidateServerCertificate");
+    bool accepted = (bool)(validator.Invoke(profile, new object?[]
+    {
+        new object(),
+        certificate,
+        null,
+        SslPolicyErrors.RemoteCertificateChainErrors,
+    }) ?? false);
+    Require(true, accepted, "exact fingerprint and device certificate accepted");
+    bool nameMismatchAccepted = (bool)(validator.Invoke(profile, new object?[]
+    {
+        new object(),
+        certificate,
+        null,
+        SslPolicyErrors.RemoteCertificateNameMismatch,
+    }) ?? false);
+    Require(false, nameMismatchAccepted, "TLS hostname mismatch rejected");
+
+    string wrongPinPath = WriteTestRelaySecurityProfile(
+        root,
+        "https://192.168.1.222:18080/",
+        deviceId,
+        new string('0', 64),
+        secret,
+        "wrong-pin.json");
+    RelaySecurityProfile wrongPin = RelaySecurityProfile.Load(wrongPinPath, root);
+    bool wrongPinAccepted = (bool)(validator.Invoke(wrongPin, new object?[]
+    {
+        new object(),
+        certificate,
+        null,
+        SslPolicyErrors.RemoteCertificateChainErrors,
+    }) ?? false);
+    Require(false, wrongPinAccepted, "wrong certificate fingerprint rejected");
+
+    MethodInfo macMethod = typeof(RelaySecurityProfile).GetMethod(
+        "ComputeAuthenticationMac",
+        BindingFlags.Instance | BindingFlags.NonPublic)
+        ?? throw new MissingMethodException(nameof(RelaySecurityProfile), "ComputeAuthenticationMac");
+    string actualMac = (string)(macMethod.Invoke(profile, new object[]
+    {
+        "challenge",
+        "nonce",
+        new[] { "viewer", "operator" },
+    }) ?? String.Empty);
+    string canonical = "v5.remote.auth.v1\nwinremote\nchallenge\nnonce\n359764\noperator,viewer";
+    string expectedMac = Convert.ToBase64String(HMACSHA256.HashData(secret, Encoding.UTF8.GetBytes(canonical)))
+        .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+    Require(expectedMac, actualMac, "challenge-response canonical HMAC");
+
+    string winRoot = FindWinRemoteRoot(AppContext.BaseDirectory);
+    string clientSource = ReadWinRemoteFile(winRoot, "src", "8ax.WinRemote", "Transport", "RemoteRelayClient.cs");
+    string authSource = ReadWinRemoteFile(winRoot, "src", "8ax.WinRemote", "Transport", "RelayAuthenticationSession.cs");
+    Require(false, clientSource.Contains("\"ws\"", StringComparison.Ordinal), "client has no WS fallback");
+    Require(true, authSource.Contains("Authorization", StringComparison.Ordinal), "HTTP and WSS use authorization header");
+    Require(true, authSource.Contains("Invalidate();", StringComparison.Ordinal), "expired sessions trigger bounded reauthentication");
+}
+
+static string WriteTestRelaySecurityProfile(
+    string root,
+    string relayBaseUri,
+    string deviceId = "359764",
+    string? fingerprint = null,
+    byte[]? secret = null,
+    string fileName = "relay-security.json")
+{
+    fingerprint ??= new string('0', 64);
+    secret ??= Enumerable.Range(0, 32).Select(value => (byte)value).ToArray();
+    string path = Path.Combine(root, fileName);
+    File.WriteAllText(
+        path,
+        $$"""
+        {
+          "schema": "v5.winremote_relay_security.v1",
+          "device_id": "{{deviceId}}",
+          "relay_base_uri": "{{relayBaseUri}}",
+          "certificate_sha256": "{{fingerprint}}",
+          "client_id": "winremote",
+          "client_secret_base64": "{{Convert.ToBase64String(secret)}}",
+          "scopes": ["viewer", "diagnostics", "program_manager", "operator", "ota_admin"]
+        }
+        """);
+    return path;
 }
 
 static void VerifyUpdateDefaults()
@@ -516,6 +658,122 @@ static void VerifyUpdateDefaults()
     Require(-1, WinRemoteUpdater.CompareVersions("2026.0618.2008", "2026.0618.2010"), "remote older version comparison");
     Require(true, !String.IsNullOrWhiteSpace(WinRemoteUpdater.CurrentVersion()), "local current version readable");
 }
+
+static void VerifySignedUpdateSecurity()
+{
+    Require("v5.winremote_update_manifest.v2", UpdateManifestVerifier.ManifestSchema, "signed update manifest schema");
+    Require("winremote-update-p256-2026-01", UpdateManifestVerifier.SigningKeyId, "signed update key id");
+    Require("stable", UpdateManifestVerifier.ReleaseChannel, "signed update channel");
+    Require(true,
+        typeof(WinRemoteUpdater).Assembly.GetManifestResourceNames().Contains(
+            UpdateManifestVerifier.PublicKeyResourceName, StringComparer.Ordinal),
+        "update public key embedded in single exe");
+
+    byte[] packageBytes = [1, 3, 5, 7, 9, 11];
+    string packageSha256 = Convert.ToHexString(SHA256.HashData(packageBytes)).ToLowerInvariant();
+    byte[] manifestBytes = BuildSignedManifestBytes(10, "9.9.9", packageBytes.Length, packageSha256);
+    using ECDsa signingKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+    byte[] signature = signingKey.SignData(
+        manifestBytes,
+        HashAlgorithmName.SHA256,
+        DSASignatureFormat.Rfc3279DerSequence);
+    UpdateManifest manifest = UpdateManifestVerifier.VerifyAndParse(manifestBytes, signature, signingKey);
+    Require(10L, manifest.ReleaseSequence, "verified release sequence");
+    Require(packageSha256, manifest.Sha256, "verified signed package hash");
+
+    byte[] tamperedManifest = manifestBytes.ToArray();
+    tamperedManifest[^2] ^= 1;
+    ExpectThrows<CryptographicException>(
+        () => UpdateManifestVerifier.VerifyAndParse(tamperedManifest, signature, signingKey),
+        "tampered manifest rejected before parse");
+    byte[] tamperedSignature = signature.ToArray();
+    tamperedSignature[^1] ^= 1;
+    ExpectThrows<CryptographicException>(
+        () => UpdateManifestVerifier.VerifyAndParse(manifestBytes, tamperedSignature, signingKey),
+        "tampered signature rejected");
+
+    byte[] bomManifest = [0xEF, 0xBB, 0xBF, .. manifestBytes];
+    byte[] bomSignature = signingKey.SignData(
+        bomManifest, HashAlgorithmName.SHA256, DSASignatureFormat.Rfc3279DerSequence);
+    ExpectThrows<InvalidOperationException>(
+        () => UpdateManifestVerifier.VerifyAndParse(bomManifest, bomSignature, signingKey),
+        "signed UTF-8 BOM manifest rejected");
+
+    string manifestText = Encoding.UTF8.GetString(manifestBytes);
+    byte[] duplicateManifest = Encoding.UTF8.GetBytes(
+        manifestText.Replace("\"version\":\"9.9.9\",", "\"version\":\"9.9.9\",\"version\":\"9.9.9\",", StringComparison.Ordinal));
+    byte[] duplicateSignature = signingKey.SignData(
+        duplicateManifest, HashAlgorithmName.SHA256, DSASignatureFormat.Rfc3279DerSequence);
+    ExpectThrows<InvalidOperationException>(
+        () => UpdateManifestVerifier.VerifyAndParse(duplicateManifest, duplicateSignature, signingKey),
+        "signed duplicate manifest field rejected");
+
+    byte[] unknownKeyManifest = Encoding.UTF8.GetBytes(
+        manifestText.Replace(UpdateManifestVerifier.SigningKeyId, "unknown-update-key", StringComparison.Ordinal));
+    byte[] unknownKeySignature = signingKey.SignData(
+        unknownKeyManifest, HashAlgorithmName.SHA256, DSASignatureFormat.Rfc3279DerSequence);
+    ExpectThrows<InvalidOperationException>(
+        () => UpdateManifestVerifier.VerifyAndParse(unknownKeyManifest, unknownKeySignature, signingKey),
+        "unknown signed key id rejected");
+
+    string directory = Path.Combine(Path.GetTempPath(), "8ax-winremote-signed-update-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(directory);
+    try
+    {
+        string packagePath = Path.Combine(directory, manifest.FileName);
+        File.WriteAllBytes(packagePath, packageBytes);
+        using (FileStream verifiedPackage = UpdateManifestVerifier.OpenExclusiveVerifiedPackage(packagePath, manifest))
+        {
+            ExpectThrows<IOException>(
+                () => { using FileStream _ = new(packagePath, FileMode.Open, FileAccess.Write, FileShare.ReadWrite); },
+                "exclusive installer package handle blocks TOCTOU write");
+            Require(packageSha256, UpdateManifestVerifier.VerifyPackage(verifiedPackage, manifest), "verified package hash");
+        }
+        byte[] changedPackage = packageBytes.ToArray();
+        changedPackage[0] ^= 1;
+        File.WriteAllBytes(packagePath, changedPackage);
+        ExpectThrows<CryptographicException>(
+            () => { using FileStream _ = UpdateManifestVerifier.OpenExclusiveVerifiedPackage(packagePath, manifest); },
+            "tampered downloaded package rejected");
+
+        UpdateTrustStore trustStore = new(Path.Combine(directory, "trusted-update.json"));
+        trustStore.RecordInstalled(manifest);
+        ExpectThrows<InvalidOperationException>(
+            () => trustStore.ValidateNoRollback(manifest with { ReleaseSequence = 9 }),
+            "release sequence rollback rejected");
+        ExpectThrows<InvalidOperationException>(
+            () => trustStore.ValidateNoRollback(manifest with { Sha256 = new string('0', 64) }),
+            "same release sequence identity conflict rejected");
+        trustStore.ValidateNoRollback(manifest with { ReleaseSequence = 11, Version = "10.0.0" });
+    }
+    finally
+    {
+        Directory.Delete(directory, recursive: true);
+    }
+
+    string repoRoot = FindRepoRoot(AppContext.BaseDirectory);
+    string updaterSource = File.ReadAllText(Path.Combine(repoRoot, "8ax-win", "src", "8ax.WinRemote", "Update", "WinRemoteUpdater.cs"));
+    string installerSource = File.ReadAllText(Path.Combine(repoRoot, "8ax-win", "src", "8ax.WinRemote", "Update", "UpdateInstaller.cs"));
+    string appSource = File.ReadAllText(Path.Combine(repoRoot, "8ax-win", "src", "8ax.WinRemote", "App.xaml.cs"));
+    Require(false, updaterSource.Contains("powershell.exe", StringComparison.OrdinalIgnoreCase), "PowerShell updater retired");
+    Require(false, updaterSource.Contains("ExecutionPolicy", StringComparison.OrdinalIgnoreCase), "ExecutionPolicy bypass retired");
+    Require(true, updaterSource.Contains("--apply-update", StringComparison.Ordinal), "same-exe apply-update mode launched");
+    Require(true, installerSource.Contains("FileShare.None", StringComparison.Ordinal), "installer opens package exclusively");
+    Require(true, installerSource.Contains("new(package, ZipArchiveMode.Read", StringComparison.Ordinal), "installer reads zip from verified handle");
+    Require(true, installerSource.Contains("File.Replace", StringComparison.Ordinal), "installer performs atomic executable replacement");
+    Require(true,
+        appSource.IndexOf("IsApplyUpdateInvocation", StringComparison.Ordinal) <
+        appSource.IndexOf("new Mutex", StringComparison.Ordinal),
+        "apply-update mode runs before single-instance UI startup");
+}
+
+static byte[] BuildSignedManifestBytes(long releaseSequence, string version, long size, string sha256) =>
+    Encoding.UTF8.GetBytes(
+        "{\"schema\":\"v5.winremote_update_manifest.v2\",\"app_id\":\"8ax.WinRemote\"," +
+        "\"channel\":\"stable\",\"version\":\"" + version + "\",\"release_sequence\":" + releaseSequence + "," +
+        "\"key_id\":\"winremote-update-p256-2026-01\",\"file_name\":\"8ax-winremote-win-x64.zip\"," +
+        "\"package_url\":\"8ax-winremote-win-x64.zip\",\"size\":" + size + ",\"sha256\":\"" + sha256 + "\"," +
+        "\"published_at_utc\":\"2026-07-22T00:00:00Z\"}");
 
 static void VerifyRelayReconnectContract()
 {
@@ -546,6 +804,7 @@ static void VerifyRelayStreamFailureNoFallbackContract()
     string repoRoot = FindRepoRoot(AppContext.BaseDirectory);
     string mainWindow = ReadMainWindowSource(Path.Combine(repoRoot, "8ax-win"));
     string relayClient = File.ReadAllText(Path.Combine(repoRoot, "8ax-win", "src", "8ax.WinRemote", "Transport", "RemoteRelayClient.cs"));
+    string relayAuthentication = File.ReadAllText(Path.Combine(repoRoot, "8ax-win", "src", "8ax.WinRemote", "Transport", "RelayAuthenticationSession.cs"));
     string readme = File.ReadAllText(Path.Combine(repoRoot, "8ax-win", "README.md"));
     Require(false, mainWindow.Contains("RunFullFramePollingAsync", StringComparison.Ordinal), "relay HTTP polling fallback is retired");
     Require(true, mainWindow.Contains("relay_stream_unavailable", StringComparison.Ordinal), "relay stream failure evidence exists");
@@ -557,7 +816,9 @@ static void VerifyRelayStreamFailureNoFallbackContract()
     Require(false, mainWindow.Contains("SetConnectionState(\"recovering\"", StringComparison.Ordinal), "full-frame repair must not make top-right badge jump");
     Require(true, relayClient.Contains("StreamConnectTimeout", StringComparison.Ordinal), "relay stream connect timeout exists");
     Require(true, relayClient.Contains("InputConnectTimeout", StringComparison.Ordinal), "relay input connect timeout exists");
-    Require(true, relayClient.Contains("WebSocket connect timed out", StringComparison.Ordinal), "websocket timeout is explicit");
+    Require(true, relayAuthentication.Contains("Authenticated WSS connect timed out", StringComparison.Ordinal), "authenticated WSS timeout is explicit");
+    Require(true, relayAuthentication.Contains("Authorization", StringComparison.Ordinal), "WSS handshake carries the RAM session header");
+    Require(false, relayClient.Contains("builder.Scheme = \"ws\"", StringComparison.Ordinal), "plaintext websocket fallback is retired");
     Require(true, readme.Contains("does not fall back to relay polling", StringComparison.Ordinal), "README documents relay polling retirement");
     Require(false, mainWindow.Contains("/dev/fb0", StringComparison.Ordinal), "fallback does not use retired fb0 path");
 }
@@ -566,7 +827,6 @@ static void VerifyRelayDisplayRefreshRateContract()
 {
     string winRoot = FindWinRemoteRoot(AppContext.BaseDirectory);
     string mainWindow = ReadMainWindowSource(winRoot);
-    string mockRelay = ReadWinRemoteFile(winRoot, "tools", "mock-relay", "Program.cs");
     string readme = ReadWinRemoteFile(winRoot, "README.md");
     Require(true, mainWindow.Contains("RelayStreamTargetFps = 10", StringComparison.Ordinal), "relay target fps is 10");
     Require(true, mainWindow.Contains("RelayFrameMetricsMinIntervalMs = 1000.0 / RelayStreamTargetFps", StringComparison.Ordinal), "relay frame metrics cadence derives from target fps");
@@ -583,9 +843,6 @@ static void VerifyRelayDisplayRefreshRateContract()
                 == mainWindow.LastIndexOf("GetFullFrameAsync(_shutdown.Token)", StringComparison.Ordinal),
         "HTTP full frame remains only for explicit repair");
     Require(true, mainWindow.Contains("[\"target_fps\"] = RelayStreamTargetFps", StringComparison.Ordinal), "relay target fps is recorded in session evidence");
-    Require(true, mockRelay.Contains("StreamTargetFps = 10", StringComparison.Ordinal), "mock relay target fps is 10");
-    Require(true, mockRelay.Contains("StreamFrameIntervalTicks = (long)Math.Round(Stopwatch.Frequency / (double)StreamTargetFps)", StringComparison.Ordinal), "mock relay frame interval derives from target fps");
-    Require(true, mockRelay.Contains("PaceToNextStreamFrameAsync", StringComparison.Ordinal), "mock relay uses target-time stream pacing");
     Require(true,
         readme.Contains("targets 10Hz", StringComparison.Ordinal)
             && readme.Contains("WebSocket dirty-rect stream", StringComparison.Ordinal)
@@ -671,13 +928,14 @@ static void VerifyWinRemoteBoardTimeSyncContract()
 {
     string winRoot = FindWinRemoteRoot(AppContext.BaseDirectory);
     string relayClient = ReadWinRemoteFile(winRoot, "src", "8ax.WinRemote", "Transport", "RemoteRelayClient.cs");
+    string networkTime = ReadWinRemoteFile(winRoot, "src", "8ax.WinRemote", "Transport", "ClientNetworkTime.cs");
     string winReadme = ReadWinRemoteFile(winRoot, "README.md");
     Require(true, relayClient.Contains("X-8ax-Client-Time-Unix-Ms", StringComparison.Ordinal), "WinRemote sends client time unix ms header");
     Require(true, relayClient.Contains("X-8ax-Client-Time-Source", StringComparison.Ordinal), "WinRemote sends client time source header");
-    Require(true, relayClient.Contains("NetworkTimeUris", StringComparison.Ordinal), "WinRemote has network time probe list");
-    Require(true, relayClient.Contains("winremote-network-time", StringComparison.Ordinal), "WinRemote reports network time source");
-    Require(true, relayClient.Contains("winremote-local-time", StringComparison.Ordinal), "WinRemote reports local fallback time source");
-    Require(true, relayClient.Contains("DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()", StringComparison.Ordinal), "WinRemote falls back to local UTC clock");
+    Require(true, networkTime.Contains("ProbeUris", StringComparison.Ordinal), "WinRemote has network time probe list");
+    Require(true, networkTime.Contains("winremote-network-time", StringComparison.Ordinal), "WinRemote reports network time source");
+    Require(true, networkTime.Contains("winremote-local-time", StringComparison.Ordinal), "WinRemote reports local fallback time source");
+    Require(true, networkTime.Contains("DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()", StringComparison.Ordinal), "WinRemote falls back to local UTC clock");
     Require(true, winReadme.Contains("falls back to the Windows local UTC clock", StringComparison.Ordinal), "README documents local fallback");
     Require(true,
         winReadme.Contains("may set the system", StringComparison.Ordinal)
@@ -690,6 +948,8 @@ static void VerifyUpgradeProgressContract()
     string repoRoot = FindRepoRoot(AppContext.BaseDirectory);
     string mainWindow = ReadMainWindowSource(Path.Combine(repoRoot, "8ax-win"));
     string updater = File.ReadAllText(Path.Combine(repoRoot, "8ax-win", "src", "8ax.WinRemote", "Update", "WinRemoteUpdater.cs"));
+    string verifier = File.ReadAllText(Path.Combine(repoRoot, "8ax-win", "src", "8ax.WinRemote", "Update", "UpdateManifestVerifier.cs"));
+    string installer = File.ReadAllText(Path.Combine(repoRoot, "8ax-win", "src", "8ax.WinRemote", "Update", "UpdateInstaller.cs"));
     string dialog = File.ReadAllText(Path.Combine(repoRoot, "8ax-win", "src", "8ax.WinRemote", "Update", "UpdateProgressDialog.cs"));
     Require(true, mainWindow.Contains("UpdateProgressDialog", StringComparison.Ordinal), "upgrade opens progress dialog");
     Require(true, mainWindow.Contains("progressDialog.Show()", StringComparison.Ordinal), "upgrade progress dialog shown");
@@ -706,17 +966,22 @@ static void VerifyUpgradeProgressContract()
     Require(true, updater.Contains("ResponseHeadersRead", StringComparison.Ordinal), "download streams with progress");
     Require(true, updater.Contains("ManifestRequestTimeout", StringComparison.Ordinal), "manifest read has timeout");
     Require(true, updater.Contains("PackageDownloadTimeout", StringComparison.Ordinal), "package download has timeout");
-    Require(true, updater.Contains("TrimStart('\\uFEFF')", StringComparison.Ordinal), "manifest BOM is stripped");
-    Require(true, updater.Contains("ManifestSourceName", StringComparison.Ordinal), "manifest progress names primary source");
+    Require(true, updater.Contains("UpdateManifestVerifier.VerifyAndParse(manifestBytes, signatureBytes)", StringComparison.Ordinal), "manifest signature is verified before fields are used");
+    Require(false, updater.Contains("TrimStart('\\uFEFF')", StringComparison.Ordinal), "updater must not normalize signed manifest bytes");
+    Require(true, verifier.Contains("manifestBytes[..3].SequenceEqual", StringComparison.Ordinal), "signed UTF-8 BOM is rejected");
+    Require(true, updater.Contains("CreateProtectedWorkDirectory(targetDirectory)", StringComparison.Ordinal), "update staging shares the install volume for atomic replace");
+    Require(true, updater.Contains("Path.Combine(targetRoot, \".winremote-update\")", StringComparison.Ordinal), "protected update staging is rooted beside the installed executable");
+    Require(true, updater.Contains("manifestUri.Host", StringComparison.Ordinal), "manifest progress names the active signed source");
     Require(true, updater.Contains("DefaultManifestUris", StringComparison.Ordinal), "manifest progress names backup source");
     Require(false, updater.Contains("UseProxy = false", StringComparison.Ordinal), "updater uses system network/proxy");
-    Require(true, updater.Contains("single-exe update package has unexpected files", StringComparison.Ordinal), "updater rejects multi-file package");
-    Require(true, updater.Contains("8ax.WinRemote.dll", StringComparison.Ordinal), "updater removes old sidecar dll");
-    Require(true, updater.Contains("8ax.WinRemote.deps.json", StringComparison.Ordinal), "updater removes old deps sidecar");
-    Require(true, updater.Contains("install.log", StringComparison.Ordinal), "installer writes install log");
-    Require(true, updater.Contains("-ParentPid", StringComparison.Ordinal), "installer avoids read-only PowerShell PID variable");
-    Require(true, updater.Contains("restart ok", StringComparison.Ordinal), "installer logs restart success");
-    Require(true, updater.Contains("Start-Process -FilePath $targetExe -WorkingDirectory $Target -PassThru", StringComparison.Ordinal), "installer restarts updated exe");
+    Require(true, installer.Contains("archive.Entries.Count != 1", StringComparison.Ordinal), "installer rejects multi-file package");
+    Require(true, installer.Contains("args.Count != 17", StringComparison.Ordinal), "same-exe installer requires the complete fixed argument set");
+    Require(true, installer.Contains("UpdateManifestVerifier.VerifyAndParse(manifestBytes, signatureBytes)", StringComparison.Ordinal), "installer re-verifies the detached signature");
+    Require(true, installer.Contains("OpenExclusiveVerifiedPackage", StringComparison.Ordinal), "installer re-verifies the package through an exclusive handle");
+    Require(true, installer.Contains("new(package, ZipArchiveMode.Read, leaveOpen: true)", StringComparison.Ordinal), "installer reads zip from the verified package handle");
+    Require(true, installer.Contains("File.Replace", StringComparison.Ordinal), "installer atomically replaces the executable");
+    Require(true, installer.Contains("update_install_succeeded", StringComparison.Ordinal), "installer records successful completion evidence");
+    Require(true, installer.Contains("Updated WinRemote process did not start", StringComparison.Ordinal), "installer requires a successful restart");
     Require(true, dialog.Contains("ProgressBar", StringComparison.Ordinal), "progress dialog has progress bar");
     Require(true, dialog.Contains("Topmost = true", StringComparison.Ordinal), "progress dialog is topmost");
     Require(true, dialog.Contains("MarkDone", StringComparison.Ordinal), "progress dialog supports already-current state");
@@ -749,7 +1014,6 @@ static void VerifyOperatorButtonsContract()
     string logDialog = ReadWinRemoteFile(winRoot, "src", "8ax.WinRemote", "Diagnostics", "ClientLogPreviewDialog.cs");
     string readme = ReadWinRemoteFile(winRoot, "README.md");
     string buttonDoc = readme;
-    string mockRelay = ReadWinRemoteFile(winRoot, "tools", "mock-relay", "Program.cs");
     Require(true, xaml.Contains("Height=\"920\"", StringComparison.Ordinal), "main window default height enlarged");
     Require(true, xaml.Contains("Width=\"1440\"", StringComparison.Ordinal), "main window default width enlarged");
     Require(true, xaml.Contains("MinHeight=\"840\"", StringComparison.Ordinal), "main window minimum height enlarged");
@@ -798,7 +1062,6 @@ static void VerifyOperatorButtonsContract()
     Require(true, relayClient.Contains("remote/program/file", StringComparison.Ordinal), "relay client calls program file endpoint");
     Require(true, relayClient.Contains("overwrite=", StringComparison.Ordinal), "relay client sends overwrite flag");
     Require(true, relayClient.Contains("remote/ota/upgrade", StringComparison.Ordinal), "relay client calls OTA upgrade endpoint");
-    Require(true, mockRelay.Contains("OTA_NOT_IMPLEMENTED", StringComparison.Ordinal), "mock relay rejects OTA until board client exists");
     Require(true, readme.Contains("GET /remote/diagnostics", StringComparison.Ordinal) && readme.Contains("diagnostic summary", StringComparison.Ordinal), "README documents read-log button");
     Require(true, readme.Contains("indented, wrapped", StringComparison.Ordinal), "README documents wrapped diagnostics display");
     Require(true,
@@ -907,130 +1170,26 @@ static void VerifySingleExePublishContract()
     Require(true, script.Contains("update package must contain only", StringComparison.Ordinal), "release package is single-file only");
     Require(true, script.Contains("multi-file sidecar must not be published", StringComparison.Ordinal), "release blocks sidecar files");
     Require(true, script.Contains("Formal release path: package generation must be followed by direct VPS upload and verification", StringComparison.Ordinal), "release uploads immediately after package generation");
-    Require(true, script.Contains("sha256sum '$remotePackagePath'", StringComparison.Ordinal), "release verifies remote VPS package hash");
-    Require(true, script.Contains("Assert-ManifestMatchesRelease -Json $remoteManifestJson", StringComparison.Ordinal), "release verifies remote VPS manifest file");
-    Require(true, script.Contains("UTF8Encoding($false)", StringComparison.Ordinal), "release writes manifest without UTF-8 BOM");
-    Require(true, script.Contains("TrimStart([char]0xFEFF)", StringComparison.Ordinal), "release manifest verification strips UTF-8 BOM");
-    Require(true, script.Contains("[char]0x00EF", StringComparison.Ordinal), "release manifest verification strips mojibake UTF-8 BOM");
-    Require(true, script.Contains("Invoke-WebRequest -UseBasicParsing -TimeoutSec 15", StringComparison.Ordinal), "release verifies HTTPS manifest URLs");
-    Require(true, script.Contains("VPS HTTPS manifest verification failed", StringComparison.Ordinal), "release fails when VPS manifest verification fails");
+    Require(true, script.Contains("sha256sum '$($remotePair[0])'", StringComparison.Ordinal), "release verifies VPS package, manifest, and signature hashes");
+    Require(true, script.Contains("Assert-ManifestMatchesRelease -Path $Manifest", StringComparison.Ordinal), "release verifies remote VPS manifest file");
+    Require(true, script.Contains("UTF8Encoding($false, $true)", StringComparison.Ordinal), "release writes strict UTF-8 without BOM");
+    Require(true, script.Contains("manifest contains a forbidden UTF-8 BOM", StringComparison.Ordinal), "release rejects UTF-8 BOM instead of normalizing signed bytes");
+    Require(false, script.Contains("TrimStart([char]0xFEFF)", StringComparison.Ordinal), "release does not strip a signed BOM");
+    Require(true, script.Contains("sign --private-key", StringComparison.Ordinal), "release creates a detached manifest signature");
+    Require(true, script.Contains("verify --public-key", StringComparison.Ordinal), "release verifies detached signatures locally and after readback");
+    Require(true, script.Contains("package/manifest/signature raw bytes differ", StringComparison.Ordinal), "release compares all signed release bytes after readback");
+    Require(true, script.Contains("$BaseUrl/manifest.sig", StringComparison.Ordinal), "release verifies HTTPS signature URLs");
+    Require(true, script.Contains("Download-SignedReleaseSet -BaseUrl $primaryBaseUrl", StringComparison.Ordinal), "release verifies primary HTTPS signed set");
+    Require(true, script.Contains("Download-SignedReleaseSet -BaseUrl $backupBaseUrl", StringComparison.Ordinal), "release verifies backup HTTPS signed set");
     Require(true, script.Contains("-SkipUpload is diagnostic only", StringComparison.Ordinal), "skip upload is diagnostic-only");
+    Require(true, script.Contains("$officialPublishDir", StringComparison.Ordinal), "release identifies the formal WinRemote publish directory");
+    Require(true, script.Contains("$diagnosticRoot", StringComparison.Ordinal), "diagnostic publish is confined to repo_ignored");
+    Require(true, script.Contains("cannot update the formal WinRemote executable", StringComparison.Ordinal), "skip upload cannot replace the formal client");
     Require(true, winReadme.Contains("must not stop after local package generation", StringComparison.Ordinal), "README requires direct VPS upload after generation");
+    Require(true, winReadme.Contains("must upload all three", StringComparison.Ordinal), "README requires each formal executable update to upload in the same run");
     Require(true, uploadRule.Contains("must not stop after local package generation", StringComparison.Ordinal), "VPS doc requires direct upload after generation");
     Require(false, script.Contains("--self-contained false", StringComparison.Ordinal), "release no longer uses multi-file framework-dependent publish");
 }
-
-static async Task VerifyMockRelayReadOnlyClientAsync()
-{
-    string repoRoot = FindRepoRoot(AppContext.BaseDirectory);
-    string mockRelayProject = Path.Combine(repoRoot, "8ax-win", "tools", "mock-relay", "8ax.MockRelay.csproj");
-    if (!File.Exists(mockRelayProject))
-    {
-        throw new FileNotFoundException("mock relay project not found", mockRelayProject);
-    }
-
-    int port = FindFreeTcpPort();
-    Uri relayUri = new($"http://127.0.0.1:{port}/");
-    using Process relay = StartMockRelay(mockRelayProject, relayUri);
-    try
-    {
-        await WaitForRelayAsync(relay, relayUri);
-
-        using RemoteRelayClient client = new(relayUri);
-        RemoteInfoMessage info = await client.GetInfoAsync(CancellationToken.None);
-        Require(PointerMapper.RemoteWidth, info.Width, "mock relay info width");
-        Require(PointerMapper.RemoteHeight, info.Height, "mock relay info height");
-        Require(true, info.ViewOnly, "mock relay view-only");
-        Require(10.0, info.SystemMetrics?.Cpu0Percent ?? -1.0, "mock relay cpu0 metric");
-        Require(11.0, info.SystemMetrics?.Cpu1Percent ?? -1.0, "mock relay cpu1 metric");
-        Require(42.0, info.SystemMetrics?.MemoryPercent ?? -1.0, "mock relay memory metric");
-        Require(64.0, info.SystemMetrics?.DiskPercent ?? -1.0, "mock relay disk metric");
-
-        string diagnostics = await client.GetDiagnosticsJsonAsync(CancellationToken.None);
-        Require(true, diagnostics.Contains("\"schema\":\"re.v5.remote_diagnostics.v1\"", StringComparison.Ordinal), "mock relay diagnostics schema");
-        Require(true, diagnostics.Contains("\"program_dir\":\"/opt/8ax/v5/gcode/golden\"", StringComparison.Ordinal), "mock relay diagnostics program dir");
-
-        OtaUpgradeResult ota = await client.RequestOtaUpgradeAsync(CancellationToken.None);
-        Require("rejected", ota.Status, "mock relay OTA status");
-        Require("OTA_NOT_IMPLEMENTED", ota.Code, "mock relay OTA code");
-        Require(false, ota.Cancellable, "mock relay OTA job not cancellable because no job started");
-
-        byte[] program = Encoding.ASCII.GetBytes("G0 X0\nM2\n");
-        using MemoryStream programStream = new(program);
-        string programSha = Sha256Hex(program);
-        ProgramUploadResult upload = await client.UploadProgramAsync("unit_test.ngc", programStream, program.Length, programSha, overwrite: false, CancellationToken.None);
-        Require("unit_test.ngc", upload.FileName, "mock relay upload filename");
-        Require(program.Length, (int)upload.SizeBytes, "mock relay upload size");
-        Require(programSha, upload.Sha256, "mock relay upload sha");
-        Require("/opt/8ax/v5/gcode/golden/unit_test.ngc", upload.DestinationPath, "mock relay upload destination");
-
-        ProgramListResult list = await client.GetProgramListAsync(CancellationToken.None);
-        Require(1, list.Count, "mock relay program list count");
-        Require("unit_test.ngc", list.Files.Single().FileName, "mock relay program list filename");
-        ProgramFileInfo stat = await client.GetProgramFileInfoAsync("unit_test.ngc", CancellationToken.None);
-        Require(true, stat.Exists, "mock relay program stat exists");
-        Require(programSha, stat.Sha256 ?? String.Empty, "mock relay program stat sha");
-        ProgramFileContentResult content = await client.GetProgramFileContentAsync("unit_test.ngc", CancellationToken.None);
-        Require("G0 X0\nM2\n", content.Text, "mock relay program read text");
-
-        bool duplicateRejected = false;
-        try
-        {
-            using MemoryStream duplicateStream = new(program);
-            _ = await client.UploadProgramAsync("unit_test.ngc", duplicateStream, program.Length, programSha, overwrite: false, CancellationToken.None);
-        }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("program file exists", StringComparison.Ordinal))
-        {
-            duplicateRejected = true;
-        }
-        Require(true, duplicateRejected, "mock relay duplicate upload rejected without overwrite");
-
-        byte[] editedProgram = Encoding.ASCII.GetBytes("G1 X1\nM2\n");
-        using MemoryStream editedStream = new(editedProgram);
-        string editedSha = Sha256Hex(editedProgram);
-        ProgramUploadResult overwrite = await client.UploadProgramAsync("unit_test.ngc", editedStream, editedProgram.Length, editedSha, overwrite: true, CancellationToken.None);
-        Require(true, overwrite.Overwrote, "mock relay upload overwrite flag");
-        Require(editedSha, overwrite.Sha256, "mock relay overwritten sha");
-        ProgramDeleteResult deleted = await client.DeleteProgramFileAsync("unit_test.ngc", CancellationToken.None);
-        Require(true, deleted.Deleted, "mock relay program delete result");
-        ProgramFileInfo missing = await client.GetProgramFileInfoAsync("unit_test.ngc", CancellationToken.None);
-        Require(false, missing.Exists, "mock relay program stat missing after delete");
-
-        RemoteFramebuffer framebuffer = new();
-        RemoteFrameAssembler assembler = new(framebuffer);
-        RemoteFrameApplyResult full = assembler.Apply(await client.GetFullFrameAsync(CancellationToken.None));
-        Require(RemoteFrameApplyStatus.AppliedFullFrame, full.Status, $"mock relay full frame apply {full.Reason}");
-
-        bool appliedDirty = false;
-        bool neededFullFrame = false;
-        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
-        await foreach (RemoteFramePacket packet in client.ReadFrameStreamAsync(timeout.Token))
-        {
-            RemoteFrameApplyResult result = assembler.Apply(packet);
-            if (result.Status == RemoteFrameApplyStatus.AppliedDirtyRects)
-            {
-                appliedDirty = true;
-            }
-            else if (result.Status == RemoteFrameApplyStatus.NeedFullFrame)
-            {
-                neededFullFrame = true;
-                RemoteFrameApplyResult repair = assembler.Apply(await client.GetFullFrameAsync(timeout.Token));
-                Require(RemoteFrameApplyStatus.AppliedFullFrame, repair.Status, $"mock relay full-frame repair {repair.Reason}");
-                break;
-            }
-        }
-
-        Require(true, appliedDirty, "mock relay applied at least one dirty rect");
-        Require(true, neededFullFrame, "mock relay drop triggers full-frame repair");
-    }
-    finally
-    {
-        StopProcessTree(relay);
-    }
-}
-
-static string Sha256Hex(byte[] payload) =>
-    Convert.ToHexString(SHA256.HashData(payload)).ToLowerInvariant();
 
 static byte[] FullBgraFrame(byte blue, byte green, byte red) =>
     SolidBgraRect(PointerMapper.RemoteWidth, PointerMapper.RemoteHeight, blue, green, red);
@@ -1051,93 +1210,12 @@ static byte[] SolidBgraRect(int width, int height, byte blue, byte green, byte r
 
 static int PixelOffset(int x, int y) => ((y * PointerMapper.RemoteWidth) + x) * 4;
 
-static Process StartMockRelay(string mockRelayProject, Uri relayUri)
-{
-    ProcessStartInfo startInfo = new("dotnet")
-    {
-        UseShellExecute = false,
-        CreateNoWindow = true,
-        RedirectStandardOutput = true,
-        RedirectStandardError = true,
-    };
-    startInfo.ArgumentList.Add("run");
-    startInfo.ArgumentList.Add("--project");
-    startInfo.ArgumentList.Add(mockRelayProject);
-    startInfo.ArgumentList.Add("--");
-    startInfo.ArgumentList.Add("--prefix");
-    startInfo.ArgumentList.Add(relayUri.ToString());
-    startInfo.ArgumentList.Add("--drop-every");
-    startInfo.ArgumentList.Add("2");
-
-    Process process = new() { StartInfo = startInfo };
-    process.Start();
-    return process;
-}
-
-static async Task WaitForRelayAsync(Process relay, Uri relayUri)
-{
-    using RemoteRelayClient client = new(relayUri);
-    DateTime deadline = DateTime.UtcNow.AddSeconds(20);
-    Exception? lastError = null;
-    while (DateTime.UtcNow < deadline)
-    {
-        if (relay.HasExited)
-        {
-            string stdout = await relay.StandardOutput.ReadToEndAsync();
-            string stderr = await relay.StandardError.ReadToEndAsync();
-            throw new InvalidOperationException($"mock relay exited early with code {relay.ExitCode}. stdout={stdout} stderr={stderr}");
-        }
-
-        try
-        {
-            _ = await client.GetInfoAsync(CancellationToken.None);
-            return;
-        }
-        catch (Exception ex) when (ex is HttpRequestException or SocketException or InvalidOperationException)
-        {
-            lastError = ex;
-            await Task.Delay(250);
-        }
-    }
-
-    throw new TimeoutException($"mock relay did not start at {relayUri}: {lastError?.Message}");
-}
-
-static void StopProcessTree(Process process)
-{
-    try
-    {
-        if (!process.HasExited)
-        {
-            process.Kill(entireProcessTree: true);
-            process.WaitForExit(5000);
-        }
-    }
-    catch (InvalidOperationException)
-    {
-    }
-}
-
-static int FindFreeTcpPort()
-{
-    TcpListener listener = new(IPAddress.Loopback, 0);
-    listener.Start();
-    try
-    {
-        return ((IPEndPoint)listener.LocalEndpoint).Port;
-    }
-    finally
-    {
-        listener.Stop();
-    }
-}
-
 static string FindRepoRoot(string startDirectory)
 {
     DirectoryInfo? directory = new(startDirectory);
     while (directory is not null)
     {
-        string candidate = Path.Combine(directory.FullName, "8ax-win", "tools", "mock-relay", "8ax.MockRelay.csproj");
+        string candidate = Path.Combine(directory.FullName, "8ax-win", "src", "8ax.WinRemote", "8ax.WinRemote.csproj");
         if (File.Exists(candidate))
         {
             return directory.FullName;
@@ -1146,7 +1224,7 @@ static string FindRepoRoot(string startDirectory)
         directory = directory.Parent;
     }
 
-    throw new DirectoryNotFoundException("Could not locate repo root for mock relay test.");
+    throw new DirectoryNotFoundException("Could not locate the V5 repository root.");
 }
 
 static string FindWinRemoteRoot(string startDirectory)

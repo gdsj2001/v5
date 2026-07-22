@@ -148,9 +148,11 @@ gate="/run/8ax_v5_product_ui/v5_command_gate.sock"
 try:
  pid=int(open("/run/8ax/v5_command_gate.pid").read().strip())
  cmdline=open("/proc/%d/cmdline"%pid,"rb").read().replace(b"\0",b" ")
+ class DriveAttestation(ctypes.Structure):
+  _fields_=[("readback_ns",ctypes.c_uint64),("active_mask",ctypes.c_uint32),("slots",ctypes.c_uint32*5),("slaves",ctypes.c_uint32*5),("expected_num",ctypes.c_uint32*5),("expected_den",ctypes.c_uint32*5),("actual_num",ctypes.c_uint32*5),("actual_den",ctypes.c_uint32*5),("mode",ctypes.c_int32*5),("bits",ctypes.c_uint32*5),("statusword",ctypes.c_uint32*5),("error_code",ctypes.c_uint32*5)]
  class Request(ctypes.Structure):
-  _fields_=[("magic",ctypes.c_uint32),("version",ctypes.c_uint32),("size",ctypes.c_uint32),("op",ctypes.c_uint32),("kind",ctypes.c_int32),("index",ctypes.c_int32),("enabled",ctypes.c_int32),("mask",ctypes.c_uint32),("run",ctypes.c_uint64),("generation",ctypes.c_uint32),("clean_generation",ctypes.c_uint32),("axis",ctypes.c_double),("increment",ctypes.c_double),("points",ctypes.c_double*5),("text",ctypes.c_char*512),("secondary",ctypes.c_char*128),("mode",ctypes.c_char*64),("settings_index",ctypes.c_uint32),("owner_generation",ctypes.c_uint32),("readback_token",ctypes.c_uint32),("project_root",ctypes.c_char*256),("settings_axis",ctypes.c_char*16),("field_key",ctypes.c_char*64),("field_name",ctypes.c_char*128),("value",ctypes.c_char*128)]
- req=Request(); req.magic=0x56354347; req.version=6; req.size=ctypes.sizeof(Request); req.op=2
+  _fields_=[("magic",ctypes.c_uint32),("version",ctypes.c_uint32),("size",ctypes.c_uint32),("op",ctypes.c_uint32),("kind",ctypes.c_int32),("index",ctypes.c_int32),("enabled",ctypes.c_int32),("mask",ctypes.c_uint32),("run",ctypes.c_uint64),("generation",ctypes.c_uint32),("clean_generation",ctypes.c_uint32),("axis",ctypes.c_double),("increment",ctypes.c_double),("points",ctypes.c_double*5),("text",ctypes.c_char*512),("secondary",ctypes.c_char*128),("mode",ctypes.c_char*64),("settings_index",ctypes.c_uint32),("owner_generation",ctypes.c_uint32),("readback_token",ctypes.c_uint32),("project_root",ctypes.c_char*256),("settings_axis",ctypes.c_char*16),("field_key",ctypes.c_char*64),("field_name",ctypes.c_char*128),("value",ctypes.c_char*128),("drive",DriveAttestation)]
+ req=Request(); req.magic=0x56354347; req.version=7; req.size=ctypes.sizeof(Request); req.op=2
  s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.settimeout(1); s.connect(gate); s.sendall(bytes(req)); response=b""
  while len(response)<12:
   chunk=s.recv(4096)
@@ -164,7 +166,7 @@ try:
   response+=chunk
  if len(response)!=declared: raise RuntimeError("command gate response exceeded declared size")
  s.close(); fields=struct.unpack_from("<III8i",response)
- protocol_ok=(fields[0:3]==(0x56354347,6,len(response)) and fields[3]==1 and
+  protocol_ok=(fields[0:3]==(0x56354347,7,len(response)) and fields[3]==1 and
               fields[4]==0 and fields[7:11]==(1,1,1,0))
  out["command_gate_ready"]=stat.S_ISSOCK(os.stat(gate).st_mode) and b"/usr/libexec/8ax/v5_command_gate_server" in cmdline and protocol_ok
  out["estop_active"]=(fields[7:9]==(1,1))

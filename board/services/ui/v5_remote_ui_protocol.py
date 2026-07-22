@@ -4,6 +4,7 @@ import base64
 import hashlib
 import os
 import socket
+import ssl
 import struct
 import time
 
@@ -27,7 +28,7 @@ def send_payload(sock: socket.socket, payload: FramePayload) -> None:
     if len(parts) == 1:
         sock.sendall(parts[0])
         return
-    if not hasattr(sock, "sendmsg"):
+    if isinstance(sock, ssl.SSLSocket) or not hasattr(sock, "sendmsg"):
         for part in parts:
             if part:
                 sock.sendall(part)
