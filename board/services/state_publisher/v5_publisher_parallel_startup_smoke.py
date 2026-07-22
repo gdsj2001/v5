@@ -100,7 +100,10 @@ def audit_sources(texts: dict[str, str]) -> None:
     assert "/proc/[0-9]*/cmdline" not in wait_inputs, "ACTIVE_INI_PROC_SCAN_REMAINED"
     assert 'expected_ini="$PROJECT_ROOT/linuxcnc/ini/v5_bus.ini"' in wait_inputs, "CANONICAL_BUS_INI_MISSING"
     assert "v5_pulse.ini" not in wait_inputs, "PULSE_RUNTIME_BARRIER_RESURRECTED"
-    boot = texts[str(UI_ROOT / "v5_ui_boot_ready.py")]
+    boot = (
+        texts[str(UI_ROOT / "v5_ui_boot_ready.py")]
+        + texts[str(UI_ROOT / "v5_ui_boot_inputs.py")]
+    )
     for token in ("inotify_init1", "inotify_add_watch", "select.poll", "publisher exited before UI barrier"):
         assert token in boot, f"UI_EVENT_GATE_MISSING:{token}"
     assert 'rsplit(")", 1)[1].split()[19]' in boot, "PID_REUSE_START_TICKS_GATE_MISSING"
@@ -599,16 +602,18 @@ def main() -> int:
         STATE_ROOT / "v5_state_publisher_main.c",
         UI_ROOT / "init.d/v5-ui-relay",
         UI_ROOT / "v5_ui_boot_ready.py",
+        UI_ROOT / "v5_ui_boot_inputs.py",
     ]
     texts = {str(path): path.read_text(encoding="utf-8") for path in paths}
     audit_sources(texts)
     boot = load_boot_module()
-    behavior_smoke(boot)
+    boot_inputs = sys.modules["v5_ui_boot_inputs"]
+    behavior_smoke(boot_inputs)
     final_barrier_smoke(boot)
     failure_payload_smoke(boot)
-    publisher_lock_smoke(boot)
-    block_validation_smoke(boot)
-    posix_inotify_smoke(boot)
+    publisher_lock_smoke(boot_inputs)
+    block_validation_smoke(boot_inputs)
+    posix_inotify_smoke(boot_inputs)
     mutation_smoke(texts)
     print("V5_PUBLISHER_PARALLEL_STARTUP_OK")
     return 0

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Tuple
 
 import v5_drive_bus_action as bus
+import v5_drive_bus_reset_action as reset_action
 from v5_drive_bus_contract import DriveActionError
 
 
@@ -44,8 +45,8 @@ def run_case(begin_ok: bool, finish_ok: bool = True,
     batch_calls = 0
 
     def replace(name: str, value: Callable[..., Any]) -> None:
-        originals[name] = getattr(bus, name)
-        setattr(bus, name, value)
+        originals[name] = getattr(reset_action, name)
+        setattr(reset_action, name, value)
 
     replace("configured_drive_targets", lambda _timeout: (
         TARGETS, {"axes": []}, {"ok": True, "slaves": []}))
@@ -142,7 +143,7 @@ def run_case(begin_ok: bool, finish_ok: bool = True,
         bus.v5_drive_enable_window.finish_safely = original_finish
         bus.time.sleep = original_sleep
         for name, value in originals.items():
-            setattr(bus, name, value)
+            setattr(reset_action, name, value)
     return result, events
 
 

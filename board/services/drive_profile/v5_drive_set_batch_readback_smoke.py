@@ -5,8 +5,12 @@ import unittest
 from typing import Any, Dict, List, Tuple
 from unittest import mock
 
-import v5_drive_bus_action as bus
+import v5_drive_bus_action as bus_facade
+import v5_drive_bus_apply_action as bus
 import v5_drive_health as health
+
+assert bus_facade.run_set_drive is bus.run_set_drive
+assert bus_facade.run_boot_drive_apply is bus.run_boot_drive_apply
 
 
 TARGETS = [{"position": "0"}, {"position": "1"}]

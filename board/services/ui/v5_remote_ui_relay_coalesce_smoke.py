@@ -11,6 +11,19 @@ import threading
 import time
 from pathlib import Path
 
+
+def relay_source_text() -> str:
+    root = Path(__file__).resolve().parent
+    return "\n".join(
+        (root / name).read_text(encoding="utf-8")
+        for name in (
+            "v5_remote_ui_relay.py",
+            "v5_remote_ui_relay_access.py",
+            "v5_remote_ui_relay_stream.py",
+        )
+    )
+
+
 def write_framebuffer(path: Path, width: int, height: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = bytearray()
@@ -168,7 +181,7 @@ def check_proc_cpu_usage_snapshot() -> int:
     import v5_remote_ui_support as support
 
     support_source = Path(support.__file__).read_text(encoding="utf-8")
-    relay_source = Path(relay.__file__).read_text(encoding="utf-8")
+    relay_source = relay_source_text()
     for forbidden in (
         "v5_status_shm_reader",
         "V5StatusShmReader",
@@ -231,7 +244,7 @@ def check_refresh_commit_boundary() -> int:
     toolpath_geometry_source = source_path.with_name("v5_main_page_toolpath_geometry.c").read_text(encoding="utf-8")
     toolpath_program_source = source_path.with_name("v5_main_page_toolpath_program.c").read_text(encoding="utf-8")
     toolpath_raster_source = source_path.with_name("v5_main_page_toolpath_raster.c").read_text(encoding="utf-8")
-    relay_source = Path(__file__).with_name("v5_remote_ui_relay.py").read_text(encoding="utf-8")
+    relay_source = relay_source_text()
     state_source = Path(__file__).with_name("v5_remote_ui_state.py").read_text(encoding="utf-8")
     compose_start = source.index("static void compose_area")
     commit_start = source.index("static void commit_composed_frame")
@@ -385,7 +398,7 @@ def check_startup_lifecycle_sources() -> int:
     source = source_path.read_text(encoding="utf-8")
     capture_source = source_path.with_name("v5_lvgl_remote_display_capture.c").read_text(encoding="utf-8")
     bootstrap_source = source_path.with_name("v5_ui_shell_bootstrap.c").read_text(encoding="utf-8")
-    relay_source = Path(__file__).with_name("v5_remote_ui_relay.py").read_text(encoding="utf-8")
+    relay_source = relay_source_text()
     init_source = Path(__file__).with_name("init.d").joinpath("v5-ui-relay").read_text(encoding="utf-8")
     framebuffer_fail_closed = (
         "int v5_lvgl_remote_display_capture_setup(unsigned int width, unsigned int height)",
@@ -610,7 +623,7 @@ class ProducerTestState:
 
 
 def check_global_producer_source_contract() -> int:
-    relay_source = Path(__file__).with_name("v5_remote_ui_relay.py").read_text(encoding="utf-8")
+    relay_source = relay_source_text()
     producer_source = Path(__file__).with_name("v5_remote_ui_shared_payload.py").read_text(encoding="utf-8")
     required = [
         "SharedDirtyPayloadProducer",

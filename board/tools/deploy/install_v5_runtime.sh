@@ -443,14 +443,17 @@ manifest_shm_abi_cadence=0
 manifest_shm_abi_projection=0
 manifest_shm_abi_codec=0
 manifest_shm_abi_relay=0
+manifest_shm_abi_relay_access=0
+manifest_shm_abi_relay_stream=0
 manifest_shm_abi_boot_ready=0
+manifest_shm_abi_boot_inputs=0
 manifest_shm_abi_main_cache_contract=0
 manifest_shm_abi_python_reader=0
 manifest_shm_abi_position_init=0
 manifest_shm_abi_wcs_init=0
 manifest_shm_abi_state_init=0
 manifest_shm_abi_ui_init=0
-manifest_shm_abi_required_rows=15
+manifest_shm_abi_required_rows=18
 manifest_ethercat_master=0
 manifest_ethercat_generic=0
 manifest_ethercat_lcec=0
@@ -555,9 +558,21 @@ while IFS="$tab" read -r scope_kind scope_source scope_destination scope_mode sc
     /usr/libexec/8ax/v5_remote_ui_relay.py)
       manifest_shm_abi_relay=1
       ;;
+    /usr/libexec/8ax/v5_remote_ui_relay_access.py)
+      manifest_shm_abi_touched=1
+      manifest_shm_abi_relay_access=1
+      ;;
+    /usr/libexec/8ax/v5_remote_ui_relay_stream.py)
+      manifest_shm_abi_touched=1
+      manifest_shm_abi_relay_stream=1
+      ;;
     /usr/libexec/8ax/v5_ui_boot_ready.py)
       manifest_shm_abi_touched=1
       manifest_shm_abi_boot_ready=1
+      ;;
+    /usr/libexec/8ax/v5_ui_boot_inputs.py)
+      manifest_shm_abi_touched=1
+      manifest_shm_abi_boot_inputs=1
       ;;
     /usr/libexec/8ax/v5_ui_main_cache_contract.py)
       manifest_shm_abi_touched=1
@@ -766,7 +781,10 @@ if [ "$manifest_shm_abi_ui_binary" -eq 1 ] &&
    [ "$manifest_shm_abi_projection" -eq 1 ] &&
    [ "$manifest_shm_abi_codec" -eq 1 ] &&
    [ "$manifest_shm_abi_relay" -eq 1 ] &&
+   [ "$manifest_shm_abi_relay_access" -eq 1 ] &&
+   [ "$manifest_shm_abi_relay_stream" -eq 1 ] &&
    [ "$manifest_shm_abi_boot_ready" -eq 1 ] &&
+   [ "$manifest_shm_abi_boot_inputs" -eq 1 ] &&
    [ "$manifest_shm_abi_main_cache_contract" -eq 1 ] &&
    [ "$manifest_shm_abi_python_reader" -eq 1 ] &&
    [ "$manifest_shm_abi_position_init" -eq 1 ] &&

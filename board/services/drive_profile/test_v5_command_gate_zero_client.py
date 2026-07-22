@@ -5,6 +5,7 @@ from unittest import mock
 
 import v5_command_gate_zero_client as client
 import v5_drive_axis_model as axis_model
+import v5_drive_axis_zero as axis_zero
 
 
 class FakeSocket:
@@ -138,13 +139,13 @@ def test_axis_zero_verify_saves_zero_and_raw_limits_without_live_apply() -> None
         return {"raw_limit_save": _raw_limit_save()}
 
     patches = [
-        mock.patch.object(axis_model, "request_slave_position", return_value=0),
-        mock.patch.object(axis_model, "load_settings_runtime", return_value=runtime),
+        mock.patch.object(axis_zero, "request_slave_position", return_value=0),
+        mock.patch.object(axis_zero, "load_settings_runtime", return_value=runtime),
         mock.patch.object(axis_model, "derive_counts_per_unit", return_value=(10000.0, {"source": "test"})),
-        mock.patch.object(axis_model, "current_axis_counts", side_effect=[(1000.0, {"position": "0"}), (1050.0, {"position": "0"})]),
-        mock.patch.object(axis_model, "persist_axis_zero_model", side_effect=persist),
-        mock.patch.object(axis_model, "snapshot_axis_zero_persistence", return_value={"settings_runtime_json": "{}", "runtime_ini": ""}),
-        mock.patch.object(axis_model, "read_runtime_ini_sections", return_value=_raw_limit_sections()),
+        mock.patch.object(axis_zero, "current_axis_counts", side_effect=[(1000.0, {"position": "0"}), (1050.0, {"position": "0"})]),
+        mock.patch.object(axis_zero, "persist_axis_zero_model", side_effect=persist),
+        mock.patch.object(axis_zero, "snapshot_axis_zero_persistence", return_value={"settings_runtime_json": "{}", "runtime_ini": ""}),
+        mock.patch.object(axis_zero, "read_runtime_ini_sections", return_value=_raw_limit_sections()),
     ]
     with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
         result = axis_model.axis_zero_verify({
@@ -177,14 +178,14 @@ def test_axis_zero_verify_rolls_back_persistence_after_raw_limit_readback_failur
     def restore(_snapshot):
         return {"ok": True}
 
-    with mock.patch.object(axis_model, "request_slave_position", return_value=0), \
-         mock.patch.object(axis_model, "load_settings_runtime", side_effect=[runtime, original]), \
+    with mock.patch.object(axis_zero, "request_slave_position", return_value=0), \
+         mock.patch.object(axis_zero, "load_settings_runtime", side_effect=[runtime, original]), \
          mock.patch.object(axis_model, "derive_counts_per_unit", return_value=(10000.0, {})), \
-         mock.patch.object(axis_model, "current_axis_counts", side_effect=[(1000.0, {"position": "0"}), (1000.0, {"position": "0"})]), \
-         mock.patch.object(axis_model, "persist_axis_zero_model", side_effect=persist), \
-         mock.patch.object(axis_model, "snapshot_axis_zero_persistence", return_value={"settings_runtime_json": "{}", "runtime_ini": ""}), \
-         mock.patch.object(axis_model, "restore_axis_zero_persistence", side_effect=restore) as restore_mock, \
-         mock.patch.object(axis_model, "read_runtime_ini_sections", return_value=_raw_limit_sections(2.0)):
+         mock.patch.object(axis_zero, "current_axis_counts", side_effect=[(1000.0, {"position": "0"}), (1000.0, {"position": "0"})]), \
+         mock.patch.object(axis_zero, "persist_axis_zero_model", side_effect=persist), \
+         mock.patch.object(axis_zero, "snapshot_axis_zero_persistence", return_value={"settings_runtime_json": "{}", "runtime_ini": ""}), \
+         mock.patch.object(axis_zero, "restore_axis_zero_persistence", side_effect=restore) as restore_mock, \
+         mock.patch.object(axis_zero, "read_runtime_ini_sections", return_value=_raw_limit_sections(2.0)):
         try:
             axis_model.axis_zero_verify({
                 "axis": "X", "driver_mode": "bus",
@@ -217,15 +218,15 @@ def test_rotary_axis_zero_accepts_explicit_disabled_raw_limits() -> None:
             "updated_sections": ["AXIS_B", "JOINT_3"],
         }}
 
-    with mock.patch.object(axis_model, "request_slave_position", return_value=4), \
-         mock.patch.object(axis_model, "load_settings_runtime", return_value=runtime), \
+    with mock.patch.object(axis_zero, "request_slave_position", return_value=4), \
+         mock.patch.object(axis_zero, "load_settings_runtime", return_value=runtime), \
          mock.patch.object(axis_model, "derive_counts_per_unit", return_value=(10000.0, {})), \
-         mock.patch.object(axis_model, "current_axis_counts", side_effect=[
+         mock.patch.object(axis_zero, "current_axis_counts", side_effect=[
              (-248668.0, {"position": "4"}), (-248668.0, {"position": "4"})]), \
-         mock.patch.object(axis_model, "persist_axis_zero_model", side_effect=persist), \
-         mock.patch.object(axis_model, "snapshot_axis_zero_persistence", return_value={
+         mock.patch.object(axis_zero, "persist_axis_zero_model", side_effect=persist), \
+         mock.patch.object(axis_zero, "snapshot_axis_zero_persistence", return_value={
              "settings_runtime_json": "{}", "runtime_ini": ""}), \
-         mock.patch.object(axis_model, "read_runtime_ini_sections", return_value={
+         mock.patch.object(axis_zero, "read_runtime_ini_sections", return_value={
              "AXIS_B": {"MIN_LIMIT": "0", "MAX_LIMIT": "0"},
              "JOINT_3": {"MIN_LIMIT": "0", "MAX_LIMIT": "0"},
          }):
@@ -251,13 +252,13 @@ def test_axis_zero_verify_rolls_back_when_raw_limit_formula_is_wrong() -> None:
         bad["raw_min_limit"] = -0.5
         return {"raw_limit_save": bad}
 
-    with mock.patch.object(axis_model, "request_slave_position", return_value=0), \
-         mock.patch.object(axis_model, "load_settings_runtime", side_effect=[runtime, original]), \
+    with mock.patch.object(axis_zero, "request_slave_position", return_value=0), \
+         mock.patch.object(axis_zero, "load_settings_runtime", side_effect=[runtime, original]), \
          mock.patch.object(axis_model, "derive_counts_per_unit", return_value=(10000.0, {})), \
-         mock.patch.object(axis_model, "current_axis_counts", side_effect=[(1000.0, {"position": "0"}), (1000.0, {"position": "0"})]), \
-         mock.patch.object(axis_model, "persist_axis_zero_model", side_effect=persist), \
-         mock.patch.object(axis_model, "snapshot_axis_zero_persistence", return_value={"settings_runtime_json": "{}", "runtime_ini": ""}), \
-         mock.patch.object(axis_model, "restore_axis_zero_persistence", return_value={"ok": True}) as restore_mock:
+         mock.patch.object(axis_zero, "current_axis_counts", side_effect=[(1000.0, {"position": "0"}), (1000.0, {"position": "0"})]), \
+         mock.patch.object(axis_zero, "persist_axis_zero_model", side_effect=persist), \
+         mock.patch.object(axis_zero, "snapshot_axis_zero_persistence", return_value={"settings_runtime_json": "{}", "runtime_ini": ""}), \
+         mock.patch.object(axis_zero, "restore_axis_zero_persistence", return_value={"ok": True}) as restore_mock:
         try:
             axis_model.axis_zero_verify({
                 "axis": "X", "driver_mode": "bus",

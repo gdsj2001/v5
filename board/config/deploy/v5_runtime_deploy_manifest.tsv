@@ -14,12 +14,15 @@ binary	build/board/app/v5_command_gate_server	/usr/libexec/8ax/v5_command_gate_s
 binary	build/board/app/v5_command_gate_drive_window	/usr/libexec/8ax/v5_command_gate_drive_window	0755
 binary	build/board/app/v5_linuxcncrsh_golden_run	/usr/libexec/8ax/v5_linuxcncrsh_golden_run	0755
 script	services/ui/v5_remote_ui_relay.py	/usr/libexec/8ax/v5_remote_ui_relay.py	0755
+module	services/ui/v5_remote_ui_relay_access.py	/usr/libexec/8ax/v5_remote_ui_relay_access.py	0644
+module	services/ui/v5_remote_ui_relay_stream.py	/usr/libexec/8ax/v5_remote_ui_relay_stream.py	0644
 module	services/ui/v5_remote_ui_auth.py	/usr/libexec/8ax/v5_remote_ui_auth.py	0644
 script	services/ui/v5_remote_ui_local_client.py	/usr/libexec/8ax/v5_remote_ui_local_client.py	0755
 binary	build/board/app/v5_remote_ui_packer	/usr/libexec/8ax/v5_remote_ui_packer.so	0755
 module	services/ui/v5_remote_ui_native_packer.py	/usr/libexec/8ax/v5_remote_ui_native_packer.py	0644
 module	services/ui/v5_remote_ui_programs.py	/usr/libexec/8ax/v5_remote_ui_programs.py	0644
 script	services/ui/v5_ui_boot_ready.py	/usr/libexec/8ax/v5_ui_boot_ready.py	0755
+module	services/ui/v5_ui_boot_inputs.py	/usr/libexec/8ax/v5_ui_boot_inputs.py	0644
 module	services/ui/v5_ui_main_cache_contract.py	/usr/libexec/8ax/v5_ui_main_cache_contract.py	0644
 module	services/ui/v5_remote_ui_contract.py	/usr/libexec/8ax/v5_remote_ui_contract.py	0644
 module	services/ui/v5_remote_ui_protocol.py	/usr/libexec/8ax/v5_remote_ui_protocol.py	0644
@@ -85,10 +88,13 @@ init	services/remote_ssh/init.d/v5-remote-ssh	/etc/init.d/v5-remote-ssh	0755
 config	config/auth/vps_remote_ssh_known_hosts	/etc/6x-cnc/vps_remote_ssh_known_hosts	0644
 config	petalinux/project-spec/meta-user/recipes-apps/v5-base-overlay/files/rootfs-overlay/etc/6x-cnc/vps_endpoints.json	/etc/6x-cnc/vps_endpoints.json	0644
 script	services/drive_profile/v5_drive_bus_action.py	/usr/libexec/8ax/drive_profile/v5_drive_bus_action.py	0755
+module	services/drive_profile/v5_drive_bus_apply_action.py	/usr/libexec/8ax/drive_profile/v5_drive_bus_apply_action.py	0644
+module	services/drive_profile/v5_drive_bus_reset_action.py	/usr/libexec/8ax/drive_profile/v5_drive_bus_reset_action.py	0644
 module	services/drive_profile/v5_active_model_descriptor.py	/usr/libexec/8ax/drive_profile/v5_active_model_descriptor.py	0644
 module	services/drive_profile/v5_command_gate_zero_client.py	/usr/libexec/8ax/drive_profile/v5_command_gate_zero_client.py	0644
 module	services/drive_profile/v5_drive_enable_window.py	/usr/libexec/8ax/drive_profile/v5_drive_enable_window.py	0644
 module	services/drive_profile/v5_drive_axis_model.py	/usr/libexec/8ax/drive_profile/v5_drive_axis_model.py	0644
+module	services/drive_profile/v5_drive_axis_zero.py	/usr/libexec/8ax/drive_profile/v5_drive_axis_zero.py	0644
 module	services/drive_profile/v5_drive_bus_context.py	/usr/libexec/8ax/drive_profile/v5_drive_bus_context.py	0644
 module	services/drive_profile/v5_drive_bus_contract.py	/usr/libexec/8ax/drive_profile/v5_drive_bus_contract.py	0644
 module	services/drive_profile/v5_drive_transaction_identity.py	/usr/libexec/8ax/drive_profile/v5_drive_transaction_identity.py	0644
@@ -98,6 +104,7 @@ module	services/drive_profile/v5_drive_parameter_table.py	/usr/libexec/8ax/drive
 module	services/drive_profile/v5_drive_query.py	/usr/libexec/8ax/drive_profile/v5_drive_query.py	0644
 module	services/drive_profile/v5_drive_result.py	/usr/libexec/8ax/drive_profile/v5_drive_result.py	0644
 module	services/drive_profile/v5_drive_runtime_store.py	/usr/libexec/8ax/drive_profile/v5_drive_runtime_store.py	0644
+module	services/drive_profile/v5_drive_runtime_schema.py	/usr/libexec/8ax/drive_profile/v5_drive_runtime_schema.py	0644
 module	services/drive_profile/v5_drive_sdo.py	/usr/libexec/8ax/drive_profile/v5_drive_sdo.py	0644
 script	services/drive_profile/v5_drive_profile_resident_snapshot.py	/usr/libexec/8ax/drive_profile/v5_drive_profile_resident_snapshot.py	0755
 script	services/drive_profile/v5_settings_actiond.py	/usr/libexec/8ax/drive_profile/v5_settings_actiond.py	0755

@@ -164,6 +164,8 @@ def check_remote_relay_access_control() -> int:
     manifest = ROOT / "config" / "deploy" / "v5_runtime_deploy_manifest.tsv"
     relay_modules = (
         relay,
+        ROOT / "services" / "ui" / "v5_remote_ui_relay_access.py",
+        ROOT / "services" / "ui" / "v5_remote_ui_relay_stream.py",
         ROOT / "services" / "ui" / "v5_remote_ui_auth.py",
         ROOT / "services" / "ui" / "v5_remote_ui_local_client.py",
         ROOT / "services" / "ui" / "v5_remote_ui_state.py",
@@ -188,7 +190,10 @@ def check_remote_relay_access_control() -> int:
         return 1
     source_text = source.read_text(encoding="utf-8", errors="ignore")
     relay_text = "\n".join(path.read_text(encoding="utf-8", errors="ignore") for path in relay_modules)
-    relay_source_text = relay.read_text(encoding="utf-8", errors="ignore")
+    relay_source_text = "\n".join(
+        path.read_text(encoding="utf-8", errors="ignore")
+        for path in relay_modules[:3]
+    )
     relay_smoke_text = relay_smoke.read_text(encoding="utf-8", errors="ignore")
     auth_smoke_text = auth_smoke.read_text(encoding="utf-8", errors="ignore")
     tls_smoke_text = tls_smoke.read_text(encoding="utf-8", errors="ignore")
@@ -358,6 +363,8 @@ def check_remote_relay_access_control() -> int:
             print(f"REMOTE_RELAY_INIT_ALLOWLIST_MISSING: {init.relative_to(ROOT)} lacks {token}", file=sys.stderr)
             rc = 1
     required_manifest_rows = (
+        "module\tservices/ui/v5_remote_ui_relay_access.py\t/usr/libexec/8ax/v5_remote_ui_relay_access.py\t0644",
+        "module\tservices/ui/v5_remote_ui_relay_stream.py\t/usr/libexec/8ax/v5_remote_ui_relay_stream.py\t0644",
         "module\tservices/ui/v5_remote_ui_auth.py\t/usr/libexec/8ax/v5_remote_ui_auth.py\t0644",
         "script\tservices/ui/v5_remote_ui_local_client.py\t/usr/libexec/8ax/v5_remote_ui_local_client.py\t0755",
     )
@@ -1186,7 +1193,10 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         "module\tservices/state_publisher/v5_machine_status_projection.py\t/usr/libexec/8ax/v5_machine_status_projection.py\t0644",
         "module\tservices/state_publisher/v5_wcs_status_codec.py\t/usr/libexec/8ax/v5_wcs_status_codec.py\t0644",
         "script\tservices/ui/v5_remote_ui_relay.py\t/usr/libexec/8ax/v5_remote_ui_relay.py\t0755",
+        "module\tservices/ui/v5_remote_ui_relay_access.py\t/usr/libexec/8ax/v5_remote_ui_relay_access.py\t0644",
+        "module\tservices/ui/v5_remote_ui_relay_stream.py\t/usr/libexec/8ax/v5_remote_ui_relay_stream.py\t0644",
         "script\tservices/ui/v5_ui_boot_ready.py\t/usr/libexec/8ax/v5_ui_boot_ready.py\t0755",
+        "module\tservices/ui/v5_ui_boot_inputs.py\t/usr/libexec/8ax/v5_ui_boot_inputs.py\t0644",
         "module\tservices/ui/v5_status_shm_reader.py\t/usr/libexec/8ax/v5_status_shm_reader.py\t0644",
         "init\tservices/state_publisher/init.d/v5-position-status-publisher\t/etc/init.d/v5-position-status-publisher\t0755",
         "init\tservices/state_publisher/init.d/v5-wcs-status-publisher\t/etc/init.d/v5-wcs-status-publisher\t0755",
@@ -1240,7 +1250,7 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         "writer did not stop before upgrade",
         "manifest_shm_abi_touched=0",
         "manifest_shm_abi_complete=0",
-        "manifest_shm_abi_required_rows=15",
+        "manifest_shm_abi_required_rows=18",
         "SHM ABI deploy requires the complete Position/State/UI atomic bundle",
         "manifest_ethercat_required_rows=4",
         "manifest_ethercat_touched=0",
@@ -2945,6 +2955,13 @@ def check_product_runtime_closure_policy() -> int:
     for row in (
         "binary\tbuild/board/app/v5_command_gate_drive_window\t/usr/libexec/8ax/v5_command_gate_drive_window\t0755",
         "module\tservices/drive_profile/v5_drive_enable_window.py\t/usr/libexec/8ax/drive_profile/v5_drive_enable_window.py\t0644",
+        "module\tservices/drive_profile/v5_drive_bus_apply_action.py\t/usr/libexec/8ax/drive_profile/v5_drive_bus_apply_action.py\t0644",
+        "module\tservices/drive_profile/v5_drive_bus_reset_action.py\t/usr/libexec/8ax/drive_profile/v5_drive_bus_reset_action.py\t0644",
+        "module\tservices/drive_profile/v5_drive_axis_zero.py\t/usr/libexec/8ax/drive_profile/v5_drive_axis_zero.py\t0644",
+        "module\tservices/drive_profile/v5_drive_runtime_schema.py\t/usr/libexec/8ax/drive_profile/v5_drive_runtime_schema.py\t0644",
+        "module\tservices/ui/v5_remote_ui_relay_access.py\t/usr/libexec/8ax/v5_remote_ui_relay_access.py\t0644",
+        "module\tservices/ui/v5_remote_ui_relay_stream.py\t/usr/libexec/8ax/v5_remote_ui_relay_stream.py\t0644",
+        "module\tservices/ui/v5_ui_boot_inputs.py\t/usr/libexec/8ax/v5_ui_boot_inputs.py\t0644",
         "init\tservices/runtime_startup/init.d/v5-runtime-startup\t/etc/init.d/v5-runtime-startup\t0755",
     ):
         if row not in manifest_text.splitlines():

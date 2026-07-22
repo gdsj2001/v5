@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 import v5_drive_bus_action as action
+import v5_drive_bus_apply_action as apply_action
 import v5_drive_bus_context as context
 import v5_drive_bus_contract as contract
 import v5_drive_parameter_table as parameter_table
@@ -170,27 +171,27 @@ def run_set_drive_with(targets: List[Dict[str, Any]]) -> tuple[Dict[str, Any], L
         "ok": True, "run_id": run_id, "code": "DRIVE_WRITE_WINDOW_FINISH_KEEP_OFF",
         "initial_machine_enabled": False, "final_machine_enabled": False,
     }
-    action.configured_drive_targets = lambda _timeout: (targets, RUNTIME, SCAN)
-    action.capture_drive_transaction_identity = lambda *_args, **_kwargs: {
+    apply_action.configured_drive_targets = lambda _timeout: (targets, RUNTIME, SCAN)
+    apply_action.capture_drive_transaction_identity = lambda *_args, **_kwargs: {
         "transaction_generation": "resident-mapping-smoke"}
-    action.verify_drive_transaction_identity = lambda _frozen, _current, stage: {
+    apply_action.verify_drive_transaction_identity = lambda _frozen, _current, stage: {
         "ok": True, "stage": stage}
-    action.precheck_targets_for_write = lambda *_args, **_kwargs: {"ok": True}
+    apply_action.precheck_targets_for_write = lambda *_args, **_kwargs: {"ok": True}
     action.target_egear = lambda _target: (100, 1, {"source": "smoke"})
-    action._planned_drive_transaction = lambda current_targets: {
+    apply_action._planned_drive_transaction = lambda current_targets: {
         str(target["position"]): ((100, 1), {"source": "smoke"})
         for target in current_targets
     }
-    action._reload_drive_transaction_identity = lambda _timeout: {
+    apply_action._reload_drive_transaction_identity = lambda _timeout: {
         "transaction_generation": "resident-mapping-smoke"}
-    action.read_required_state = lambda *_args: {"ok": True, "reads": {"drive.read_mode": {"upload": {"value": 8}}}}
+    apply_action.read_required_state = lambda *_args: {"ok": True, "reads": {"drive.read_mode": {"upload": {"value": 8}}}}
 
     def fake_write(position: str, command_name: str, _command: Dict[str, Any], _values: Any = None) -> Dict[str, Any]:
         writes.append((str(position), command_name))
         return {"ok": True}
 
-    action.write_command = fake_write
-    action.set_drive_batch_readback = lambda current_targets, _timeout, _expectations: {
+    apply_action.write_command = fake_write
+    apply_action.set_drive_batch_readback = lambda current_targets, _timeout, _expectations: {
         "failed_positions": [],
         "cycles": [{"recovery_positions": []}],
         "readbacks": {
@@ -201,9 +202,9 @@ def run_set_drive_with(targets: List[Dict[str, Any]]) -> tuple[Dict[str, Any], L
             for target in current_targets
         },
     }
-    action.update_axis_drive_set_evidence = lambda *_args: None
-    action.persist_settings_runtime = lambda _runtime: {"ok": True}
-    action.write_drive_parameter_display_rows = lambda _updates: {"ok": True}
+    apply_action.update_axis_drive_set_evidence = lambda *_args: None
+    apply_action.persist_settings_runtime = lambda _runtime: {"ok": True}
+    apply_action.write_drive_parameter_display_rows = lambda _updates: {"ok": True}
     return action.run_set_drive(1.0), writes
 
 
@@ -216,8 +217,8 @@ def expect_precheck_failure(
 ) -> None:
     set_query_inputs(bindings, runtime, sections)
     writes: List[tuple[str, str]] = []
-    action.configured_drive_targets = query.configured_drive_targets
-    action.write_command = lambda position, name, *_args: writes.append((str(position), name)) or {"ok": True}
+    apply_action.configured_drive_targets = query.configured_drive_targets
+    apply_action.write_command = lambda position, name, *_args: writes.append((str(position), name)) or {"ok": True}
     result = action.run_set_drive(1.0)
     if result.get("code") != expected_code or result.get("write_executed") or writes:
         raise AssertionError((expected_code, result, writes))
