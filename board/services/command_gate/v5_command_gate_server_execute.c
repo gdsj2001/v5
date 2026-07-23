@@ -255,16 +255,30 @@ void execute_request(const V5CommandGateIpcRequestFrame *frame, V5CommandGateIpc
             native_result.code[0] ? native_result.code : "HOME_RESULT_MISSING");
     } else {
         char jog_code[64];
+        int jog_keepalive_only = 0;
         if (!v5_jog_watchdog_prepare_request(
                 &g_jog_watchdog, &g_motion_parameters,
-                &request, jog_code, sizeof(jog_code))) {
+                &request, &jog_keepalive_only,
+                jog_code, sizeof(jog_code))) {
             response->send_status = V5_COMMAND_GATE_SEND_INVALID;
             v5_command_gate_response_copy_text(response->readback_code, sizeof(response->readback_code),
                       jog_code[0] ? jog_code : "JOG_NATIVE_PARAMETERS_REJECTED");
             linuxcncrsh_unlock();
             return;
         }
-        if (request.kind == V5_COMMAND_START) {
+        if (jog_keepalive_only) {
+            snprintf(
+                response->command_line,
+                sizeof(response->command_line),
+                "Jog Keepalive %c",
+                request.text_value[0]);
+            snprintf(
+                jog_code,
+                sizeof(jog_code),
+                "%s",
+                "JOG_KEEPALIVE_REFRESHED");
+            status = V5_LINUXCNCRSH_SEND_SENT;
+        } else if (request.kind == V5_COMMAND_START) {
             status = v5_linuxcncrsh_send_start_transaction(
                 &g_linuxcncrsh_config,
                 &prepared,

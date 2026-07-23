@@ -10,6 +10,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define V5_LINUXCNCRSH_SECONDS_PER_MINUTE 60.0
+
 #define V5_MOTION_VALUE_VELOCITY 0x01U
 #define V5_MOTION_VALUE_ACCELERATION 0x02U
 #define V5_MOTION_VALUE_MIN_LIMIT 0x04U
@@ -404,7 +406,15 @@ int v5_native_motion_parameters_resolve_jog(
         return 1;
     }
     direction = request->axis_value < 0.0 ? -1.0 : 1.0;
-    request->axis_value = direction * axis->max_velocity * 0.5;
+    /*
+     * LinuxCNC INI MAX_VELOCITY is stored in user-units/second, while
+     * linuxcncrsh Set Jog accepts user-units/minute and converts it back to
+     * user-units/second internally.  Keep the native owner in INI units and
+     * convert only at the linuxcncrsh request boundary.
+     */
+    request->axis_value =
+        direction * axis->max_velocity * 0.5 *
+        V5_LINUXCNCRSH_SECONDS_PER_MINUTE;
     if (!isfinite(request->axis_value) || request->axis_value == 0.0 ||
         !isfinite(axis->max_acceleration) || axis->max_acceleration <= 0.0) {
         set_code(code, code_cap, "JOG_EFFECTIVE_PARAMETERS_INVALID");

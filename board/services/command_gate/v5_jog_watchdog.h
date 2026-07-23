@@ -22,6 +22,7 @@ typedef struct V5JogWatchdog {
     volatile sig_atomic_t *stop_requested;
     uint64_t deadline_ms;
     char axis;
+    int direction;
     int active;
     int started;
 } V5JogWatchdog;
@@ -45,6 +46,9 @@ static void *v5_jog_watchdog_thread_main(void *arg)
         if (watchdog->active && now && now >= watchdog->deadline_ms) {
             axis = watchdog->axis;
             watchdog->active = 0;
+            watchdog->axis = '\0';
+            watchdog->direction = 0;
+            watchdog->deadline_ms = 0ULL;
         }
         pthread_mutex_unlock(&watchdog->state_lock);
         if (axis) {
@@ -74,6 +78,7 @@ static int v5_jog_watchdog_start(
     watchdog->stop_requested = stop_requested;
     watchdog->deadline_ms = 0ULL;
     watchdog->axis = '\0';
+    watchdog->direction = 0;
     watchdog->active = 0;
     if (pthread_mutex_init(&watchdog->state_lock, 0) != 0 ||
         pthread_create(&watchdog->thread, 0, v5_jog_watchdog_thread_main, watchdog) != 0) {
@@ -86,6 +91,7 @@ static int v5_jog_watchdog_start(
 static int v5_jog_watchdog_refresh(
     V5JogWatchdog *watchdog,
     char axis,
+    int direction,
     int *new_transaction)
 {
     uint64_t now = v5_jog_watchdog_monotonic_ms();
@@ -93,15 +99,18 @@ static int v5_jog_watchdog_refresh(
     if (new_transaction) {
         *new_transaction = 0;
     }
-    if (!watchdog || !watchdog->started || !axis || !now) {
+    if (!watchdog || !watchdog->started || !axis ||
+        (direction != -1 && direction != 1) || !now) {
         return 0;
     }
     pthread_mutex_lock(&watchdog->state_lock);
-    if (!watchdog->active || watchdog->axis == axis) {
+    if (!watchdog->active ||
+        (watchdog->axis == axis && watchdog->direction == direction)) {
         if (new_transaction && !watchdog->active) {
             *new_transaction = 1;
         }
         watchdog->axis = axis;
+        watchdog->direction = direction;
         watchdog->deadline_ms = now + V5_JOG_WATCHDOG_TIMEOUT_MS;
         watchdog->active = 1;
         accepted = 1;
@@ -119,6 +128,7 @@ static void v5_jog_watchdog_clear(V5JogWatchdog *watchdog, char axis)
     if (!axis || watchdog->axis == axis) {
         watchdog->active = 0;
         watchdog->axis = '\0';
+        watchdog->direction = 0;
         watchdog->deadline_ms = 0ULL;
     }
     pthread_mutex_unlock(&watchdog->state_lock);
@@ -128,6 +138,7 @@ static int v5_jog_watchdog_prepare_request(
     V5JogWatchdog *watchdog,
     const V5NativeMotionParameters *parameters,
     V5CommandRequest *request,
+    int *keepalive_only,
     char *code,
     size_t code_cap)
 {
@@ -136,6 +147,9 @@ static int v5_jog_watchdog_prepare_request(
          request->kind == V5_COMMAND_JOG_CONTINUOUS ||
          request->kind == V5_COMMAND_JOG_STOP);
     int new_continuous_transaction = 0;
+    if (keepalive_only) {
+        *keepalive_only = 0;
+    }
     if (!is_jog) {
         return 1;
     }
@@ -146,9 +160,13 @@ static int v5_jog_watchdog_prepare_request(
         if (!v5_jog_watchdog_refresh(
                 watchdog,
                 request->text_value[0],
+                request->axis_value > 0.0 ? 1 : -1,
                 &new_continuous_transaction)) {
             snprintf(code, code_cap, "%s", "JOG_WATCHDOG_AXIS_CONFLICT");
             return 0;
+        }
+        if (keepalive_only) {
+            *keepalive_only = !new_continuous_transaction;
         }
         if (new_continuous_transaction &&
             v5_linuxcncrsh_send_line(

@@ -31,6 +31,11 @@ typedef struct V5ToolpathViewTransform {
 
 int v5_main_page_internal_action_needs_native_readback_refresh(V5MainPageActionKind action);
 
+int v5_main_page_internal_trigger_jog_keepalive(
+    V5MainPage *page,
+    V5MainPageActionKind action,
+    V5MainPageActionReport *report);
+
 int v5_main_page_internal_action_requires_power_on_home(
     const V5MainPage *page,
     V5MainPageActionKind action);

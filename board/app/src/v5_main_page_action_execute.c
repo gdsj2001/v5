@@ -317,7 +317,11 @@ static int action_keeps_axis_selection_active(V5MainPageActionKind action)
     }
 }
 
-int v5_main_page_trigger_action(V5MainPage *page, V5MainPageActionKind action, V5MainPageActionReport *report)
+static int main_page_trigger_action(
+    V5MainPage *page,
+    V5MainPageActionKind action,
+    V5MainPageActionReport *report,
+    int jog_keepalive)
 {
     V5MainPageActionReport local_report;
     V5MainPageActionReport *out = report ? report : &local_report;
@@ -326,7 +330,9 @@ int v5_main_page_trigger_action(V5MainPage *page, V5MainPageActionKind action, V
     if (!page) {
         return 0;
     }
-    if (v5_main_page_internal_action_needs_native_readback_refresh(action) && page->native_readback_refresh_cb) {
+    if (!jog_keepalive &&
+        v5_main_page_internal_action_needs_native_readback_refresh(action) &&
+        page->native_readback_refresh_cb) {
         page->native_readback_refresh_cb(page->native_readback_refresh_user_data, action);
     }
     if (v5_main_page_internal_action_requires_power_on_home(page, action) &&
@@ -355,6 +361,26 @@ int v5_main_page_trigger_action(V5MainPage *page, V5MainPageActionKind action, V
     }
     page->last_action = *out;
     return 1;
+}
+
+int v5_main_page_trigger_action(
+    V5MainPage *page,
+    V5MainPageActionKind action,
+    V5MainPageActionReport *report)
+{
+    return main_page_trigger_action(page, action, report, 0);
+}
+
+int v5_main_page_internal_trigger_jog_keepalive(
+    V5MainPage *page,
+    V5MainPageActionKind action,
+    V5MainPageActionReport *report)
+{
+    if (action != V5_MAIN_PAGE_ACTION_JOG_CONTINUOUS_PLUS &&
+        action != V5_MAIN_PAGE_ACTION_JOG_CONTINUOUS_MINUS) {
+        return 0;
+    }
+    return main_page_trigger_action(page, action, report, 1);
 }
 
 int v5_main_page_trigger_override(

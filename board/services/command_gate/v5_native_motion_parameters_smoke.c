@@ -250,9 +250,19 @@ int main(void)
     request.increment_value = 0.001;
     if (!v5_native_motion_parameters_resolve_jog(
             &parameters, &request, code, sizeof(code)) ||
-        !close_enough(request.axis_value, 83.3333333335) ||
+        !close_enough(request.axis_value, 5000.00000001) ||
         strstr(code, "JOG_PARAMS_X_") != code) {
         return 5;
+    }
+    memset(&request, 0, sizeof(request));
+    request.kind = V5_COMMAND_JOG_CONTINUOUS;
+    request.text_value = "A";
+    request.axis_value = -1.0;
+    if (!v5_native_motion_parameters_resolve_jog(
+            &parameters, &request, code, sizeof(code)) ||
+        !close_enough(request.axis_value, -24999.99999999) ||
+        strstr(code, "JOG_PARAMS_A_") != code) {
+        return 10;
     }
     if (!v5_native_motion_parameters_load(
             "board/linuxcnc/ini/v5_pulse.ini", &parameters, code, sizeof(code)) ||

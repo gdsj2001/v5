@@ -23,6 +23,14 @@ static volatile unsigned int g_home_send_hook_calls;
 static volatile unsigned int g_home_send_delay_ms = 25U;
 static volatile unsigned int g_home_progress_terminal_phase;
 static volatile int g_home_send_hook_returned;
+static unsigned int g_native_readback_refresh_calls;
+
+static void count_native_readback_refresh(void *user_data, V5MainPageActionKind action)
+{
+    (void)user_data;
+    (void)action;
+    g_native_readback_refresh_calls += 1U;
+}
 
 static void smoke_sleep_us(unsigned int delay_us)
 {
@@ -621,6 +629,7 @@ static int button_visual_state_cycle(lv_obj_t *button)
 static int exercise_jog_press_timing(V5MainPage *page)
 {
     lv_obj_t *button;
+    unsigned int refresh_calls_before;
     if (!page || !v5_main_page_select_axis(page, V5_MAIN_PAGE_SELECT_MCS, 'X')) {
         return 0;
     }
@@ -628,18 +637,26 @@ static int exercise_jog_press_timing(V5MainPage *page)
     if (!button) {
         return 0;
     }
+    refresh_calls_before = g_native_readback_refresh_calls;
+    v5_main_page_set_native_readback_refresh_callback(
+        page,
+        count_native_readback_refresh,
+        0);
     lv_event_send(button, LV_EVENT_PRESSED, 0);
     if (page->last_action.request.kind != V5_COMMAND_JOG_CONTINUOUS ||
         page->last_action.request.axis_value <= 0.0 ||
-        page->jog_pressed_button != button) {
+        page->jog_pressed_button != button ||
+        g_native_readback_refresh_calls != refresh_calls_before + 1U) {
         return 0;
     }
     lv_tick_inc(V5_MAIN_PAGE_JOG_KEEPALIVE_MS);
     lv_event_send(button, LV_EVENT_PRESSING, 0);
     if (page->last_action.request.kind != V5_COMMAND_JOG_CONTINUOUS ||
-        page->jog_keepalive_last_tick == 0U) {
+        page->jog_keepalive_last_tick == 0U ||
+        g_native_readback_refresh_calls != refresh_calls_before + 1U) {
         return 0;
     }
+    v5_main_page_set_native_readback_refresh_callback(page, 0, 0);
     lv_event_send(button, LV_EVENT_PRESS_LOST, 0);
     if (page->jog_pressed_button ||
         page->last_action.request.kind != V5_COMMAND_JOG_STOP) {
@@ -839,6 +856,15 @@ int main(int argc, char **argv)
     screen = lv_scr_act();
     if (!v5_main_page_create(&page, screen)) {
         return 2;
+    }
+    if (argc == 2 &&
+        strcmp(argv[1], "--jog-press-only") == 0) {
+        V5NativeReadback readback;
+        v5_native_readback_init(&readback);
+        v5_native_readback_set_all_homed(&readback, 1);
+        v5_main_page_set_native_readback(&page, &readback);
+        v5_main_page_set_command_execution_enabled(&page, 0);
+        return exercise_jog_press_timing(&page) ? 0 : 127;
     }
     if (argc == 2 &&
         strcmp(argv[1], "--program-scene-generations-only") == 0) {

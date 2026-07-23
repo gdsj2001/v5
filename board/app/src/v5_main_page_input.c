@@ -23,6 +23,7 @@
 static int trigger_jog_for_captured_axis(
     V5MainPage *page,
     V5MainPageActionKind action,
+    int keepalive,
     V5MainPageActionReport *report);
 
 static void write_json_text(FILE *fp, const char *text)
@@ -349,6 +350,7 @@ void v5_main_page_set_page_visible(V5MainPage *page, int visible)
             int ok = trigger_jog_for_captured_axis(
                 page,
                 V5_MAIN_PAGE_ACTION_JOG_STOP,
+                0,
                 &report);
             v5_main_page_internal_log_button_event(
                 V5_MAIN_PAGE_ACTION_JOG_STOP,
@@ -394,6 +396,7 @@ void v5_main_page_internal_selection_idle_timer_cb(lv_timer_t *timer)
 static int trigger_jog_for_captured_axis(
     V5MainPage *page,
     V5MainPageActionKind action,
+    int keepalive,
     V5MainPageActionReport *report)
 {
     V5MainPageSelection saved;
@@ -405,7 +408,9 @@ static int trigger_jog_for_captured_axis(
     page->selection.space = page->jog_pressed_space;
     page->selection.axis = page->jog_pressed_axis;
     page->selection.all_axes = 0;
-    ok = v5_main_page_trigger_action(page, action, report);
+    ok = keepalive
+        ? v5_main_page_internal_trigger_jog_keepalive(page, action, report)
+        : v5_main_page_trigger_action(page, action, report);
     page->selection = saved;
     return ok;
 }
@@ -422,7 +427,7 @@ static void refresh_jog_keepalive(V5MainPage *page)
     action = page->jog_pressed_positive
         ? V5_MAIN_PAGE_ACTION_JOG_CONTINUOUS_PLUS
         : V5_MAIN_PAGE_ACTION_JOG_CONTINUOUS_MINUS;
-    ok = trigger_jog_for_captured_axis(page, action, &report);
+    ok = trigger_jog_for_captured_axis(page, action, 1, &report);
     page->jog_continuous_active = ok && report.executed;
     page->jog_keepalive_last_tick = lv_tick_get();
     v5_main_page_internal_log_button_event(action, ok, ok ? &report : 0);
@@ -438,6 +443,7 @@ static void finish_jog_press(V5MainPage *page, lv_obj_t *button)
     ok = trigger_jog_for_captured_axis(
         page,
         V5_MAIN_PAGE_ACTION_JOG_STOP,
+        0,
         &report);
     v5_main_page_internal_log_button_event(
         V5_MAIN_PAGE_ACTION_JOG_STOP,
@@ -481,7 +487,7 @@ void v5_main_page_internal_jog_button_event_cb(lv_event_t *event)
                 action = page->jog_pressed_positive
                     ? V5_MAIN_PAGE_ACTION_JOG_CONTINUOUS_PLUS
                     : V5_MAIN_PAGE_ACTION_JOG_CONTINUOUS_MINUS;
-                ok = trigger_jog_for_captured_axis(page, action, &report);
+                ok = trigger_jog_for_captured_axis(page, action, 0, &report);
                 page->jog_continuous_active = ok && report.executed;
                 page->jog_keepalive_last_tick = lv_tick_get();
                 v5_main_page_internal_log_button_event(
@@ -511,7 +517,11 @@ void v5_main_page_internal_main_page_root_delete_event_cb(lv_event_t *event)
     }
     if (page->jog_pressed_button && page->jog_pressed_axis) {
         V5MainPageActionReport report;
-        (void)trigger_jog_for_captured_axis(page, V5_MAIN_PAGE_ACTION_JOG_STOP, &report);
+        (void)trigger_jog_for_captured_axis(
+            page,
+            V5_MAIN_PAGE_ACTION_JOG_STOP,
+            0,
+            &report);
     }
     if (page->selection_idle_timer) {
         lv_timer_del(page->selection_idle_timer);
