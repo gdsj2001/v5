@@ -26,7 +26,12 @@ jobs:
           lfs: false
           sparse-checkout: |
             /*
-            !/linux/
+            !/*/
+            /board/
+            /8ax-win/
+            /8ax-factory-client-source/
+            /8ax-dealer-client-source/
+            /功能/
           sparse-checkout-cone-mode: false
 
       - name: Fetch push diff base
