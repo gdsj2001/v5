@@ -36,6 +36,7 @@ jobs:
             /8ax-factory-client-source/
             /8ax-dealer-client-source/
             /功能/
+            /待做工作/
           sparse-checkout-cone-mode: false
 
       - name: Fetch push diff base

@@ -21,6 +21,8 @@ param(
 
 Set-StrictMode -Version 3.0
 $ErrorActionPreference = 'Stop'
+$env:PYTHONUTF8 = '1'
+$env:PYTHONIOENCODING = 'utf-8'
 
 $script:StageResults = [System.Collections.Generic.List[object]]::new()
 $script:DiffBaseWasProvided = $PSBoundParameters.ContainsKey('DiffBase')
