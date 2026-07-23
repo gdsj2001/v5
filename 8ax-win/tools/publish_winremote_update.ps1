@@ -10,7 +10,7 @@ param(
     [string]$PrimaryDomain = "https://license.cjwsjzyy.xyz",
     [string]$BackupDomain = "https://license.3dtouch.top",
     [string]$PublishDir = "",
-    [string]$SigningPrivateKey = "D:\授权私钥\winremote-update-signing-private.pem",
+    [string]$SigningPrivateKey = "",
     [string]$Python = "python",
     [switch]$SkipUpload
 )
@@ -19,6 +19,12 @@ $ErrorActionPreference = "Stop"
 $keyId = "winremote-update-p256-2026-01"
 $manifestSchema = "v5.winremote_update_manifest.v2"
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+if ([string]::IsNullOrWhiteSpace($SigningPrivateKey)) {
+    # Keep this script ASCII so Windows PowerShell 5.1 cannot corrupt the
+    # canonical Unicode key directory when the source file has no UTF-8 BOM.
+    $signingKeyDirectoryName = -join ([char[]](0x6388, 0x6743, 0x79C1, 0x94A5))
+    $SigningPrivateKey = Join-Path ("D:\" + $signingKeyDirectoryName) "winremote-update-signing-private.pem"
+}
 if ([string]::IsNullOrWhiteSpace($PublishDir)) {
     $PublishDir = Join-Path $repo "8ax-win\publish\$Runtime"
 }

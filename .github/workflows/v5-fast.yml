@@ -19,6 +19,10 @@ jobs:
     timeout-minutes: 30
 
     steps:
+      - name: Allow sparse checkout past Windows-reserved Linux paths
+        shell: powershell
+        run: git config --global core.protectNTFS false
+
       - name: Check out canonical source
         uses: actions/checkout@v4
         with:

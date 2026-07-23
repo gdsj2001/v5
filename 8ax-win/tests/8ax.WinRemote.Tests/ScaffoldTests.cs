@@ -1170,6 +1170,9 @@ static void VerifySingleExePublishContract()
     Require(true, script.Contains("update package must contain only", StringComparison.Ordinal), "release package is single-file only");
     Require(true, script.Contains("multi-file sidecar must not be published", StringComparison.Ordinal), "release blocks sidecar files");
     Require(true, script.Contains("Formal release path: package generation must be followed by direct VPS upload and verification", StringComparison.Ordinal), "release uploads immediately after package generation");
+    Require(true, script.All(character => character <= 0x7f), "Windows PowerShell 5.1 release script remains ASCII-safe");
+    Require(true, script.Contains("[char[]](0x6388, 0x6743, 0x79C1, 0x94A5)", StringComparison.Ordinal), "release constructs the canonical Unicode signing-key directory without source-encoding ambiguity");
+    Require(true, script.Contains("$SigningPrivateKey = Join-Path (\"D:\\\" + $signingKeyDirectoryName)", StringComparison.Ordinal), "release defaults to the canonical offline signing key path");
     Require(true, script.Contains("sha256sum '$($remotePair[0])'", StringComparison.Ordinal), "release verifies VPS package, manifest, and signature hashes");
     Require(true, script.Contains("Assert-ManifestMatchesRelease -Path $Manifest", StringComparison.Ordinal), "release verifies remote VPS manifest file");
     Require(true, script.Contains("UTF8Encoding($false, $true)", StringComparison.Ordinal), "release writes strict UTF-8 without BOM");
