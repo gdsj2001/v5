@@ -67,3 +67,4 @@ if ($outputText -match '(?m)^\[document-routes\]$') {
 }
 
 Write-Host 'V5 Windows host gate fail-fast smoke: PASS'
+exit 0
