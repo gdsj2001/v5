@@ -34,6 +34,160 @@ actiond_job=
 publishers_job=
 ui_job=
 
+process_has_userspace_argv() {
+  [ -r "$1" ] || return 1
+  argv0=$(tr '\000' '\n' <"$1" 2>/dev/null | sed -n '1p')
+  [ -n "$argv0" ]
+}
+
+pin_userspace_housekeeping_to_cpu1() {
+  [ -x /usr/bin/taskset ] || {
+    echo "taskset missing; userspace housekeeping cannot exclude CPU0" >&2
+    return 1
+  }
+  if ! grep -qw 1 /sys/devices/system/cpu/online 2>/dev/null &&
+     ! grep -q '0-1' /sys/devices/system/cpu/online 2>/dev/null; then
+    echo "CPU1 unavailable; userspace housekeeping cannot exclude CPU0" >&2
+    return 1
+  fi
+
+  pinned=0
+  for cmdline in /proc/[0-9]*/cmdline; do
+    process_has_userspace_argv "$cmdline" || continue
+    proc=${cmdline%/cmdline}
+    for status in "$proc"/task/[0-9]*/status; do
+      [ -r "$status" ] || continue
+      task=${status%/status}
+      tid=${task##*/}
+      comm=$(cat "$task/comm" 2>/dev/null || true)
+      case "$comm" in
+        rtapi_app:T#*)
+          continue
+          ;;
+      esac
+      if ! /usr/bin/taskset -pc 1 "$tid" >/dev/null 2>&1; then
+        [ ! -r "$status" ] && continue
+        echo "failed to pin userspace housekeeping tid=$tid comm=$comm to CPU1" >&2
+        return 1
+      fi
+      pinned=$((pinned + 1))
+    done
+  done
+
+  verified=0
+  for cmdline in /proc/[0-9]*/cmdline; do
+    process_has_userspace_argv "$cmdline" || continue
+    proc=${cmdline%/cmdline}
+    for status in "$proc"/task/[0-9]*/status; do
+      [ -r "$status" ] || continue
+      task=${status%/status}
+      tid=${task##*/}
+      comm=$(cat "$task/comm" 2>/dev/null || true)
+      case "$comm" in
+        rtapi_app:T#*)
+          continue
+          ;;
+      esac
+      cpus=$(awk -F: '/^Cpus_allowed_list:/ {gsub(/[ \t]/, "", $2); print $2}' \
+        "$status" 2>/dev/null || true)
+      if [ "$cpus" != "1" ]; then
+        [ ! -r "$status" ] && continue
+        echo "userspace housekeeping affinity readback failed tid=$tid comm=$comm cpus=$cpus" >&2
+        return 1
+      fi
+      verified=$((verified + 1))
+    done
+  done
+  [ "$verified" -gt 0 ] || {
+    echo "userspace housekeeping affinity readback found no live tasks" >&2
+    return 1
+  }
+  echo "userspace housekeeping pinned to CPU1 tasks=$pinned verified=$verified"
+}
+
+pin_irq_threads_to_cpu1() {
+  irq_number=$1
+  irq_label=$2
+  irq_thread_count=0
+  [ -x /usr/bin/taskset ] || {
+    echo "taskset missing; IRQ threads cannot exclude CPU0" >&2
+    return 1
+  }
+  for comm_path in /proc/[0-9]*/comm; do
+    [ -r "$comm_path" ] || continue
+    irq_comm=$(cat "$comm_path" 2>/dev/null || true)
+    case "$irq_comm" in
+      irq/"$irq_number"-*) ;;
+      *) continue ;;
+    esac
+    proc=${comm_path%/comm}
+    tid=${proc##*/}
+    if ! /usr/bin/taskset -pc 1 "$tid" >/dev/null 2>&1; then
+      [ ! -r "$proc/status" ] && continue
+      echo "failed to pin non-motion IRQ thread label=$irq_label irq=$irq_number tid=$tid comm=$irq_comm to CPU1" >&2
+      return 1
+    fi
+    cpus=$(awk -F: '/^Cpus_allowed_list:/ {gsub(/[ \t]/, "", $2); print $2}' \
+      "$proc/status" 2>/dev/null || true)
+    [ "$cpus" = "1" ] || {
+      [ ! -r "$proc/status" ] && continue
+      echo "non-motion IRQ thread affinity readback failed label=$irq_label irq=$irq_number tid=$tid comm=$irq_comm cpus=$cpus" >&2
+      return 1
+    }
+    irq_thread_count=$((irq_thread_count + 1))
+  done
+  echo "non-motion IRQ threads pinned label=$irq_label irq=$irq_number cpu=1 count=$irq_thread_count"
+}
+
+pin_irq_label_to_cpu1() {
+  irq_label=$1
+  irq_found=0
+  for irq_number in $(awk -v wanted="$irq_label" '
+      $NF == wanted {
+        gsub(/:/, "", $1)
+        print $1
+      }
+    ' /proc/interrupts); do
+    irq_found=1
+    irq_chip=$(cat "/sys/kernel/irq/$irq_number/chip_name" 2>/dev/null || true)
+    case "$irq_label:$irq_chip" in
+      *:zynq-gpio)
+        echo "non-motion GPIO child IRQ has no independent affinity label=$irq_label irq=$irq_number chip=$irq_chip"
+        ;;
+      *)
+        affinity_path=/proc/irq/$irq_number/smp_affinity_list
+        [ -w "$affinity_path" ] || {
+          echo "non-motion IRQ affinity is not writable label=$irq_label irq=$irq_number" >&2
+          return 1
+        }
+        printf '1\n' >"$affinity_path" || {
+          echo "failed to pin non-motion IRQ label=$irq_label irq=$irq_number to CPU1" >&2
+          return 1
+        }
+        affinity_readback=$(cat "$affinity_path" 2>/dev/null || true)
+        [ "$affinity_readback" = "1" ] || {
+          echo "non-motion IRQ affinity readback failed label=$irq_label irq=$irq_number cpus=$affinity_readback" >&2
+          return 1
+        }
+        echo "non-motion IRQ pinned label=$irq_label irq=$irq_number cpu=1"
+        ;;
+    esac
+    pin_irq_threads_to_cpu1 "$irq_number" "$irq_label" || return 1
+  done
+  [ "$irq_found" -eq 0 ] &&
+    echo "non-motion IRQ label not present label=$irq_label"
+  return 0
+}
+
+pin_non_motion_irqs_to_cpu1() {
+  for irq_label in \
+      eth0 mmc0 mmc1 xuartps cdns-i2c f8007100.adc e000d000.spi \
+      e0002000.usb xilinx_framebuffer f8003000.dmac f8007000.devcfg \
+      f800c000.ocmc ft5426 pl_key0 pl_key1 ps_key1 ps_key2 touch_key; do
+    pin_irq_label_to_cpu1 "$irq_label" || return 1
+  done
+}
+
 require_runtime_files() {
   for path in "$BACKEND_READINESS_PROBE" "$COMMAND_GATE" "$POSITION" \
       "$WCS" "$STATE" "$ACTIOND" "$UI"; do
@@ -96,13 +250,27 @@ status_runtime() {
     "$UI" status >/dev/null 2>&1
 }
 
+release_runtime_lock() {
+  flock -u 9 2>/dev/null || true
+  exec 9>&-
+}
+
 start_runtime() {
   require_runtime_files
   mkdir -p "$RUN_DIR"
   exec 9>"$LOCKFILE"
   flock -x 9
+  if ! pin_non_motion_irqs_to_cpu1; then
+    release_runtime_lock
+    return 1
+  fi
+  if ! pin_userspace_housekeeping_to_cpu1; then
+    release_runtime_lock
+    return 1
+  fi
   if status_runtime; then
     echo "v5 runtime event DAG already ready"
+    release_runtime_lock
     return 0
   fi
   : >"$LOGFILE"
@@ -118,33 +286,39 @@ start_runtime() {
   if ! wait "$actiond_job"; then
     echo "v5 runtime actiond/profile branch failed" >&2
     rollback_start
+    release_runtime_lock
     return 1
   fi
   actiond_job=
   if ! wait "$command_gate_job"; then
     echo "v5 runtime Command Gate branch failed" >&2
     rollback_start
+    release_runtime_lock
     return 1
   fi
   command_gate_job=
   if ! wait "$publishers_job"; then
     echo "v5 runtime Publisher branch failed" >&2
     rollback_start
+    release_runtime_lock
     return 1
   fi
   publishers_job=
   if ! wait "$ui_job"; then
     echo "v5 runtime UI/relay/cache/final-barrier branch failed" >&2
     rollback_start
+    release_runtime_lock
     return 1
   fi
   ui_job=
   if ! status_runtime; then
     echo "v5 runtime final event DAG status failed" >&2
     rollback_start
+    release_runtime_lock
     return 1
   fi
   echo "v5 runtime event DAG ready"
+  release_runtime_lock
 }
 
 case "${1:-}" in

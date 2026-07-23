@@ -209,6 +209,16 @@ class SetDrivePreflightSmoke(unittest.TestCase):
         ), mock.patch.object(
             bus, "invalidate_stale_drive_transaction_evidence", return_value=[],
         ), mock.patch.object(
+            bus,
+            "invalidate_drive_generation",
+            return_value={
+                "ok": True,
+                "code": "BACKEND_DRIVE_INVALIDATED_MACHINE_OFF",
+                "generation": 123,
+                "motion_ready": False,
+                "drive_verified": False,
+            },
+        ) as invalidate_native, mock.patch.object(
             bus, "write_command",
         ) as write_command, mock.patch.object(
             bus.v5_drive_enable_window, "begin",
@@ -224,6 +234,8 @@ class SetDrivePreflightSmoke(unittest.TestCase):
         self.assertFalse(result["drive_write_executed"])
         self.assertEqual(4096, result["targets"][0]["target_egear"]["numerator"])
         self.assertEqual(1125, result["targets"][0]["target_egear"]["denominator"])
+        self.assertFalse(result["native_invalidation"]["motion_ready"])
+        invalidate_native.assert_called_once_with(3.0)
         write_command.assert_not_called()
         window_begin.assert_not_called()
 
@@ -235,7 +247,13 @@ class BootDriveApplySmoke(unittest.TestCase):
             actual_mode: int,
             ) -> tuple[Dict[str, Any], mock.Mock]:
         target = drive_target()
-        identity = {"transaction_generation": "b" * 64}
+        identity = {
+            "transaction_generation": "b" * 64,
+            "native_mapping_generation": 1234,
+            "persistent_mapping_generation": 1234,
+            "native_mapping_matches_persistent": True,
+        }
+        events: List[str] = []
         pre_read = {
             "ok": True,
             "reads": {
@@ -258,6 +276,14 @@ class BootDriveApplySmoke(unittest.TestCase):
             "egear_denominator": 1125,
             "mode_of_operation": 8,
         })
+
+        def readback_batch(*_args: Any, **_kwargs: Any) -> Dict[str, Any]:
+            events.append("batch_readback")
+            return batch
+
+        def readback_start_time() -> int:
+            events.append("batch_start")
+            return 987654321
         with mock.patch.object(
             bus,
             "configured_drive_targets",
@@ -304,7 +330,9 @@ class BootDriveApplySmoke(unittest.TestCase):
         ), mock.patch.object(
             bus, "write_command", return_value={"ok": True, "code": "OK"},
         ) as write_command, mock.patch.object(
-            bus, "set_drive_batch_readback", return_value=batch,
+            bus, "set_drive_batch_readback", side_effect=readback_batch,
+        ), mock.patch.object(
+            bus.time, "monotonic_ns", side_effect=readback_start_time,
         ), mock.patch.object(
             bus, "update_axis_drive_set_evidence",
         ), mock.patch.object(
@@ -320,6 +348,10 @@ class BootDriveApplySmoke(unittest.TestCase):
                 5.0,
                 {"_run_id": "boot-smoke", "trigger": "post_restart_boot"},
             )
+        self.assertEqual(["batch_start", "batch_readback"], events)
+        self.assertEqual(
+            987654321, result["batch_readback_started_monotonic_ns"])
+        self.assertEqual(4, result["targets"][0]["status_slot"])
         return result, write_command
 
     def test_matching_actual_skips_sdo_writes_but_still_fresh_reads(self) -> None:

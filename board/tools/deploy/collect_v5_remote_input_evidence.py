@@ -2,14 +2,22 @@
 import argparse
 import base64
 import hashlib
+import hmac
 import json
 import os
 import socket
+import ssl
 import struct
 import subprocess
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
+
+
+AUTH_PROTOCOL = "v5.remote.auth.v1"
+SESSION_SCHEME = "V5Session"
+SECURITY_PROFILE_SCHEMA = "v5.winremote_relay_security.v1"
 
 
 def ssh(host, command):
@@ -36,11 +44,148 @@ def fetch_delta(host, remote, before, local):
     scp_from(host, "/tmp/v5_remote_input_delta.tmp", local)
 
 
-def capture_frame(host, port, out_bmp, out_json):
-    url = f"http://{host}:{port}/remote/frame/full"
-    with urllib.request.urlopen(url, timeout=5) as response:
-        payload = response.read()
+def load_security_profile(path, ca_cert, host, port, required_scopes):
+    profile_path = Path(path)
+    ca_path = Path(ca_cert)
+    if not profile_path.is_absolute() or not ca_path.is_absolute():
+        raise ValueError("relay security profile and CA certificate paths must be absolute")
+    payload = json.loads(profile_path.read_text(encoding="utf-8"))
+    expected_fields = {
+        "schema",
+        "device_id",
+        "relay_base_uri",
+        "certificate_sha256",
+        "client_id",
+        "client_secret_base64",
+        "scopes",
+    }
+    if not isinstance(payload, dict) or set(payload) != expected_fields:
+        raise ValueError("relay security profile fields are invalid")
+    if payload["schema"] != SECURITY_PROFILE_SCHEMA:
+        raise ValueError("relay security profile schema is invalid")
+    parsed = urllib.parse.urlparse(str(payload["relay_base_uri"]))
+    profile_port = parsed.port or 443
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != host
+        or profile_port != port
+        or parsed.path != "/"
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("relay host/port do not match the pinned security profile")
+    device_id = str(payload["device_id"])
+    client_id = str(payload["client_id"])
+    if not (device_id.isdecimal() and len(device_id) == 6) or not client_id:
+        raise ValueError("relay security identity is invalid")
+    try:
+        secret = base64.b64decode(str(payload["client_secret_base64"]).encode("ascii"), validate=True)
+        pinned_fingerprint = bytes.fromhex(str(payload["certificate_sha256"]))
+    except (ValueError, UnicodeError) as exc:
+        raise ValueError("relay security profile encoding is invalid") from exc
+    if len(secret) != 32 or len(pinned_fingerprint) != 32:
+        raise ValueError("relay security profile key material is invalid")
+    scopes = tuple(sorted(set(str(value) for value in payload["scopes"])))
+    requested = tuple(sorted(set(required_scopes)))
+    if not requested or not set(requested).issubset(scopes):
+        raise ValueError("relay security profile lacks required scopes")
+    certificate_der = ssl.PEM_cert_to_DER_cert(ca_path.read_text(encoding="ascii"))
+    if not hmac.compare_digest(hashlib.sha256(certificate_der).digest(), pinned_fingerprint):
+        raise ValueError("CA certificate does not match the pinned relay fingerprint")
+    ssl_context = ssl.create_default_context(cafile=str(ca_path))
+    if hasattr(ssl, "TLSVersion"):
+        ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
+    return {
+        "base_url": str(payload["relay_base_uri"]),
+        "host": host,
+        "port": port,
+        "device_id": device_id,
+        "client_id": client_id,
+        "secret": secret,
+        "scopes": requested,
+        "fingerprint": pinned_fingerprint,
+        "ssl_context": ssl_context,
+    }
+
+
+def https_request(profile, path, authorization="", json_payload=None):
+    headers = {"Accept": "application/json"}
+    data = None
+    if authorization:
+        headers["Authorization"] = authorization
+    if json_payload is not None:
+        headers["Content-Type"] = "application/json"
+        data = json.dumps(json_payload, separators=(",", ":")).encode("utf-8")
+    request = urllib.request.Request(
+        urllib.parse.urljoin(profile["base_url"], path.lstrip("/")),
+        data=data,
+        headers=headers,
+        method="POST" if data is not None else "GET",
+    )
+    opener = urllib.request.build_opener(
+        urllib.request.HTTPSHandler(context=profile["ssl_context"])
+    )
+    with opener.open(request, timeout=5) as response:
+        return response.read()
+
+
+def authenticate(profile):
+    challenge = json.loads(https_request(
+        profile,
+        "/remote/auth/challenge?client_id="
+        + urllib.parse.quote(profile["client_id"], safe=""),
+    ))
+    if (
+        challenge.get("schema") != "v5.remote_auth_challenge.v1"
+        or challenge.get("protocol") != AUTH_PROTOCOL
+        or challenge.get("device_id") != profile["device_id"]
+    ):
+        raise RuntimeError("relay challenge identity is invalid")
+    challenge_id = str(challenge.get("challenge_id") or "")
+    nonce = str(challenge.get("nonce") or "")
+    if not challenge_id or not nonce:
+        raise RuntimeError("relay challenge is incomplete")
+    canonical = (
+        AUTH_PROTOCOL + "\n"
+        + profile["client_id"] + "\n"
+        + challenge_id + "\n"
+        + nonce + "\n"
+        + profile["device_id"] + "\n"
+        + ",".join(profile["scopes"])
+    ).encode("utf-8")
+    mac = base64.urlsafe_b64encode(
+        hmac.new(profile["secret"], canonical, hashlib.sha256).digest()
+    ).decode("ascii").rstrip("=")
+    session = json.loads(https_request(profile, "/remote/auth/session", json_payload={
+        "schema": "v5.remote_auth_session_request.v1",
+        "protocol": AUTH_PROTOCOL,
+        "client_id": profile["client_id"],
+        "challenge_id": challenge_id,
+        "nonce": nonce,
+        "requested_scopes": list(profile["scopes"]),
+        "mac": mac,
+    }))
+    if (
+        session.get("schema") != "v5.remote_auth_session.v1"
+        or session.get("protocol") != AUTH_PROTOCOL
+        or session.get("device_id") != profile["device_id"]
+        or session.get("client_id") != profile["client_id"]
+    ):
+        raise RuntimeError("relay session identity is invalid")
+    token = str(session.get("session_token") or "")
+    if not token:
+        raise RuntimeError("relay session token is missing")
+    return SESSION_SCHEME + " " + token
+
+
+def capture_frame(profile, authorization, out_bmp, out_json):
+    payload = https_request(profile, "/remote/frame/full", authorization=authorization)
+    if len(payload) < 4:
+        raise RuntimeError("remote frame payload is truncated")
     meta_len = struct.unpack("<I", payload[:4])[0]
+    if meta_len <= 0 or 4 + meta_len > len(payload):
+        raise RuntimeError("remote frame metadata length is invalid")
     meta = json.loads(payload[4:4 + meta_len].decode("utf-8"))
     pixels = payload[4 + meta_len:]
     width = int(meta["width"])
@@ -50,6 +195,8 @@ def capture_frame(host, port, out_bmp, out_json):
         raise SystemExit(f"unsupported frame format: {meta.get('format')}")
     row_stride = width * 4
     image_size = row_stride * height
+    if stride < row_stride or len(pixels) < stride * height:
+        raise RuntimeError("remote frame pixels are truncated")
     file_size = 14 + 40 + image_size
     with out_bmp.open("wb") as fp:
         fp.write(b"BM")
@@ -98,17 +245,32 @@ def ws_recv_text(sock):
     return json.loads(payload.decode("utf-8"))
 
 
-def ws_connect(host, port):
+def ws_connect(profile, authorization):
+    host = profile["host"]
+    port = profile["port"]
     key = base64.b64encode(os.urandom(16)).decode("ascii")
     request = (
         f"GET /remote/input HTTP/1.1\r\n"
         f"Host: {host}:{port}\r\n"
+        f"Authorization: {authorization}\r\n"
         "Upgrade: websocket\r\n"
         "Connection: Upgrade\r\n"
         f"Sec-WebSocket-Key: {key}\r\n"
         "Sec-WebSocket-Version: 13\r\n\r\n"
     ).encode("ascii")
-    sock = socket.create_connection((host, port), timeout=5)
+    raw_sock = socket.create_connection((host, port), timeout=5)
+    try:
+        sock = profile["ssl_context"].wrap_socket(raw_sock, server_hostname=host)
+    except Exception:
+        raw_sock.close()
+        raise
+    peer_certificate = sock.getpeercert(binary_form=True)
+    if not hmac.compare_digest(
+        hashlib.sha256(peer_certificate).digest(),
+        profile["fingerprint"],
+    ):
+        sock.close()
+        raise RuntimeError("relay WebSocket certificate fingerprint mismatch")
     sock.sendall(request)
     response = b""
     while b"\r\n\r\n" not in response:
@@ -143,9 +305,9 @@ def send_pointer(sock, session_id, seq, phase, x, y):
     return ack
 
 
-def remote_action(host, port, kind, args):
+def remote_action(profile, authorization, kind, args):
     session_id = f"v5-evidence-{int(time.time() * 1000)}"
-    with ws_connect(host, port) as sock:
+    with ws_connect(profile, authorization) as sock:
         ws_send_text(sock, json.dumps({
             "type": "control_request",
             "session_id": session_id,
@@ -182,6 +344,8 @@ def main():
     parser.add_argument("--ssh", help="optional board SSH host for event-delta collection")
     parser.add_argument("--host", default="192.168.1.221", help="relay host/IP")
     parser.add_argument("--port", type=int, default=18080)
+    parser.add_argument("--relay-security-profile", required=True)
+    parser.add_argument("--ca-cert", required=True)
     parser.add_argument("--out-dir", default=str(evidence_root / "board_remote_input"))
     sub = parser.add_subparsers(dest="kind", required=True)
     click = sub.add_parser("click")
@@ -196,13 +360,22 @@ def main():
     sub.add_parser("capture")
     args = parser.parse_args()
 
+    requested_scopes = {"viewer"} if args.kind == "capture" else {"viewer", "operator"}
+    profile = load_security_profile(
+        args.relay_security_profile,
+        args.ca_cert,
+        args.host,
+        args.port,
+        requested_scopes,
+    )
+    authorization = authenticate(profile)
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     if args.kind == "capture":
         frame = out_dir / f"v5_board_capture_{stamp}.bmp"
         meta_path = out_dir / f"v5_board_capture_{stamp}.json"
-        capture_frame(args.host, args.port, frame, meta_path)
+        capture_frame(profile, authorization, frame, meta_path)
         print(frame)
         return
     before_bmp = out_dir / f"v5_remote_input_{stamp}_before.bmp"
@@ -213,13 +386,13 @@ def main():
     input_delta = out_dir / f"v5_remote_input_{stamp}_remote_input_delta.jsonl"
     summary = out_dir / f"v5_remote_input_{stamp}_summary.json"
 
-    before_meta = capture_frame(args.host, args.port, before_bmp, before_json)
+    before_meta = capture_frame(profile, authorization, before_bmp, before_json)
     before_ui = count_remote_lines(args.ssh, "/run/8ax_v5_product_ui/ui_events.jsonl") if args.ssh else None
     before_input = count_remote_lines(args.ssh, "/run/8ax_v5_product_ui/remote_input_events.jsonl") if args.ssh else None
 
-    result = remote_action(args.host, args.port, args.kind, args)
+    result = remote_action(profile, authorization, args.kind, args)
     time.sleep(0.2)
-    after_meta = capture_frame(args.host, args.port, after_bmp, after_json)
+    after_meta = capture_frame(profile, authorization, after_bmp, after_json)
     after_ui = count_remote_lines(args.ssh, "/run/8ax_v5_product_ui/ui_events.jsonl") if args.ssh else None
     after_input = count_remote_lines(args.ssh, "/run/8ax_v5_product_ui/remote_input_events.jsonl") if args.ssh else None
     if args.ssh:
@@ -230,6 +403,10 @@ def main():
         "schema": "v5.remote_input_evidence.v1",
         "kind": args.kind,
         "mode": "layout_only",
+        "transport": "https_wss_challenge_session",
+        "device_id": profile["device_id"],
+        "client_id": profile["client_id"],
+        "scopes": list(profile["scopes"]),
         "before_frame": str(before_bmp),
         "after_frame": str(after_bmp),
         "before_meta": before_meta,

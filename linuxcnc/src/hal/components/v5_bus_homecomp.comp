@@ -27,8 +27,8 @@ option homemod;
 #include "hal/components/v5_bus_home_math.h"
 
 #define V5_HOME_JOINTS 5
-#define V5_HOME_STABLE_CYCLES 3u
-#define V5_HOME_WAIT_CYCLES 500u
+#define V5_HOME_STABLE_CYCLES 6u
+#define V5_HOME_WAIT_CYCLES 1000u
 
 enum v5_phase {
     V5_IDLE, V5_MOVING, V5_SETTLING, V5_COMPLETE, V5_FAILED,

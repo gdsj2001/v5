@@ -224,8 +224,11 @@ static void settings_popup_set_eta(V5SettingsPage *page, int seconds_left)
 void v5_settings_page_popup_show(V5SettingsPage *page, const char *action, const char *title, const char *message, int final, int ok)
 {
     int was_active;
+    int model_mapping_set_drive;
+    lv_obj_t *close_label;
     lv_color_t message_color;
     if (!page || !page->popup_overlay) return;
+    model_mapping_set_drive = action && strcmp(action, "motion_model_mapping_confirm") == 0;
     was_active = page->popup_active;
     if (!was_active) {
         if (!v5_ui_first_frame_guard_begin_overlay(&page->popup_frame_guard)) {
@@ -239,6 +242,7 @@ void v5_settings_page_popup_show(V5SettingsPage *page, const char *action, const
     page->popup_final = final ? 1 : 0;
     page->popup_ok = ok ? 1 : 0;
     page->popup_restart_handoff_accepted = 0;
+    page->popup_model_mapping_set_drive = model_mapping_set_drive;
     page->popup_started_s = v5_settings_page_monotonic_seconds();
     page->popup_eta_seconds = (!final && settings_action_requires_countdown(action)) ? settings_action_eta_seconds(action) : 0;
     (void)v5_ui_first_frame_guard_set_label_text(
@@ -257,6 +261,13 @@ void v5_settings_page_popup_show(V5SettingsPage *page, const char *action, const
         page->popup_message,
         message_color);
     settings_popup_set_eta(page, page->popup_eta_seconds);
+    close_label = page->popup_close ? lv_obj_get_child(page->popup_close, 0) : 0;
+    if (close_label) {
+        (void)v5_ui_first_frame_guard_set_label_text(
+            &page->popup_frame_guard,
+            close_label,
+            model_mapping_set_drive ? "设置驱动" : "关闭");
+    }
     settings_popup_set_close_enabled(page, final ? 1 : 0);
     if (!was_active &&
         !v5_ui_first_frame_guard_present_overlay(&page->popup_frame_guard, page->popup_overlay)) {
@@ -264,6 +275,7 @@ void v5_settings_page_popup_show(V5SettingsPage *page, const char *action, const
         page->popup_final = 0;
         page->popup_ok = 0;
         page->popup_restart_handoff_accepted = 0;
+        page->popup_model_mapping_set_drive = 0;
         page->popup_action[0] = '\0';
         page->popup_run_id[0] = '\0';
         page->popup_cancel_pending = 0;
@@ -340,6 +352,7 @@ static void settings_popup_hide(V5SettingsPage *page)
     page->popup_final = 0;
     page->popup_ok = 0;
     page->popup_restart_handoff_accepted = 0;
+    page->popup_model_mapping_set_drive = 0;
     page->popup_action[0] = '\0';
     page->popup_run_id[0] = '\0';
     page->popup_cancel_pending = 0;
@@ -395,6 +408,17 @@ static void settings_popup_close_cb(lv_event_t *event)
     v5_button_visual_release_now(lv_event_get_target(event));
     if (lv_indev_get_act()) {
         lv_indev_wait_release(lv_indev_get_act());
+    }
+    if (page->popup_final && page->popup_model_mapping_set_drive) {
+        V5MainPageActionReport drive_report;
+        memset(&drive_report, 0, sizeof(drive_report));
+        page->popup_model_mapping_set_drive = 0;
+        settings_popup_hide(page);
+        (void)v5_settings_page_trigger_action(
+            page,
+            V5_MAIN_PAGE_ACTION_SETTINGS_SET_DRIVE,
+            &drive_report);
+        return;
     }
     if (page->popup_final) {
         if (page->popup_restart_handoff_accepted) {

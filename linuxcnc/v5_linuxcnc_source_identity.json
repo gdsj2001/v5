@@ -10,7 +10,7 @@
     "tree": "cbadbb8d029aefe7a8d0e3218885aaa59798337b"
   },
   "v5_source_tree": "c1f4c53315c8e614fafbe48992afa91e8aef8014",
-  "content_sha256": "ee1672e08ae971ef33b39628cb492caf87b83e0fd58cb93017aadbd756d93370",
+  "content_sha256": "b34b5ea84a5737ec37720262843057cdb2971bd768eeb4944347a226a6cec8aa",
   "implementation": "in_tree",
   "changed_files": [
     "scripts/linuxcnc.in",
@@ -268,6 +268,8 @@
       "component v5_bus_homecomp",
       "option homemod;",
       "#define CUSTOM_HOMEMODULE",
+      "#define V5_HOME_STABLE_CYCLES 6u",
+      "#define V5_HOME_WAIT_CYCLES 1000u",
       "V5_SETTLING",
       "V5_ZERO_DELTA_UNPROVEN",
       "V5_TXN_PLAN",
@@ -276,7 +278,7 @@
     ],
     "src/hal/components/v5_safety_latch.comp": [
       "component v5_safety_latch",
-      "param rw u32 watchdog_cycles = 50",
+      "param rw u32 watchdog_cycles = 100",
       "if (force || data.stale_cycles > watchdog_cycles)"
     ],
     "src/hal/user_comps/v5_native_hal_owner.comp": [
@@ -286,8 +288,12 @@
       "V5_NATIVE_HAL_OWNER_SOCKET_PATH",
       "V5_BACKEND_READINESS_SOCKET_PATH",
       "backend_cpu_contract_capture",
+      "rtapi_threads_contract",
       "backend_readiness_arm",
       "backend_readiness_tick",
+      "backend_drive_verify",
+      "backend_drive_invalidate",
+      "NATIVE_SAFETY_DRIVE_NOT_VERIFIED",
       "registered_processes_failure",
       "backend_domain_wkc",
       "backend_dc_time_ok_seq",
@@ -299,10 +305,15 @@
     ],
     "src/hal/user_comps/v5_backend_readiness_protocol.h": [
       "V5_BACKEND_READINESS_OP_ARM",
+      "V5_BACKEND_READINESS_OP_DRIVE_VERIFY",
+      "V5_BACKEND_READINESS_OP_DRIVE_INVALIDATE",
       "V5_BACKEND_READINESS_STATUS_REVOKED",
       "owner_start_ticks",
       "backend_data_ready",
       "motion_backend_ready",
+      "drive_verified",
+      "drive_mapping_generation",
+      "drive_transaction_sha256",
       "first_full_wkc_ns",
       "dc_fresh_pair_ready_ns",
       "backend_ready_published_ns"
@@ -494,7 +505,10 @@
         "XYZAC_TRT",
         "XYZBC_TRT",
         "xyzac-trt-kins",
-        "xyzbc-trt-kins"
+        "xyzbc-trt-kins",
+        "BACKEND_DRIVE_VERIFIED",
+        "BACKEND_DRIVE_INVALIDATED_MACHINE_OFF",
+        "NATIVE_SAFETY_DRIVE_NOT_VERIFIED"
       ],
       "forbidden_ascii": []
     },

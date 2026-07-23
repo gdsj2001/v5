@@ -411,10 +411,11 @@ def validate_contract(project_root, source_root):
             'b"120000"',
             '"--deleted", "-z"',
             '"--force-remove", "-z", "--stdin"',
-            '"--others"',
-            '"--exclude-standard"',
+            "except (OSError, ValueError, SystemExit):",
             'STATE_SCHEMA = "v5-linux-projection-state-v1"',
             "def apply_projection_delta(",
+            "def repair_owner_projection(output_root):",
+            "V5_LINUX_PROJECTION_REPAIRED reason=untrusted-state owners=",
             "V5_LINUX_PROJECTION_DELTA",
             "write_projection_state(output_root, desired_entries)",
             "V5_LINUX_PROJECTION_GIT_REMOVED",
@@ -426,6 +427,8 @@ def validate_contract(project_root, source_root):
             "if output_root.exists():\n        shutil.rmtree(output_root)",
             "initialize_kernel_git(output_root)",
             "allow_build_git=True",
+            '"--others"',
+            '"--exclude-standard"',
         ),
     )
     require_tokens(

@@ -2,6 +2,7 @@
 
 #include "v5_backend_readiness_protocol.h"
 
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
@@ -92,6 +93,7 @@ static int owner_start_ticks(uint32_t pid, uint64_t *result)
 static int query_owner(
     uint32_t operation,
     uint64_t request_id,
+    const V5BackendReadinessRequest *request_fields,
     V5BackendReadinessResponse *response)
 {
     struct sockaddr_un address;
@@ -111,6 +113,7 @@ static int query_owner(
         return 0;
     }
     memset(&request, 0, sizeof(request));
+    if (request_fields) request = *request_fields;
     request.magic = V5_BACKEND_READINESS_MAGIC;
     request.version = V5_BACKEND_READINESS_VERSION;
     request.size = (uint32_t)sizeof(request);
@@ -152,12 +155,22 @@ static int target_ready(
 
 static void print_response(const V5BackendReadinessResponse *response)
 {
+    char digest[V5_BACKEND_DRIVE_IDENTITY_SHA256_SIZE * 2U + 1U];
+    size_t index;
+    for (index = 0U; index < V5_BACKEND_DRIVE_IDENTITY_SHA256_SIZE; ++index) {
+        snprintf(digest + index * 2U, 3U, "%02x",
+                 response->drive_transaction_sha256[index]);
+    }
+    digest[sizeof(digest) - 1U] = '\0';
     printf(
         "code=%s generation=%u owner_pid=%u owner_start_ticks=%llu "
         "armed=%u data_ready=%u motion_ready=%u revoked=%u "
         "slaves=%u/%u wkc=%u/%u wkc_complete=%u all_op=%u "
         "dc_phased=%u dc_valid=%u dc_age=%u dc_seq=%u dc_errors=%u "
         "cpu_contract_ready=%llu first_full_wkc=%llu "
+        "drive_verified=%u drive_mapping_generation=%u drive_axis_mask=%u "
+        "drive_readback_count=%u drive_readback_started=%llu "
+        "drive_verified_at=%llu drive_identity_sha256=%s "
         "dc_fresh_pair_ready=%llu backend_data_ready=%llu "
         "backend_ready_published=%llu\n",
         response->code,
@@ -181,6 +194,13 @@ static void print_response(const V5BackendReadinessResponse *response)
         response->dc_time_error_count,
         (unsigned long long)response->cpu_contract_ready_ns,
         (unsigned long long)response->first_full_wkc_ns,
+        response->drive_verified,
+        response->drive_mapping_generation,
+        response->drive_axis_mask,
+        response->drive_readback_count,
+        (unsigned long long)response->drive_readback_started_ns,
+        (unsigned long long)response->drive_verified_ns,
+        digest,
         (unsigned long long)response->dc_fresh_pair_ready_ns,
         (unsigned long long)response->backend_data_ready_ns,
         (unsigned long long)response->backend_ready_published_ns);
@@ -191,9 +211,43 @@ static void usage(const char *program)
     fprintf(stderr,
             "usage: %s [--arm] [--status] [--wait data|motion] "
             "[--require data|motion] [--timeout-ms N] "
+            "[--verify-drive|--invalidate-drive --drive-owner-generation N "
+            "--drive-mapping-generation N --drive-axis-mask N "
+            "--drive-readback-count N --drive-readback-start-ns N "
+            "--drive-transaction-sha256 HEX] "
             "[--expect-generation N --expect-owner-pid N "
             "--expect-owner-start-ticks N]\n",
             program);
+}
+
+static int parse_sha256(const char *text, uint8_t *digest)
+{
+    size_t index;
+    if (!text || strlen(text) != V5_BACKEND_DRIVE_IDENTITY_SHA256_SIZE * 2U ||
+        !digest) return 0;
+    for (index = 0U; index < V5_BACKEND_DRIVE_IDENTITY_SHA256_SIZE; ++index) {
+        unsigned char high = (unsigned char)text[index * 2U];
+        unsigned char low = (unsigned char)text[index * 2U + 1U];
+        unsigned int high_value;
+        unsigned int low_value;
+        if (!isxdigit(high) || !isxdigit(low)) return 0;
+        high_value = isdigit(high) ? (unsigned int)(high - '0') :
+            (unsigned int)(tolower(high) - 'a' + 10);
+        low_value = isdigit(low) ? (unsigned int)(low - '0') :
+            (unsigned int)(tolower(low) - 'a' + 10);
+        digest[index] = (uint8_t)((high_value << 4U) | low_value);
+    }
+    return 1;
+}
+
+static int request_digest_present(const V5BackendReadinessRequest *request)
+{
+    size_t index;
+    if (!request) return 0;
+    for (index = 0U; index < V5_BACKEND_DRIVE_IDENTITY_SHA256_SIZE; ++index) {
+        if (request->drive_transaction_sha256[index] != 0U) return 1;
+    }
+    return 0;
 }
 
 static int parse_u64(const char *text, uint64_t *result)
@@ -219,12 +273,20 @@ int main(int argc, char **argv)
     unsigned long timeout_ms = 0UL;
     uint64_t request_id = ((uint64_t)getpid() << 32U) ^ monotonic_ns();
     uint64_t deadline;
+    V5BackendReadinessRequest request_fields;
+    uint32_t requested_operation;
     V5BackendReadinessResponse response;
     int index;
+
+    memset(&request_fields, 0, sizeof(request_fields));
 
     for (index = 1; index < argc; ++index) {
         if (strcmp(argv[index], "--arm") == 0) {
             first_operation = V5_BACKEND_READINESS_OP_ARM;
+        } else if (strcmp(argv[index], "--verify-drive") == 0) {
+            first_operation = V5_BACKEND_READINESS_OP_DRIVE_VERIFY;
+        } else if (strcmp(argv[index], "--invalidate-drive") == 0) {
+            first_operation = V5_BACKEND_READINESS_OP_DRIVE_INVALIDATE;
         } else if (strcmp(argv[index], "--status") == 0) {
             continue;
         } else if ((strcmp(argv[index], "--wait") == 0 ||
@@ -265,12 +327,89 @@ int main(int argc, char **argv)
                 usage(argv[0]);
                 return 2;
             }
+        } else if (strcmp(argv[index], "--drive-owner-generation") == 0 &&
+                   index + 1 < argc) {
+            uint64_t value = 0U;
+            if (!parse_u64(argv[++index], &value) || value > UINT32_MAX) {
+                usage(argv[0]);
+                return 2;
+            }
+            request_fields.generation = (uint32_t)value;
+        } else if (strcmp(argv[index], "--drive-mapping-generation") == 0 &&
+                   index + 1 < argc) {
+            uint64_t value = 0U;
+            if (!parse_u64(argv[++index], &value) || value > UINT32_MAX) {
+                usage(argv[0]);
+                return 2;
+            }
+            request_fields.drive_mapping_generation = (uint32_t)value;
+        } else if (strcmp(argv[index], "--drive-axis-mask") == 0 &&
+                   index + 1 < argc) {
+            uint64_t value = 0U;
+            if (!parse_u64(argv[++index], &value) || value > UINT32_MAX) {
+                usage(argv[0]);
+                return 2;
+            }
+            request_fields.drive_axis_mask = (uint32_t)value;
+        } else if (strcmp(argv[index], "--drive-readback-count") == 0 &&
+                   index + 1 < argc) {
+            uint64_t value = 0U;
+            if (!parse_u64(argv[++index], &value) || value > UINT32_MAX) {
+                usage(argv[0]);
+                return 2;
+            }
+            request_fields.drive_readback_count = (uint32_t)value;
+        } else if (strcmp(argv[index], "--drive-readback-start-ns") == 0 &&
+                   index + 1 < argc) {
+            if (!parse_u64(argv[++index],
+                           &request_fields.drive_readback_started_ns)) {
+                usage(argv[0]);
+                return 2;
+            }
+        } else if (strcmp(argv[index], "--drive-transaction-sha256") == 0 &&
+                   index + 1 < argc) {
+            if (!parse_sha256(argv[++index],
+                              request_fields.drive_transaction_sha256)) {
+                usage(argv[0]);
+                return 2;
+            }
         } else {
             usage(argv[0]);
             return 2;
         }
     }
     if (wait_target != WAIT_TARGET_NONE && require_target != WAIT_TARGET_NONE) {
+        usage(argv[0]);
+        return 2;
+    }
+    if (first_operation == V5_BACKEND_READINESS_OP_DRIVE_VERIFY) {
+        if (wait_target != WAIT_TARGET_NONE || require_target != WAIT_TARGET_NONE ||
+            !request_fields.generation ||
+            !request_fields.drive_mapping_generation ||
+            !request_fields.drive_axis_mask ||
+            !request_fields.drive_readback_count ||
+            !request_fields.drive_readback_started_ns ||
+            !request_digest_present(&request_fields)) {
+            usage(argv[0]);
+            return 2;
+        }
+    } else if (first_operation == V5_BACKEND_READINESS_OP_DRIVE_INVALIDATE) {
+        if (wait_target != WAIT_TARGET_NONE || require_target != WAIT_TARGET_NONE ||
+            !request_fields.generation ||
+            request_fields.drive_mapping_generation ||
+            request_fields.drive_axis_mask ||
+            request_fields.drive_readback_count ||
+            request_fields.drive_readback_started_ns ||
+            request_digest_present(&request_fields)) {
+            usage(argv[0]);
+            return 2;
+        }
+    } else if (request_fields.generation ||
+               request_fields.drive_mapping_generation ||
+               request_fields.drive_axis_mask ||
+               request_fields.drive_readback_count ||
+               request_fields.drive_readback_started_ns ||
+               request_digest_present(&request_fields)) {
         usage(argv[0]);
         return 2;
     }
@@ -287,11 +426,13 @@ int main(int argc, char **argv)
     }
     if (wait_target != WAIT_TARGET_NONE && !timeout_ms) timeout_ms = 30000UL;
     deadline = monotonic_ns() + (uint64_t)timeout_ms * 1000000ULL;
+    requested_operation = first_operation;
 
     for (;;) {
         memset(&response, 0, sizeof(response));
-        if (query_owner(first_operation, ++request_id, &response)) {
+        if (query_owner(first_operation, ++request_id, &request_fields, &response)) {
             first_operation = V5_BACKEND_READINESS_OP_STATUS;
+            memset(&request_fields, 0, sizeof(request_fields));
             if (expected_generation &&
                 (response.generation != expected_generation ||
                  response.owner_pid != expected_owner_pid ||
@@ -303,6 +444,16 @@ int main(int argc, char **argv)
                 response.status == V5_BACKEND_READINESS_STATUS_REVOKED) {
                 print_response(&response);
                 return 3;
+            }
+            if (requested_operation == V5_BACKEND_READINESS_OP_DRIVE_VERIFY) {
+                print_response(&response);
+                return response.status == V5_BACKEND_READINESS_STATUS_OK &&
+                       response.drive_verified ? 0 : 4;
+            }
+            if (requested_operation == V5_BACKEND_READINESS_OP_DRIVE_INVALIDATE) {
+                print_response(&response);
+                return response.status == V5_BACKEND_READINESS_STATUS_OK &&
+                       !response.drive_verified ? 0 : 4;
             }
             if (require_target != WAIT_TARGET_NONE) {
                 print_response(&response);

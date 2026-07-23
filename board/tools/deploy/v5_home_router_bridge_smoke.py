@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[3]
 ROUTER = ROOT / "linuxcnc/src/hal/components/v5_bus_axis_router.comp"
 OWNER = ROOT / "linuxcnc/src/hal/user_comps/v5_native_hal_owner.comp"
 PROTOCOL = ROOT / "linuxcnc/src/hal/user_comps/v5_native_hal_owner_protocol.h"
-HAL = ROOT / "board/linuxcnc/hal/v5_bus_2ms.hal"
+HAL = ROOT / "board/linuxcnc/hal/v5_bus_1ms.hal"
 COMMAND_IPC = ROOT / "board/services/command_gate/v5_command_gate_ipc.h"
 COMMAND_SERVER = ROOT / "board/services/command_gate/v5_command_gate_server.c"
 HOME_MAPPING = ROOT / "board/services/command_gate/v5_native_home_mapping.c"
@@ -172,6 +172,9 @@ def main() -> int:
     settings_axis_runtime = SETTINGS_AXIS_RUNTIME.read_text(encoding="utf-8")
 
     require_hal_name_lengths(owner, router, safety, home_pins)
+    require(safety, "param rw u32 watchdog_cycles = 100")
+    require(home_component, "#define V5_HOME_STABLE_CYCLES 6u")
+    require(home_component, "#define V5_HOME_WAIT_CYCLES 1000u")
 
     for token in (
         "pin in u32 joint-axis-code-##[5]",

@@ -2,8 +2,8 @@
 
 static const V5MicrokernelManifestEntry k_manifest[] = {
     {"linuxcnc_ini", "linuxcnc/ini/v5_bus.ini", V5_MICROKERNEL_MANIFEST_FILE, 1, "microkernel"},
-    {"linuxcnc_hal", "linuxcnc/hal/v5_bus_2ms.hal", V5_MICROKERNEL_MANIFEST_FILE, 1, "microkernel"},
-    {"ethercat_hal_config", "linuxcnc/hal/ethercat-conf-2ms.xml", V5_MICROKERNEL_MANIFEST_FILE, 1, "microkernel"},
+    {"linuxcnc_hal", "linuxcnc/hal/v5_bus_1ms.hal", V5_MICROKERNEL_MANIFEST_FILE, 1, "microkernel"},
+    {"ethercat_hal_config", "linuxcnc/hal/ethercat-conf-1ms.xml", V5_MICROKERNEL_MANIFEST_FILE, 1, "microkernel"},
     {"step_ip_contract", "linuxcnc/components/step_ip_v1_5.contract.json", V5_MICROKERNEL_MANIFEST_FILE, 1, "microkernel"},
     {"linuxcnc_executable", "linuxcnc/runtime/linuxcnc", V5_MICROKERNEL_MANIFEST_RUNTIME_OWNER, 1, "microkernel"},
     {"rtapi_modules", "linuxcnc/runtime/rtapi_modules", V5_MICROKERNEL_MANIFEST_RUNTIME_OWNER, 1, "microkernel"},

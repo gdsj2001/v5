@@ -7,6 +7,11 @@ from typing import Any, Dict
 
 import v5_drive_bus_action
 from v5_command_gate_zero_client import probe_axis_slave_mapping
+from v5_drive_boot_attestation import (
+    DriveAttestationError,
+    attest_boot_drive_generation,
+    backend_data_identity,
+)
 
 
 BOOT_APPLY_RESULT_SCHEMA = "v5.drive_boot_apply_result.v1"
@@ -21,6 +26,7 @@ TRANSIENT_CODES = frozenset({
     "DRIVE_WRITE_WINDOW_CLOSE_FAILED",
     "DRIVE_WRITE_WINDOW_MACHINE_OFF_NOT_CONFIRMED",
     "DRIVE_SET_BATCH_READBACK_FAILED",
+    "DRIVE_BOOT_NATIVE_ATTESTATION_NOT_READY",
 })
 
 
@@ -50,7 +56,7 @@ def _result(ok: bool, code: str, message_cn: str,
     return result
 
 
-def _current_boot_result() -> Dict[str, Any] | None:
+def _current_boot_result(timeout_s: float) -> Dict[str, Any] | None:
     try:
         payload = json.loads(BOOT_APPLY_RESULT_PATH.read_text(encoding="utf-8"))
     except (OSError, ValueError, TypeError):
@@ -61,6 +67,30 @@ def _current_boot_result() -> Dict[str, Any] | None:
             not payload.get("ok") or
             str(payload.get("boot_id") or "") != _boot_id()):
         return None
+    attestation = payload.get("native_attestation")
+    if not isinstance(attestation, dict) or not attestation.get("ok"):
+        return None
+    try:
+        current = backend_data_identity(timeout_s)
+        cached_identity = (
+            int(attestation.get("generation") or 0),
+            int(attestation.get("owner_pid") or 0),
+            int(attestation.get("owner_start_ticks") or 0),
+        )
+        current_identity = (
+            int(current.get("generation") or 0),
+            int(current.get("owner_pid") or 0),
+            int(current.get("owner_start_ticks") or 0),
+        )
+    except (DriveAttestationError, TypeError, ValueError):
+        return None
+    fields = current.get("fields")
+    if (cached_identity != current_identity or
+            not all(current_identity) or
+            not isinstance(fields, dict) or
+            fields.get("drive_verified") != "1" or
+            fields.get("motion_ready") != "1"):
+        return None
     return payload
 
 
@@ -70,12 +100,12 @@ def _persist(result: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def run_post_restart_drive_apply(timeout_s: float = 8.0) -> Dict[str, Any]:
-    """Apply final INI/mapping/profile once per board boot and keep Machine Off."""
-    completed = _current_boot_result()
-    if completed is not None:
-        return completed
+    """Apply final owners once per live backend generation and keep Machine Off."""
     try:
         probe_timeout = min(max(float(timeout_s), 0.1), 1.0)
+        completed = _current_boot_result(probe_timeout)
+        if completed is not None:
+            return completed
         try:
             mapping = probe_axis_slave_mapping(probe_timeout)
         except OSError as exc:
@@ -122,6 +152,23 @@ def run_post_restart_drive_apply(timeout_s: float = 8.0) -> Dict[str, Any]:
                 "_run_id": "boot-%d" % time.monotonic_ns(),
             },
         )
+        native_attestation: Dict[str, Any] = {}
+        if raw.get("ok"):
+            try:
+                native_attestation = attest_boot_drive_generation(
+                    raw, min(max(float(timeout_s), 0.1), 3.0))
+            except DriveAttestationError as exc:
+                return _result(
+                    False,
+                    "DRIVE_BOOT_NATIVE_ATTESTATION_NOT_READY",
+                    "驱动fresh readback已完成，但同启动代native运动准入尚未确认；保持Machine Off。",
+                    detail={"code": exc.code, "detail": exc.detail},
+                    drive_apply=raw,
+                    drive_write_executed=bool(
+                        raw.get("drive_write_executed")),
+                    readback_complete=False,
+                    native_attestation={},
+                )
         result = _result(
             bool(raw.get("ok")),
             "DRIVE_BOOT_APPLY_OK" if raw.get("ok") else str(
@@ -132,6 +179,7 @@ def run_post_restart_drive_apply(timeout_s: float = 8.0) -> Dict[str, Any]:
                 "重启后驱动统一应用失败，保持Machine Off。"),
             owner_reload=preload,
             drive_apply=raw,
+            native_attestation=native_attestation,
             drive_write_executed=bool(raw.get("drive_write_executed")),
             readback_complete=bool(raw.get("ok")),
         )

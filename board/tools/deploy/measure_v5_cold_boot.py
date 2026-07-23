@@ -10,7 +10,6 @@ import shlex
 import sys
 import threading
 import time
-import urllib.request
 import socket
 from pathlib import Path
 from typing import Any
@@ -99,41 +98,39 @@ def parse_boot_stages(lines: list[tuple[float, str]]) -> list[dict[str, Any]]:
 
 
 def post_ready_ethercat_errors(
-        serial_lines: list[tuple[float, str]]) -> list[dict[str, Any]]:
-    ready_seen = False
+        serial_lines: list[tuple[float, str]],
+        backend_ready_stamp_s: float | None) -> list[dict[str, Any]]:
     failures: list[dict[str, Any]] = []
     markers = ("Working counter changed to 0/", "SKIPPED", "TIMED OUT",
                "UNMATCHED", "Unexpected realtime delay", "4AE322B9D742")
     for stamp_s, line in serial_lines:
-        if "LinuxCNC backend transport ready;" in line:
-            ready_seen = True
-            continue
-        if ready_seen and any(marker in line for marker in markers):
+        if (backend_ready_stamp_s is not None
+                and stamp_s >= backend_ready_stamp_s
+                and any(marker in line for marker in markers)):
             failures.append({"stamp_s": stamp_s, "line": line})
     return failures
 
 
 def startup_forbidden_errors(
-        serial_lines: list[tuple[float, str]]) -> list[dict[str, Any]]:
+        serial_lines: list[tuple[float, str]],
+        backend_ready_stamp_s: float | None) -> list[dict[str, Any]]:
     """Reject whole-boot realtime faults and post-ready EtherCAT loss.
 
     WKC convergence and transient datagrams are allowed before the canonical
     backend-ready boundary.  Realtime deadline faults and their operator
     reference are never allowed anywhere in the captured cold-boot window.
     """
-    ready_seen = False
     failures: list[dict[str, Any]] = []
     whole_boot_markers = ("Unexpected realtime delay", "4AE322B9D742")
     post_ready_markers = ("Working counter changed to 0/", "SKIPPED",
                           "TIMED OUT", "UNMATCHED")
     for stamp_s, line in serial_lines:
-        if "LinuxCNC backend transport ready;" in line:
-            ready_seen = True
-            continue
         scope = None
         if any(marker in line for marker in whole_boot_markers):
             scope = "whole_boot"
-        elif ready_seen and any(marker in line for marker in post_ready_markers):
+        elif (backend_ready_stamp_s is not None
+              and stamp_s >= backend_ready_stamp_s
+              and any(marker in line for marker in post_ready_markers)):
             scope = "post_backend_ready"
         if scope:
             failures.append({"stamp_s": stamp_s, "scope": scope, "line": line})
@@ -141,18 +138,17 @@ def startup_forbidden_errors(
 
 
 def ssh_probe(target: str, expected_ui_pid: int) -> dict[str, Any] | None:
-    script = ("V5_EXPECT_UI_PID=%d taskset -c 1 " % expected_ui_pid) + r'''python3 - <<'PY'
+    script = ("V5_EXPECT_UI_PID=%d taskset -c 1 env "
+              "PYTHONPATH=/usr/lib/python3/dist-packages " % expected_ui_pid) + r'''python3 - <<'PY'
 import ctypes,json,os,socket,stat,struct,time
 out={"uptime_s":float(open("/proc/uptime").read().split()[0]),"boot_id":open("/proc/sys/kernel/random/boot_id").read().strip()}
 gate="/run/8ax_v5_product_ui/v5_command_gate.sock"
 try:
  pid=int(open("/run/8ax/v5_command_gate.pid").read().strip())
  cmdline=open("/proc/%d/cmdline"%pid,"rb").read().replace(b"\0",b" ")
- class DriveAttestation(ctypes.Structure):
-  _fields_=[("readback_ns",ctypes.c_uint64),("active_mask",ctypes.c_uint32),("slots",ctypes.c_uint32*5),("slaves",ctypes.c_uint32*5),("expected_num",ctypes.c_uint32*5),("expected_den",ctypes.c_uint32*5),("actual_num",ctypes.c_uint32*5),("actual_den",ctypes.c_uint32*5),("mode",ctypes.c_int32*5),("bits",ctypes.c_uint32*5),("statusword",ctypes.c_uint32*5),("error_code",ctypes.c_uint32*5)]
  class Request(ctypes.Structure):
-  _fields_=[("magic",ctypes.c_uint32),("version",ctypes.c_uint32),("size",ctypes.c_uint32),("op",ctypes.c_uint32),("kind",ctypes.c_int32),("index",ctypes.c_int32),("enabled",ctypes.c_int32),("mask",ctypes.c_uint32),("run",ctypes.c_uint64),("generation",ctypes.c_uint32),("clean_generation",ctypes.c_uint32),("axis",ctypes.c_double),("increment",ctypes.c_double),("points",ctypes.c_double*5),("text",ctypes.c_char*512),("secondary",ctypes.c_char*128),("mode",ctypes.c_char*64),("settings_index",ctypes.c_uint32),("owner_generation",ctypes.c_uint32),("readback_token",ctypes.c_uint32),("project_root",ctypes.c_char*256),("settings_axis",ctypes.c_char*16),("field_key",ctypes.c_char*64),("field_name",ctypes.c_char*128),("value",ctypes.c_char*128),("drive",DriveAttestation)]
- req=Request(); req.magic=0x56354347; req.version=7; req.size=ctypes.sizeof(Request); req.op=2
+  _fields_=[("magic",ctypes.c_uint32),("version",ctypes.c_uint32),("size",ctypes.c_uint32),("op",ctypes.c_uint32),("kind",ctypes.c_int32),("index",ctypes.c_int32),("enabled",ctypes.c_int32),("mask",ctypes.c_uint32),("run",ctypes.c_uint64),("generation",ctypes.c_uint32),("clean_generation",ctypes.c_uint32),("axis",ctypes.c_double),("increment",ctypes.c_double),("points",ctypes.c_double*5),("text",ctypes.c_char*512),("secondary",ctypes.c_char*128),("mode",ctypes.c_char*64),("settings_index",ctypes.c_uint32),("owner_generation",ctypes.c_uint32),("readback_token",ctypes.c_uint32),("project_root",ctypes.c_char*256),("settings_axis",ctypes.c_char*16),("field_key",ctypes.c_char*64),("field_name",ctypes.c_char*128),("value",ctypes.c_char*128)]
+ req=Request(); req.magic=0x56354347; req.version=6; req.size=ctypes.sizeof(Request); req.op=2
  s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.settimeout(1); s.connect(gate); s.sendall(bytes(req)); response=b""
  while len(response)<12:
   chunk=s.recv(4096)
@@ -166,7 +162,7 @@ try:
   response+=chunk
  if len(response)!=declared: raise RuntimeError("command gate response exceeded declared size")
  s.close(); fields=struct.unpack_from("<III8i",response)
-  protocol_ok=(fields[0:3]==(0x56354347,7,len(response)) and fields[3]==1 and
+ protocol_ok=(fields[0:3]==(0x56354347,6,len(response)) and fields[3]==1 and
               fields[4]==0 and fields[7:11]==(1,1,1,0))
  out["command_gate_ready"]=stat.S_ISSOCK(os.stat(gate).st_mode) and b"/usr/libexec/8ax/v5_command_gate_server" in cmdline and protocol_ok
  out["estop_active"]=(fields[7:9]==(1,1))
@@ -192,6 +188,14 @@ try:
  bra,ba=block("/dev/shm/v5_native_bus_status.bin",bf); time.sleep(.25); brb,bb=block("/dev/shm/v5_native_bus_status.bin",bf); now=time.monotonic_ns()
  out["ethercat_health"]=(len(fields)==3 and ba[0:3]==(0x56425553,1,bf.size) and bb[0:3]==(0x56425553,1,bf.size) and ba[3]==bb[3]==1 and ba[4]>0 and bb[4]>ba[4] and not(ba[4]&1) and not(bb[4]&1) and ba[5]==bb[5]==pwriter and ba[6]>0 and bb[6]>=ba[6] and ba[7]>0 and bb[7]>0 and ba[8]&7==7 and bb[8]&7==7 and ba[9:11]==bb[9:11]==(5,5) and ba[11]>0 and bb[11]>=ba[11] and ba[-2]==fnv(bra[:-8]) and bb[-2]==fnv(brb[:-8]) and 0<=now-ba[12]<=1000000000 and 0<=now-bb[12]<=1000000000 and bb[12]>ba[12])
 except Exception as e: out["bus_error"]=type(e).__name__+":"+str(e); out["ethercat_health"]=False
+try:
+ import hal
+ hal_component=hal.component("v5_cold_boot_probe_%d"%os.getpid()); hal_component.ready()
+ tmax_names=sorted(str(item.get("NAME", "")) for item in hal.get_info_params() if str(item.get("NAME", "")).endswith(".tmax"))
+ tmax={name:int(hal.get_value(name)) for name in tmax_names}
+ if "servo-thread.tmax" not in tmax: raise RuntimeError("servo-thread.tmax missing")
+ out["startup_servo"]={"motion_last_period_ns":int(hal.get_value("motion.servo.last-period")),"servo_tmax_ns":tmax["servo-thread.tmax"],"max_function_tmax_ns":max(tmax.values()),"runtime_phase_step_max_ns":int(hal.get_value("lcec.0.runtime-phase-step-max")),"runtime_period_ns":int(hal.get_value("lcec.0.runtime-period-ns")),"runtime_period_error_max_ns":int(hal.get_value("lcec.0.runtime-period-error-max")),"runtime_period_warning_count":int(hal.get_value("lcec.0.runtime-period-warning-count")),"runtime_period_fault_count":int(hal.get_value("lcec.0.runtime-period-fault-count")),"domain_wc_incomplete_count":int(hal.get_value("lcec.0.domain-wc-incomplete-count")),"all_op_false_count":int(hal.get_value("lcec.0.all-op-false-count")),"tmax_ns":tmax}
+except Exception as e: out["startup_servo_error"]=type(e).__name__+":"+str(e); out["startup_servo"]={}
 print(json.dumps(out,separators=(",",":")))
 PY'''
     try:
@@ -230,12 +234,91 @@ PY'''
     return payload
 
 
-def http_probe(host: str) -> dict[str, Any] | None:
+def relay_info_probe(target: str) -> dict[str, Any] | None:
+    command = (
+        "taskset -c 1 env PYTHONPATH=/usr/libexec/8ax "
+        "/usr/libexec/8ax/v5_remote_ui_local_client.py "
+        "--base-url https://127.0.0.1:18080 "
+        "--ca-cert /etc/6x-cnc/remote-relay/server-cert.pem "
+        "--clients-file /etc/6x-cnc/remote-relay/clients.json "
+        "--client-id local-bootstrap --scope viewer --path /remote/info")
     try:
-        with urllib.request.urlopen("http://%s:18080/remote/info" % host, timeout=0.5) as response:
-            return json.loads(response.read().decode("utf-8"))
+        result = run(
+            ["ssh", "-o", "ConnectTimeout=2", target, command], timeout=4.0)
+        if result.returncode != 0:
+            return None
+        lines = [line for line in result.stdout.splitlines() if line.strip()]
+        payload = json.loads(lines[-1]) if lines else None
+        if (not isinstance(payload, dict) or
+                payload.get("auth_protocol") != "v5.remote.auth.v1" or
+                not payload.get("protocol_version")):
+            return None
+        return payload
     except Exception:
         return None
+
+
+def backend_ready_host_boundary(
+        info: dict[str, Any], observed_s: float) -> dict[str, Any] | None:
+    """Map the authenticated native backend-ready time to host monotonic time."""
+    ready = (info.get("ready_metadata") or {}).get("backend_ready") or {}
+    metrics = info.get("system_metrics") or {}
+    try:
+        published_ns = int(ready.get("backend_ready_published_ns") or 0)
+        sample_ns = int(metrics.get("cpu_sample_monotonic_ns") or 0)
+        generation = int(ready.get("generation") or 0)
+        owner_pid = int(ready.get("owner_pid") or 0)
+        owner_start_ticks = int(ready.get("owner_start_ticks") or 0)
+    except (TypeError, ValueError):
+        return None
+    if (published_ns <= 0 or sample_ns < published_ns or generation <= 0
+            or owner_pid <= 0 or owner_start_ticks <= 0):
+        return None
+    host_stamp_s = observed_s - ((sample_ns - published_ns) / 1_000_000_000.0)
+    if host_stamp_s > observed_s + 0.1:
+        return None
+    return {
+        "host_stamp_s": host_stamp_s,
+        "board_uptime_s": published_ns / 1_000_000_000.0,
+        "generation": generation,
+        "owner_pid": owner_pid,
+        "owner_start_ticks": owner_start_ticks,
+    }
+
+
+def startup_servo_complete(probe: dict[str, Any]) -> bool:
+    startup = probe.get("startup_servo") or {}
+    tmax = startup.get("tmax_ns") or {}
+    try:
+        values = [int(value) for value in tmax.values()]
+        servo_tmax = int(startup.get("servo_tmax_ns") or -1)
+        phase_step = int(startup.get("runtime_phase_step_max_ns") or -1)
+        period_error = int(startup.get("runtime_period_error_max_ns") or -1)
+        combined_budget = servo_tmax + max(phase_step, period_error)
+        # Cold/controlled-restart evidence retains the complete startup-period
+        # jitter counters.  100 us is a quality warning; startup is rejected only
+        # by the 200 us/combined hard limits, execution overrun, or hard stickies.
+        return (bool(values)
+                and "servo-thread.tmax" in tmax
+                and servo_tmax == int(tmax["servo-thread.tmax"])
+                and 0 <= servo_tmax < 1_000_000
+                and 0 <= int(startup.get("max_function_tmax_ns") or -1) < 1_000_000
+                and max(values) == int(startup.get("max_function_tmax_ns") or -1)
+                and all(0 <= value < 1_000_000 for value in values)
+                and 800_000 <= int(startup.get("motion_last_period_ns") or 0)
+                    <= 1_200_000
+                and 800_000 <= int(startup.get("runtime_period_ns") or 0)
+                    <= 1_200_000
+                and 0 <= phase_step <= 200_000
+                and 0 <= period_error <= 200_000
+                and combined_budget < 1_000_000
+                and 0 <= int(startup.get("runtime_period_warning_count", -1))
+                    < 0xFFFFFFFF
+                and int(startup.get("runtime_period_fault_count") or 0) == 0
+                and int(startup.get("domain_wc_incomplete_count") or 0) == 0
+                and int(startup.get("all_op_false_count") or 0) == 0)
+    except (TypeError, ValueError):
+        return False
 
 
 def terminal_complete(probe: dict[str, Any], info: dict[str, Any]) -> bool:
@@ -281,7 +364,8 @@ def terminal_complete(probe: dict[str, Any], info: dict[str, Any]) -> bool:
             and probe.get("command_gate_ready") is True
             and probe.get("touch_registered") is True
             and probe.get("estop_active") is True
-            and probe.get("machine_enabled") is False)
+            and probe.get("machine_enabled") is False
+            and startup_servo_complete(probe))
 
 
 class DeterministicProbeError(RuntimeError):
@@ -499,6 +583,7 @@ def persist_cycle_evidence(cycle_dir: Path, state: dict[str, Any]) -> list[str]:
                               if state.get("t0") else None),
         "segments": state.get("rows") or [],
         "remote_info": state.get("remote_info"),
+        "backend_ready_boundary": state.get("backend_ready_boundary"),
         "probe": state.get("probe"),
         "final": state.get("final"),
         "log_fetch": state.get("log_fetch"),
@@ -532,6 +617,7 @@ def measure_cycle(index: int, out_dir: Path, relay_port: str, console_port: str,
         "ui_log": "",
         "runtime_log": "",
         "remote_info": None,
+        "backend_ready_boundary": None,
         "probe": None,
         "final": None,
         "ssh_seen": False,
@@ -574,7 +660,7 @@ def measure_cycle(index: int, out_dir: Path, relay_port: str, console_port: str,
         state["rows"].append({"stage": "power_on", "host_elapsed_s": 0.0,
                               "board_uptime_s": ""})
         deadline = time.monotonic() + timeout_s
-        ssh_seen = tcp_seen = http_seen = False
+        ssh_seen = tcp_seen = relay_seen = False
         while time.monotonic() < deadline:
             if not tcp_seen:
                 try:
@@ -583,26 +669,45 @@ def measure_cycle(index: int, out_dir: Path, relay_port: str, console_port: str,
                         state["rows"].append({"stage": "tcp22_ready", "host_elapsed_s": round(time.monotonic() - state["t0"], 3), "board_uptime_s": ""})
                 except OSError:
                     pass
-            info = http_probe(host)
-            info_observed = time.monotonic()
-            if info is not None and not http_seen:
-                http_seen = True
-                state["rows"].append({"stage": "http18080_ready", "host_elapsed_s": round(info_observed - state["t0"], 3), "board_uptime_s": ""})
-            if (info is not None and info.get("ui_ready") is True
-                    and state["remote_info"] is None):
-                ui_elapsed = round(info_observed - state["t0"], 3)
-                state["remote_info"] = info
-                state["rows"].append({"stage": "ui_ready", "host_elapsed_s": ui_elapsed,
-                                      "board_uptime_s": ""})
             if not ssh_seen:
                 ssh_light = run(["ssh", "-o", "ConnectTimeout=2", target, "true"], timeout=3.0)
                 if ssh_light.returncode == 0:
                     state["rows"].append({"stage": "ssh_ready", "host_elapsed_s": round(time.monotonic() - state["t0"], 3), "board_uptime_s": ""})
                     ssh_seen = True
                     state["ssh_seen"] = True
-            if state["remote_info"] is not None:
+            info = relay_info_probe(target) if ssh_seen else None
+            info_observed = time.monotonic()
+            if info is not None and state["backend_ready_boundary"] is None:
+                boundary = backend_ready_host_boundary(info, info_observed)
+                if boundary is not None:
+                    state["backend_ready_boundary"] = boundary
+                    state["rows"].append({
+                        "stage": "backend_motion_ready",
+                        "host_elapsed_s": round(
+                            float(boundary["host_stamp_s"]) - state["t0"], 3),
+                        "board_uptime_s": round(
+                            float(boundary["board_uptime_s"]), 3),
+                    })
+            if info is not None and not relay_seen:
+                relay_seen = True
+                state["rows"].append({"stage": "relay_https_ready", "host_elapsed_s": round(info_observed - state["t0"], 3), "board_uptime_s": ""})
+            if (info is not None and info.get("ui_ready") is True
+                    and state["remote_info"] is None):
+                ui_elapsed = round(info_observed - state["t0"], 3)
+                state["remote_info"] = info
+                state["rows"].append({"stage": "ui_ready", "host_elapsed_s": ui_elapsed,
+                                      "board_uptime_s": ""})
+            boundary = state["backend_ready_boundary"]
+            startup_window_complete = (
+                boundary is not None and
+                info_observed - float(boundary["host_stamp_s"]) >= 30.0)
+            if state["remote_info"] is not None and startup_window_complete:
                 ui_elapsed = next(float(row["host_elapsed_s"]) for row in state["rows"]
                                   if row["stage"] == "ui_ready")
+                state["rows"].append({
+                    "stage": "startup_window_30s",
+                    "host_elapsed_s": round(info_observed - state["t0"], 3),
+                    "board_uptime_s": ""})
                 try:
                     probe, attempts = prove_terminal(target, state["remote_info"])
                 except DeterministicProbeError as exc:
@@ -610,6 +715,7 @@ def measure_cycle(index: int, out_dir: Path, relay_port: str, console_port: str,
                     raise
                 state["probe"] = probe
                 state["final"] = {"runtime": probe, "remote_info": state["remote_info"],
+                                  "backend_ready_boundary": boundary,
                                   "terminal_probe_attempts": attempts,
                                   "ui_ready_host_elapsed_s": ui_elapsed}
                 break
@@ -622,8 +728,8 @@ def measure_cycle(index: int, out_dir: Path, relay_port: str, console_port: str,
         serial_text = "\n".join(line for _, line in state["serial_lines"])
         if "U-Boot" not in serial_text or "Starting kernel" not in serial_text:
             raise RuntimeError("serial console is not bound to a complete current power-on")
-        if "LinuxCNC backend transport ready;" not in serial_text:
-            raise RuntimeError("serial console has no current EtherCAT backend-ready boundary")
+        if state["backend_ready_boundary"] is None:
+            raise RuntimeError("authenticated native backend-ready boundary is unavailable")
         # Keep capture running beyond the terminal probe. IgH reports a lost
         # cyclic datagram after its timeout, so an immediate stop would hide
         # a readiness-probe-induced WKC loss.
@@ -639,9 +745,11 @@ def measure_cycle(index: int, out_dir: Path, relay_port: str, console_port: str,
         # alive beyond it and reject any WKC/datagram loss it exposes.
         time.sleep(1.0)
         state["post_ready_ethercat_errors"] = post_ready_ethercat_errors(
-            state["serial_lines"])
+            state["serial_lines"],
+            float(state["backend_ready_boundary"]["host_stamp_s"]))
         state["startup_forbidden_errors"] = startup_forbidden_errors(
-            state["serial_lines"])
+            state["serial_lines"],
+            float(state["backend_ready_boundary"]["host_stamp_s"]))
         if state["startup_forbidden_errors"]:
             raise RuntimeError(
                 "realtime startup fault or post-ready EtherCAT loss occurred")

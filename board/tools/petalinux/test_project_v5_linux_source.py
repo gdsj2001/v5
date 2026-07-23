@@ -143,6 +143,39 @@ class ProjectionIncrementalTest(unittest.TestCase):
         self.assertEqual("add\n", (self.output / "linux/kernel/drivers/add.c").read_text(encoding="utf-8"))
         self.assertEqual(keep_mtime, projected_keep.stat().st_mtime_ns)
 
+    def test_untracked_workspace_extra_does_not_enter_incremental_projection(self):
+        self.project_now()
+        projected_keep = self.output / "linux/kernel/drivers/keep.c"
+        keep_mtime = projected_keep.stat().st_mtime_ns
+        self.write("linux/kernel/drivers/unregistered.c", "not a canonical input\n")
+
+        self.project_now()
+
+        self.assertFalse((self.output / "linux/kernel/drivers/unregistered.c").exists())
+        self.assertEqual(keep_mtime, projected_keep.stat().st_mtime_ns)
+
+    def test_untrusted_legacy_projection_is_rebuilt_after_strict_identity_failure(self):
+        self.project_now()
+        (self.output / projection.STATE_NAME).unlink()
+        unexpected = self.output / "linux/kernel/generated-stale.c"
+        unexpected.write_text("stale\n", encoding="utf-8")
+        unrelated = self.output / "linuxcnc/keep.txt"
+        unrelated.parent.mkdir(parents=True)
+        unrelated.write_text("other owner\n", encoding="utf-8")
+
+        with mock.patch.object(
+            projection,
+            "verify_projection",
+            side_effect=(SystemExit("identity mismatch"), {"linux/kernel": "test-hash"}),
+        ) as verifier:
+            projection.project_and_verify(self.project, self.build, self.output)
+
+        self.assertEqual(2, verifier.call_count)
+        self.assertFalse(unexpected.exists())
+        self.assertEqual("other owner\n", unrelated.read_text(encoding="utf-8"))
+        self.assertTrue((self.output / projection.STATE_NAME).is_file())
+        self.assertEqual("keep\n", (self.output / "linux/kernel/drivers/keep.c").read_text(encoding="utf-8"))
+
 
 if __name__ == "__main__":
     unittest.main()

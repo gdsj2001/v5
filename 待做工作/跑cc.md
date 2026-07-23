@@ -23,8 +23,8 @@
 
 ## 执行步骤
 
-1. 完整发布验收在部署后用合规operator面进入设置页，只点击一次 `设置驱动`；等待同一 `run_id` 的 `DRIVE_SET_OK + write_verified_readback`。focused性能复测若本轮未改参数、模型、驱动绑定或比例链，则只做fresh readback核对，不重复设置驱动和重启。
-2. 点击右上角 `保存并重启`，等待 canonical clean restart；回读全部当前目标轴—从站绑定、mode/egear/statusword/error_code、LinuxCNC/HAL/EtherCAT 比例链和 PDO/axis binding。缺项时停止，设置驱动不在后续每轮重复执行。
+1. 完整发布验收在部署后用合规operator面进入设置页，只点击一次 `设置驱动`；等待同一 `run_id` 的 `DRIVE_SET_RESTART_REQUIRED`、`restart_required=true`、`restart_deferred=true`，并证明按钮阶段零HAL写入、零SDO写入、零即时驱动readback。focused性能复测若本轮未改参数、模型、驱动绑定或比例链，则只做fresh readback核对，不重复设置驱动和重启。
+2. 点击右上角 `保存并重启`，等待 canonical clean restart；旧进程只提交handoff。新启动链统一回读全部当前目标轴—从站绑定、mode/egear/statusword/error_code、LinuxCNC/HAL/EtherCAT 比例链和 PDO/axis binding，actual不一致时才写驱动，最终以本启动代 `DRIVE_SET_OK + write_verified_readback` 闭合。缺项时停止，设置驱动不在后续每轮重复执行。
 3. 确认合规operator面可用且当前页面正确，板端为fresh `estop_active=true / machine_enabled=false`；启动编码器反馈采样并记录active model、`mcs/cmd_mcs/velocity/seq/valid_mask`和当前模型旋转轴的raw/count-domain基线。
 4. 先完成一次 `取消急停 -> 机械全轴回零 -> 打开程序 -> 选择并打开 active model 对应程序`：Home 必须有新的 native transaction、真实编码器位移、RTCP force-off actual、各轴到位和 fresh `all_homed`；程序页第一次点击模型匹配行完成选中，第二次点击同一行完成打开，并在主页核对程序名、runtime identity 和原始 hash。
 5. 在同一 program identity 和有效 `all_homed` 上连续执行至少三轮 `启动 -> 1 秒后急停`。每轮 Start 都持续采样编码器反馈并取得新运动；每次急停都在 owner 时限内确认 native 安全 actual、运动停止、clean generation、队列清空，同时保留 program identity、刀路和 homed。轮间只点击一次 `取消急停`，确认 fresh latch 清除和 machine enable actual 后继续；不重新 Home、不重新打开程序。最后一轮急停后保持 `estop_active=true && machine_enabled=false`。

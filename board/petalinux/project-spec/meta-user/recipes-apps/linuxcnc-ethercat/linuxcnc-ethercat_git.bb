@@ -9,6 +9,8 @@ SRC_URI = " \
     file://0001-v5-register-pdo-outputs-before-inputs.patch \
     file://0002-v5-dc-reference-health-pins.patch \
     file://0003-v5-require-initf-master-activation.patch \
+    file://0004-v5-runtime-cycle-health-sticky-pins.patch \
+    file://0005-v5-runtime-write-segment-event-pins.patch \
 "
 SRCREV = "de7e377f76873fa99e8ea5dcafd7df916e118024"
 PV = "1.0+git${SRCPV}"
@@ -146,7 +148,7 @@ if old not in text:
 text = text.replace(old, new, 1)
 # Keep this recipe as the minimal runtime fix: do not gate process-data
 # queueing or DC sync here. A broader domain/prequeue/DC candidate was
-# tested on the board and broke the stable 2 ms product path.
+# tested on the board and broke the stable cyclic product path.
 with path.open("w", encoding="utf-8", newline="\n") as fh:
     fh.write(text)
 PY

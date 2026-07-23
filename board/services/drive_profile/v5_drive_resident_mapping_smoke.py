@@ -176,6 +176,13 @@ def run_set_drive_with(targets: List[Dict[str, Any]]) -> tuple[Dict[str, Any], L
         "transaction_generation": "resident-mapping-smoke"}
     apply_action.verify_drive_transaction_identity = lambda _frozen, _current, stage: {
         "ok": True, "stage": stage}
+    apply_action.invalidate_drive_generation = lambda *_args, **_kwargs: {
+        "ok": True,
+        "code": "BACKEND_DRIVE_INVALIDATED_MACHINE_OFF",
+        "generation": 1,
+        "motion_ready": False,
+        "drive_verified": False,
+    }
     apply_action.precheck_targets_for_write = lambda *_args, **_kwargs: {"ok": True}
     action.target_egear = lambda _target: (100, 1, {"source": "smoke"})
     apply_action._planned_drive_transaction = lambda current_targets: {

@@ -80,11 +80,21 @@ static void settings_motion_model_changed_cb(lv_event_t *event)
             "运动模型: %s",
             v5_settings_axis_table_motion_model_value());
         if (actual_change) {
-            V5MainPageActionReport drive_report;
-            (void)v5_settings_page_trigger_action(
+            char body[512];
+            snprintf(
+                body,
+                sizeof(body),
+                "提示: 默认映射已自动更新\n"
+                "原因: 目标模型 %s 及 descriptor 默认轴从站映射已写入唯一 owner 并完成源位置回读\n"
+                "下一步: 点击设置驱动完成默认映射预检，再到轴参数 → 从站核对或覆盖；人工覆盖后需再次设置驱动",
+                model->display);
+            v5_settings_page_popup_show(
                 page,
-                V5_MAIN_PAGE_ACTION_SETTINGS_SET_DRIVE,
-                &drive_report);
+                "motion_model_mapping_confirm",
+                "运动模型",
+                body,
+                1,
+                1);
         }
     } else {
         v5_settings_page_set_status_text(page, 245, 214, 82, "运动模型: owner readback 未确认");

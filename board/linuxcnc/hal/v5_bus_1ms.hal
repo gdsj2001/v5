@@ -39,7 +39,7 @@ loadrt not count=1
 loadrt and2 count=6
 loadrt v5_safety_latch
 
-loadusr -W lcec_conf /opt/8ax/v5/linuxcnc/hal/ethercat-conf-2ms.xml
+loadusr -W lcec_conf /opt/8ax/v5/linuxcnc/hal/ethercat-conf-1ms.xml
 loadusr -Wn v5_native_hal_owner /usr/bin/v5_native_hal_owner \
     --model=[RTCP]MODEL \
     --kins-module=[RTCP]KINS_MODULE \
@@ -61,7 +61,7 @@ loadusr -Wn v5_native_hal_owner /usr/bin/v5_native_hal_owner \
 loadrt lcec
 
 # Activate master/domain in LinuxCNC's dedicated one-shot realtime init cycle.
-# The normal 2 ms function list starts only after the RT task deadline resync.
+# The normal 1 ms function list starts only after the RT task deadline resync.
 initf lcec.activate servo-thread
 
 # Physical feedback is routed before logical cia402 read; logical commands are

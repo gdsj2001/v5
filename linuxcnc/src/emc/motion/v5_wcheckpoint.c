@@ -33,12 +33,16 @@ typedef struct {
     double base_counts;
     double runtime_counts;
     double safe_half_counts;
+    double cached_safe_half_counts;
+    unsigned long cached_turn_quantum;
     unsigned int generation;
     unsigned int sample_sequence;
     unsigned int raw_bits;
     unsigned int router_synced;
+    unsigned int profile_cached;
     unsigned int valid;
     enum v5_wcheckpoint_reason reason;
+    enum v5_wcheckpoint_reason cached_reason;
 } v5_wcheckpoint_axis_state_t;
 
 static v5_wcheckpoint_axis_state_t axis_state[V5_WCHECKPOINT_ROTARY_AXES];
@@ -137,6 +141,30 @@ static enum v5_wcheckpoint_reason profile_reason(
         return V5_WCHECKPOINT_DRIVE_WINDOW_UNPROVEN;
     }
     return V5_WCHECKPOINT_OK;
+}
+
+static enum v5_wcheckpoint_reason cached_profile_reason(
+    unsigned int index,
+    double *safe_half_counts,
+    unsigned long *turn_quantum)
+{
+    v5_wcheckpoint_axis_state_t *state = &axis_state[index];
+
+    /*
+     * Every profile input is a motmod load-time parameter.  Cache the
+     * validated contract so the 1 kHz controller path does not repeat
+     * ldexp/gcd and modulus setup on every cycle.
+     */
+    if (!state->profile_cached) {
+        state->cached_reason = profile_reason(
+            index,
+            &state->cached_safe_half_counts,
+            &state->cached_turn_quantum);
+        state->profile_cached = 1U;
+    }
+    *safe_half_counts = state->cached_safe_half_counts;
+    *turn_quantum = state->cached_turn_quantum;
+    return state->cached_reason;
 }
 
 static int snapshot_truth_available(enum v5_wcheckpoint_reason reason)
@@ -335,8 +363,8 @@ void v5_wcheckpoint_update_before_inputs(void)
         enum v5_wcheckpoint_reason reason;
         v5_wcheckpoint_hal_t *hal_axis = &emcmot_hal_data->v5_wcheckpoint[index];
         new_base_turns[index] = axis_state[index].base_turns;
-        reason = profile_reason(index, &axis_state[index].safe_half_counts,
-                                &turn_quantum[index]);
+        reason = cached_profile_reason(
+            index, &axis_state[index].safe_half_counts, &turn_quantum[index]);
         axis_state[index].raw_bits = (unsigned int)(
             v5_wcheckpoint_command_raw_bits[index] < v5_wcheckpoint_feedback_raw_bits[index]
                 ? v5_wcheckpoint_command_raw_bits[index]
@@ -348,6 +376,15 @@ void v5_wcheckpoint_update_before_inputs(void)
             double quantum_counts =
                 (double)v5_wcheckpoint_counts_per_rev[index] *
                 (double)turn_quantum[index];
+            if (axis_state[index].router_synced &&
+                *hal_axis->router_generation == axis_state[index].generation &&
+                isfinite(router_base_counts) &&
+                router_base_counts == axis_state[index].base_counts) {
+                new_base_turns[index] = axis_state[index].base_turns;
+                router_generation[index] = *hal_axis->router_generation;
+                router_candidate[index] = 1U;
+                continue;
+            }
             if (isfinite(router_base_counts) &&
                 fabs(router_base_counts) < ldexp(1.0, DBL_MANT_DIG) &&
                 floor(fabs(router_base_counts)) == fabs(router_base_counts) &&
@@ -523,7 +560,7 @@ int v5_wcheckpoint_target_allowed(unsigned int index, double target_deg)
     if (index >= V5_WCHECKPOINT_ROTARY_AXES || !isfinite(target_deg)) {
         return 0;
     }
-    reason = profile_reason(index, &safe_half_counts, &turn_quantum);
+    reason = cached_profile_reason(index, &safe_half_counts, &turn_quantum);
     if (reason == V5_WCHECKPOINT_DISABLED) {
         return 1;
     }

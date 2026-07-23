@@ -33,20 +33,37 @@ linuxcnc_install_reset=0
 build_mode=focused
 clean_kernel=0
 package_only=0
+package_target=linuxcnc-prebuilt
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --focused) build_mode=focused ;;
         --full) build_mode=full ;;
         --package-only) build_mode=package-only; package_only=1 ;;
+        --package-target)
+            shift
+            [ "$#" -gt 0 ] || {
+                echo "--package-target requires linuxcnc-prebuilt or linuxcnc-ethercat" >&2
+                exit 2
+            }
+            package_target=$1
+            ;;
         --clean-kernel) clean_kernel=1 ;;
         *)
-            echo "usage: V5_PETALINUX_BUILD_USER=<non-root-user> $0 [--package-only|--focused|--full] [--clean-kernel]" >&2
+            echo "usage: V5_PETALINUX_BUILD_USER=<non-root-user> $0 [--package-only [--package-target linuxcnc-prebuilt|linuxcnc-ethercat]|--focused|--full] [--clean-kernel]" >&2
             exit 2
             ;;
     esac
     shift
 done
+case "$package_target" in
+    linuxcnc-prebuilt|linuxcnc-ethercat) ;;
+    *) echo "unsupported package target: $package_target" >&2; exit 2 ;;
+esac
+if [ "$package_target" != linuxcnc-prebuilt ] && [ "$package_only" -ne 1 ]; then
+    echo "--package-target is only valid with --package-only" >&2
+    exit 2
+fi
 if [ "$clean_kernel" -eq 1 ] && [ "$build_mode" != full ]; then
     echo "--clean-kernel is only valid with the one final --full build" >&2
     exit 2
@@ -502,6 +519,33 @@ prepare_linuxcnc_install_workdir() {
     echo "V5_LINUXCNC_INSTALL_WORKDIR_OK user=$build_user"
 }
 
+repair_failed_kernel_projection() {
+    kernel_work="$build_root/petalinux/output/tmp/work/zynq_generic-xilinx-linux-gnueabi/linux-xlnx/5.4+v5-r0"
+    kernel_owner="$kernel_work/v5-owner-projection/linux/kernel"
+    kernel_staging="$build_root/petalinux/output/tmp/work-shared/zynq-generic/kernel-source"
+    repair_required=0
+    if [ -L "$kernel_staging" ] &&
+       [ "$(readlink "$kernel_staging")" = "$kernel_staging" ]; then
+        repair_required=1
+    fi
+    if [ -L "$kernel_owner" ] &&
+       [ "$(readlink "$kernel_owner")" = "$kernel_staging" ]; then
+        repair_required=1
+    fi
+    if [ "$repair_required" -eq 1 ]; then
+        run_bitbake_direct "linux-xlnx -c v5_linux_projection -f"
+        echo "V5_LINUX_KERNEL_PROJECTION_REPAIRED task=do_v5_linux_projection"
+    fi
+    [ -f "$kernel_owner/Makefile" ] || {
+        echo "Linux kernel owner projection is unavailable after focused repair: $kernel_owner" >&2
+        exit 12
+    }
+    [ ! -L "$kernel_owner" ] || {
+        echo "Linux kernel owner projection remained a symlink after focused repair: $kernel_owner" >&2
+        exit 12
+    }
+}
+
 verify_windows_source_packages() {
     if python3 "$source_package_verifier" \
         --project-root "$project_root" \
@@ -558,26 +602,53 @@ if [ "$package_only" -eq 1 ]; then
     configure_download_cache
     configure_offline_bitbake
     prepare_linuxcnc_install_workdir
-    if [ "$linuxcnc_install_reset" -eq 1 ]; then
-        run_bitbake_direct "linuxcnc-prebuilt -c install -f"
-    fi
-    run_bitbake_direct "linuxcnc-prebuilt -c package -f"
-    echo "V5_LINUXCNC_PACKAGE_ONLY_COMPILE_OK"
-    echo "V5_LINUXCNC_PACKAGE_ONLY_INSTALL_OK"
-    echo "V5_LINUXCNC_PACKAGE_ONLY_PACKAGE_OK"
     work_root="$build_root/petalinux/output/tmp/work"
-    package_root=$(find "$work_root" -type d \
-        -path '*/linuxcnc-prebuilt/*/packages-split/linuxcnc-prebuilt' -print | sort | tail -n 1)
-    [ -n "$package_root" ] || {
-        echo "linuxcnc-prebuilt package-only runtime root was not found" >&2
-        exit 12
-    }
-    python3 "$minimal_runtime_verifier" \
-        --allowlist "$runtime_allowlist" \
-        --package-root "$package_root"
+    if [ "$package_target" = linuxcnc-prebuilt ]; then
+        if [ "$linuxcnc_install_reset" -eq 1 ]; then
+            run_bitbake_direct "linuxcnc-prebuilt -c install -f"
+        fi
+        run_bitbake_direct "linuxcnc-prebuilt -c package -f"
+        echo "V5_LINUXCNC_PACKAGE_ONLY_COMPILE_OK"
+        echo "V5_LINUXCNC_PACKAGE_ONLY_INSTALL_OK"
+        echo "V5_LINUXCNC_PACKAGE_ONLY_PACKAGE_OK"
+        package_root=$(find "$work_root" -type d \
+            -path '*/linuxcnc-prebuilt/*/packages-split/linuxcnc-prebuilt' -print | sort | tail -n 1)
+        [ -n "$package_root" ] || {
+            echo "linuxcnc-prebuilt package-only runtime root was not found" >&2
+            exit 12
+        }
+        python3 "$minimal_runtime_verifier" \
+            --allowlist "$runtime_allowlist" \
+            --package-root "$package_root"
+    else
+        run_bitbake_direct "linuxcnc-prebuilt -c populate_sysroot"
+        repair_failed_kernel_projection
+        run_bitbake_direct "linuxcnc-ethercat -c compile -f"
+        run_bitbake_direct "linuxcnc-ethercat -c install -f"
+        run_bitbake_direct "linuxcnc-ethercat -c package -f"
+        package_root=$(find "$work_root" -type d \
+            -path '*/linuxcnc-ethercat/*/packages-split/linuxcnc-ethercat' -print | sort | tail -n 1)
+        ec_master=$(find "$work_root" -type f \
+            -path '*/ethercat-master/*/packages-split/kernel-module-ec-master-*/*/ec_master.ko' -print | sort | tail -n 1)
+        ec_generic=$(find "$work_root" -type f \
+            -path '*/ethercat-master/*/packages-split/kernel-module-ec-generic-*/*/ec_generic.ko' -print | sort | tail -n 1)
+        lcec=$(find "$package_root" -type f -path '*/usr/lib/linuxcnc/modules/lcec.so' -print | sort | tail -n 1)
+        [ -n "$package_root" ] && [ -n "$ec_master" ] &&
+            [ -n "$ec_generic" ] && [ -n "$lcec" ] || {
+            echo "linuxcnc-ethercat package-only artifacts are incomplete" >&2
+            exit 12
+        }
+        for artifact in "$ec_master" "$ec_generic" "$lcec"; do
+            file "$artifact" | grep -q 'ELF 32-bit.*ARM' || {
+                echo "linuxcnc-ethercat artifact is not 32-bit ARM: $artifact" >&2
+                exit 12
+            }
+        done
+        echo "V5_LINUXCNC_ETHERCAT_PACKAGE_ONLY_OK package_root=$package_root ec_master=$ec_master ec_generic=$ec_generic lcec=$lcec"
+    fi
     cleanup
     trap - EXIT HUP INT TERM
-    echo "V5_LINUXCNC_PACKAGE_ONLY_OK package_root=$package_root"
+    echo "V5_LINUXCNC_PACKAGE_ONLY_OK target=$package_target package_root=$package_root"
     exit 0
 fi
 

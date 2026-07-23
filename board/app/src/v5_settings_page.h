@@ -43,6 +43,7 @@ typedef struct V5SettingsPage {
     int popup_final;
     int popup_ok;
     int popup_restart_handoff_accepted;
+    int popup_model_mapping_set_drive;
     double popup_started_s;
     int popup_eta_seconds;
     char popup_action[64];

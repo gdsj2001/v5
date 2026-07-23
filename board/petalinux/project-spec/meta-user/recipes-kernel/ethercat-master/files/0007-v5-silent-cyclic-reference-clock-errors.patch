@@ -3,7 +3,7 @@ From: V5 Project <v5@example.invalid>
 Date: Wed, 15 Jul 2026 20:20:00 +0800
 Subject: [PATCH] v5: keep cyclic reference clock errors out of RT logging
 
-LinuxCNC-EtherCAT samples ecrt_master_reference_clock_time() from the 2 ms
+LinuxCNC-EtherCAT samples ecrt_master_reference_clock_time() from the servo-period
 realtime write function. The userspace library currently fprintfs every
 failed ioctl before returning the errno, creating hundreds of synchronous
 log writes per second when the DC datagram is temporarily unavailable. The

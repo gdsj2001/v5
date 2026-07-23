@@ -185,6 +185,23 @@ class PostRestartDriveApplySmoke(unittest.TestCase):
                 "drive_write_executed": True,
                 "motion_executed": False,
             }
+            native_attestation = {
+                "ok": True,
+                "code": "BACKEND_DRIVE_VERIFIED",
+                "generation": 123,
+                "owner_pid": 456,
+                "owner_start_ticks": 789,
+                "motion_ready": True,
+            }
+            current_backend = {
+                "generation": 123,
+                "owner_pid": 456,
+                "owner_start_ticks": 789,
+                "fields": {
+                    "drive_verified": "1",
+                    "motion_ready": "1",
+                },
+            }
             with mock.patch.object(
                 boot_apply, "BOOT_APPLY_RESULT_PATH", result_path,
             ), mock.patch.object(
@@ -201,7 +218,15 @@ class PostRestartDriveApplySmoke(unittest.TestCase):
                 boot_apply.v5_drive_bus_action,
                 "run_action",
                 return_value=raw,
-            ) as run_action:
+            ) as run_action, mock.patch.object(
+                boot_apply,
+                "attest_boot_drive_generation",
+                return_value=native_attestation,
+            ) as attest, mock.patch.object(
+                boot_apply,
+                "backend_data_identity",
+                return_value=current_backend,
+            ):
                 first = boot_apply.run_post_restart_drive_apply(5.0)
                 second = boot_apply.run_post_restart_drive_apply(5.0)
 
@@ -209,11 +234,79 @@ class PostRestartDriveApplySmoke(unittest.TestCase):
         self.assertEqual("DRIVE_BOOT_APPLY_OK", first["code"])
         self.assertEqual("boot-smoke", first["boot_id"])
         self.assertTrue(first["drive_write_executed"])
+        self.assertEqual(native_attestation, first["native_attestation"])
         self.assertEqual(first, second)
         preload.assert_called_once_with()
         run_action.assert_called_once()
+        attest.assert_called_once_with(raw, 3.0)
         self.assertEqual("boot-apply", run_action.call_args.args[0])
         self.assertEqual("post_restart_boot", run_action.call_args.args[3]["trigger"])
+
+    def test_cached_result_is_rebuilt_for_new_backend_generation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            result_path = Path(temporary) / "drive-boot-apply-result.json"
+            boot_id_path = Path(temporary) / "boot_id"
+            boot_id_path.write_text("boot-smoke\n", encoding="ascii")
+            result_path.write_text(json.dumps({
+                "schema": boot_apply.BOOT_APPLY_RESULT_SCHEMA,
+                "generated_at": "2026-07-23T00:00:00Z",
+                "boot_id": "boot-smoke",
+                "ok": True,
+                "code": "DRIVE_BOOT_APPLY_OK",
+                "native_attestation": {
+                    "ok": True,
+                    "generation": 122,
+                    "owner_pid": 455,
+                    "owner_start_ticks": 788,
+                    "motion_ready": True,
+                },
+            }), encoding="utf-8")
+            current_backend = {
+                "generation": 123,
+                "owner_pid": 456,
+                "owner_start_ticks": 789,
+                "fields": {
+                    "drive_verified": "0",
+                    "motion_ready": "0",
+                },
+            }
+            raw = {
+                "ok": True,
+                "code": "DRIVE_SET_OK",
+                "drive_write_executed": False,
+                "motion_executed": False,
+            }
+            refreshed_attestation = {
+                "ok": True,
+                "code": "BACKEND_DRIVE_VERIFIED",
+                "generation": 123,
+                "owner_pid": 456,
+                "owner_start_ticks": 789,
+                "motion_ready": True,
+            }
+            with mock.patch.object(
+                boot_apply, "BOOT_APPLY_RESULT_PATH", result_path,
+            ), mock.patch.object(
+                boot_apply, "BOOT_ID_PATH", boot_id_path,
+            ), mock.patch.object(
+                boot_apply, "backend_data_identity", return_value=current_backend,
+            ), mock.patch.object(
+                boot_apply, "probe_axis_slave_mapping",
+                return_value={"ok": True, "available": True, "applicable": True},
+            ), mock.patch.object(
+                boot_apply.v5_drive_bus_action, "preload_resident_state",
+                return_value={"ok": True},
+            ), mock.patch.object(
+                boot_apply.v5_drive_bus_action, "run_action", return_value=raw,
+            ) as run_action, mock.patch.object(
+                boot_apply, "attest_boot_drive_generation",
+                return_value=refreshed_attestation,
+            ):
+                result = boot_apply.run_post_restart_drive_apply(5.0)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(refreshed_attestation, result["native_attestation"])
+        run_action.assert_called_once()
 
     def test_mapping_not_ready_is_transient_and_never_writes(self) -> None:
         with mock.patch.object(

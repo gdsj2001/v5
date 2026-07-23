@@ -96,7 +96,7 @@ start_service() {
 
 stop_service() {
   if ! is_running; then
-    rm -f "$PIDFILE" "$OPERATOR_ERROR_PATH" $RETIRED_STATUS_PATHS
+    rm -f "$PIDFILE" "$STATUS_PATH" "$MODAL_TOOL_PATH" "$OPERATOR_ERROR_PATH" $RETIRED_STATUS_PATHS
     echo "v5_wcs_status_publisher not running"
     return 0
   fi
@@ -111,7 +111,7 @@ stop_service() {
     echo "v5_wcs_status_publisher did not stop pid=$pid" >&2
     return 1
   fi
-  rm -f "$PIDFILE" "$OPERATOR_ERROR_PATH" $RETIRED_STATUS_PATHS
+  rm -f "$PIDFILE" "$STATUS_PATH" "$MODAL_TOOL_PATH" "$OPERATOR_ERROR_PATH" $RETIRED_STATUS_PATHS
   echo "v5_wcs_status_publisher stopped pid=$pid"
 }
 

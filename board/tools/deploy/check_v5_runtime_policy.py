@@ -31,7 +31,7 @@ MERGED_PARAMETER_TABLE_DEPLOY_ROWS = {
 BOARD_OWNER_DEPLOY_ROWS = {
     "config/settings/drive_parameter_table.tsv": ("runtime_seed_merge", "/opt/8ax/v5/config/settings/drive_parameter_table.tsv", "0644"),
     "config/settings/settings_runtime.json": ("runtime_seed", "/opt/8ax/phase0_bus5/settings_runtime.json", "0644"),
-    "linuxcnc/ini/v5_bus.ini": ("runtime_seed", "/opt/8ax/v5/linuxcnc/ini/v5_bus.ini", "0644"),
+    "linuxcnc/ini/v5_bus.ini": ("runtime_ini_cycle_merge", "/opt/8ax/v5/linuxcnc/ini/v5_bus.ini", "0644"),
     "linuxcnc/runtime/var/linuxcnc.var": ("runtime_seed", "/opt/8ax/v5/linuxcnc/var/linuxcnc.var", "0644"),
     "linuxcnc/runtime/var/tool.tbl": ("runtime_seed", "/opt/8ax/v5/linuxcnc/var/tool.tbl", "0644"),
 }
@@ -162,6 +162,8 @@ def check_remote_relay_access_control() -> int:
     auth_smoke = ROOT / "services" / "ui" / "v5_remote_ui_auth_smoke.py"
     tls_smoke = ROOT / "services" / "ui" / "v5_remote_ui_tls_smoke.py"
     manifest = ROOT / "config" / "deploy" / "v5_runtime_deploy_manifest.tsv"
+    runtime_verify = ROOT / "tools" / "deploy" / "verify_v5_board_runtime.sh"
+    cold_boot_measure = ROOT / "tools" / "deploy" / "measure_v5_cold_boot.py"
     relay_modules = (
         relay,
         ROOT / "services" / "ui" / "v5_remote_ui_relay_access.py",
@@ -185,6 +187,8 @@ def check_remote_relay_access_control() -> int:
         or not tls_smoke.exists()
         or not manifest.exists()
         or not init.exists()
+        or not runtime_verify.exists()
+        or not cold_boot_measure.exists()
     ):
         print("REMOTE_RELAY_ACCESS_CONTROL_MISSING_SOURCE", file=sys.stderr)
         return 1
@@ -199,6 +203,9 @@ def check_remote_relay_access_control() -> int:
     tls_smoke_text = tls_smoke.read_text(encoding="utf-8", errors="ignore")
     manifest_text = manifest.read_text(encoding="utf-8", errors="ignore")
     init_text = init.read_text(encoding="utf-8", errors="ignore")
+    runtime_verify_text = runtime_verify.read_text(encoding="utf-8", errors="ignore")
+    cold_boot_measure_text = cold_boot_measure.read_text(
+        encoding="utf-8", errors="ignore")
     required_source = (
         "remote_framebuffer.bgra",
         "remote_dirty",
@@ -376,9 +383,61 @@ def check_remote_relay_access_control() -> int:
             )
             rc = 1
     for forbidden in ("http://127.0.0.1", "ws://127.0.0.1"):
-        if forbidden in relay_source_text or forbidden in init_text:
+        if (forbidden in relay_source_text or forbidden in init_text or
+                forbidden in runtime_verify_text or
+                forbidden in cold_boot_measure_text):
             print(
                 f"REMOTE_RELAY_PLAINTEXT_FALLBACK_SURVIVOR: {forbidden}",
+                file=sys.stderr,
+            )
+            rc = 1
+    for token in (
+        "v5_remote_ui_local_client.py",
+        "https://127.0.0.1:18080",
+        "server-cert.pem",
+        "clients.json",
+        "--scope viewer",
+        "--path /remote/info",
+        "remote_framebuffer.bgra",
+    ):
+        if token not in runtime_verify_text:
+            print(
+                f"REMOTE_RELAY_RUNTIME_VERIFY_AUTH_MISSING: {token}",
+                file=sys.stderr,
+            )
+            rc = 1
+    for forbidden in ("wget ", "/remote/frame/full"):
+        if forbidden in runtime_verify_text:
+            print(
+                f"REMOTE_RELAY_RUNTIME_VERIFY_PLAINTEXT_SURVIVOR: {forbidden}",
+                file=sys.stderr,
+            )
+            rc = 1
+    for token in (
+        "relay_info_probe",
+        "/usr/libexec/8ax/v5_remote_ui_local_client.py",
+        "https://127.0.0.1:18080",
+        "--scope viewer",
+        "--path /remote/info",
+        "startup_servo_complete",
+        '"servo-thread.tmax"',
+        '"runtime_phase_step_max_ns"',
+        '"startup_window_30s"',
+    ):
+        if token not in cold_boot_measure_text:
+            print(
+                f"COLD_BOOT_SECURE_STARTUP_PROOF_MISSING: {token}",
+                file=sys.stderr,
+            )
+            rc = 1
+    for forbidden in (
+        "urllib.request",
+        "http_probe",
+        'urllib.request.urlopen("http://',
+    ):
+        if forbidden in cold_boot_measure_text:
+            print(
+                f"COLD_BOOT_PLAINTEXT_PROBE_SURVIVOR: {forbidden}",
                 file=sys.stderr,
             )
             rc = 1
@@ -487,7 +546,7 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         ROOT / "services" / "state_publisher" / "v5_wcs_status_codec.py"
     )
     bus_ini = ROOT / "linuxcnc" / "ini" / "v5_bus.ini"
-    bus_hal = ROOT / "linuxcnc" / "hal" / "v5_bus_2ms.hal"
+    bus_hal = ROOT / "linuxcnc" / "hal" / "v5_bus_1ms.hal"
     linuxcnc_initf_sources = (
         ROOT.parent / "linuxcnc" / "src" / "hal" / "hal_lib.c",
         ROOT.parent / "linuxcnc" / "src" / "hal" / "utils" / "halcmd.c",
@@ -555,10 +614,14 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         "set_linuxcnc_non_realtime_priority",
         'renice -n "$MICROKERNEL_NON_RT_NICE"',
         "linuxcncsvr milltask io linuxcncrsh v5_native_hal_owner",
-        "taskset -a -pc 0",
+        "rtapi_app:T#*",
+        'taskset -pc 0 "$tid"',
+        'taskset -pc 1 "$tid"',
+        "LinuxCNC RTAPI process has no realtime servo thread",
         "taskset -a -pc 1",
         "BACKEND_READINESS_PROBE=/usr/libexec/8ax/v5_backend_readiness_probe",
-        '"$BACKEND_READINESS_PROBE" --arm --wait motion --timeout-ms 60000',
+        '"$BACKEND_READINESS_PROBE" --arm --wait data --timeout-ms 60000',
+        '"$BACKEND_READINESS_PROBE" --wait motion --timeout-ms 120000',
         "backend_readiness_require motion",
         "backend_readiness_require_transaction",
         "--expect-generation",
@@ -571,6 +634,7 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         "dc_fresh_pair_ready",
         "cpu_contract_ready",
         "backend_ready_published",
+        "drive-verified motion readiness",
         "REQUESTED_MODE_FILE=${V5_REQUESTED_MODE_FILE:-/opt/8ax/v5/config/settings/self_parameter_table.tsv}",
         "read_requested_driver_mode",
         '"SETTINGS" && $2 == "bus_pulse_setting"',
@@ -668,9 +732,15 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
     process_wait_index = text.find("wait_linuxcnc_process_set &&")
     affinity_index = text.find("set_linuxcnc_realtime_affinity &&", process_wait_index)
     linuxcncrsh_index = text.find("if ! start_gate; then")
-    readiness_index = text.find("if ! arm_and_wait_backend_motion_ready; then")
+    data_readiness_index = text.find("if ! arm_and_wait_backend_data_ready; then")
+    native_gate_index = text.find("if ! start_native_gate; then", data_readiness_index)
+    motion_readiness_index = text.find(
+        "if ! wait_backend_motion_ready; then", native_gate_index)
     if (process_wait_index < 0 or affinity_index < process_wait_index or
-            linuxcncrsh_index < affinity_index or readiness_index < linuxcncrsh_index):
+            linuxcncrsh_index < affinity_index or
+            data_readiness_index < linuxcncrsh_index or
+            native_gate_index < data_readiness_index or
+            motion_readiness_index < native_gate_index):
         print("CANONICAL_BACKEND_READINESS_EVENT_ORDER_MISSING", file=sys.stderr)
         rc = 1
     lcec_health_text = lcec_health_patch.read_text(encoding="utf-8", errors="strict")
@@ -714,8 +784,11 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
             rc = 1
     for token in (
         "backend_cpu_contract_capture",
+        "rtapi_threads_contract",
         "backend_readiness_arm",
         "backend_readiness_tick",
+        "backend_drive_verify",
+        "backend_drive_invalidate",
         "registered_processes_failure",
         "V5_BACKEND_READINESS_SOCKET_PATH",
         "backend_domain_wkc",
@@ -733,6 +806,8 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
             rc = 1
     for token in (
         "V5_BACKEND_READINESS_OP_ARM",
+        "V5_BACKEND_READINESS_OP_DRIVE_VERIFY",
+        "V5_BACKEND_READINESS_OP_DRIVE_INVALIDATE",
         "owner_start_ticks",
         "generation",
         "backend_data_ready",
@@ -740,9 +815,22 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         "first_full_wkc_ns",
         "dc_fresh_pair_ready_ns",
         "backend_ready_published_ns",
+        "drive_verified",
+        "drive_mapping_generation",
+        "drive_transaction_sha256",
     ):
         if token not in protocol_text:
             print(f"BACKEND_READINESS_PROTOCOL_MISSING: {token}", file=sys.stderr)
+            rc = 1
+    for token in (
+        "--verify-drive",
+        "--invalidate-drive",
+        "--drive-owner-generation",
+        "--drive-transaction-sha256",
+        "drive_identity_sha256",
+    ):
+        if token not in readiness_probe_text:
+            print(f"BACKEND_READINESS_PROBE_DRIVE_ATTESTATION_MISSING: {token}", file=sys.stderr)
             rc = 1
     for token in (
         "--arm",
@@ -1132,6 +1220,9 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         'Path(f"/etc/rc{level}.d/K14v5-runtime-startup")',
         "FAIL_RUNTIME_SHADOW_BOOT_LINK",
         "rc |= audit_runtime_startup_boot_graph()",
+        "def audit_userspace_housekeeping_affinity() -> int:",
+        "FAIL_USERSPACE_HOUSEKEEPING_CPU1",
+        "rc |= audit_userspace_housekeeping_affinity()",
     ):
         if token not in board_runtime_policy_text:
             print(f"RUNTIME_STARTUP_BOARD_AUDIT_MISSING: {token}", file=sys.stderr)
@@ -1179,6 +1270,7 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         "petalinux/project-spec/meta-user/recipes-apps/v5-base-overlay/files/network/v5_net_cpu_policy.sh\t/usr/local/sbin/v5_net_cpu_policy.sh\t0644",
         "petalinux/project-spec/meta-user/recipes-apps/v5-base-overlay/files/network/S99v5-net\t/etc/init.d/S99v5-net\t0755",
         "petalinux/project-spec/meta-user/recipes-apps/v5-base-overlay/files/network/v5_usb_wifi_apply.sh\t/usr/local/sbin/v5_usb_wifi_apply.sh\t0755",
+        "services/runtime_startup/init.d/v5-runtime-startup\t/etc/init.d/v5-runtime-startup\t0755",
     )
     for row in required_cpu_policy_rows:
         if row not in manifest_text:
@@ -1225,18 +1317,17 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         "manifest_cpu_policy_net_init=0",
         "manifest_cpu_policy_net_init=1",
         "manifest_cpu_policy_position=0",
+        "manifest_cpu_policy_runtime_startup=0",
+        "manifest_cpu_policy_runtime_startup=1",
         "restart_scope=cpu_policy",
         'LOG=/run/8ax/v5_cpu_policy.log',
         "apply_cpu_policy_after_install()",
         "apply_network_cpu_isolation",
         "enforce_dropbear_cpu1_affinity",
-        "/etc/init.d/v5-linuxcnc-command-gate restart",
-        "/etc/init.d/v5-position-status-publisher restart",
-        "/etc/init.d/v5-wcs-status-publisher restart",
-        "/etc/init.d/v5-state-publisher restart",
-        "/etc/init.d/v5-ui-relay restart",
+        "restart_runtime_event_dag()",
+        "/etc/init.d/v5-runtime-startup restart",
         "stop_position_publisher_before_backend",
-        "ensure_position_publisher_after_backend",
+        "stop_backend_publishers_before_backend",
         "manifest_wcs_publisher=0",
         "manifest_state_publisher=0",
         "manifest_state_publisher=1",
@@ -1256,9 +1347,17 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         "manifest_ethercat_touched=0",
         "manifest_ethercat_lcec=0",
         "manifest_ethercat_lifecycle=0",
+        "manifest_bus_cycle_touched=0",
+        "manifest_bus_cycle_complete=0",
+        "manifest_bus_cycle_ini=0",
+        "manifest_bus_cycle_hal=0",
+        "manifest_bus_cycle_xml=0",
+        "manifest_bus_cycle_readiness_probe=0",
+        "manifest_bus_cycle_command_gate_init=0",
         "binary:build/ethercat/lcec.so:0644",
         "module:services/command_gate/v5_ethercat_backend_lifecycle.sh:0644",
         "EtherCAT deploy requires the complete ec_master/ec_generic/lcec/lifecycle atomic bundle",
+        "BUS 1ms cycle deploy requires INI/HAL/XML, current LinuxCNC owner, complete EtherCAT, readiness/Command Gate, and UI/SHM atomic domains",
         "LinuxCNC/Command Gate process remained active before atomic replacement",
         "EtherCAT restart scope requires exactly the registered ec_master/ec_generic/lcec/lifecycle bundle",
         'if [ "$apply" -eq 1 ] && [ "$manifest_ethercat_complete" -eq 1 ]; then',
@@ -1292,14 +1391,26 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         if token not in installer_text:
             print(f"NATIVE_PROTOCOL_ATOMIC_DEPLOY_MISSING: {token}", file=sys.stderr)
             rc = 1
-    ensure_start = installer_text.find("ensure_position_publisher_after_backend() {")
-    ensure_end = installer_text.find("\n}\n", ensure_start)
-    ensure_block = installer_text[ensure_start:ensure_end] if ensure_start >= 0 and ensure_end > ensure_start else ""
-    if (not ensure_block or
-            "/etc/init.d/v5-position-status-publisher status" not in ensure_block or
-            "/etc/init.d/v5-position-status-publisher start" not in ensure_block or
-            "/etc/init.d/v5-position-status-publisher restart" in ensure_block):
-        print("POSITION_PUBLISHER_POST_READY_REATTACH_SURVIVOR", file=sys.stderr)
+    stop_backend_start = installer_text.find("stop_backend_publishers_before_backend() {")
+    stop_backend_end = installer_text.find("\n}\n", stop_backend_start)
+    stop_backend_block = (
+        installer_text[stop_backend_start:stop_backend_end]
+        if stop_backend_start >= 0 and stop_backend_end > stop_backend_start else ""
+    )
+    runtime_dag_start = installer_text.find("restart_runtime_event_dag() {")
+    runtime_dag_end = installer_text.find("\n}\n", runtime_dag_start)
+    runtime_dag_block = (
+        installer_text[runtime_dag_start:runtime_dag_end]
+        if runtime_dag_start >= 0 and runtime_dag_end > runtime_dag_start else ""
+    )
+    if (not stop_backend_block or
+            "stop_position_publisher_before_backend" not in stop_backend_block or
+            "stop_wcs_publisher_before_backend" not in stop_backend_block or
+            not runtime_dag_block or
+            "/etc/init.d/v5-runtime-startup restart" not in runtime_dag_block or
+            "v5-linuxcnc-command-gate restart" in runtime_dag_block or
+            "v5-settings-actiond restart" in runtime_dag_block):
+        print("RUNTIME_EVENT_DAG_RESTART_INVALID", file=sys.stderr)
         rc = 1
     writer_stop = installer_text.find("    stop_shm_abi_domain_before_install\n  else")
     manifest_install = installer_text.find(
@@ -1316,12 +1427,12 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
     cpu_scope = installer_text[cpu_scope_start:cpu_scope_end] if cpu_scope_start >= 0 and cpu_scope_end > cpu_scope_start else ""
     if (
         not cpu_scope
-        or cpu_scope.count("/etc/init.d/v5-linuxcnc-command-gate restart\n") != 1
+        or cpu_scope.count("restart_runtime_event_dag") != 1
         or "restart-native" in cpu_scope
-        or cpu_scope.find("stop_position_publisher_before_backend") >
-           cpu_scope.find("/etc/init.d/v5-linuxcnc-command-gate restart")
-        or cpu_scope.find("/etc/init.d/v5-linuxcnc-command-gate restart") >
-           cpu_scope.find("ensure_position_publisher_after_backend")
+        or "/etc/init.d/v5-linuxcnc-command-gate restart\n" in cpu_scope
+        or "/etc/init.d/v5-settings-actiond restart\n" in cpu_scope
+        or cpu_scope.find("apply_cpu_policy_after_install") >
+           cpu_scope.find("restart_runtime_event_dag")
     ):
         print("CPU_POLICY_SCOPE_BACKEND_RESTART_INVALID", file=sys.stderr)
         rc = 1
@@ -1329,13 +1440,13 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
     all_cpu_policy_index = installer_text.find(
         "    apply_cpu_policy_after_install\n", all_scope_start)
     all_backend_index = installer_text.find(
-        "    /etc/init.d/v5-linuxcnc-command-gate restart\n", all_scope_start)
+        "    restart_runtime_event_dag\n", all_scope_start)
     if (all_scope_start < 0 or all_cpu_policy_index < 0 or all_backend_index < 0 or
             all_cpu_policy_index > all_backend_index):
         print("ALL_SCOPE_CPU_POLICY_BEFORE_BACKEND_MISSING", file=sys.stderr)
         rc = 1
     barrier_call = "\n    wait_publisher_actual_barrier\n"
-    if installer_text.count(barrier_call) != 5:
+    if installer_text.count(barrier_call) != 7:
         print("PUBLISHER_ACTUAL_BARRIER_CALL_COUNT_INVALID", file=sys.stderr)
         rc = 1
     if installer_text.count("\n  wait_publisher_actual_barrier\n") != 1:
@@ -1360,7 +1471,7 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         ("wcs", 'elif [ "$restart_scope" = "wcs" ]',
          'elif [ "$restart_scope" = "cpu_policy" ]', True),
         ("cpu_policy", 'elif [ "$restart_scope" = "cpu_policy" ]',
-         'elif [ "$restart_scope" = "settings" ]', False),
+         'elif [ "$restart_scope" = "settings" ]', True),
         ("settings", 'elif [ "$restart_scope" = "settings" ]',
          "\n  else\n", True),
     )
@@ -1767,9 +1878,165 @@ def check_tcf_retirement_policy() -> int:
     return rc
 
 
+def check_bus_1ms_cycle_policy() -> int:
+    bus_ini = ROOT / "linuxcnc" / "ini" / "v5_bus.ini"
+    pulse_ini = ROOT / "linuxcnc" / "ini" / "v5_pulse.ini"
+    bus_hal = ROOT / "linuxcnc" / "hal" / "v5_bus_1ms.hal"
+    ethercat = ROOT / "linuxcnc" / "hal" / "ethercat-conf-1ms.xml"
+    retired = (
+        ROOT / "linuxcnc" / "hal" / "v5_bus_2ms.hal",
+        ROOT / "linuxcnc" / "hal" / "ethercat-conf-2ms.xml",
+    )
+    safety = ROOT.parent / "linuxcnc" / "src" / "hal" / "components" / "v5_safety_latch.comp"
+    home = ROOT.parent / "linuxcnc" / "src" / "hal" / "components" / "v5_bus_homecomp.comp"
+    manifest = ROOT / "config" / "deploy" / "v5_runtime_deploy_manifest.tsv"
+    installer = ROOT / "tools" / "deploy" / "install_v5_runtime.sh"
+    stress = ROOT / "tools" / "linuxcnc" / "v5_cpu1_motion_stress.py"
+    runtime_verify = ROOT / "tools" / "deploy" / "verify_v5_board_runtime.sh"
+    cold_boot_measure = ROOT / "tools" / "deploy" / "measure_v5_cold_boot.py"
+    lcec_recipe = (
+        ROOT / "petalinux" / "project-spec" / "meta-user" / "recipes-apps"
+        / "linuxcnc-ethercat" / "linuxcnc-ethercat_git.bb"
+    )
+    lcec_health_patch = (
+        lcec_recipe.parent / "files"
+        / "0004-v5-runtime-cycle-health-sticky-pins.patch"
+    )
+    required = (
+        bus_ini, pulse_ini, bus_hal, ethercat, safety, home, manifest,
+        installer, stress, runtime_verify, cold_boot_measure, lcec_recipe,
+        lcec_health_patch,
+    )
+    missing = [str(path.relative_to(ROOT.parent)) for path in required if not path.exists()]
+    if missing:
+        print("BUS_1MS_REQUIRED_SOURCE_MISSING:" + ",".join(missing), file=sys.stderr)
+        return 1
+    survivors = [str(path.relative_to(ROOT)) for path in retired if path.exists()]
+    if survivors:
+        print("BUS_1MS_RETIRED_SOURCE_SURVIVOR:" + ",".join(survivors), file=sys.stderr)
+        return 1
+
+    ini_text = bus_ini.read_text(encoding="utf-8", errors="strict")
+    pulse_text = pulse_ini.read_text(encoding="utf-8", errors="strict")
+    hal_text = bus_hal.read_text(encoding="utf-8", errors="strict")
+    xml_text = ethercat.read_text(encoding="utf-8", errors="strict")
+    safety_text = safety.read_text(encoding="utf-8", errors="strict")
+    home_text = home.read_text(encoding="utf-8", errors="strict")
+    manifest_text = manifest.read_text(encoding="utf-8", errors="strict")
+    installer_text = installer.read_text(encoding="utf-8", errors="strict")
+    stress_text = stress.read_text(encoding="utf-8", errors="strict")
+    runtime_verify_text = runtime_verify.read_text(encoding="utf-8", errors="strict")
+    cold_boot_measure_text = cold_boot_measure.read_text(
+        encoding="utf-8", errors="strict"
+    )
+    lcec_recipe_text = lcec_recipe.read_text(encoding="utf-8", errors="strict")
+    lcec_health_patch_text = lcec_health_patch.read_text(
+        encoding="utf-8", errors="strict"
+    )
+
+    contracts = (
+        (ini_text, r"^SERVO_PERIOD\s*=\s*1000000\s*$", "BUS_SERVO_PERIOD_NOT_1MS"),
+        (ini_text, r"^HALFILE\s*=\s*/opt/8ax/v5/linuxcnc/hal/v5_bus_1ms\.hal\s*$", "BUS_HAL_OWNER_NOT_1MS"),
+        (ini_text, r"^ARC_BLEND_GAP_CYCLES\s*=\s*8\s*$", "BUS_ARC_BLEND_WALL_TIME_NOT_PRESERVED"),
+        (pulse_text, r"^SERVO_PERIOD\s*=\s*4500000\s*$", "PULSE_SERVO_PERIOD_CHANGED_BY_BUS_SLICE"),
+    )
+    for text, pattern, code in contracts:
+        if not re.search(pattern, text, re.MULTILINE):
+            print(code, file=sys.stderr)
+            return 1
+    if (
+        '<master idx="0" appTimePeriod="1000000" refClockSyncCycles="10">' not in xml_text
+        or xml_text.count('sync0Cycle="*1" sync0Shift="0"') != 5
+    ):
+        print("BUS_ETHERCAT_1MS_DC_IDENTITY_INVALID", file=sys.stderr)
+        return 1
+    if (
+        "/opt/8ax/v5/linuxcnc/hal/ethercat-conf-1ms.xml" not in hal_text
+        or "v5_bus_2ms.hal" in hal_text
+        or "ethercat-conf-2ms.xml" in hal_text
+    ):
+        print("BUS_HAL_1MS_XML_OWNER_INVALID", file=sys.stderr)
+        return 1
+    for text, token, code in (
+        (safety_text, 'param rw u32 watchdog_cycles = 100', "BUS_SAFETY_WATCHDOG_NOT_100MS"),
+        (home_text, '#define V5_HOME_STABLE_CYCLES 6u', "BUS_HOME_STABLE_WALL_TIME_NOT_PRESERVED"),
+        (home_text, '#define V5_HOME_WAIT_CYCLES 1000u', "BUS_HOME_WAIT_WALL_TIME_NOT_PRESERVED"),
+        (manifest_text, 'runtime_ini_cycle_merge\tlinuxcnc/ini/v5_bus.ini\t/opt/8ax/v5/linuxcnc/ini/v5_bus.ini\t0644', "BUS_1MS_INI_CYCLE_MERGE_MANIFEST_MISSING"),
+        (manifest_text, 'linuxcnc\tlinuxcnc/hal/v5_bus_1ms.hal\t/opt/8ax/v5/linuxcnc/hal/v5_bus_1ms.hal\t0644', "BUS_1MS_HAL_MANIFEST_MISSING"),
+        (manifest_text, 'linuxcnc\tlinuxcnc/hal/ethercat-conf-1ms.xml\t/opt/8ax/v5/linuxcnc/hal/ethercat-conf-1ms.xml\t0644', "BUS_1MS_XML_MANIFEST_MISSING"),
+        (installer_text, '/opt/8ax/v5/linuxcnc/hal/v5_bus_2ms.hal', "BUS_2MS_HAL_RETIREMENT_MISSING"),
+        (installer_text, '/opt/8ax/v5/linuxcnc/hal/ethercat-conf-2ms.xml', "BUS_2MS_XML_RETIREMENT_MISSING"),
+        (installer_text, 'merge_runtime_bus_ini_cycle() {', "BUS_1MS_INI_CYCLE_MERGER_MISSING"),
+        (installer_text, '("EMCMOT", "SERVO_PERIOD"): "1000000"', "BUS_1MS_INI_SERVO_MERGE_MISSING"),
+        (installer_text, '("HAL", "HALFILE"): "/opt/8ax/v5/linuxcnc/hal/v5_bus_1ms.hal"', "BUS_1MS_INI_HAL_MERGE_MISSING"),
+        (installer_text, '("TRAJ", "ARC_BLEND_GAP_CYCLES"): "8"', "BUS_1MS_INI_TRAJ_MERGE_MISSING"),
+        (installer_text, '[ "$manifest_bus_cycle_touched" -eq 1 ]', "BUS_1MS_ACTIOND_STOP_GUARD_MISSING"),
+        (stress_text, 'os.sched_setaffinity', "BUS_CPU1_STRESS_AFFINITY_MISSING"),
+        (stress_text, '/proc/self/status', "BUS_CPU1_STRESS_READBACK_MISSING"),
+        (stress_text, 'SAMPLE_INTERVAL_NS = 100_000_000', "BUS_CPU1_STRESS_100MS_SAMPLER_MISSING"),
+        (stress_text, 'hal.get_value', "BUS_CPU1_STRESS_HAL_READER_MISSING"),
+        (stress_text, 'linuxcnc_module.stat', "BUS_CPU1_STRESS_MOTION_READER_MISSING"),
+        (stress_text, 'read_cpu_ticks', "BUS_CPU1_STRESS_CPU_TICKS_MISSING"),
+        (stress_text, 'query_backend_identity(expected=identity)', "BUS_CPU1_STRESS_GENERATION_CLOSE_MISSING"),
+        (stress_text, 'external command attempted inside measurement window', "BUS_CPU1_STRESS_WINDOW_COMMAND_GUARD_MISSING"),
+        (stress_text, 'evidence write attempted inside measurement window', "BUS_CPU1_STRESS_WINDOW_WRITE_GUARD_MISSING"),
+        (stress_text, 'sticky counter saturated before measurement window', "BUS_CPU1_STRESS_STICKY_SATURATION_GUARD_MISSING"),
+        (stress_text, 'hal_module.get_info_params()', "BUS_CPU1_STRESS_TMAX_INVENTORY_MISSING"),
+        (stress_text, 'previous_tmax_ns', "BUS_CPU1_STRESS_TMAX_BASELINE_MISSING"),
+        (stress_text, 'kernel_fault_start', "BUS_CPU1_STRESS_KERNEL_FAULT_BASELINE_MISSING"),
+        (stress_text, 'runtime_log_start', "BUS_CPU1_STRESS_RUNTIME_LOG_BASELINE_MISSING"),
+        (stress_text, 'function_tmax_overrun', "BUS_CPU1_STRESS_FUNCTION_TMAX_GATE_MISSING"),
+        (stress_text, 'MAX_OBSERVE_DURATION_SECONDS = 600', "BUS_CPU1_OBSERVE_10MIN_MISSING"),
+        (stress_text, 'TARGET_RUNTIME_PERIOD_ERROR_NS = 100_000', "BUS_CPU1_PERIOD_WARNING_TARGET_MISSING"),
+        (stress_text, 'HARD_RUNTIME_PERIOD_ERROR_NS = 200_000', "BUS_CPU1_PERIOD_HARD_LIMIT_MISSING"),
+        (stress_text, 'TARGET_COMBINED_BUDGET_NS = 800_000', "BUS_CPU1_COMBINED_TARGET_MISSING"),
+        (stress_text, 'HARD_COMBINED_BUDGET_NS = EXPECTED_SERVO_PERIOD_NS', "BUS_CPU1_COMBINED_HARD_LIMIT_MISSING"),
+        (stress_text, 'lcec.0.runtime-period-warning-count', "BUS_CPU1_PERIOD_WARNING_STICKY_MISSING"),
+        (runtime_verify_text, 'lcec.0.runtime-phase-step-max', "BUS_RUNTIME_PHASE_STEP_READBACK_MISSING"),
+        (runtime_verify_text, 'lcec.0.runtime-period-ns', "BUS_RUNTIME_PERIOD_READBACK_MISSING"),
+        (runtime_verify_text, 'lcec.0.runtime-period-error-max', "BUS_RUNTIME_PERIOD_ERROR_READBACK_MISSING"),
+        (runtime_verify_text, 'lcec.0.runtime-period-warning-count', "BUS_RUNTIME_PERIOD_WARNING_READBACK_MISSING"),
+        (runtime_verify_text, 'lcec.0.runtime-period-fault-count', "BUS_RUNTIME_PERIOD_STICKY_READBACK_MISSING"),
+        (runtime_verify_text, 'lcec.0.domain-wc-incomplete-count', "BUS_RUNTIME_WKC_STICKY_READBACK_MISSING"),
+        (runtime_verify_text, 'lcec.0.all-op-false-count', "BUS_RUNTIME_OP_STICKY_READBACK_MISSING"),
+        (runtime_verify_text, 'setp lcec.0.runtime-phase-step-max 0', "BUS_RUNTIME_PHASE_WINDOW_RESET_MISSING"),
+        (runtime_verify_text, 'setp lcec.0.runtime-period-error-max 0', "BUS_RUNTIME_PERIOD_WINDOW_RESET_MISSING"),
+        (runtime_verify_text, '| halcmd -s -f', "BUS_RUNTIME_SINGLE_HAL_ATTACH_MISSING"),
+        (runtime_verify_text, 'test "$period" -ge 800000', "BUS_RUNTIME_PERIOD_LOW_BOUND_MISSING"),
+        (runtime_verify_text, 'test "$period" -le 1200000', "BUS_RUNTIME_PERIOD_HIGH_BOUND_MISSING"),
+        (runtime_verify_text, 'test "$phase" -le 200000', "BUS_RUNTIME_PHASE_HARD_GATE_MISSING"),
+        (runtime_verify_text, 'test "$error" -le 200000', "BUS_RUNTIME_PERIOD_HARD_GATE_MISSING"),
+        (runtime_verify_text, 'test "$combined" -lt 1000000', "BUS_RUNTIME_COMBINED_HARD_GATE_MISSING"),
+        (runtime_verify_text, 'test "$fault_end" -eq "$fault_start"', "BUS_RUNTIME_PERIOD_FAULT_WINDOW_GATE_MISSING"),
+        (runtime_verify_text, 'test "$wc_end" -eq "$wc_start"', "BUS_RUNTIME_WKC_FAULT_WINDOW_GATE_MISSING"),
+        (runtime_verify_text, 'test "$op_end" -eq "$op_start"', "BUS_RUNTIME_OP_FAULT_WINDOW_GATE_MISSING"),
+        (cold_boot_measure_text, '"runtime_period_ns"', "BUS_COLD_BOOT_PERIOD_READBACK_MISSING"),
+        (cold_boot_measure_text, '"runtime_period_error_max_ns"', "BUS_COLD_BOOT_PERIOD_ERROR_READBACK_MISSING"),
+        (cold_boot_measure_text, '"runtime_period_warning_count"', "BUS_COLD_BOOT_PERIOD_WARNING_READBACK_MISSING"),
+        (cold_boot_measure_text, '"runtime_period_fault_count"', "BUS_COLD_BOOT_PERIOD_STICKY_READBACK_MISSING"),
+        (cold_boot_measure_text, '800_000 <= int(startup.get("runtime_period_ns")', "BUS_COLD_BOOT_PERIOD_RANGE_GATE_MISSING"),
+        (cold_boot_measure_text, 'combined_budget < 1_000_000', "BUS_COLD_BOOT_COMBINED_GATE_MISSING"),
+        (cold_boot_measure_text, 'int(startup.get("runtime_period_fault_count") or 0) == 0', "BUS_COLD_BOOT_PERIOD_FAULT_GATE_MISSING"),
+        (lcec_recipe_text, 'file://0004-v5-runtime-cycle-health-sticky-pins.patch', "BUS_LCEC_HEALTH_PATCH_RECIPE_MISSING"),
+        (lcec_health_patch_text, 'startup-phase-span', "BUS_LCEC_STARTUP_PHASE_RENAME_MISSING"),
+        (lcec_health_patch_text, 'runtime-phase-step-max', "BUS_LCEC_RUNTIME_PHASE_STICKY_MISSING"),
+        (lcec_health_patch_text, 'runtime-period-ns', "BUS_LCEC_RUNTIME_PERIOD_MISSING"),
+        (lcec_health_patch_text, 'runtime-period-error-max', "BUS_LCEC_RUNTIME_PERIOD_ERROR_STICKY_MISSING"),
+        (lcec_health_patch_text, 'runtime-period-warning-count', "BUS_LCEC_RUNTIME_PERIOD_WARNING_STICKY_MISSING"),
+        (lcec_health_patch_text, 'runtime-period-fault-count', "BUS_LCEC_RUNTIME_PERIOD_FAULT_STICKY_MISSING"),
+        (lcec_health_patch_text, 'master->app_time_period / 5', "BUS_LCEC_RUNTIME_PERIOD_20_PERCENT_HARD_LIMIT_MISSING"),
+        (lcec_health_patch_text, 'domain-wc-incomplete-count', "BUS_LCEC_WKC_STICKY_MISSING"),
+        (lcec_health_patch_text, 'all-op-false-count', "BUS_LCEC_OP_STICKY_MISSING"),
+    ):
+        if token not in text:
+            print(code, file=sys.stderr)
+            return 1
+    return 0
+
+
 def check_rotary_native_target_policy() -> int:
     rc = 0
-    bus_hal = ROOT / "linuxcnc" / "hal" / "v5_bus_2ms.hal"
+    bus_hal = ROOT / "linuxcnc" / "hal" / "v5_bus_1ms.hal"
     bus_ini = ROOT / "linuxcnc" / "ini" / "v5_bus.ini"
     if not bus_hal.exists() or not bus_ini.exists():
         print("ROTARY_WRAPPED_MASK_BUS_SOURCE_MISSING", file=sys.stderr)
@@ -2269,12 +2536,23 @@ def check_linuxcnc_source_rebuild_policy() -> int:
             return 1
     for required in (
         '--package-only) build_mode=package-only; package_only=1',
+        '--package-target)',
         '--sync-registered-delta "$linuxcnc_projection"',
-        'V5_LINUXCNC_PACKAGE_ONLY_OK package_root=$package_root',
+        'V5_LINUXCNC_PACKAGE_ONLY_OK target=$package_target package_root=$package_root',
+        'run_bitbake_direct "linuxcnc-prebuilt -c populate_sysroot"',
+        'run_bitbake_direct "linux-xlnx -c v5_linux_projection -f"',
+        'run_bitbake_direct "linuxcnc-ethercat -c compile -f"',
+        'run_bitbake_direct "linuxcnc-ethercat -c install -f"',
+        'run_bitbake_direct "linuxcnc-ethercat -c package -f"',
+        'V5_LINUX_KERNEL_PROJECTION_REPAIRED task=do_v5_linux_projection',
+        'V5_LINUXCNC_ETHERCAT_PACKAGE_ONLY_OK',
     ):
         if required not in build_script:
             print(f"LINUXCNC_PACKAGE_ONLY_FAST_PATH_MISSING: {required}", file=sys.stderr)
             return 1
+    if "bitbake -b" in package_only_body:
+        print("LINUXCNC_PACKAGE_ONLY_RECIPE_BYPASS_PRESENT", file=sys.stderr)
+        return 1
     if "sync_v5_linuxcnc_recipe_to_petalinux" in build_script:
         print("LINUXCNC_REBUILD_RETIRED_SYNC_CALL_PRESENT", file=sys.stderr)
         return 1
@@ -2592,7 +2870,7 @@ def check_cc_golden_model_specific_motion() -> int:
     runner = ROOT / "services" / "command_gate" / "v5_linuxcncrsh_golden_run.c"
     acceptance = ROOT / "tools" / "deploy" / "run_v5_board_acceptance.sh"
     manifest = ROOT / "config" / "deploy" / "v5_runtime_deploy_manifest.tsv"
-    hal = ROOT / "linuxcnc" / "hal" / "v5_bus_2ms.hal"
+    hal = ROOT / "linuxcnc" / "hal" / "v5_bus_1ms.hal"
     native_hal_owner = ROOT.parent / "linuxcnc" / "src" / "hal" / "user_comps" / "v5_native_hal_owner.comp"
     rc = 0
     if legacy_program.exists():
@@ -2614,7 +2892,7 @@ def check_cc_golden_model_specific_motion() -> int:
         print("CC_GOLDEN_DEPLOY_MANIFEST_MISSING: config/deploy/v5_runtime_deploy_manifest.tsv", file=sys.stderr)
         return 1
     if not hal.exists():
-        print("CC_GOLDEN_RTCP_HAL_MISSING: linuxcnc/hal/v5_bus_2ms.hal", file=sys.stderr)
+        print("CC_GOLDEN_RTCP_HAL_MISSING: linuxcnc/hal/v5_bus_1ms.hal", file=sys.stderr)
         return 1
     if not native_hal_owner.exists():
         print("CC_GOLDEN_NATIVE_HAL_OWNER_MISSING: linuxcnc/src/hal/user_comps/v5_native_hal_owner.comp", file=sys.stderr)
@@ -3077,7 +3355,8 @@ def check_product_runtime_closure_policy() -> int:
         "manifest_command_gate_only=1",
         "restart_scope=command_gate",
         "Command-gate restart scope requires a non-empty command-gate-only manifest and no LinuxCNC bundle",
-        "/etc/init.d/v5-linuxcnc-command-gate restart",
+        "restart_runtime_event_dag()",
+        "/etc/init.d/v5-runtime-startup restart",
         "disable_unconditional_ethercat_autostart",
         "enable_runtime_startup_boot_graph",
         "enable_auxiliary_boot_service v5-runtime-startup 05 14",
@@ -3101,6 +3380,11 @@ def check_product_runtime_closure_policy() -> int:
             return 1
     runtime_startup = runtime_startup_path.read_text(encoding="utf-8", errors="strict")
     for token in (
+        "pin_userspace_housekeeping_to_cpu1() {",
+        'rtapi_app:T#*)',
+        '/usr/bin/taskset -pc 1 "$tid"',
+        "Cpus_allowed_list:",
+        "  pin_userspace_housekeeping_to_cpu1\n",
         '"$COMMAND_GATE" start >>"$LOGFILE" 2>&1 &',
         '"$ACTIOND" start >>"$LOGFILE" 2>&1 &',
         'start_publishers_after_data_ready >>"$LOGFILE" 2>&1 &',
@@ -3172,12 +3456,10 @@ def check_product_runtime_closure_policy() -> int:
     )
     if (
         not command_gate_scope
-        or command_gate_scope.count("/etc/init.d/v5-linuxcnc-command-gate restart\n") != 1
+        or command_gate_scope.count("restart_runtime_event_dag") != 1
         or "restart-native" in command_gate_scope
-        or command_gate_scope.find("stop_position_publisher_before_backend") >
-           command_gate_scope.find("/etc/init.d/v5-linuxcnc-command-gate restart")
-        or command_gate_scope.find("/etc/init.d/v5-linuxcnc-command-gate restart") >
-           command_gate_scope.find("ensure_position_publisher_after_backend")
+        or "/etc/init.d/v5-linuxcnc-command-gate restart\n" in command_gate_scope
+        or "/etc/init.d/v5-settings-actiond restart\n" in command_gate_scope
     ):
         print("DRIVE_GENERATION_COMMAND_GATE_SCOPE_BACKEND_RESTART_INVALID", file=sys.stderr)
         return 1
@@ -3192,12 +3474,12 @@ def check_product_runtime_closure_policy() -> int:
     )
     if (
         not cpu_policy_scope
-        or cpu_policy_scope.count("/etc/init.d/v5-linuxcnc-command-gate restart\n") != 1
+        or cpu_policy_scope.count("restart_runtime_event_dag") != 1
         or "restart-native" in cpu_policy_scope
-        or cpu_policy_scope.find("stop_position_publisher_before_backend") >
-           cpu_policy_scope.find("/etc/init.d/v5-linuxcnc-command-gate restart")
-        or cpu_policy_scope.find("/etc/init.d/v5-linuxcnc-command-gate restart") >
-           cpu_policy_scope.find("ensure_position_publisher_after_backend")
+        or "/etc/init.d/v5-linuxcnc-command-gate restart\n" in cpu_policy_scope
+        or "/etc/init.d/v5-settings-actiond restart\n" in cpu_policy_scope
+        or cpu_policy_scope.find("apply_cpu_policy_after_install") >
+           cpu_policy_scope.find("restart_runtime_event_dag")
     ):
         print("DRIVE_GENERATION_CPU_POLICY_SCOPE_BACKEND_RESTART_INVALID", file=sys.stderr)
         return 1
@@ -3215,6 +3497,7 @@ def main() -> int:
         check_shm_consumers() |
         check_shm_abi() |
         check_cpu_policy() |
+        check_bus_1ms_cycle_policy() |
         check_linuxcnc_rtapi_affinity_owner() |
         check_linuxcnc_control_transport_policy() |
         check_uio_device_permission_policy() |

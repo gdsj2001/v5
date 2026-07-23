@@ -9,6 +9,10 @@ from pathlib import Path
 
 INSTALLER = Path(__file__).with_name('install_v5_runtime.sh')
 MANIFEST = Path(__file__).resolve().parents[2] / 'config/deploy/v5_runtime_deploy_manifest.tsv'
+BUS_INI = Path(__file__).resolve().parents[2] / 'linuxcnc/ini/v5_bus.ini'
+WCS_INIT = (
+    Path(__file__).resolve().parents[2] /
+    'services/state_publisher/init.d/v5-wcs-status-publisher')
 
 
 def section(text: str, start: str, end: str) -> str:
@@ -123,17 +127,151 @@ merge_runtime_seed_tsv {shlex.quote(template.as_posix())} {shlex.quote(destinati
         assert_snapshot_clean()
 
 
+def audit_retired_bus_cycle_cleanup(text: str) -> None:
+    transaction = section(
+        text,
+        'parameter_table_transaction_cleanup() {',
+        '\nmerge_runtime_seed_tsv() {',
+    )
+    cleanup = section(
+        text,
+        'cleanup_retired_bus_cycle_files() {',
+        '\ncleanup_retired_runtime_files() {',
+    )
+    for path in (
+        '/opt/8ax/v5/linuxcnc/hal/v5_bus_2ms.hal',
+        '/opt/8ax/v5/linuxcnc/hal/ethercat-conf-2ms.xml',
+    ):
+        assert path in cleanup
+    with tempfile.TemporaryDirectory() as raw_root:
+        root = Path(raw_root)
+        hal_root = root / 'opt/8ax/v5/linuxcnc/hal'
+        hal_root.mkdir(parents=True)
+        retired = (
+            hal_root / 'v5_bus_2ms.hal',
+            hal_root / 'ethercat-conf-2ms.xml',
+        )
+        for path in retired:
+            path.write_text('retired\n', encoding='utf-8')
+            path.chmod(0o640)
+        shell_root_result = subprocess.run(
+            ['sh', '-c', 'cd "$1" && pwd', 'sh', root.as_posix()],
+            check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        assert shell_root_result.returncode == 0, shell_root_result.stderr.decode(errors='replace')
+        shell_root = shell_root_result.stdout.decode(encoding='utf-8').strip()
+        common = (
+            'set -eu\n'
+            f'parameter_table_snapshot_root={shlex.quote((root / "temp_parameter_snapshot").as_posix())}\n'
+            'parameter_table_transaction_dir=\n'
+            'parameter_table_transaction_entry=\n'
+            'parameter_table_transaction_active=0\n'
+            'parameter_table_transaction_count=0\n' +
+            transaction + '\n' + cleanup + '\n')
+        script = (
+            common + 'cleanup_retired_bus_cycle_files ' + shlex.quote(shell_root) + '\n'
+            'parameter_table_transaction_complete\n')
+        result = subprocess.run(
+            ['sh'], input=script.encode('utf-8'), check=False,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        assert result.returncode == 0, result.stderr.decode(errors='replace')
+        assert all(not path.exists() for path in retired)
+        assert not (root / 'temp_parameter_snapshot').exists()
+
+        expected = {}
+        for index, path in enumerate(retired):
+            path.write_text(f'rollback-{index}\n', encoding='utf-8')
+            path.chmod(0o640 + index)
+            expected[path] = (path.read_bytes(), path.stat().st_mode & 0o777)
+        rollback = subprocess.run(
+            ['sh'],
+            input=(
+                common + 'cleanup_retired_bus_cycle_files ' + shlex.quote(shell_root) + '\n'
+                'exit 17\n').encode('utf-8'),
+            check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        assert rollback.returncode == 17, rollback.stderr.decode(errors='replace')
+        assert b'restored parameter owner after failed deploy' in rollback.stderr
+        for path, (expected_bytes, expected_mode) in expected.items():
+            assert path.read_bytes() == expected_bytes
+            assert path.stat().st_mode & 0o777 == expected_mode
+        assert not (root / 'temp_parameter_snapshot').exists()
+
+
+def audit_runtime_bus_ini_cycle_merge(text: str, manifest: str) -> None:
+    merge = section(
+        text,
+        'merge_runtime_bus_ini_cycle() {',
+        '\ntab=$(printf',
+    )
+    expected_row = (
+        'runtime_ini_cycle_merge\tlinuxcnc/ini/v5_bus.ini\t'
+        '/opt/8ax/v5/linuxcnc/ini/v5_bus.ini\t0644')
+    assert manifest.splitlines().count(expected_row) == 1
+    with tempfile.TemporaryDirectory() as raw_root:
+        root = Path(raw_root)
+        destination = root / 'v5_bus.ini'
+        destination.write_text(
+            '[EMCMOT]\nSERVO_PERIOD = 2000000\n\n'
+            '[HAL]\nHALFILE = /opt/8ax/v5/linuxcnc/hal/v5_bus_2ms.hal\n\n'
+            '[TRAJ]\nARC_BLEND_GAP_CYCLES = 4\n\n'
+            '[AXIS_C]\nMOTOR_REV = 50\nCUSTOM_DEVICE_VALUE = keep-me\n',
+            encoding='utf-8')
+        entry = root / 'transaction-entry'
+        script = (
+            'set -eu\n'
+            f'PYTHON_EXE={shlex.quote(Path(sys.executable).as_posix())}\n'
+            'python3() { "$PYTHON_EXE" "$@"; }\n'
+            'parameter_table_transaction_snapshot() {\n'
+            f'  parameter_table_transaction_entry={shlex.quote(entry.as_posix())}\n'
+            '  mkdir -p "$parameter_table_transaction_entry"\n'
+            '}\n' + merge + '\n' +
+            'merge_runtime_bus_ini_cycle ' + shlex.quote(BUS_INI.as_posix()) + ' ' +
+            shlex.quote(destination.as_posix()) + ' 0666\n')
+        result = subprocess.run(
+            ['sh'], input=script.encode('utf-8'), check=False,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        assert result.returncode == 0, result.stderr.decode(errors='replace')
+        merged = destination.read_text(encoding='utf-8')
+        for token in (
+            'SERVO_PERIOD = 1000000',
+            'HALFILE = /opt/8ax/v5/linuxcnc/hal/v5_bus_1ms.hal',
+            'ARC_BLEND_GAP_CYCLES = 8',
+            'MOTOR_REV = 50',
+            'CUSTOM_DEVICE_VALUE = keep-me',
+        ):
+            assert token in merged, token
+        assert '2000000' not in merged and 'v5_bus_2ms.hal' not in merged
+
+        malformed = merged.replace(
+            'SERVO_PERIOD = 1000000',
+            'SERVO_PERIOD = 1000000\nSERVO_PERIOD = 2000000', 1)
+        destination.write_text(malformed, encoding='utf-8')
+        second = subprocess.run(
+            ['sh'], input=script.encode('utf-8'), check=False,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        assert second.returncode != 0
+        assert destination.read_text(encoding='utf-8') == malformed
+
 def main() -> int:
     text = INSTALLER.read_text(encoding='utf-8')
     manifest = MANIFEST.read_text(encoding='utf-8')
+    wcs_init = WCS_INIT.read_text(encoding='utf-8')
     audit_state_upgrade(text)
     audit_parameter_table_merge_behavior(text)
+    audit_retired_bus_cycle_cleanup(text)
+    audit_runtime_bus_ini_cycle_merge(text, manifest)
     for token in (
         'disable_unconditional_ethercat_autostart',
         'rm -f "$dir"/S??ethercat',
         'enable_runtime_startup_boot_graph',
         'disable_boot_service "$service"',
         'enable_auxiliary_boot_service v5-runtime-startup 05 14',
+        'manifest_cpu_policy_runtime_startup=0',
+        'manifest_cpu_policy_runtime_startup=1',
+        '[ "$manifest_cpu_policy_runtime_startup" -eq 1 ]',
+        '[ "$manifest_cpu_policy_runtime_startup" -ne 1 ]',
+        'manifest_runtime_startup_only=1',
+        'restart_scope=runtime_startup',
+        'Runtime-startup restart scope requires exactly the registered runtime-startup init row',
     ):
         assert token in text, 'MODE_SELECTED_BOOT_ORDER_MISSING:' + token
     for retired in (
@@ -163,7 +301,7 @@ def main() -> int:
     ):
         assert runtime_ini in text
     runtime_model_seed = (
-        'runtime_seed\tlinuxcnc/ini/v5_bus.ini\t'
+        'runtime_ini_cycle_merge\tlinuxcnc/ini/v5_bus.ini\t'
         '/opt/8ax/v5/linuxcnc/ini/v5_bus.ini\t0644')
     assert manifest.splitlines().count(runtime_model_seed) == 1
     install_loop_text = section(
@@ -172,6 +310,7 @@ def main() -> int:
         '\nenable_auxiliary_boot_service() {')
     assert 'if [ "$kind" = "runtime_seed" ] && [ -e "$destination" ]; then' in install_loop_text
     assert 'preserve runtime seed %s -> %s (exists)' in install_loop_text
+    assert 'merge_runtime_bus_ini_cycle "$source_path" "$destination" "$mode"' in install_loop_text
     for row in (
         'binary\tbuild/board/app/v5_state_publisher\t/usr/libexec/8ax/v5_state_publisher\t0755',
         'init\tservices/state_publisher/init.d/v5-state-publisher\t/etc/init.d/v5-state-publisher\t0755',
@@ -222,10 +361,9 @@ def main() -> int:
         assert token in text
     assert 'return 1\n  fi\n  for writer_cmdline' in stop
 
-    # Spawn-only publisher services are joined once per non-UI install batch.
-    # The UI/cpu-policy/all scopes reuse the UI-owned barrier and must not add
-    # a second wait after each individual restart.
-    assert text.count('\n    wait_publisher_actual_barrier\n') == 5
+    # Every backend-generation restart uses the one event DAG owner, then one
+    # deployment readback barrier.  WCS-only remains a publisher-local restart.
+    assert text.count('\n    wait_publisher_actual_barrier\n') == 8
     assert text.count('\n  wait_publisher_actual_barrier\n') == 1
     scopes = {
         'actiond': section(
@@ -239,7 +377,10 @@ def main() -> int:
         'ethercat': section(text, 'elif [ "$restart_scope" = "ethercat" ]',
                            'elif [ "$restart_scope" = "wcs" ]'),
         'wcs': section(text, 'elif [ "$restart_scope" = "wcs" ]',
-                       'elif [ "$restart_scope" = "cpu_policy" ]'),
+                       'elif [ "$restart_scope" = "runtime_startup" ]'),
+        'runtime_startup': section(
+            text, 'elif [ "$restart_scope" = "runtime_startup" ]',
+            'elif [ "$restart_scope" = "cpu_policy" ]'),
         'cpu_policy': section(text, 'elif [ "$restart_scope" = "cpu_policy" ]',
                               'elif [ "$restart_scope" = "settings" ]'),
         'settings': section(text, 'elif [ "$restart_scope" = "settings" ]',
@@ -248,33 +389,62 @@ def main() -> int:
             text, '\n  else\n    enable_auxiliary_boot_services',
             '\n  fi\n  parameter_table_transaction_complete\nelse\n'),
     }
-    for name in ('command_gate', 'backend', 'ethercat', 'wcs', 'settings'):
+    for name in (
+            'command_gate', 'backend', 'ethercat', 'wcs', 'runtime_startup',
+            'cpu_policy', 'settings', 'all'):
         assert scopes[name].count('wait_publisher_actual_barrier') == 1, name
-    for name in ('cpu_policy', 'all'):
-        assert 'wait_publisher_actual_barrier' not in scopes[name], name
-    assert scopes['backend'].index('ensure_position_publisher_after_backend') < scopes['backend'].index('wait_publisher_actual_barrier')
-    assert scopes['ethercat'].index('ensure_position_publisher_after_backend') < scopes['ethercat'].index('wait_publisher_actual_barrier')
     assert scopes['wcs'].index('/etc/init.d/v5-wcs-status-publisher restart') < scopes['wcs'].index('wait_publisher_actual_barrier')
-    assert scopes['settings'].index('/etc/init.d/v5-state-publisher restart') < scopes['settings'].index('wait_publisher_actual_barrier') < scopes['settings'].index('/etc/init.d/v5-settings-actiond restart')
-    for name in ('actiond', 'settings', 'all'):
+    assert scopes['actiond'].index('parameter_table_transaction_complete') < \
+        scopes['actiond'].index('/etc/init.d/v5-settings-actiond restart')
+    for name in ('settings', 'all'):
         assert scopes[name].index('parameter_table_transaction_complete') < \
-            scopes[name].index('/etc/init.d/v5-settings-actiond restart'), name
-    for name in ('command_gate', 'cpu_policy'):
+            scopes[name].index('restart_runtime_event_dag'), name
+    assert scopes['all'].index('cleanup_retired_runtime_files') < \
+        scopes['all'].index('parameter_table_transaction_complete')
+    assert 'if cpu_policy_manifest_touched; then' in scopes['all']
+    assert scopes['all'].count('apply_cpu_policy_after_install') == 1
+    assert scopes['cpu_policy'].count('apply_cpu_policy_after_install') == 1
+    cpu_policy_touched = section(
+        text, 'cpu_policy_manifest_touched() {',
+        '\n}\n\nif [ "$apply" -eq 1 ] && '
+        '[ "$manifest_cpu_policy_command_gate" -eq 1 ]')
+    for flag in (
+            'manifest_cpu_policy_net_core',
+            'manifest_cpu_policy_net_module',
+            'manifest_cpu_policy_net_init',
+            'manifest_cpu_policy_relay_payload',
+            'manifest_cpu_policy_command_gate',
+            'manifest_cpu_policy_ui',
+            'manifest_cpu_policy_state',
+            'manifest_cpu_policy_wcs',
+            'manifest_cpu_policy_position',
+            'manifest_cpu_policy_runtime_startup'):
+        assert f'[ "${flag}" -eq 1 ]' in cpu_policy_touched
+    for name in (
+            'command_gate', 'backend', 'ethercat', 'runtime_startup',
+            'cpu_policy', 'settings', 'all'):
+        assert scopes[name].count('restart_runtime_event_dag') == 1, name
         assert '/etc/init.d/v5-linuxcnc-command-gate restart-native' not in scopes[name]
-        assert scopes[name].count(
-            '/etc/init.d/v5-linuxcnc-command-gate restart\n') == 1
-        assert scopes[name].index('stop_position_publisher_before_backend') < scopes[name].index(
-            '/etc/init.d/v5-linuxcnc-command-gate restart') < scopes[name].index(
-            'ensure_position_publisher_after_backend')
+        assert '/etc/init.d/v5-linuxcnc-command-gate restart\n' not in scopes[name]
+        assert '/etc/init.d/v5-settings-actiond restart\n' not in scopes[name]
     for token in ('active_ini=conflict', '--pre-ui-inputs',
                   '--expected-ini "$expected_ini"', '--timeout 120'):
         assert token in actual_barrier
-    ensure_position = section(
-        text, 'ensure_position_publisher_after_backend() {',
+    stop_backend = section(
+        text, 'stop_backend_publishers_before_backend() {',
+        '\n}\n\nstop_ethercat_modules_before_install() {')
+    assert 'stop_position_publisher_before_backend' in stop_backend
+    assert 'stop_wcs_publisher_before_backend' in stop_backend
+    runtime_dag = section(
+        text, 'restart_runtime_event_dag() {',
         '\n}\n\nwait_publisher_actual_barrier() {')
-    assert '/etc/init.d/v5-position-status-publisher status' in ensure_position
-    assert '/etc/init.d/v5-position-status-publisher start' in ensure_position
-    assert '/etc/init.d/v5-position-status-publisher restart' not in ensure_position
+    assert '/etc/init.d/v5-runtime-startup restart' in runtime_dag
+    assert 'v5-linuxcnc-command-gate' not in runtime_dag
+    assert 'v5-settings-actiond' not in runtime_dag
+    wcs_stop = section(wcs_init, 'stop_service() {', '\n}\n\ncase "${1:-}" in')
+    assert wcs_stop.count(
+        'rm -f "$PIDFILE" "$STATUS_PATH" "$MODAL_TOOL_PATH" '
+        '"$OPERATOR_ERROR_PATH" $RETIRED_STATUS_PATHS') == 2
 
     # SHM ABI participants are one atomic deployment domain. An incomplete
     # UI-only or State-only manifest is rejected before any installation.
@@ -323,7 +493,9 @@ def main() -> int:
                 'echo "ABI_COMPLETE=$manifest_shm_abi_complete '
                 'ABI_TOUCHED=$manifest_shm_abi_touched '
                 'EC_COMPLETE=$manifest_ethercat_complete '
-                'EC_TOUCHED=$manifest_ethercat_touched"\n'
+                'EC_TOUCHED=$manifest_ethercat_touched '
+                'BUS_COMPLETE=$manifest_bus_cycle_complete '
+                'BUS_TOUCHED=$manifest_bus_cycle_touched"\n'
             )
             script_path = Path(directory) / 'manifest-scan.sh'
             script_path.write_text(script, encoding='utf-8')
@@ -395,6 +567,51 @@ def main() -> int:
     atomic_native_protocol = run_manifest_scan(
         [command_gate_row, zero_client_row], linuxcnc_bundle_enabled=1)
     assert atomic_native_protocol.returncode == 0, atomic_native_protocol.stderr
+
+    bus_cycle_destinations = (
+        '/opt/8ax/v5/linuxcnc/ini/v5_bus.ini',
+        '/opt/8ax/v5/linuxcnc/hal/v5_bus_1ms.hal',
+        '/opt/8ax/v5/linuxcnc/hal/ethercat-conf-1ms.xml',
+        '/usr/libexec/8ax/v5_backend_readiness_probe',
+        '/etc/init.d/v5-linuxcnc-command-gate',
+    )
+    bus_cycle_rows = [
+        line for line in manifest.splitlines()
+        if line and not line.startswith('#') and
+        line.split('\t')[2] in bus_cycle_destinations
+    ]
+    assert len(bus_cycle_rows) == len(bus_cycle_destinations)
+    assert {line.split('\t')[2] for line in bus_cycle_rows} == set(
+        bus_cycle_destinations)
+    complete_bus_cycle_rows = list(dict.fromkeys(
+        manifest_rows + ethercat_rows + bus_cycle_rows +
+        [command_gate_row, zero_client_row]))
+    complete_bus_cycle = run_manifest_scan(
+        complete_bus_cycle_rows, linuxcnc_bundle_enabled=1)
+    assert complete_bus_cycle.returncode == 0, complete_bus_cycle.stderr
+    assert b'BUS_COMPLETE=1 BUS_TOUCHED=1' in complete_bus_cycle.stdout
+    for destination in bus_cycle_destinations:
+        incomplete_rows = [
+            row for row in complete_bus_cycle_rows
+            if row.split('\t')[2] != destination]
+        incomplete = run_manifest_scan(
+            incomplete_rows, linuxcnc_bundle_enabled=1)
+        assert incomplete.returncode == 8, (destination, incomplete.stderr)
+        assert b'BUS 1ms cycle deploy requires' in incomplete.stderr
+    ini_only = run_manifest_scan([
+        row for row in bus_cycle_rows
+        if row.split('\t')[2] == '/opt/8ax/v5/linuxcnc/ini/v5_bus.ini'
+    ])
+    assert ini_only.returncode == 8, ini_only.stderr
+    assert b'BUS 1ms cycle deploy requires' in ini_only.stderr
+    retired_hal = run_manifest_scan([
+        row.replace('v5_bus_1ms.hal', 'v5_bus_2ms.hal')
+        for row in bus_cycle_rows
+        if row.split('\t')[2] == '/opt/8ax/v5/linuxcnc/hal/v5_bus_1ms.hal'
+    ])
+    assert retired_hal.returncode == 6, retired_hal.stderr
+    assert b'unique registered 1ms owner' in retired_hal.stderr
+
     unregistered_gate = run_manifest_scan([
         command_gate_row.replace(
             'build/board/app/v5_command_gate_server',
@@ -425,7 +642,7 @@ def main() -> int:
         '  stop_ethercat_modules_before_install')
     ethercat_stop_function = section(
         text, 'stop_ethercat_modules_before_install() {',
-        '\nensure_position_publisher_after_backend() {')
+        '\nrestart_runtime_event_dag() {')
     assert 'if ! /etc/init.d/v5-linuxcnc-command-gate stop; then' in ethercat_stop_function
     assert 'continuing verified idempotent teardown' in ethercat_stop_function
     assert 'for process in rtapi_app linuxcncsvr milltask io linuxcncrsh v5_command_gate_server' in ethercat_stop_function
@@ -435,9 +652,15 @@ def main() -> int:
         'while IFS="$tab" read -r kind source destination mode extra; do',
         ethercat_stop)
     actiond_stop_index = text.index(
-        'if [ "$manifest_actiond_touched" -eq 1 ]; then\n'
+        'if [ "$manifest_actiond_touched" -eq 1 ] ||\n'
+        '     [ "$manifest_bus_cycle_touched" -eq 1 ]; then\n'
         '    stop_settings_actiond_before_install')
     assert actiond_stop_index < install_loop_index
+    settings_backend_stop = (
+        '[ "$restart_scope" = "backend" ] ||\n'
+        '       [ "$restart_scope" = "settings" ]')
+    assert settings_backend_stop in text
+    assert text.index(settings_backend_stop) < install_loop_index
     depmod_index = text.index(
         'if [ "$apply" -eq 1 ] && [ "$manifest_ethercat_complete" -eq 1 ]; then\n'
         '  [ -x /sbin/depmod ] || {', install_loop_index)

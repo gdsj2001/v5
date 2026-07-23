@@ -5,7 +5,7 @@ pin in bit reset "Rising-edge reset request accepted only while the owner heartb
 pin in bit heartbeat "Heartbeat toggled by the native HAL owner";
 pin out bit estop_ok = false "True only while the realtime latch is clear";
 pin out bit estop_active = true "Realtime emergency-stop actual";
-param rw u32 watchdog_cycles = 50 "Maximum unchanged heartbeat servo cycles before fail-closed";
+param rw u32 watchdog_cycles = 100 "Maximum unchanged heartbeat servo cycles before fail-closed";
 
 function _ nofp;
 option data v5_safety_latch_data;

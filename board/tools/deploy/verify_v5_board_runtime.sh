@@ -66,7 +66,7 @@ check_remote_test "linuxcnc command gate init installed" 'test -x /etc/init.d/v5
 check_remote_test "v5 ui relay init installed" 'test -x /etc/init.d/v5-ui-relay'
 check_remote_test "v5 touch diagnostics init installed" 'test -x /etc/init.d/v5-touch-diagnostics'
 check_remote_test "v5 BUS linuxcnc ini installed" 'test -r /opt/8ax/v5/linuxcnc/ini/v5_bus.ini'
-check_remote_test "v5 BUS linuxcnc hal installed" 'test -r /opt/8ax/v5/linuxcnc/hal/v5_bus_2ms.hal && test -r /opt/8ax/v5/linuxcnc/hal/ethercat-conf-2ms.xml'
+check_remote_test "v5 BUS 1ms linuxcnc hal installed with retired 2ms paths absent" 'test -r /opt/8ax/v5/linuxcnc/hal/v5_bus_1ms.hal && test -r /opt/8ax/v5/linuxcnc/hal/ethercat-conf-1ms.xml && test ! -e /opt/8ax/v5/linuxcnc/hal/v5_bus_2ms.hal && test ! -e /opt/8ax/v5/linuxcnc/hal/ethercat-conf-2ms.xml'
 check_remote_test "v5 deploy config installed" 'test -r /opt/8ax/v5/config/hardware_profile.json'
 check_remote_test "v5 auth dna register installed executable" 'test -x /usr/libexec/8ax/auth_download/v5_device_dna_register.py'
 check_remote_test "v5 auth authorization download installed executable" 'test -x /usr/libexec/8ax/auth_download/v5_device_authorization_download.py'
@@ -247,19 +247,19 @@ else
 fi
 rm -f /tmp/v5_ui_relay_status.out
 
-if remote 'test -s /run/8ax_v5_product_ui/ui_ready.json && grep -q "\"schema\":\"v5.ui_ready.v1\"" /run/8ax_v5_product_ui/ui_ready.json && grep -q "\"ready\":true" /run/8ax_v5_product_ui/ui_ready.json && wget -q -O /tmp/v5_remote_info_probe.json http://127.0.0.1:18080/remote/info && grep -q "\"protocol_version\"" /tmp/v5_remote_info_probe.json && grep -q "\"ui_ready\":true" /tmp/v5_remote_info_probe.json && grep -q "\"ready_metadata\"" /tmp/v5_remote_info_probe.json && grep -q "\"view_only\":false" /tmp/v5_remote_info_probe.json && grep -q "\"input_enabled\":true" /tmp/v5_remote_info_probe.json && grep -q "\"cpu0_percent\"" /tmp/v5_remote_info_probe.json && grep -q "\"cpu1_percent\"" /tmp/v5_remote_info_probe.json' >/dev/null 2>&1; then
-  ok "v5 remote relay gated ready metadata, input enabled, and system metrics probe: 18080"
+if remote 'test -s /run/8ax_v5_product_ui/ui_ready.json && grep -q "\"schema\":\"v5.ui_ready.v1\"" /run/8ax_v5_product_ui/ui_ready.json && grep -q "\"ready\":true" /run/8ax_v5_product_ui/ui_ready.json && PYTHONPATH=/usr/libexec/8ax /usr/libexec/8ax/v5_remote_ui_local_client.py --base-url https://127.0.0.1:18080 --ca-cert /etc/6x-cnc/remote-relay/server-cert.pem --clients-file /etc/6x-cnc/remote-relay/clients.json --scope viewer --path /remote/info > /tmp/v5_remote_info_probe.json && grep -q "\"auth_protocol\":\"v5.remote.auth.v1\"" /tmp/v5_remote_info_probe.json && grep -q "\"protocol_version\"" /tmp/v5_remote_info_probe.json && grep -q "\"ui_ready\":true" /tmp/v5_remote_info_probe.json && grep -q "\"ready_metadata\"" /tmp/v5_remote_info_probe.json && grep -q "\"view_only\":false" /tmp/v5_remote_info_probe.json && grep -q "\"input_enabled\":true" /tmp/v5_remote_info_probe.json && grep -q "\"cpu0_percent\"" /tmp/v5_remote_info_probe.json && grep -q "\"cpu1_percent\"" /tmp/v5_remote_info_probe.json' >/dev/null 2>&1; then
+  ok "v5 remote relay HTTPS/auth ready metadata, input enabled, and system metrics probe: 18080"
   remote "wc -c /tmp/v5_remote_info_probe.json | sed 's/^/remote_info_bytes=/'" | sed 's/^/INFO /'
 else
-  fail_msg "v5 remote relay ready-gated info JSON probe: 18080"
+  fail_msg "v5 remote relay HTTPS/auth ready-gated info JSON probe: 18080"
   remote 'head -c 160 /tmp/v5_remote_info_probe.json 2>/dev/null || true' | sed 's/^/INFO remote_info_prefix: /'
 fi
 
-if remote 'wget -q -O /tmp/v5_remote_frame_probe.bin http://127.0.0.1:18080/remote/frame/full && test -s /tmp/v5_remote_frame_probe.bin' >/dev/null 2>&1; then
-  ok "v5 remote frame relay full-frame probe: 18080"
-  remote "stat -c 'remote_frame_bytes=%s' /tmp/v5_remote_frame_probe.bin" | sed 's/^/INFO /'
+if remote 'test -s /run/8ax_v5_product_ui/remote_framebuffer.bgra && python3 -c "import json,os,sys; p=json.load(open(\"/tmp/v5_remote_info_probe.json\")); expected=int(p[\"stride\"])*int(p[\"height\"]); actual=os.stat(\"/run/8ax_v5_product_ui/remote_framebuffer.bgra\").st_size; sys.exit(0 if int(p[\"frame_id\"])>0 and expected==actual else 1)"' >/dev/null 2>&1; then
+  ok "v5 authenticated relay frame identity matches canonical framebuffer"
+  remote "stat -c 'remote_frame_bytes=%s' /run/8ax_v5_product_ui/remote_framebuffer.bgra" | sed 's/^/INFO /'
 else
-  fail_msg "v5 remote frame relay full-frame probe: 18080"
+  fail_msg "v5 authenticated relay frame identity matches canonical framebuffer"
 fi
 
 if remote 'found=0; for p in /proc/[0-9]*/cmdline; do c=$(tr "\000" " " < "$p" 2>/dev/null || true); case "$c" in *"milltask"*"v5_bus.ini"*) found=1;; esac; done; test "$found" = 1 && halcmd show comp 2>/dev/null | grep -Eq "(^|[[:space:]])(lcec|cia402)([[:space:]]|$)"' >/dev/null 2>&1; then
@@ -269,12 +269,110 @@ else
   remote 'for p in /proc/[0-9]*/cmdline; do c=$(tr "\000" " " < "$p" 2>/dev/null || true); case "$c" in *linuxcnc*|*milltask*|*linuxcncrsh*|*v5_bus.ini*) printf "%s\n" "$c";; esac; done; halcmd show comp 2>/dev/null | grep -E "lcec|cia402|zynq_stepgen_hw" || true' | sed 's/^/INFO bus runtime: /'
 fi
 
-rtapi_affinity_check='pids=$(pidof rtapi_app 2>/dev/null || true); test -n "$pids"; for pid in $pids; do for status in /proc/$pid/task/[0-9]*/status; do test -r "$status"; tid=${status%/status}; tid=${tid##*/}; comm=$(cat /proc/$pid/task/$tid/comm 2>/dev/null || true); cpus=$(awk -F: '"'"'/^Cpus_allowed_list:/ {gsub(/[ \t]/, "", $2); print $2}'"'"' "$status"); printf "pid=%s tid=%s comm=%s Cpus_allowed_list=%s\n" "$pid" "$tid" "$comm" "$cpus"; test "$cpus" = 0; done; done'
+lcec_cycle_health_check='set -eu
+halcmd show thread | grep -Eq "^[[:space:]]*1000000[[:space:]]+(YES|NO)[[:space:]]+servo-thread([[:space:]]|$)"
+values=$({
+  printf "getp lcec.0.runtime-period-warning-count\n"
+  printf "getp lcec.0.runtime-period-fault-count\n"
+  printf "getp lcec.0.domain-wc-incomplete-count\n"
+  printf "getp lcec.0.all-op-false-count\n"
+  printf "setp lcec.0.runtime-phase-step-max 0\n"
+  printf "setp lcec.0.runtime-period-error-max 0\n"
+  printf "setp servo-thread.tmax 0\n"
+  sleep 1
+  printf "getp motion.servo.last-period\n"
+  printf "getp servo-thread.tmax\n"
+  printf "getp lcec.0.startup-phase-span\n"
+  printf "getp lcec.0.runtime-phase-step\n"
+  printf "getp lcec.0.runtime-phase-step-max\n"
+  printf "getp lcec.0.runtime-period-ns\n"
+  printf "getp lcec.0.runtime-period-error-max\n"
+  printf "getp lcec.0.runtime-period-warning-count\n"
+  printf "getp lcec.0.runtime-period-fault-count\n"
+  printf "getp lcec.0.domain-wc-incomplete-count\n"
+  printf "getp lcec.0.all-op-false-count\n"
+} | halcmd -s -f)
+set -- $values
+test "$#" -eq 15
+warning_start=$1
+fault_start=$2
+wc_start=$3
+op_start=$4
+last=$5
+servo_tmax=$6
+startup=$7
+runtime_phase=$8
+phase=$9
+shift 9
+period=$1
+error=$2
+warning_end=$3
+fault_end=$4
+wc_end=$5
+op_end=$6
+test "$warning_start" -lt 4294967295
+test "$fault_start" -lt 4294967295
+test "$wc_start" -lt 4294967295
+test "$op_start" -lt 4294967295
+printf "motion.servo.last-period=%s\n" "$last"
+printf "servo-thread.tmax=%s\n" "$servo_tmax"
+printf "lcec.0.startup-phase-span=%s\n" "$startup"
+printf "lcec.0.runtime-phase-step=%s\n" "$runtime_phase"
+printf "lcec.0.runtime-phase-step-max=%s\n" "$phase"
+printf "lcec.0.runtime-period-ns=%s\n" "$period"
+printf "lcec.0.runtime-period-error-max=%s\n" "$error"
+printf "lcec.0.runtime-period-warning-count=%s\n" "$warning_end"
+printf "lcec.0.runtime-period-fault-count=%s\n" "$fault_end"
+printf "lcec.0.domain-wc-incomplete-count=%s\n" "$wc_end"
+printf "lcec.0.all-op-false-count=%s\n" "$op_end"
+printf "sticky_start warning=%s fault=%s wkc=%s op=%s\n" "$warning_start" "$fault_start" "$wc_start" "$op_start"
+printf "sticky_end warning=%s fault=%s wkc=%s op=%s\n" "$warning_end" "$fault_end" "$wc_end" "$op_end"
+jitter_max=$phase
+test "$error" -le "$jitter_max" || jitter_max=$error
+combined=$((servo_tmax + jitter_max))
+quality_warning=0
+test "$warning_end" -eq "$warning_start" || quality_warning=1
+test "$phase" -le 100000 || quality_warning=1
+test "$error" -le 100000 || quality_warning=1
+test "$servo_tmax" -le 700000 || quality_warning=1
+test "$combined" -le 800000 || quality_warning=1
+printf "quality_warning=%s combined_budget_ns=%s\n" "$quality_warning" "$combined"
+test "$last" -ge 800000
+test "$last" -le 1200000
+test "$period" -ge 800000
+test "$period" -le 1200000
+test "$phase" -le 200000
+test "$error" -le 200000
+test "$servo_tmax" -lt 1000000
+test "$combined" -lt 1000000
+test "$fault_end" -eq "$fault_start"
+test "$wc_end" -eq "$wc_start"
+test "$op_end" -eq "$op_start"'
+if remote "$lcec_cycle_health_check" >/tmp/v5_lcec_cycle_health.out 2>&1; then
+  ok "lcec actual period satisfies the 200us/combined hard budget with no hard/WKC/OP sticky increments in the 1s window"
+  sed 's/^/INFO lcec cycle health: /' /tmp/v5_lcec_cycle_health.out
+else
+  fail_msg "lcec actual period satisfies the 200us/combined hard budget with no hard/WKC/OP sticky increments in the 1s window"
+  sed 's/^/INFO lcec cycle health: /' /tmp/v5_lcec_cycle_health.out
+fi
+rm -f /tmp/v5_lcec_cycle_health.out
+
+sv630_1ms_check='set -eu; test "$(ethercat slaves | wc -l)" -eq 5; sdo(){ ethercat upload -p "$1" -t "$4" "$2" "$3" | awk '"'"'END {print $NF}'"'"'; }; for p in 0 1 2 3 4; do for idx in 0x1c32 0x1c33; do sync=$(sdo "$p" "$idx" 1 uint16); cycle=$(sdo "$p" "$idx" 2 uint32); supported=$(sdo "$p" "$idx" 4 uint16); minimum=$(sdo "$p" "$idx" 5 uint32); missed=$(sdo "$p" "$idx" 11 uint16); too_small=$(sdo "$p" "$idx" 12 uint16); sync_error=$(sdo "$p" "$idx" 32 uint8); test "$sync" -eq 2; test "$cycle" -eq 1000000; test "$supported" -eq 4; test "$minimum" -gt 0; test "$minimum" -le 1000000; test "$missed" -eq 0; test "$too_small" -eq 0; test "$sync_error" -eq 0; printf "slave=%s object=%s sync=%s cycle_ns=%s supported=%s minimum_ns=%s missed=%s too_small=%s sync_error=%s\n" "$p" "$idx" "$sync" "$cycle" "$supported" "$minimum" "$missed" "$too_small" "$sync_error"; done; done'
+if remote "$sv630_1ms_check" >/tmp/v5_verify_sv630_1ms.out 2>&1; then
+  ok "five SV630N drives expose active 1ms DC Sync0 capability and zero SM sync errors"
+  sed 's/^/INFO SV630 1ms: /' /tmp/v5_verify_sv630_1ms.out
+else
+  fail_msg "five SV630N drives expose active 1ms DC Sync0 capability and zero SM sync errors"
+  sed 's/^/INFO SV630 1ms: /' /tmp/v5_verify_sv630_1ms.out
+fi
+rm -f /tmp/v5_verify_sv630_1ms.out
+
+rtapi_affinity_check='pids=$(pidof rtapi_app 2>/dev/null || true); test -n "$pids"; for pid in $pids; do realtime_threads=0; for status in /proc/$pid/task/[0-9]*/status; do test -r "$status"; tid=${status%/status}; tid=${tid##*/}; comm=$(cat /proc/$pid/task/$tid/comm 2>/dev/null || true); cpus=$(awk -F: '"'"'/^Cpus_allowed_list:/ {gsub(/[ \t]/, "", $2); print $2}'"'"' "$status"); printf "pid=%s tid=%s comm=%s Cpus_allowed_list=%s\n" "$pid" "$tid" "$comm" "$cpus"; case "$comm" in rtapi_app:T#*) test "$cpus" = 0; realtime_threads=$((realtime_threads + 1));; *) test "$cpus" = 1;; esac; done; test "$realtime_threads" -gt 0; done'
 if remote "$rtapi_affinity_check" >/tmp/v5_rtapi_affinity.out 2>&1; then
-  ok "LinuxCNC RTAPI realtime threads pinned to CPU0"
+  ok "LinuxCNC RTAPI realtime threads are on CPU0 and non-realtime RTAPI threads are on CPU1"
   sed 's/^/INFO rtapi affinity: /' /tmp/v5_rtapi_affinity.out
 else
-  fail_msg "LinuxCNC RTAPI realtime threads pinned to CPU0"
+  fail_msg "LinuxCNC RTAPI realtime threads are on CPU0 and non-realtime RTAPI threads are on CPU1"
   sed 's/^/INFO rtapi affinity: /' /tmp/v5_rtapi_affinity.out
 fi
 rm -f /tmp/v5_rtapi_affinity.out

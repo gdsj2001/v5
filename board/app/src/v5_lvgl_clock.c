@@ -3,7 +3,12 @@
 #include "lvgl.h"
 
 #include <stdint.h>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#else
 #include <time.h>
+#endif
 
 #define V5_LVGL_CLOCK_FALLBACK_MS 10U
 
@@ -11,11 +16,26 @@ static uint64_t g_last_tick_ns;
 
 static uint64_t monotonic_nanoseconds(void)
 {
+#ifdef _WIN32
+    LARGE_INTEGER counter;
+    LARGE_INTEGER frequency;
+    uint64_t seconds;
+    uint64_t remainder;
+    if (!QueryPerformanceFrequency(&frequency) || frequency.QuadPart <= 0 ||
+        !QueryPerformanceCounter(&counter) || counter.QuadPart < 0) {
+        return 0U;
+    }
+    seconds = (uint64_t)counter.QuadPart / (uint64_t)frequency.QuadPart;
+    remainder = (uint64_t)counter.QuadPart % (uint64_t)frequency.QuadPart;
+    return seconds * 1000000000ULL +
+           (remainder * 1000000000ULL) / (uint64_t)frequency.QuadPart;
+#else
     struct timespec ts;
     if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
         return 0U;
     }
     return ((uint64_t)ts.tv_sec * 1000000000ULL) + (uint64_t)ts.tv_nsec;
+#endif
 }
 
 void v5_lvgl_clock_init(void)

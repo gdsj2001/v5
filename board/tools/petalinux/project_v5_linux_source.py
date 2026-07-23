@@ -197,6 +197,25 @@ def remove_projected_path(path):
         shutil.rmtree(path)
 
 
+def repair_owner_projection(output_root):
+    repaired = []
+    for owner in contract.OWNERS:
+        relative = Path(owner["relative"])
+        if relative.is_absolute() or ".." in relative.parts:
+            fail("Linux projection owner escaped the output root: %s" % relative)
+        owner_root = output_root / relative
+        if projected_path_exists(owner_root):
+            remove_projected_path(owner_root)
+            repaired.append(relative.as_posix())
+    state_path = output_root / STATE_NAME
+    if projected_path_exists(state_path):
+        remove_projected_path(state_path)
+    print(
+        "V5_LINUX_PROJECTION_REPAIRED reason=untrusted-state owners=%s"
+        % ",".join(repaired)
+    )
+
+
 def apply_projection_delta(
     project_root, index_path, output_root, desired_entries, encoded_paths, overrides, previous_entries
 ):
@@ -380,29 +399,13 @@ def project_and_verify(
                 ["update-index", "--force-remove", "-z", "--stdin"],
                 input_data=deleted,
             )
-        untracked_raw = git_command(
-            project_root,
-            index_path,
-            [
-                "ls-files",
-                "--others",
-                "--exclude-standard",
-                "-z",
-                "--",
-                "linux/kernel",
-                "linux/realtime",
-            ],
-        ).stdout
-        untracked = [
-            path
-            for path in nul_records(untracked_raw)
-            if path not in inaccessible and not below_indexed_symlink(path, symlinks)
-        ]
-        if untracked:
-            fail(
-                "untracked Linux source is outside the canonical Git snapshot: %s"
-                % untracked[0].decode("utf-8", errors="replace")
-            )
+        # The incremental projection is the temporary Git index plus the
+        # identity-registered working-tree overrides below.  verify_projection()
+        # then hashes every registered owner file against the canonical identity.
+        # Do not enumerate --others here: on the read-only VM mount that walks the
+        # complete kernel tree even though unregistered extras cannot enter the
+        # projection.  Repository-wide untracked audits stay on the Windows
+        # release/source-closure path, outside this target build hot path.
         indexed_entries, encoded_paths = indexed_projection_entries(project_root, index_path)
         if not indexed_entries:
             fail("Git index contains no canonical Linux owner files")
@@ -417,9 +420,8 @@ def project_and_verify(
                     verify_projection(output_root)
                     previous_entries = dict(desired_entries)
                     print("V5_LINUX_PROJECTION_STATE_MIGRATED output=%s" % output_root)
-                except (OSError, ValueError):
-                    shutil.rmtree(output_root)
-                    print("V5_LINUX_PROJECTION_REPAIRED reason=untrusted-state")
+                except (OSError, ValueError, SystemExit):
+                    repair_owner_projection(output_root)
         output_root.mkdir(parents=True, exist_ok=True)
         persistent_git = output_root / "linux/kernel/.git"
         if projected_path_exists(persistent_git):

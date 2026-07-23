@@ -1,0 +1,301 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: V5 Project <v5@example.invalid>
+Date: Thu, 23 Jul 2026 00:38:00 +0800
+Subject: [PATCH] v5: expose per-cycle sticky EtherCAT health actuals
+
+The existing phase-jitter pin is a one-shot span measured only across the
+first 100 cycles after activation. Rename that diagnostic so it cannot be
+mistaken for runtime jitter. Expose per-cycle circular app-phase and actual
+period measurements with resettable sticky maxima. Count periods outside the
+10 percent quality target as warnings and periods outside the 20 percent hard
+limit as faults. Also count every post-ready incomplete WKC and all-OP drop so
+100 ms observers cannot miss a one-cycle realtime fault.
+---
+ src/lcec.h      | 30 +++++++++++++++++++++++++++++-
+ src/lcec_main.c | 145 ++++++++++++++++++++++++++++++++++++++++++++++++++++++----
+ 2 files changed, 166 insertions(+), 9 deletions(-)
+
+diff --git a/src/lcec.h b/src/lcec.h
+index 1765958..167186f 100644
+--- a/src/lcec.h
++++ b/src/lcec.h
+@@ -183,6 +183,9 @@ typedef struct lcec_master_data {
+   hal_bit_t *activated;             // Master/domain activation completed
+   hal_u32_t *domain_working_counter;
+   hal_bit_t *domain_wc_complete;
++  hal_u32_t *domain_wc_incomplete_count;
++  hal_u32_t *all_op_false_count;
++  hal_bit_t runtime_health_armed;
+ #ifdef RTAPI_TASK_PLL_SUPPORT
+   hal_s32_t *pll_err;
+   hal_s32_t *pll_out;
+@@ -196,11 +199,36 @@ typedef struct lcec_master_data {
+   hal_u32_t *dc_time_ok_seq;       // Increments after every successful fresh read
+   hal_u32_t *dc_time_age_cycles;   // Consecutive cycles since the last successful read
+   hal_u32_t *dc_time_error_count;  // Total failed reference-clock reads
+-  hal_s32_t *phase_jitter_out;     // Output: measured app_phase jitter amplitude (ns)
++  hal_s32_t *phase_jitter_out;     // Startup-only 100-cycle app_phase span (ns)
++  hal_s32_t *runtime_phase_step;   // Circular app_phase change from previous cycle (ns)
++  hal_u32_t runtime_phase_step_max; // Resettable sticky maximum runtime step (ns)
++  hal_u32_t *runtime_period_ns;     // Actual app_time interval for this cycle (ns)
++  hal_u32_t runtime_period_error_max; // Resettable max |actual - nominal| (ns)
++  hal_u32_t *runtime_period_warning_count; // Saturating cycles outside 10% target
++  hal_u32_t *runtime_period_fault_count; // Saturating cycles outside 20% hard limit
++  hal_bit_t runtime_period_event_clear; // One-shot clear for the frozen first hard event
++  hal_bit_t *runtime_period_event_valid;
++  hal_u32_t *runtime_period_event_sequence;
++  hal_u32_t *runtime_period_event_period_ns;
++  hal_u32_t *runtime_period_event_error_ns;
++  hal_u32_t *runtime_period_event_phase_step_ns;
++  hal_u32_t *runtime_period_event_working_counter;
++  hal_u32_t *runtime_period_event_slaves_responding;
++  hal_bit_t *runtime_period_event_wc_complete;
++  hal_bit_t *runtime_period_event_all_op;
++  hal_bit_t *runtime_period_event_dc_phased;
++  hal_bit_t *runtime_period_event_dc_valid;
++  hal_u32_t *runtime_period_event_dc_age_cycles;
++  hal_u32_t *runtime_period_event_app_time_hi;
++  hal_u32_t *runtime_period_event_app_time_lo;
+   hal_s32_t *drift_mode;            // Input: 0=simple, 1=manual
+   hal_s32_t *pll_drift;            // Input: debug offset added to PLL correction (ns)
+   hal_s32_t *pll_final;            // Output: final PLL correction value sent to rtapi (ns)
+   int32_t auto_drift_delay;        // Internal: auto-drift delay counter
++  int32_t runtime_phase_last;
++  hal_bit_t runtime_phase_last_valid;
++  uint64_t runtime_app_time_last;
++  hal_bit_t runtime_period_last_valid;
+ #endif
+   // Phase calibration for sync_to_ref_clock=false mode
+   int32_t phase_measure_cnt;       // Internal: measurement cycle counter
+diff --git a/src/lcec_main.c b/src/lcec_main.c
+index 84a523f..9ac408f 100644
+--- a/src/lcec_main.c
++++ b/src/lcec_main.c
+@@ -54,6 +54,8 @@ static const lcec_pindesc_t master_pins[] = {
+     {HAL_BIT, HAL_OUT, offsetof(lcec_master_data_t, activated), "%s.activated"},
+     {HAL_U32, HAL_OUT, offsetof(lcec_master_data_t, domain_working_counter), "%s.domain-working-counter"},
+     {HAL_BIT, HAL_OUT, offsetof(lcec_master_data_t, domain_wc_complete), "%s.domain-wc-complete"},
++    {HAL_U32, HAL_OUT, offsetof(lcec_master_data_t, domain_wc_incomplete_count), "%s.domain-wc-incomplete-count"},
++    {HAL_U32, HAL_OUT, offsetof(lcec_master_data_t, all_op_false_count), "%s.all-op-false-count"},
+ #ifdef RTAPI_TASK_PLL_SUPPORT
+     {HAL_S32, HAL_OUT, offsetof(lcec_master_data_t, pll_err), "%s.pll-err"},
+     {HAL_S32, HAL_OUT, offsetof(lcec_master_data_t, pll_out), "%s.pll-out"},
+@@ -64,7 +66,25 @@ static const lcec_pindesc_t master_pins[] = {
+     {HAL_U32, HAL_OUT, offsetof(lcec_master_data_t, dc_time_ok_seq), "%s.dc-time-ok-seq"},
+     {HAL_U32, HAL_OUT, offsetof(lcec_master_data_t, dc_time_age_cycles), "%s.dc-time-age-cycles"},
+     {HAL_U32, HAL_OUT, offsetof(lcec_master_data_t, dc_time_error_count), "%s.dc-time-error-count"},
+-    {HAL_S32, HAL_OUT, offsetof(lcec_master_data_t, phase_jitter_out), "%s.phase-jitter"},
++    {HAL_S32, HAL_OUT, offsetof(lcec_master_data_t, phase_jitter_out), "%s.startup-phase-span"},
++    {HAL_S32, HAL_OUT, offsetof(lcec_master_data_t, runtime_phase_step), "%s.runtime-phase-step"},
++    {HAL_U32, HAL_OUT, offsetof(lcec_master_data_t, runtime_period_ns), "%s.runtime-period-ns"},
++    {HAL_U32, HAL_OUT, offsetof(lcec_master_data_t, runtime_period_warning_count), "%s.runtime-period-warning-count"},
++    {HAL_U32, HAL_OUT, offsetof(lcec_master_data_t, runtime_period_fault_count), "%s.runtime-period-fault-count"},
++    {HAL_BIT, HAL_OUT, offsetof(lcec_master_data_t, runtime_period_event_valid), "%s.runtime-period-event-valid"},
++    {HAL_U32, HAL_OUT, offsetof(lcec_master_data_t, runtime_period_event_sequence), "%s.runtime-period-event-sequence"},
++    {HAL_U32, HAL_OUT, offsetof(lcec_master_data_t, runtime_period_event_period_ns), "%s.runtime-period-event-period-ns"},
++    {HAL_U32, HAL_OUT, offsetof(lcec_master_data_t, runtime_period_event_error_ns), "%s.runtime-period-event-error-ns"},
++    {HAL_U32, HAL_OUT, offsetof(lcec_master_data_t, runtime_period_event_phase_step_ns), "%s.runtime-period-event-phase-step-ns"},
++    {HAL_U32, HAL_OUT, offsetof(lcec_master_data_t, runtime_period_event_working_counter), "%s.runtime-period-event-working-counter"},
++    {HAL_U32, HAL_OUT, offsetof(lcec_master_data_t, runtime_period_event_slaves_responding), "%s.runtime-period-event-slaves-responding"},
++    {HAL_BIT, HAL_OUT, offsetof(lcec_master_data_t, runtime_period_event_wc_complete), "%s.runtime-period-event-wc-complete"},
++    {HAL_BIT, HAL_OUT, offsetof(lcec_master_data_t, runtime_period_event_all_op), "%s.runtime-period-event-all-op"},
++    {HAL_BIT, HAL_OUT, offsetof(lcec_master_data_t, runtime_period_event_dc_phased), "%s.runtime-period-event-dc-phased"},
++    {HAL_BIT, HAL_OUT, offsetof(lcec_master_data_t, runtime_period_event_dc_valid), "%s.runtime-period-event-dc-valid"},
++    {HAL_U32, HAL_OUT, offsetof(lcec_master_data_t, runtime_period_event_dc_age_cycles), "%s.runtime-period-event-dc-age-cycles"},
++    {HAL_U32, HAL_OUT, offsetof(lcec_master_data_t, runtime_period_event_app_time_hi), "%s.runtime-period-event-app-time-hi"},
++    {HAL_U32, HAL_OUT, offsetof(lcec_master_data_t, runtime_period_event_app_time_lo), "%s.runtime-period-event-app-time-lo"},
+     {HAL_S32, HAL_IN, offsetof(lcec_master_data_t, drift_mode), "%s.drift-mode"},
+     {HAL_S32, HAL_IN, offsetof(lcec_master_data_t, pll_drift), "%s.pll-drift"},
+     {HAL_S32, HAL_OUT, offsetof(lcec_master_data_t, pll_final), "%s.pll-final"},
+@@ -77,6 +97,9 @@ static const lcec_paramdesc_t master_params[] = {
+ #ifdef RTAPI_TASK_PLL_SUPPORT
+     {HAL_U32, HAL_RW, offsetof(lcec_master_data_t, pll_step), "%s.pll-step"},
+     {HAL_U32, HAL_RW, offsetof(lcec_master_data_t, pll_max_err), "%s.pll-max-err"},
++    {HAL_U32, HAL_RW, offsetof(lcec_master_data_t, runtime_phase_step_max), "%s.runtime-phase-step-max"},
++    {HAL_U32, HAL_RW, offsetof(lcec_master_data_t, runtime_period_error_max), "%s.runtime-period-error-max"},
++    {HAL_BIT, HAL_RW, offsetof(lcec_master_data_t, runtime_period_event_clear), "%s.runtime-period-event-clear"},
+ #endif
+     {HAL_TYPE_UNSPECIFIED},
+ };
+@@ -1107,6 +1130,9 @@ static int lcec_activate_master(lcec_master_t *master) {
+   *(master->hal_data->activated) = 0;
+   *(master->hal_data->domain_working_counter) = 0;
+   *(master->hal_data->domain_wc_complete) = 0;
++  *(master->hal_data->domain_wc_incomplete_count) = 0;
++  *(master->hal_data->all_op_false_count) = 0;
++  master->hal_data->runtime_health_armed = 0;
+   
+   // Initialize application time base (now we're in the RT thread context)
+   lcec_gettimeofday(&tv);
+@@ -1118,6 +1144,30 @@ static int lcec_activate_master(lcec_master_t *master) {
+   *(master->hal_data->dc_time_ok_seq) = 0;
+   *(master->hal_data->dc_time_age_cycles) = 0;
+   *(master->hal_data->dc_time_error_count) = 0;
++  *(master->hal_data->phase_jitter_out) = 0;
++  *(master->hal_data->runtime_phase_step) = 0;
++  master->hal_data->runtime_phase_step_max = 0;
++  master->hal_data->runtime_phase_last_valid = 0;
++  *(master->hal_data->runtime_period_ns) = 0;
++  master->hal_data->runtime_period_error_max = 0;
++  *(master->hal_data->runtime_period_warning_count) = 0;
++  *(master->hal_data->runtime_period_fault_count) = 0;
++  master->hal_data->runtime_period_event_clear = 0;
++  *(master->hal_data->runtime_period_event_valid) = 0;
++  *(master->hal_data->runtime_period_event_sequence) = 0;
++  *(master->hal_data->runtime_period_event_period_ns) = 0;
++  *(master->hal_data->runtime_period_event_error_ns) = 0;
++  *(master->hal_data->runtime_period_event_phase_step_ns) = 0;
++  *(master->hal_data->runtime_period_event_working_counter) = 0;
++  *(master->hal_data->runtime_period_event_slaves_responding) = 0;
++  *(master->hal_data->runtime_period_event_wc_complete) = 0;
++  *(master->hal_data->runtime_period_event_all_op) = 0;
++  *(master->hal_data->runtime_period_event_dc_phased) = 0;
++  *(master->hal_data->runtime_period_event_dc_valid) = 0;
++  *(master->hal_data->runtime_period_event_dc_age_cycles) = 0;
++  *(master->hal_data->runtime_period_event_app_time_hi) = 0;
++  *(master->hal_data->runtime_period_event_app_time_lo) = 0;
++  master->hal_data->runtime_period_last_valid = 0;
+   master->dc_ref = 0;
+   if (!master->sync_to_ref_clock) {
+     long long rtapi_now = rtapi_get_time();
+@@ -1218,6 +1268,21 @@ void lcec_read_master(void *arg, long period) {
+   *(master->hal_data->domain_working_counter) = master->domain_state.working_counter;
+   *(master->hal_data->domain_wc_complete) =
+       master->domain_state.wc_state == EC_WC_COMPLETE;
++  if (!master->hal_data->runtime_health_armed) {
++    if (*(master->hal_data->domain_wc_complete) &&
++        *(master->hal_data->all_op)) {
++      master->hal_data->runtime_health_armed = 1;
++    }
++  } else {
++    if (!*(master->hal_data->domain_wc_complete) &&
++        *(master->hal_data->domain_wc_incomplete_count) != UINT32_MAX) {
++      (*(master->hal_data->domain_wc_incomplete_count))++;
++    }
++    if (!*(master->hal_data->all_op) &&
++        *(master->hal_data->all_op_false_count) != UINT32_MAX) {
++      (*(master->hal_data->all_op_false_count))++;
++    }
++  }
+ 
+   // update global state
+   global_ms.slaves_responding += master->ms.slaves_responding;
+@@ -1348,6 +1413,107 @@ void lcec_write_master(void *arg, long period) {
+   int32_t current_app_phase = (int32_t)((app_time - master->dc_ref_time) % master->app_time_period);
+   *(hal_data->app_phase) = current_app_phase;
+   int32_t app_period = (int32_t)master->app_time_period;
++  int runtime_period_hard_event = 0;
++  uint32_t runtime_period_ns_for_event = 0;
++  uint32_t runtime_period_error_ns_for_event = 0;
++  if (hal_data->runtime_period_event_clear) {
++    hal_data->runtime_period_event_clear = 0;
++    *(hal_data->runtime_period_event_valid) = 0;
++    *(hal_data->runtime_period_event_sequence) = 0;
++    *(hal_data->runtime_period_event_period_ns) = 0;
++    *(hal_data->runtime_period_event_error_ns) = 0;
++    *(hal_data->runtime_period_event_phase_step_ns) = 0;
++    *(hal_data->runtime_period_event_working_counter) = 0;
++    *(hal_data->runtime_period_event_slaves_responding) = 0;
++    *(hal_data->runtime_period_event_wc_complete) = 0;
++    *(hal_data->runtime_period_event_all_op) = 0;
++    *(hal_data->runtime_period_event_dc_phased) = 0;
++    *(hal_data->runtime_period_event_dc_valid) = 0;
++    *(hal_data->runtime_period_event_dc_age_cycles) = 0;
++    *(hal_data->runtime_period_event_app_time_hi) = 0;
++    *(hal_data->runtime_period_event_app_time_lo) = 0;
++  }
++  if (!hal_data->runtime_period_last_valid) {
++    hal_data->runtime_app_time_last = app_time;
++    hal_data->runtime_period_last_valid = 1;
++    *(hal_data->runtime_period_ns) = master->app_time_period;
++  } else {
++    uint64_t runtime_period_delta = app_time >= hal_data->runtime_app_time_last ?
++        app_time - hal_data->runtime_app_time_last : UINT32_MAX;
++    uint64_t runtime_period_error = runtime_period_delta > master->app_time_period ?
++        runtime_period_delta - master->app_time_period :
++        master->app_time_period - runtime_period_delta;
++    uint32_t runtime_period_ns = runtime_period_delta > UINT32_MAX ?
++        UINT32_MAX : (uint32_t)runtime_period_delta;
++    uint32_t runtime_period_error_ns = runtime_period_error > UINT32_MAX ?
++        UINT32_MAX : (uint32_t)runtime_period_error;
++    *(hal_data->runtime_period_ns) = runtime_period_ns;
++    if (runtime_period_error_ns > hal_data->runtime_period_error_max) {
++      hal_data->runtime_period_error_max = runtime_period_error_ns;
++    }
++    if (runtime_period_error > master->app_time_period / 10 &&
++        *(hal_data->runtime_period_warning_count) != UINT32_MAX) {
++      (*(hal_data->runtime_period_warning_count))++;
++    }
++    if (runtime_period_error > master->app_time_period / 5) {
++      if (*(hal_data->runtime_period_fault_count) != UINT32_MAX) {
++        (*(hal_data->runtime_period_fault_count))++;
++      }
++      runtime_period_hard_event = 1;
++      runtime_period_ns_for_event = runtime_period_ns;
++      runtime_period_error_ns_for_event = runtime_period_error_ns;
++    }
++    hal_data->runtime_app_time_last = app_time;
++  }
++  if (!hal_data->runtime_phase_last_valid) {
++    hal_data->runtime_phase_last = current_app_phase;
++    hal_data->runtime_phase_last_valid = 1;
++    *(hal_data->runtime_phase_step) = 0;
++  } else {
++    int32_t runtime_phase_diff = current_app_phase - hal_data->runtime_phase_last;
++    if (runtime_phase_diff > app_period / 2) {
++      runtime_phase_diff -= app_period;
++    } else if (runtime_phase_diff < -app_period / 2) {
++      runtime_phase_diff += app_period;
++    }
++    if (runtime_phase_diff < 0) {
++      runtime_phase_diff = -runtime_phase_diff;
++    }
++    *(hal_data->runtime_phase_step) = runtime_phase_diff;
++    if ((uint32_t)runtime_phase_diff > hal_data->runtime_phase_step_max) {
++      hal_data->runtime_phase_step_max = (uint32_t)runtime_phase_diff;
++    }
++    hal_data->runtime_phase_last = current_app_phase;
++  }
++  if (runtime_period_hard_event &&
++      !*(hal_data->runtime_period_event_valid)) {
++    *(hal_data->runtime_period_event_sequence) =
++        *(hal_data->runtime_period_fault_count);
++    *(hal_data->runtime_period_event_period_ns) =
++        runtime_period_ns_for_event;
++    *(hal_data->runtime_period_event_error_ns) =
++        runtime_period_error_ns_for_event;
++    *(hal_data->runtime_period_event_phase_step_ns) =
++        *(hal_data->runtime_phase_step);
++    *(hal_data->runtime_period_event_working_counter) =
++        *(hal_data->domain_working_counter);
++    *(hal_data->runtime_period_event_slaves_responding) =
++        master->ms.slaves_responding;
++    *(hal_data->runtime_period_event_wc_complete) =
++        *(hal_data->domain_wc_complete);
++    *(hal_data->runtime_period_event_all_op) = *(hal_data->all_op);
++    *(hal_data->runtime_period_event_dc_phased) =
++        *(hal_data->dc_phased);
++    *(hal_data->runtime_period_event_dc_valid) =
++        *(hal_data->dc_time_valid);
++    *(hal_data->runtime_period_event_dc_age_cycles) =
++        *(hal_data->dc_time_age_cycles);
++    *(hal_data->runtime_period_event_app_time_hi) =
++        (uint32_t)(app_time >> 32);
++    *(hal_data->runtime_period_event_app_time_lo) =
++        (uint32_t)(app_time & UINT32_MAX);
++    *(hal_data->runtime_period_event_valid) = 1;
++  }
+   
+   // When sync_to_ref_clock = false: adjust app_phase to a stable position using PLL
+   // This is needed because app_phase is random at startup
+@@ -1389,7 +1555,7 @@ void lcec_write_master(void *arg, long period) {
+       } else {
+         // Phase 2: Calculate jitter and target position
+         hal_data->phase_jitter = hal_data->phase_max - hal_data->phase_min;
+-        *(hal_data->phase_jitter_out) = hal_data->phase_jitter;  // Output jitter for debugging
++        *(hal_data->phase_jitter_out) = hal_data->phase_jitter;
+         
+         // Target position: jitter + jitter/2 = jitter * 1.5
+         int32_t target = hal_data->phase_jitter + hal_data->phase_jitter / 2;
+-- 
+2.39.2

@@ -1,5 +1,5 @@
 <masters>
-  <master idx="0" appTimePeriod="2000000" refClockSyncCycles="5">
+  <master idx="0" appTimePeriod="1000000" refClockSyncCycles="10">
     <slave idx="0" type="generic" vid="0x00100000" pid="0x000c0112" name="s0" configPdos="true">
       <dcConf assignActivate="300" sync0Cycle="*1" sync0Shift="0"/>
       <sdoConfig idx="6060" subIdx="00">

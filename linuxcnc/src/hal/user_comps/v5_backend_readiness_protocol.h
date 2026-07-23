@@ -6,12 +6,15 @@
 #define V5_BACKEND_READINESS_SOCKET_PATH \
     "/run/8ax_v5_product_ui/v5_backend_readiness.sock"
 #define V5_BACKEND_READINESS_MAGIC 0x56354252u
-#define V5_BACKEND_READINESS_VERSION 1u
+#define V5_BACKEND_READINESS_VERSION 2u
 #define V5_BACKEND_READINESS_CODE_CAP 64u
+#define V5_BACKEND_DRIVE_IDENTITY_SHA256_SIZE 32u
 
 enum V5BackendReadinessOperation {
     V5_BACKEND_READINESS_OP_STATUS = 1,
-    V5_BACKEND_READINESS_OP_ARM = 2
+    V5_BACKEND_READINESS_OP_ARM = 2,
+    V5_BACKEND_READINESS_OP_DRIVE_VERIFY = 3,
+    V5_BACKEND_READINESS_OP_DRIVE_INVALIDATE = 4
 };
 
 enum V5BackendReadinessStatus {
@@ -27,6 +30,12 @@ typedef struct V5BackendReadinessRequest {
     uint32_t size;
     uint32_t operation;
     uint64_t request_id;
+    uint32_t generation;
+    uint32_t drive_mapping_generation;
+    uint32_t drive_axis_mask;
+    uint32_t drive_readback_count;
+    uint64_t drive_readback_started_ns;
+    uint8_t drive_transaction_sha256[V5_BACKEND_DRIVE_IDENTITY_SHA256_SIZE];
 } V5BackendReadinessRequest;
 
 typedef struct V5BackendReadinessResponse {
@@ -55,6 +64,13 @@ typedef struct V5BackendReadinessResponse {
     uint32_t dc_time_age_cycles;
     uint32_t dc_time_ok_seq;
     uint32_t dc_time_error_count;
+    uint32_t drive_verified;
+    uint32_t drive_mapping_generation;
+    uint32_t drive_axis_mask;
+    uint32_t drive_readback_count;
+    uint64_t drive_readback_started_ns;
+    uint64_t drive_verified_ns;
+    uint8_t drive_transaction_sha256[V5_BACKEND_DRIVE_IDENTITY_SHA256_SIZE];
     uint64_t cpu_contract_ready_ns;
     uint64_t first_full_wkc_ns;
     uint64_t dc_fresh_pair_ready_ns;

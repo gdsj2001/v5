@@ -169,6 +169,7 @@ typedef struct HomeConfigRecord {
 
 #define V5_BACKEND_REGISTERED_PROCESS_CAP 6U
 #define V5_BACKEND_IDENTITY_CHECK_NS 100000000ULL
+#define V5_BACKEND_DRIVE_ATTESTATION_MAX_AGE_NS 30000000000ULL
 
 typedef struct BackendRegisteredProcess {
     pid_t pid;
@@ -189,6 +190,13 @@ typedef struct BackendReadinessState {
     uint64_t dc_fresh_pair_ready_ns;
     uint64_t backend_data_ready_ns;
     uint64_t backend_ready_published_ns;
+    int drive_verified;
+    uint32_t drive_mapping_generation;
+    uint32_t drive_axis_mask;
+    uint32_t drive_readback_count;
+    uint64_t drive_readback_started_ns;
+    uint64_t drive_verified_ns;
+    uint8_t drive_transaction_sha256[V5_BACKEND_DRIVE_IDENTITY_SHA256_SIZE];
     uint32_t first_dc_seq;
     uint32_t first_dc_errors;
     int first_dc_seen;
@@ -770,6 +778,50 @@ static int process_threads_contract(
     return thread_count > 0U && (!require_rtapi_thread || realtime_count > 0U);
 }
 
+static int rtapi_threads_contract(pid_t pid)
+{
+    char path[64];
+    DIR *directory;
+    struct dirent *entry;
+    unsigned int realtime_count = 0U;
+    unsigned int non_realtime_count = 0U;
+    snprintf(path, sizeof(path), "/proc/%ld/task", (long)pid);
+    directory = opendir(path);
+    if (!directory) return 0;
+    while ((entry = readdir(directory)) != 0) {
+        pid_t tid;
+        char cpu[32];
+        char comm[64];
+        long rt_priority = 0;
+        long policy = 0;
+        int realtime;
+        if (!numeric_name(entry->d_name, &tid)) continue;
+        if (!read_task_cpu_list(pid, tid, cpu, sizeof(cpu)) ||
+            !read_task_comm(pid, tid, comm, sizeof(comm)) ||
+            !read_task_stat(pid, tid, 0, 0, &rt_priority, &policy)) {
+            closedir(directory);
+            return 0;
+        }
+        realtime = strncmp(comm, "rtapi_app:T", 11U) == 0;
+        if (realtime) {
+            if (strcmp(cpu, "0") != 0 || (policy != 1 && policy != 2) ||
+                rt_priority <= 0) {
+                closedir(directory);
+                return 0;
+            }
+            ++realtime_count;
+        } else {
+            if (strcmp(cpu, "1") != 0 || policy != 0 || rt_priority != 0) {
+                closedir(directory);
+                return 0;
+            }
+            ++non_realtime_count;
+        }
+    }
+    closedir(directory);
+    return realtime_count > 0U && non_realtime_count > 0U;
+}
+
 static int register_process(BackendReadinessState *state, pid_t pid)
 {
     uint64_t start_ticks = 0U;
@@ -951,7 +1003,7 @@ static int backend_cpu_contract_capture(BackendReadinessState *state)
             !register_process(state, pid)) return 0;
     }
     if (!find_process_by_comm("rtapi_app", &pid) ||
-        !process_threads_contract(pid, "0", 0, 0, 1) ||
+        !rtapi_threads_contract(pid) ||
         !register_process(state, pid)) return 0;
     if (process_count_by_comm("irqbalance", 0) != 0U ||
         !irq_affinity_contract("eth0", "1") ||
@@ -1011,7 +1063,7 @@ static void backend_readiness_arm(BackendReadinessState *state)
     state->last_identity_check_ns = now;
 }
 
-static int backend_runtime_actual_valid(const BackendReadinessState *state)
+static int backend_bus_actual_valid(const BackendReadinessState *state)
 {
     return state && backend_contract_wired && backend_activated &&
            backend_slaves_responding == g_config.expected_slaves &&
@@ -1020,6 +1072,11 @@ static int backend_runtime_actual_valid(const BackendReadinessState *state)
            backend_domain_wc_complete && backend_dc_phased &&
            backend_dc_time_valid && backend_dc_time_age_cycles == 0U &&
            backend_dc_time_error_count == state->first_dc_errors;
+}
+
+static int backend_runtime_actual_valid(const BackendReadinessState *state)
+{
+    return backend_bus_actual_valid(state) && state->drive_verified;
 }
 
 static const char *backend_runtime_actual_failure(const BackendReadinessState *state)
@@ -1037,6 +1094,118 @@ static const char *backend_runtime_actual_failure(const BackendReadinessState *s
     if (backend_dc_time_age_cycles != 0U) return "BACKEND_REVOKED_DC_STALE";
     if (backend_dc_time_error_count != state->first_dc_errors)
         return "BACKEND_REVOKED_DC_ERRORS";
+    if (!state->drive_verified) return "BACKEND_REVOKED_DRIVE_UNVERIFIED";
+    return 0;
+}
+
+static int drive_identity_digest_present(const uint8_t *digest)
+{
+    size_t index;
+    if (!digest) return 0;
+    for (index = 0U; index < V5_BACKEND_DRIVE_IDENTITY_SHA256_SIZE; ++index) {
+        if (digest[index] != 0U) return 1;
+    }
+    return 0;
+}
+
+static uint32_t expected_drive_axis_mask(void)
+{
+    if (!g_config.expected_slaves || g_config.expected_slaves >= 32U) return 0U;
+    return (1U << g_config.expected_slaves) - 1U;
+}
+
+static const char *backend_drive_verify_failure(
+    const BackendReadinessState *state,
+    const V5BackendReadinessRequest *request,
+    uint64_t now)
+{
+    uint32_t expected_mask = expected_drive_axis_mask();
+    if (!state || !request) return "BACKEND_DRIVE_VERIFY_BAD_REQUEST";
+    if (!state->armed || !state->backend_data_ready)
+        return "BACKEND_DRIVE_VERIFY_DATA_NOT_READY";
+    if (state->revoked) return "BACKEND_DRIVE_VERIFY_REVOKED";
+    if (request->generation != state->lifecycle_generation)
+        return "BACKEND_DRIVE_VERIFY_GENERATION_MISMATCH";
+    if (!expected_mask || request->drive_axis_mask != expected_mask ||
+        request->drive_readback_count != g_config.expected_slaves)
+        return "BACKEND_DRIVE_VERIFY_AXIS_SET_MISMATCH";
+    if (!home_router_mapping_valid ||
+        !home_router_map_gen ||
+        request->drive_mapping_generation != home_router_map_gen)
+        return "BACKEND_DRIVE_VERIFY_MAPPING_MISMATCH";
+    if (!request->drive_readback_started_ns ||
+        request->drive_readback_started_ns < state->backend_data_ready_ns ||
+        request->drive_readback_started_ns > now ||
+        now - request->drive_readback_started_ns >
+            V5_BACKEND_DRIVE_ATTESTATION_MAX_AGE_NS)
+        return "BACKEND_DRIVE_VERIFY_READBACK_STALE";
+    if (!drive_identity_digest_present(request->drive_transaction_sha256))
+        return "BACKEND_DRIVE_VERIFY_IDENTITY_MISSING";
+    if (!g_safety_known || read_machine_enabled_pin())
+        return "BACKEND_DRIVE_VERIFY_MACHINE_OFF_REQUIRED";
+    if (!backend_bus_actual_valid(state))
+        return "BACKEND_DRIVE_VERIFY_BUS_ACTUAL_INVALID";
+    return 0;
+}
+
+static int backend_drive_verify(
+    BackendReadinessState *state,
+    const V5BackendReadinessRequest *request,
+    uint64_t now,
+    const char **code)
+{
+    const char *failure = backend_drive_verify_failure(state, request, now);
+    if (failure) {
+        if (code) *code = failure;
+        return 0;
+    }
+    state->drive_verified = 1;
+    state->drive_mapping_generation = request->drive_mapping_generation;
+    state->drive_axis_mask = request->drive_axis_mask;
+    state->drive_readback_count = request->drive_readback_count;
+    state->drive_readback_started_ns = request->drive_readback_started_ns;
+    state->drive_verified_ns = now;
+    memcpy(state->drive_transaction_sha256,
+           request->drive_transaction_sha256,
+           sizeof(state->drive_transaction_sha256));
+    if (code) *code = "BACKEND_DRIVE_VERIFIED";
+    return 1;
+}
+
+static int backend_drive_invalidate(
+    BackendReadinessState *state,
+    const V5BackendReadinessRequest *request,
+    const char **code)
+{
+    uint64_t deadline;
+    if (!state || !request || request->generation != state->lifecycle_generation) {
+        if (code) *code = "BACKEND_DRIVE_INVALIDATE_GENERATION_MISMATCH";
+        return 0;
+    }
+    state->drive_verified = 0;
+    state->motion_backend_ready = 0;
+    state->backend_ready_published_ns = 0U;
+    memset(state->drive_transaction_sha256, 0,
+           sizeof(state->drive_transaction_sha256));
+    state->drive_mapping_generation = 0U;
+    state->drive_axis_mask = 0U;
+    state->drive_readback_count = 0U;
+    state->drive_readback_started_ns = 0U;
+    state->drive_verified_ns = 0U;
+    g_boot_reset_started = 1;
+    g_boot_reset_done = 1;
+    safety_reset = 0;
+    safety_force = 1;
+    deadline = monotonic_ns() + 150000000ULL;
+    while (monotonic_ns() < deadline) {
+        if (g_safety_known && read_safety_estop_active_pin() &&
+            !read_machine_enabled_pin()) {
+            if (code) *code = "BACKEND_DRIVE_INVALIDATED_MACHINE_OFF";
+            return 1;
+        }
+        usleep(500U);
+    }
+    if (code) *code = "BACKEND_DRIVE_INVALIDATE_MACHINE_OFF_NOT_CONFIRMED";
     return 0;
 }
 
@@ -1148,6 +1317,15 @@ static void fill_backend_readiness_response(
     response->dc_time_age_cycles = backend_dc_time_age_cycles;
     response->dc_time_ok_seq = backend_dc_time_ok_seq;
     response->dc_time_error_count = backend_dc_time_error_count;
+    response->drive_verified = state->drive_verified ? 1U : 0U;
+    response->drive_mapping_generation = state->drive_mapping_generation;
+    response->drive_axis_mask = state->drive_axis_mask;
+    response->drive_readback_count = state->drive_readback_count;
+    response->drive_readback_started_ns = state->drive_readback_started_ns;
+    response->drive_verified_ns = state->drive_verified_ns;
+    memcpy(response->drive_transaction_sha256,
+           state->drive_transaction_sha256,
+           sizeof(response->drive_transaction_sha256));
     response->cpu_contract_ready_ns = state->cpu_contract_ready_ns;
     response->first_full_wkc_ns = state->first_full_wkc_ns;
     response->dc_fresh_pair_ready_ns = state->dc_fresh_pair_ready_ns;
@@ -1174,8 +1352,29 @@ static void process_backend_readiness_request(
     const V5BackendReadinessRequest *request,
     V5BackendReadinessResponse *response)
 {
+    const char *drive_code = 0;
+    int drive_ok = 0;
     if (request->operation == V5_BACKEND_READINESS_OP_ARM) {
         backend_readiness_arm(&g_backend_readiness);
+    } else if (request->operation == V5_BACKEND_READINESS_OP_DRIVE_VERIFY) {
+        drive_ok = backend_drive_verify(
+            &g_backend_readiness, request, monotonic_ns(), &drive_code);
+        backend_readiness_tick(monotonic_ns());
+        fill_backend_readiness_response(request, response);
+        response->status = drive_ok ? V5_BACKEND_READINESS_STATUS_OK :
+                                      V5_BACKEND_READINESS_STATUS_UNAVAILABLE;
+        snprintf(response->code, sizeof(response->code), "%s",
+                 drive_code ? drive_code : "BACKEND_DRIVE_VERIFY_FAILED");
+        return;
+    } else if (request->operation == V5_BACKEND_READINESS_OP_DRIVE_INVALIDATE) {
+        drive_ok = backend_drive_invalidate(
+            &g_backend_readiness, request, &drive_code);
+        fill_backend_readiness_response(request, response);
+        response->status = drive_ok ? V5_BACKEND_READINESS_STATUS_OK :
+                                      V5_BACKEND_READINESS_STATUS_UNAVAILABLE;
+        snprintf(response->code, sizeof(response->code), "%s",
+                 drive_code ? drive_code : "BACKEND_DRIVE_INVALIDATE_FAILED");
+        return;
     } else if (request->operation != V5_BACKEND_READINESS_OP_STATUS) {
         fill_backend_readiness_response(request, response);
         response->status = V5_BACKEND_READINESS_STATUS_BAD_REQUEST;
@@ -1518,6 +1717,13 @@ static void process_request(const V5NativeHalOwnerRequest *request, V5NativeHalO
             safety_force = 0;
         }
     } else if (request->operation == V5_NATIVE_HAL_OWNER_OP_ESTOP_RESET) {
+        if (!g_backend_readiness.drive_verified ||
+            !g_backend_readiness.motion_backend_ready) {
+            response->status = V5_NATIVE_HAL_OWNER_STATUS_NOT_CONFIRMED;
+            snprintf(response->code, sizeof(response->code), "%s",
+                     "NATIVE_SAFETY_DRIVE_NOT_VERIFIED");
+            return;
+        }
         g_boot_reset_started = 1;
         g_boot_reset_done = 1;
         safety_force = 0;

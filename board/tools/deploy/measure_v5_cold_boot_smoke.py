@@ -21,6 +21,7 @@ from measure_v5_cold_boot import (DeterministicProbeError, FatalMeasurementError
                                   TransientProbeError, canonical_publisher_argv,
                                   parse_boot_stages, persist_cycle_evidence,
                                   post_ready_ethercat_errors,
+                                  backend_ready_host_boundary,
                                   startup_forbidden_errors,
                                   prove_terminal, receive_declared_response,
                                   require_resource_lock, run, summarize_results,
@@ -33,24 +34,24 @@ rejected_after_ready = [
     "EtherCAT WARNING 0: 1 datagram SKIPPED!",
     "EtherCAT WARNING 0: 1 datagram TIMED OUT!",
     "EtherCAT WARNING 0: 3 datagrams UNMATCHED!",
-    "Unexpected realtime delay on task 0 with period 2000000",
+    "Unexpected realtime delay on task 0 with period 1000000",
     "control error reference=4AE322B9D742",
 ]
 assert post_ready_ethercat_errors(
-    [(float(index), line) for index, line in enumerate(rejected_after_ready, 1)] +
-    [(10.0, "LinuxCNC backend transport ready; WKC/DC stable")]) == []
+    [(float(index), line) for index, line in enumerate(rejected_after_ready, 1)],
+    10.0) == []
 whole_boot_faults = startup_forbidden_errors(
-    [(float(index), line) for index, line in enumerate(rejected_after_ready, 1)] +
-    [(10.0, "LinuxCNC backend transport ready; WKC/DC stable")])
+    [(float(index), line) for index, line in enumerate(rejected_after_ready, 1)],
+    10.0)
 assert [item["line"] for item in whole_boot_faults] == rejected_after_ready[-2:]
 assert all(item["scope"] == "whole_boot" for item in whole_boot_faults)
 post_ready_loss = post_ready_ethercat_errors([
-    (2.0, "LinuxCNC backend transport ready; WKC/DC stable"),
-    *[(float(index + 3), line) for index, line in enumerate(rejected_after_ready)]])
+    *[(float(index + 3), line) for index, line in enumerate(rejected_after_ready)]],
+    2.0)
 assert [item["line"] for item in post_ready_loss] == rejected_after_ready
 startup_loss = startup_forbidden_errors([
-    (2.0, "LinuxCNC backend transport ready; WKC/DC stable"),
-    *[(float(index + 3), line) for index, line in enumerate(rejected_after_ready)]])
+    *[(float(index + 3), line) for index, line in enumerate(rejected_after_ready)]],
+    2.0)
 assert [item["line"] for item in startup_loss] == rejected_after_ready
 assert [item["scope"] for item in startup_loss] == [
     "post_backend_ready", "post_backend_ready", "post_backend_ready",
@@ -65,7 +66,22 @@ probe["boot_id"] = "11111111-1111-4111-8111-111111111111"
 probe["ui_instance_id"] = "22222222-2222-4222-8222-222222222222"
 probe["ui_pid"] = 123
 probe["ui_start_ticks"] = 12345
+probe["startup_servo"] = {
+    "motion_last_period_ns": 1_000_000,
+    "servo_tmax_ns": 600_000,
+    "max_function_tmax_ns": 600_000,
+    "runtime_phase_step_max_ns": 50_000,
+    "runtime_period_ns": 1_000_000,
+    "runtime_period_error_max_ns": 50_000,
+    "runtime_period_warning_count": 0,
+    "runtime_period_fault_count": 0,
+    "domain_wc_incomplete_count": 0,
+    "all_op_false_count": 0,
+    "tmax_ns": {"servo-thread.tmax": 600_000,
+                 "lcec.0.read-all.tmax": 300_000},
+}
 info = {"ui_ready": True, "width": 1024, "height": 600,
+        "system_metrics": {"cpu_sample_monotonic_ns": 40_000_000_000},
         "ready_metadata": {"cache_policy": "main_first_navigation_lazy_v1",
                            "cache_page_count": 1,
                            "cache_registered_page_count": 9,
@@ -81,9 +97,51 @@ info = {"ui_ready": True, "width": 1024, "height": 600,
                            "boot_id": probe["boot_id"],
                            "ui_instance_id": probe["ui_instance_id"],
                            "ui_pid": 123, "ui_start_ticks": probe["ui_start_ticks"],
+                           "backend_ready": {
+                               "backend_ready_published_ns": 1_000_000_000,
+                               "generation": 7, "owner_pid": 321,
+                               "owner_start_ticks": 654},
                            "first_frame": {"x": 0, "y": 0, "w": 1024, "h": 600,
                                            "frame_id": 2, "base_frame_id": 1}}}
 assert terminal_complete(probe, info)
+boundary = backend_ready_host_boundary(info, 100.0)
+assert boundary is not None and boundary["host_stamp_s"] == 61.0
+bad_startup_tmax = dict(probe)
+bad_startup_tmax["startup_servo"] = dict(
+    probe["startup_servo"], servo_tmax_ns=950_001)
+assert not terminal_complete(bad_startup_tmax, info)
+bad_combined_budget = dict(probe)
+bad_combined_budget["startup_servo"] = dict(
+    probe["startup_servo"],
+    servo_tmax_ns=850_000,
+    max_function_tmax_ns=850_000,
+    runtime_phase_step_max_ns=150_000,
+    runtime_period_error_max_ns=150_000,
+    tmax_ns={"servo-thread.tmax": 850_000, "lcec.0.read-all.tmax": 300_000},
+)
+assert not terminal_complete(bad_combined_budget, info)
+for field, value in (
+        ("motion_last_period_ns", 1_900_000),
+        ("runtime_period_ns", 1_900_000),
+        ("runtime_period_error_max_ns", 200_001),
+        ("runtime_period_fault_count", 0xFFFFFFFF),
+        ("domain_wc_incomplete_count", 1),
+        ("all_op_false_count", 1)):
+    bad_cycle_health = dict(probe)
+    bad_cycle_health["startup_servo"] = dict(
+        probe["startup_servo"], **{field: value})
+    assert not terminal_complete(bad_cycle_health, info), field
+startup_with_quality_warnings = dict(probe)
+startup_with_quality_warnings["startup_servo"] = dict(
+    probe["startup_servo"], runtime_phase_step_max_ns=125_865,
+    runtime_period_error_max_ns=125_865, runtime_period_warning_count=52)
+assert terminal_complete(startup_with_quality_warnings, info)
+startup_with_hard_period_error = dict(probe)
+startup_with_hard_period_error["startup_servo"] = dict(
+    probe["startup_servo"], runtime_phase_step_max_ns=225_865,
+    runtime_period_error_max_ns=225_865, runtime_period_warning_count=52,
+    runtime_period_fault_count=1)
+assert not terminal_complete(startup_with_hard_period_error, info)
 wrong_boot = dict(probe, boot_id="33333333-3333-4333-8333-333333333333")
 assert not terminal_complete(wrong_boot, info)
 wrong_start = dict(probe, ui_start_ticks=probe["ui_start_ticks"] + 1)
@@ -104,6 +162,14 @@ assert "RELAY_COMMANDS" not in measure_source
 assert 'result["power_on_monotonic_s"]' in power_source
 assert power_source.index("command_monotonic_ns = time.monotonic_ns()") < power_source.index("time.sleep(0.12)")
 assert "console_ready.wait" in measure_source and "terminal_complete" in measure_source
+assert "relay_info_probe" in measure_source
+assert "backend_ready_host_boundary" in measure_source
+assert "\n protocol_ok=" in measure_source
+assert "\n  protocol_ok=" not in measure_source
+assert "/usr/libexec/8ax/v5_remote_ui_local_client.py" in measure_source
+assert "urllib.request" not in measure_source
+assert "http_probe" not in measure_source
+assert 'urllib.request.urlopen("http://' not in measure_source
 assert (measure_source.index("fetch_logs_into_state(target, state)") <
         measure_source.index('state["startup_forbidden_errors"] = startup_forbidden_errors('))
 assert "parse_boot_stages(normalized_serial)" not in measure_source
@@ -127,6 +193,11 @@ for token in (
         'out["ui_instance_id"]',
         "taskset -c 1", "timeout=5.0", "power_stdout.log"):
     assert token in measure_source, token
+assert "PYTHONPATH=/usr/lib/python3/dist-packages" in measure_source
+assert "DriveAttestation" not in measure_source
+assert "req.version=6" in measure_source
+assert "0x56354347,6,len(response)" in measure_source
+assert 'hal.component("v5_cold_boot_probe_%d"%os.getpid())' in measure_source
 for token in ('cat /proc/sys/kernel/random/boot_id', '\\"ui_start_ticks\\":$ui_start_ticks',
               '\\"boot_id\\":\\"$boot_id\\"'):
     assert token in ui_init_source, token
@@ -194,7 +265,7 @@ def run_injected_failure(kind: str) -> dict:
     released = []
     old_capture = measure.capture_console
     old_run = measure.run
-    old_http = measure.http_probe
+    old_relay = measure.relay_info_probe
     old_prove = measure.prove_terminal
     old_fetch = measure.fetch_boot_logs
     def fake_capture(_port, stop, ready, sink, errors, _handles):
@@ -217,9 +288,9 @@ def run_injected_failure(kind: str) -> dict:
         return subprocess.CompletedProcess(args, 0, "")
     ready_info = dict(info)
     ready_info["ready_metadata"] = dict(info["ready_metadata"], ui_pid=123)
-    def fake_http(_host):
-        if kind == "http":
-            raise ValueError("http injected")
+    def fake_relay(_target):
+        if kind == "relay":
+            raise ValueError("relay injected")
         if kind == "keyboard":
             raise KeyboardInterrupt("keyboard injected")
         return ready_info if kind == "terminal" else None
@@ -227,7 +298,7 @@ def run_injected_failure(kind: str) -> dict:
         raise DeterministicProbeError("terminal injected", {"partial": observed["ui_ready"]})
     measure.capture_console = fake_capture
     measure.run = fake_run
-    measure.http_probe = fake_http
+    measure.relay_info_probe = fake_relay
     measure.prove_terminal = fake_prove
     measure.fetch_boot_logs = lambda _target: {
         "ui": {"stdout": "V5_BOOT_STAGE stage=ui_ready uptime_ms=1\n",
@@ -255,7 +326,7 @@ def run_injected_failure(kind: str) -> dict:
                 assert (root / "cycle-01/v5_ui_relay.log").read_text(encoding="utf-8")
                 assert (root / "cycle-01/boot_runtime.log").read_text(encoding="utf-8")
                 assert payload["log_fetch"]["ui"]["returncode"] == 0
-            if kind in ("json", "http", "serial", "keyboard"):
+            if kind in ("json", "serial"):
                 assert payload["log_fetch"] is None
                 assert payload["log_fetch_errors"] == [
                     "log fetch skipped: SSH never became ready"]
@@ -266,11 +337,11 @@ def run_injected_failure(kind: str) -> dict:
     finally:
         measure.capture_console = old_capture
         measure.run = old_run
-        measure.http_probe = old_http
+        measure.relay_info_probe = old_relay
         measure.prove_terminal = old_prove
         measure.fetch_boot_logs = old_fetch
 
-for injected in ("json", "http", "ssh", "terminal", "serial", "keyboard"):
+for injected in ("json", "relay", "ssh", "terminal", "serial", "keyboard"):
     run_injected_failure(injected)
 
 # Complete canonical publisher argv is accepted. Missing, repeated, additional
@@ -318,16 +389,15 @@ for completed in (subprocess.CompletedProcess(["ssh"], 1, "remote failed"),
     assert len(calls) == 1
 measure.subprocess.run = original_subprocess_run
 
-# ui_ready is frozen at the HTTP observation before a deliberately slow SSH
-# light probe. The later proof and log fetch do not move that main boundary.
+# Relay readiness is observed only after SSH is ready and through the board's
+# authenticated loopback HTTPS client.  The later proof does not move it.
 old_capture, old_run = measure.capture_console, measure.run
-old_http, old_prove = measure.http_probe, measure.prove_terminal
+old_relay, old_prove = measure.relay_info_probe, measure.prove_terminal
 old_fetch, old_append = measure.fetch_boot_logs, measure.append_ui_stage_evidence
 released = []
 def ready_capture(_port, stop, ready, sink, _errors, _handles):
     sink.extend([(time.monotonic(), "U-Boot fixture"),
-                 (time.monotonic(), "Starting kernel fixture"),
-                 (time.monotonic(), "LinuxCNC backend transport ready; fixture")])
+                 (time.monotonic(), "Starting kernel fixture")])
     ready.set(); stop.wait(2.0); released.append(True)
 def slow_ssh_run(args, timeout=15.0):
     if str(measure.POWER_TOOL) in args:
@@ -339,7 +409,7 @@ def slow_ssh_run(args, timeout=15.0):
     return subprocess.CompletedProcess(args, 0, "")
 measure.capture_console = ready_capture
 measure.run = slow_ssh_run
-measure.http_probe = lambda _host: info
+measure.relay_info_probe = lambda _target: info
 measure.prove_terminal = lambda _target, _info: (good_probe, 1)
 measure.fetch_boot_logs = lambda _target: {
     "ui": {"stdout": "ui log\n", "stderr": "", "returncode": 0},
@@ -350,17 +420,17 @@ try:
         payload = measure.measure_cycle(1, Path(temporary), "COM3", "COM4",
                                         "board", "192.0.2.1", 0.5)
         times = {row["stage"]: row["host_elapsed_s"] for row in payload["segments"]}
-        assert times["ui_ready"] + 0.04 <= times["ssh_ready"]
+        assert times["ssh_ready"] <= times["relay_https_ready"] <= times["ui_ready"]
         assert payload["final"]["ui_ready_host_elapsed_s"] == times["ui_ready"]
         assert released
 finally:
     measure.capture_console, measure.run = old_capture, old_run
-    measure.http_probe, measure.prove_terminal = old_http, old_prove
+    measure.relay_info_probe, measure.prove_terminal = old_relay, old_prove
     measure.fetch_boot_logs, measure.append_ui_stage_evidence = old_fetch, old_append
 
 # A console thread that ignores stop and has no closeable handle is fatal, so a
 # multi-cycle run cannot continue and contend for COM4.
-old_capture, old_run, old_http = measure.capture_console, measure.run, measure.http_probe
+old_capture, old_run, old_relay = measure.capture_console, measure.run, measure.relay_info_probe
 never = threading.Event()
 def stuck_capture(_port, _stop, ready, _sink, _errors, _handles):
     ready.set(); never.wait(60.0)
@@ -371,7 +441,7 @@ def power_then_http_error(args, timeout=15.0):
     return subprocess.CompletedProcess(args, 0, "")
 measure.capture_console = stuck_capture
 measure.run = power_then_http_error
-measure.http_probe = lambda _host: (_ for _ in ()).throw(ValueError("stop fixture"))
+measure.relay_info_probe = lambda _target: (_ for _ in ()).throw(ValueError("stop fixture"))
 try:
     with tempfile.TemporaryDirectory() as temporary:
         try:
@@ -382,7 +452,7 @@ try:
         else:
             raise AssertionError("stuck console thread was not fatal")
 finally:
-    measure.capture_console, measure.run, measure.http_probe = old_capture, old_run, old_http
+    measure.capture_console, measure.run, measure.relay_info_probe = old_capture, old_run, old_relay
     never.set()
 
 # A transient file-write failure is retried while preserving the rest of the

@@ -119,8 +119,8 @@ void v5_boot_closure_load(V5BootClosure *closure, const char *project_root)
     closure->resource_count = registry.resource_count;
 
     boot_closure_load_text(&closure->runtime_ini, root, "linuxcnc/ini/v5_bus.ini");
-    boot_closure_load_text(&closure->runtime_hal, root, "linuxcnc/hal/v5_bus_2ms.hal");
-    boot_closure_load_text(&closure->ethercat_hal, root, "linuxcnc/hal/ethercat-conf-2ms.xml");
+    boot_closure_load_text(&closure->runtime_hal, root, "linuxcnc/hal/v5_bus_1ms.hal");
+    boot_closure_load_text(&closure->ethercat_hal, root, "linuxcnc/hal/ethercat-conf-1ms.xml");
     boot_closure_load_text(&closure->linuxcnc_parameter_file, root, "linuxcnc/runtime/var/linuxcnc.var");
     boot_closure_load_text(&closure->tool_table, root, "linuxcnc/runtime/var/tool.tbl");
     boot_closure_load_text(&closure->step_ip_contract, root, "linuxcnc/components/step_ip_v1_5.contract.json");

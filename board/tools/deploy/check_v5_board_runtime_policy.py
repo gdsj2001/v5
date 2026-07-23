@@ -926,15 +926,31 @@ def audit_linuxcnc_rtapi_affinity() -> int:
                     print(
                         f"OK_LINUXCNC_RTAPI_SCHEDULER pid={pid} tid={tid} comm={comm} policy={policy}"
                     )
-            if not cpu_list_is_exact_zero(cpus):
-                print(
-                    f"FAIL linuxcnc_rtapi_affinity: pid={pid} tid={tid} comm={comm} "
-                    f"Cpus_allowed_list={cpus} expected=0",
-                    file=sys.stderr,
-                )
-                rc = 1
+                if not cpu_list_is_exact_zero(cpus):
+                    print(
+                        f"FAIL linuxcnc_rtapi_affinity: pid={pid} tid={tid} comm={comm} "
+                        f"Cpus_allowed_list={cpus} expected=0",
+                        file=sys.stderr,
+                    )
+                    rc = 1
+                else:
+                    print(
+                        f"OK_LINUXCNC_RTAPI_CPU0 pid={pid} tid={tid} comm={comm} "
+                        f"Cpus_allowed_list={cpus}"
+                    )
             else:
-                print(f"OK_LINUXCNC_RTAPI_CPU0 pid={pid} tid={tid} comm={comm} Cpus_allowed_list={cpus}")
+                if cpus != "1" or policy != 0:
+                    print(
+                        f"FAIL linuxcnc_rtapi_non_realtime: pid={pid} tid={tid} comm={comm} "
+                        f"Cpus_allowed_list={cpus} policy={policy} expected=CPU1/SCHED_OTHER",
+                        file=sys.stderr,
+                    )
+                    rc = 1
+                else:
+                    print(
+                        f"OK_LINUXCNC_RTAPI_NON_RT_CPU1 pid={pid} tid={tid} comm={comm} "
+                        f"Cpus_allowed_list={cpus} policy={policy}"
+                    )
     if realtime_threads == 0:
         print("FAIL linuxcnc_rtapi_scheduler: no rtapi_app:T realtime thread found", file=sys.stderr)
         rc = 1
@@ -1085,6 +1101,39 @@ def audit_management_daemon_cpu_isolation() -> int:
         print(f"OK_MANAGEMENT_DAEMON_CPU_ISOLATION dropbear_pids={dropbear_pids} cpu=1")
     return rc
 
+def audit_userspace_housekeeping_affinity() -> int:
+    failures = []
+    checked = 0
+    for proc in sorted(Path(PROC_ROOT).glob("[0-9]*")):
+        try:
+            if not (proc / "cmdline").read_bytes().strip(b"\0"):
+                continue
+        except OSError:
+            continue
+        for task in sorted((proc / "task").glob("[0-9]*")):
+            try:
+                tid = int(task.name)
+                comm = (task / "comm").read_text(
+                    encoding="ascii", errors="replace").strip()
+                if comm.startswith("rtapi_app:T#"):
+                    continue
+                cpus = read_status_field(tid, "Cpus_allowed_list")
+            except (OSError, ValueError):
+                continue
+            checked += 1
+            if cpus != "1":
+                failures.append(
+                    f"FAIL_USERSPACE_HOUSEKEEPING_CPU1 pid={proc.name} tid={tid} "
+                    f"comm={comm} Cpus_allowed_list={cpus} expected=1"
+                )
+    if checked == 0:
+        failures.append("FAIL_USERSPACE_HOUSEKEEPING_CPU1 no_live_userspace_tasks")
+    for failure in failures:
+        print(failure, file=sys.stderr)
+    if not failures:
+        print(f"OK_USERSPACE_HOUSEKEEPING_CPU1 tasks={checked}")
+    return int(bool(failures))
+
 rc = 0
 for name, pidfile in PIDFILES.items():
     if name == "v5_position_status_publisher":
@@ -1153,6 +1202,7 @@ rc |= audit_linuxcnc_non_realtime_scheduling()
 rc |= audit_kernel_boot_cpu_layout()
 rc |= audit_network_cpu_isolation()
 rc |= audit_management_daemon_cpu_isolation()
+rc |= audit_userspace_housekeeping_affinity()
 rc |= audit_linuxcnc_control_listeners()
 rc |= audit_tcf_retirement()
 rc |= audit_uio_devices()

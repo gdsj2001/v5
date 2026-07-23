@@ -5,6 +5,10 @@ import time
 from typing import Any, Dict, List
 
 import v5_drive_enable_window
+from v5_drive_boot_attestation import (
+    DriveAttestationError,
+    invalidate_drive_generation,
+)
 from v5_drive_axis_model import (
     mark_drive_parameters_invalid,
     update_axis_drive_set_evidence,
@@ -42,6 +46,7 @@ def _run_set_drive_preflight_impl(
     frozen_identity: Dict[str, Any] = {}
     identity_check: Dict[str, Any] = {}
     stale_evidence_invalidation: Dict[str, Any] = {}
+    native_invalidation: Dict[str, Any] = {}
     try:
         targets, runtime, scan = configured_drive_targets(timeout_s)
         planned = _planned_drive_transaction(targets)
@@ -98,6 +103,14 @@ def _run_set_drive_preflight_impl(
                 },
                 "target_mode": CANONICAL_CSP_MODE,
             })
+        try:
+            native_invalidation = invalidate_drive_generation(
+                min(max(float(timeout_s), 0.1), 3.0))
+        except DriveAttestationError as exc:
+            raise DriveActionError(
+                "DRIVE_NATIVE_INVALIDATION_FAILED",
+                "最终持久输入已校验，但native未确认当前驱动generation失效；保持Machine Off且未形成可用重启结果。",
+                {"code": exc.code, "detail": exc.detail}) from exc
         return {
             "ok": True,
             "code": "DRIVE_SET_RESTART_REQUIRED",
@@ -111,6 +124,7 @@ def _run_set_drive_preflight_impl(
                 frozen_identity),
             "drive_transaction_checks": {"preflight": identity_check},
             "stale_evidence_invalidation": stale_evidence_invalidation,
+            "native_invalidation": native_invalidation,
             "write_executed": False,
             "drive_write_executed": False,
             "motion_executed": False,
@@ -128,6 +142,7 @@ def _run_set_drive_preflight_impl(
                 frozen_identity),
             "drive_transaction_checks": {"preflight": identity_check},
             "stale_evidence_invalidation": stale_evidence_invalidation,
+            "native_invalidation": native_invalidation,
             "write_executed": False,
             "drive_write_executed": False,
             "motion_executed": False,
@@ -148,11 +163,17 @@ def _run_boot_drive_apply_impl(
     prewrite_identity_check: Dict[str, Any] = {}
     postreadback_identity_check: Dict[str, Any] = {}
     stale_evidence_invalidation: Dict[str, Any] = {}
+    batch_readback_started_monotonic_ns = 0
     try:
         targets, runtime, scan = configured_drive_targets(timeout_s)
         planned = _planned_drive_transaction(targets)
         frozen_identity = capture_drive_transaction_identity(
             targets, planned, scan, timeout_s)
+        if not frozen_identity.get("native_mapping_matches_persistent"):
+            raise DriveActionError(
+                "DRIVE_BOOT_NATIVE_MAPPING_GENERATION_MISMATCH",
+                "重启后的 native 映射 generation 与最终持久映射不一致，未写驱动。",
+                compact_drive_transaction_identity(frozen_identity))
         stale_rows = invalidate_stale_drive_transaction_evidence(
             targets, frozen_identity)
         if stale_rows:
@@ -221,6 +242,7 @@ def _run_boot_drive_apply_impl(
         item: Dict[str, Any] = {
             "axis": target.get("axis"),
             "position": position,
+            "status_slot": int(target.get("status_slot") or 0),
             "axis_slave_binding_source": target.get("axis_slave_binding_source", ""),
             "profile_id": (target.get("profile") or {}).get("profile_id", ""),
             "target_egear": {"numerator": egear[0], "denominator": egear[1], "source": egear_source},
@@ -281,6 +303,7 @@ def _run_boot_drive_apply_impl(
 
     if target_results and all(item.get("ok") for item in target_results):
         expectations = {position: (egear, CANONICAL_CSP_MODE) for position, (egear, _source) in planned.items()}
+        batch_readback_started_monotonic_ns = time.monotonic_ns()
         batch_readback = set_drive_batch_readback(targets, timeout_s, expectations)
         identity_failure = None
         try:
@@ -361,6 +384,8 @@ def _run_boot_drive_apply_impl(
             "prewrite": prewrite_identity_check,
             "postreadback": postreadback_identity_check,
         },
+        "batch_readback_started_monotonic_ns":
+            batch_readback_started_monotonic_ns,
         "stale_evidence_invalidation": stale_evidence_invalidation,
         "settings_runtime_writeback": persist,
         "drive_parameter_display_writeback": display_writeback,

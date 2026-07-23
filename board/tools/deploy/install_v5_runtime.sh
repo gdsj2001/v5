@@ -397,6 +397,118 @@ print(
 PY
 }
 
+merge_runtime_bus_ini_cycle() {
+  source_path="$1"
+  destination="$2"
+  mode="$3"
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "python3 required to merge runtime BUS INI cycle identity: $destination" >&2
+    return 5
+  fi
+  [ -f "$source_path" ] && [ ! -L "$source_path" ] || {
+    echo "runtime BUS INI template must be a regular file: $source_path" >&2
+    return 5
+  }
+  if [ -L "$destination" ]; then
+    echo "runtime BUS INI owner must not be a symlink: $destination" >&2
+    return 5
+  fi
+  install -d "$(dirname "$destination")"
+  parameter_table_transaction_snapshot "$destination"
+  merged_artifact="$parameter_table_transaction_entry/merged.ini"
+  source_path="$source_path" destination="$destination" mode="$mode" merged_artifact="$merged_artifact" python3 - <<'PY'
+import os
+import shutil
+import stat
+from pathlib import Path
+
+src = Path(os.environ["source_path"])
+dst = Path(os.environ["destination"])
+artifact = Path(os.environ["merged_artifact"])
+mode = int(os.environ["mode"], 8)
+targets = {
+    ("EMCMOT", "SERVO_PERIOD"): "1000000",
+    ("HAL", "HALFILE"): "/opt/8ax/v5/linuxcnc/hal/v5_bus_1ms.hal",
+    ("TRAJ", "ARC_BLEND_GAP_CYCLES"): "8",
+}
+
+
+def parse(path: Path, owner: str):
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise SystemExit("%s BUS INI is not UTF-8: %s" % (owner, path)) from exc
+    lines = text.splitlines()
+    section = None
+    found = {key: [] for key in targets}
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("#", ";")):
+            continue
+        if stripped.startswith("[") and stripped.endswith("]"):
+            section = stripped[1:-1].strip().upper()
+            continue
+        if "=" not in line or section is None:
+            continue
+        raw_key, raw_value = line.split("=", 1)
+        key = (section, raw_key.strip().upper())
+        if key in found:
+            found[key].append((index, raw_value.strip()))
+    for key, matches in found.items():
+        if len(matches) != 1:
+            raise SystemExit(
+                "%s BUS INI must contain exactly one [%s] %s: %s count=%d" %
+                (owner, key[0], key[1], path, len(matches)))
+    return text, lines, found
+
+
+source_text, source_lines, source_found = parse(src, "template")
+for key, expected in targets.items():
+    actual = source_found[key][0][1]
+    if actual != expected:
+        raise SystemExit(
+            "template BUS INI cycle identity mismatch [%s] %s=%s expected=%s" %
+            (key[0], key[1], actual, expected))
+
+if dst.exists():
+    _, output_lines, destination_found = parse(dst, "board")
+    for key, expected in targets.items():
+        index = destination_found[key][0][0]
+        output_lines[index] = "%s = %s" % (key[1], expected)
+    expected_text = "\n".join(output_lines) + "\n"
+else:
+    expected_text = source_text.rstrip("\r\n") + "\n"
+
+artifact.write_text(expected_text, encoding="utf-8")
+os.chmod(artifact, mode)
+_, _, artifact_found = parse(artifact, "merged artifact")
+for key, expected in targets.items():
+    if artifact_found[key][0][1] != expected:
+        raise SystemExit("merged BUS INI cycle identity validation failed: %s" % artifact)
+
+temporary = dst.with_name(dst.name + ".v5-new.%s" % os.getpid())
+try:
+    shutil.copyfile(artifact, temporary)
+    os.chmod(temporary, mode)
+    os.replace(temporary, dst)
+    actual_text, _, actual_found = parse(dst, "installed board")
+    actual_mode = stat.S_IMODE(dst.stat().st_mode)
+    if actual_text != expected_text or actual_mode != mode:
+        raise SystemExit("installed BUS INI readback validation failed: %s" % dst)
+    for key, expected in targets.items():
+        if actual_found[key][0][1] != expected:
+            raise SystemExit("installed BUS INI cycle identity mismatch: %s" % dst)
+finally:
+    try:
+        temporary.unlink()
+    except FileNotFoundError:
+        pass
+
+print("merged runtime BUS INI cycle identity %s -> %s keys=%d format=ok" %
+      (src, dst, len(targets)))
+PY
+}
+
 tab=$(printf '\t')
 if [ -d "$linuxcnc_package_root" ] || [ -e "$linuxcnc_bundle_allowlist" ] || [ -e "$linuxcnc_bundle_hashes" ]; then
   linuxcnc_bundle_enabled=1
@@ -419,6 +531,7 @@ manifest_backend_only=1
 manifest_ethercat_only=1
 manifest_gcode_only=1
 manifest_cpu_policy_only=1
+manifest_runtime_startup_only=1
 manifest_cpu_policy_net_core=0
 manifest_cpu_policy_net_module=0
 manifest_cpu_policy_net_init=0
@@ -429,6 +542,7 @@ manifest_cpu_policy_ui=0
 manifest_cpu_policy_state=0
 manifest_cpu_policy_wcs=0
 manifest_cpu_policy_position=0
+manifest_cpu_policy_runtime_startup=0
 manifest_position_publisher=0
 manifest_wcs_publisher=0
 manifest_state_publisher=0
@@ -461,6 +575,13 @@ manifest_ethercat_lifecycle=0
 manifest_ethercat_touched=0
 manifest_ethercat_complete=0
 manifest_ethercat_required_rows=4
+manifest_bus_cycle_touched=0
+manifest_bus_cycle_complete=0
+manifest_bus_cycle_ini=0
+manifest_bus_cycle_hal=0
+manifest_bus_cycle_xml=0
+manifest_bus_cycle_readiness_probe=0
+manifest_bus_cycle_command_gate_init=0
 ethercat_master_destination="/lib/modules/$(uname -r)/ethercat/master/ec_master.ko"
 ethercat_generic_destination="/lib/modules/$(uname -r)/ethercat/devices/ec_generic.ko"
 manifest_row_count=0
@@ -469,6 +590,51 @@ while IFS="$tab" read -r scope_kind scope_source scope_destination scope_mode sc
     ''|'#'*) continue ;;
   esac
   manifest_row_count=$((manifest_row_count + 1))
+  case "$scope_destination" in
+    /opt/8ax/v5/linuxcnc/ini/v5_bus.ini)
+      [ "$scope_kind:$scope_source:$scope_mode" = \
+        "runtime_ini_cycle_merge:linuxcnc/ini/v5_bus.ini:0644" ] || {
+        echo "BUS cycle INI requires the registered merge owner and mode 0644" >&2
+        exit 6
+      }
+      manifest_bus_cycle_touched=1
+      manifest_bus_cycle_ini=1
+      ;;
+    /opt/8ax/v5/linuxcnc/hal/v5_bus_*ms.hal)
+      [ "$scope_kind:$scope_source:$scope_mode" = \
+        "linuxcnc:linuxcnc/hal/v5_bus_1ms.hal:0644" ] || {
+        echo "BUS cycle HAL requires the unique registered 1ms owner and mode 0644" >&2
+        exit 6
+      }
+      manifest_bus_cycle_touched=1
+      manifest_bus_cycle_hal=1
+      ;;
+    /opt/8ax/v5/linuxcnc/hal/ethercat-conf-*ms.xml)
+      [ "$scope_kind:$scope_source:$scope_mode" = \
+        "linuxcnc:linuxcnc/hal/ethercat-conf-1ms.xml:0644" ] || {
+        echo "BUS cycle XML requires the unique registered 1ms owner and mode 0644" >&2
+        exit 6
+      }
+      manifest_bus_cycle_touched=1
+      manifest_bus_cycle_xml=1
+      ;;
+    /usr/libexec/8ax/v5_backend_readiness_probe)
+      [ "$scope_kind:$scope_source:$scope_mode" = \
+        "binary:build/board/app/v5_backend_readiness_probe:0755" ] || {
+        echo "BUS cycle readiness requires the registered ARM probe and mode 0755" >&2
+        exit 6
+      }
+      manifest_bus_cycle_readiness_probe=1
+      ;;
+    /etc/init.d/v5-linuxcnc-command-gate)
+      [ "$scope_kind:$scope_source:$scope_mode" = \
+        "init:services/command_gate/init.d/v5-linuxcnc-command-gate:0755" ] || {
+        echo "BUS cycle lifecycle requires the registered Command Gate init and mode 0755" >&2
+        exit 6
+      }
+      manifest_bus_cycle_command_gate_init=1
+      ;;
+  esac
   case "$scope_destination" in
     /usr/libexec/8ax/v5_command_gate_server)
       [ "$scope_kind:$scope_source:$scope_mode" = \
@@ -627,8 +793,23 @@ while IFS="$tab" read -r scope_kind scope_source scope_destination scope_mode sc
       manifest_cpu_policy_position=1
       manifest_position_publisher=1
       ;;
+    /etc/init.d/v5-runtime-startup)
+      manifest_cpu_policy_runtime_startup=1
+      ;;
     *)
       manifest_cpu_policy_only=0
+      ;;
+  esac
+  case "$scope_destination" in
+    /etc/init.d/v5-runtime-startup)
+      [ "$scope_kind:$scope_source:$scope_mode" = \
+        "init:services/runtime_startup/init.d/v5-runtime-startup:0755" ] || {
+        echo "Runtime-startup scope requires the registered init owner and mode 0755" >&2
+        exit 6
+      }
+      ;;
+    *)
+      manifest_runtime_startup_only=0
       ;;
   esac
   case "$scope_destination" in
@@ -799,6 +980,23 @@ if [ "$manifest_shm_abi_touched" -eq 1 ] &&
   exit 8
 fi
 
+if [ "$manifest_bus_cycle_ini" -eq 1 ] &&
+   [ "$manifest_bus_cycle_hal" -eq 1 ] &&
+   [ "$manifest_bus_cycle_xml" -eq 1 ] &&
+   [ "$manifest_bus_cycle_readiness_probe" -eq 1 ] &&
+   [ "$manifest_bus_cycle_command_gate_init" -eq 1 ] &&
+   [ "$manifest_shm_abi_ui_binary" -eq 1 ] &&
+   [ "$manifest_shm_abi_complete" -eq 1 ] &&
+   [ "$manifest_ethercat_complete" -eq 1 ] &&
+   [ "$linuxcnc_bundle_enabled" -eq 1 ]; then
+  manifest_bus_cycle_complete=1
+fi
+if [ "$manifest_bus_cycle_touched" -eq 1 ] &&
+   [ "$manifest_bus_cycle_complete" -ne 1 ]; then
+  echo "BUS 1ms cycle deploy requires INI/HAL/XML, current LinuxCNC owner, complete EtherCAT, readiness/Command Gate, and UI/SHM atomic domains" >&2
+  exit 8
+fi
+
 case "$restart_scope_requested" in
   auto)
     if [ "$linuxcnc_bundle_enabled" -eq 0 ] &&
@@ -839,6 +1037,10 @@ case "$restart_scope_requested" in
          [ "$manifest_wcs_only" -eq 1 ]; then
       restart_scope=wcs
     elif [ "$linuxcnc_bundle_enabled" -eq 0 ] &&
+         [ "$manifest_row_count" -eq 1 ] &&
+         [ "$manifest_runtime_startup_only" -eq 1 ]; then
+      restart_scope=runtime_startup
+    elif [ "$linuxcnc_bundle_enabled" -eq 0 ] &&
          [ "$manifest_row_count" -gt 0 ] &&
          [ "$manifest_cpu_policy_only" -eq 1 ] &&
          [ "$manifest_cpu_policy_net_core" -eq 1 ] &&
@@ -848,9 +1050,10 @@ case "$restart_scope_requested" in
          [ "$manifest_cpu_policy_relay_payload" -eq 1 ] &&
          [ "$manifest_cpu_policy_command_gate" -eq 1 ] &&
          [ "$manifest_cpu_policy_ui" -eq 1 ] &&
-         [ "$manifest_cpu_policy_state" -eq 1 ] &&
-         [ "$manifest_cpu_policy_wcs" -eq 1 ] &&
-         [ "$manifest_cpu_policy_position" -eq 1 ]; then
+       [ "$manifest_cpu_policy_state" -eq 1 ] &&
+       [ "$manifest_cpu_policy_wcs" -eq 1 ] &&
+       [ "$manifest_cpu_policy_position" -eq 1 ] &&
+       [ "$manifest_cpu_policy_runtime_startup" -eq 1 ]; then
       restart_scope=cpu_policy
     elif [ "$linuxcnc_bundle_enabled" -eq 0 ] &&
          [ "$manifest_row_count" -gt 0 ] &&
@@ -940,6 +1143,15 @@ case "$restart_scope_requested" in
     fi
     restart_scope=wcs
     ;;
+  runtime_startup)
+    if [ "$linuxcnc_bundle_enabled" -ne 0 ] ||
+       [ "$manifest_row_count" -ne 1 ] ||
+       [ "$manifest_runtime_startup_only" -ne 1 ]; then
+      echo "Runtime-startup restart scope requires exactly the registered runtime-startup init row and no LinuxCNC bundle" >&2
+      exit 8
+    fi
+    restart_scope=runtime_startup
+    ;;
   cpu_policy)
     if [ "$linuxcnc_bundle_enabled" -ne 0 ] ||
        [ "$manifest_row_count" -eq 0 ] ||
@@ -953,7 +1165,8 @@ case "$restart_scope_requested" in
        [ "$manifest_cpu_policy_ui" -ne 1 ] ||
        [ "$manifest_cpu_policy_state" -ne 1 ] ||
        [ "$manifest_cpu_policy_wcs" -ne 1 ] ||
-       [ "$manifest_cpu_policy_position" -ne 1 ]; then
+       [ "$manifest_cpu_policy_position" -ne 1 ] ||
+       [ "$manifest_cpu_policy_runtime_startup" -ne 1 ]; then
       echo "CPU-policy restart scope requires the complete registered CPU-policy manifest and no LinuxCNC bundle" >&2
       exit 8
     fi
@@ -972,16 +1185,29 @@ case "$restart_scope_requested" in
     restart_scope=all
     ;;
   *)
-    echo "unsupported V5_RUNTIME_RESTART_SCOPE: $restart_scope_requested (expected auto, gcode, ui, shm_abi, state, actiond, command_gate, backend, ethercat, wcs, cpu_policy, settings, or all)" >&2
+    echo "unsupported V5_RUNTIME_RESTART_SCOPE: $restart_scope_requested (expected auto, gcode, ui, shm_abi, state, actiond, command_gate, backend, ethercat, wcs, runtime_startup, cpu_policy, settings, or all)" >&2
     exit 8
     ;;
 esac
-echo "V5_RUNTIME_RESTART_SCOPE scope=$restart_scope rows=$manifest_row_count shm_abi_touched=$manifest_shm_abi_touched shm_abi_complete=$manifest_shm_abi_complete ethercat_touched=$manifest_ethercat_touched ethercat_complete=$manifest_ethercat_complete gcode_only=$manifest_gcode_only ui_only=$manifest_ui_only state_only=$manifest_state_only actiond_only=$manifest_actiond_only command_gate_only=$manifest_command_gate_only backend_only=$manifest_backend_only wcs_only=$manifest_wcs_only cpu_policy_only=$manifest_cpu_policy_only settings_only=$manifest_settings_only"
+echo "V5_RUNTIME_RESTART_SCOPE scope=$restart_scope rows=$manifest_row_count shm_abi_touched=$manifest_shm_abi_touched shm_abi_complete=$manifest_shm_abi_complete ethercat_touched=$manifest_ethercat_touched ethercat_complete=$manifest_ethercat_complete bus_cycle_touched=$manifest_bus_cycle_touched bus_cycle_complete=$manifest_bus_cycle_complete gcode_only=$manifest_gcode_only ui_only=$manifest_ui_only state_only=$manifest_state_only actiond_only=$manifest_actiond_only command_gate_only=$manifest_command_gate_only backend_only=$manifest_backend_only wcs_only=$manifest_wcs_only runtime_startup_only=$manifest_runtime_startup_only cpu_policy_only=$manifest_cpu_policy_only settings_only=$manifest_settings_only"
 
 stop_position_publisher_before_backend() {
   if [ -x /etc/init.d/v5-position-status-publisher ]; then
     /etc/init.d/v5-position-status-publisher stop
   fi
+}
+
+stop_wcs_publisher_before_backend() {
+  [ -x /etc/init.d/v5-wcs-status-publisher ] || {
+    echo "WCS status publisher init is missing before backend restart" >&2
+    return 1
+  }
+  /etc/init.d/v5-wcs-status-publisher stop
+}
+
+stop_backend_publishers_before_backend() {
+  stop_position_publisher_before_backend
+  stop_wcs_publisher_before_backend
 }
 
 stop_ethercat_modules_before_install() {
@@ -993,7 +1219,7 @@ stop_ethercat_modules_before_install() {
     echo "EtherCAT init is missing before module deploy" >&2
     return 1
   }
-  stop_position_publisher_before_backend
+  stop_backend_publishers_before_backend
   if ! /etc/init.d/v5-linuxcnc-command-gate stop; then
     if grep -Eq '^(ec_master|ec_generic)[[:space:]]' /proc/modules; then
       echo "Command Gate stop failed while EtherCAT modules remained loaded" >&2
@@ -1014,13 +1240,12 @@ stop_ethercat_modules_before_install() {
   fi
 }
 
-ensure_position_publisher_after_backend() {
-  [ -x /etc/init.d/v5-position-status-publisher ] || {
-    echo "position status publisher init is missing after backend restart" >&2
+restart_runtime_event_dag() {
+  [ -x /etc/init.d/v5-runtime-startup ] || {
+    echo "runtime event DAG owner is missing after install" >&2
     return 1
   }
-  /etc/init.d/v5-position-status-publisher status >/dev/null 2>&1 ||
-    /etc/init.d/v5-position-status-publisher start
+  /etc/init.d/v5-runtime-startup restart
 }
 
 wait_publisher_actual_barrier() {
@@ -1298,19 +1523,22 @@ if [ "$apply" -eq 1 ]; then
   else
     stop_affected_writers_before_install
   fi
-  if [ "$manifest_actiond_touched" -eq 1 ]; then
+  if [ "$manifest_actiond_touched" -eq 1 ] ||
+     [ "$manifest_bus_cycle_touched" -eq 1 ]; then
     stop_settings_actiond_before_install
   fi
 fi
 if [ "$apply" -eq 1 ] && [ "$manifest_ethercat_complete" -eq 1 ]; then
   stop_ethercat_modules_before_install
 elif [ "$apply" -eq 1 ] &&
-     { [ "$linuxcnc_bundle_enabled" -eq 1 ] || [ "$restart_scope" = "backend" ]; }; then
+     { [ "$linuxcnc_bundle_enabled" -eq 1 ] ||
+       [ "$restart_scope" = "backend" ] ||
+       [ "$restart_scope" = "settings" ]; }; then
   [ -x /etc/init.d/v5-linuxcnc-command-gate ] || {
     echo "LinuxCNC command-gate init is missing before deploy" >&2
     exit 7
   }
-  stop_position_publisher_before_backend
+  stop_backend_publishers_before_backend
   /etc/init.d/v5-linuxcnc-command-gate stop
 fi
 if [ "$apply" -eq 1 ] && [ "$linuxcnc_bundle_enabled" -eq 1 ]; then
@@ -1339,12 +1567,25 @@ while IFS="$tab" read -r kind source destination mode extra; do
         ;;
     esac
   fi
+  if [ "$kind" = "runtime_ini_cycle_merge" ]; then
+    case "$source:$destination:$mode" in
+      "linuxcnc/ini/v5_bus.ini:/opt/8ax/v5/linuxcnc/ini/v5_bus.ini:0644") ;;
+      *)
+        echo "runtime_ini_cycle_merge is only allowed for the registered BUS INI cycle owner: $source -> $destination mode=$mode" >&2
+        exit 6
+        ;;
+    esac
+  fi
   if [ "$apply" -eq 0 ]; then
     printf 'deploy %s %s -> %s mode=%s\n' "$kind" "$source_path" "$destination" "$mode"
     continue
   fi
   if [ "$kind" = "runtime_seed_merge" ]; then
     merge_runtime_seed_tsv "$source_path" "$destination" "$mode"
+    continue
+  fi
+  if [ "$kind" = "runtime_ini_cycle_merge" ]; then
+    merge_runtime_bus_ini_cycle "$source_path" "$destination" "$mode"
     continue
   fi
   if [ "$kind" = "runtime_seed" ] && [ -e "$destination" ]; then
@@ -1429,7 +1670,8 @@ enable_auxiliary_boot_services() {
 apply_cpu_policy_after_install() {
   [ "$manifest_cpu_policy_net_core" -eq 1 ] &&
     [ "$manifest_cpu_policy_net_module" -eq 1 ] &&
-    [ "$manifest_cpu_policy_net_init" -eq 1 ] || {
+    [ "$manifest_cpu_policy_net_init" -eq 1 ] &&
+    [ "$manifest_cpu_policy_runtime_startup" -eq 1 ] || {
       echo "installed CPU policy is incomplete" >&2
       return 1
     }
@@ -1438,6 +1680,19 @@ apply_cpu_policy_after_install() {
     . /usr/local/sbin/v5_net_core.sh
     apply_network_cpu_isolation && enforce_dropbear_cpu1_affinity
   '
+}
+
+cpu_policy_manifest_touched() {
+  [ "$manifest_cpu_policy_net_core" -eq 1 ] ||
+    [ "$manifest_cpu_policy_net_module" -eq 1 ] ||
+    [ "$manifest_cpu_policy_net_init" -eq 1 ] ||
+    [ "$manifest_cpu_policy_relay_payload" -eq 1 ] ||
+    [ "$manifest_cpu_policy_command_gate" -eq 1 ] ||
+    [ "$manifest_cpu_policy_ui" -eq 1 ] ||
+    [ "$manifest_cpu_policy_state" -eq 1 ] ||
+    [ "$manifest_cpu_policy_wcs" -eq 1 ] ||
+    [ "$manifest_cpu_policy_position" -eq 1 ] ||
+    [ "$manifest_cpu_policy_runtime_startup" -eq 1 ]
 }
 
 if [ "$apply" -eq 1 ] && [ "$manifest_cpu_policy_command_gate" -eq 1 ]; then
@@ -1501,6 +1756,29 @@ stop_retired_runtime_path() {
   done
 }
 
+cleanup_retired_bus_cycle_files() {
+  retired_root="${1:-}"
+  case "$retired_root" in
+    ""|/*) ;;
+    *)
+      echo "retired BUS cycle cleanup root must be empty or absolute: $retired_root" >&2
+      return 1
+      ;;
+  esac
+  for retired_relative in \
+    /opt/8ax/v5/linuxcnc/hal/v5_bus_2ms.hal \
+    /opt/8ax/v5/linuxcnc/hal/ethercat-conf-2ms.xml
+  do
+    retired_path="$retired_root$retired_relative"
+    parameter_table_transaction_snapshot "$retired_path" || return 1
+    rm -f -- "$retired_path" || return 1
+    if [ -e "$retired_path" ] || [ -L "$retired_path" ]; then
+      echo "retired BUS cycle file removal failed: $retired_path" >&2
+      return 1
+    fi
+  done
+}
+
 cleanup_retired_runtime_files() {
   for retired_path in \
     /usr/libexec/8ax/v5_rtcp_status_publisher.py \
@@ -1514,6 +1792,7 @@ cleanup_retired_runtime_files() {
   rm -f /opt/8ax/v5/config/settings/microkernel_parameter_table.tsv
   rm -f /opt/8ax/v5/gcode/golden/cc.ngc
   rm -f /tmp/v5_golden/cc.ngc
+  cleanup_retired_bus_cycle_files
   rm -f /opt/8ax/tools/v5_touch_calibration/v5_touch_window.py
   rm -f /opt/8ax/tools/v5_touch_calibration/v5_touch_window_calibration.py
   rm -f /opt/8ax/tools/v5_touch_calibration/v5_touch_window_restart.py
@@ -1587,58 +1866,42 @@ if [ "$apply" -eq 1 ]; then
     parameter_table_transaction_complete
     /etc/init.d/v5-settings-actiond restart
   elif [ "$restart_scope" = "command_gate" ]; then
-    stop_position_publisher_before_backend
-    /etc/init.d/v5-linuxcnc-command-gate restart
-    ensure_position_publisher_after_backend
+    restart_runtime_event_dag
     wait_publisher_actual_barrier
   elif [ "$restart_scope" = "backend" ]; then
-    /etc/init.d/v5-linuxcnc-command-gate start
-    ensure_position_publisher_after_backend
+    restart_runtime_event_dag
     wait_publisher_actual_barrier
   elif [ "$restart_scope" = "ethercat" ]; then
-    /etc/init.d/v5-linuxcnc-command-gate start
-    ensure_position_publisher_after_backend
+    restart_runtime_event_dag
     wait_publisher_actual_barrier
   elif [ "$restart_scope" = "wcs" ]; then
     /etc/init.d/v5-position-status-publisher restart
     /etc/init.d/v5-wcs-status-publisher restart
     wait_publisher_actual_barrier
+  elif [ "$restart_scope" = "runtime_startup" ]; then
+    restart_runtime_event_dag
+    wait_publisher_actual_barrier
   elif [ "$restart_scope" = "cpu_policy" ]; then
     apply_cpu_policy_after_install
-    stop_position_publisher_before_backend
-    /etc/init.d/v5-linuxcnc-command-gate restart
-    ensure_position_publisher_after_backend
-    /etc/init.d/v5-wcs-status-publisher restart
-    /etc/init.d/v5-state-publisher restart
-    /etc/init.d/v5-ui-relay restart
+    restart_runtime_event_dag
+    wait_publisher_actual_barrier
   elif [ "$restart_scope" = "settings" ]; then
     [ "$manifest_drive_profiles" -eq 0 ] || install_runtime_drive_profiles
-    stop_position_publisher_before_backend
-    /etc/init.d/v5-linuxcnc-command-gate restart
-    ensure_position_publisher_after_backend
-    /etc/init.d/v5-wcs-status-publisher restart
-    /etc/init.d/v5-state-publisher restart
-    wait_publisher_actual_barrier
     parameter_table_transaction_complete
-    /etc/init.d/v5-settings-actiond restart
+    restart_runtime_event_dag
+    wait_publisher_actual_barrier
   else
     enable_auxiliary_boot_services
     cleanup_retired_runtime_files
     install_runtime_drive_profiles
-    apply_cpu_policy_after_install
-    /etc/init.d/v5-linuxcnc-command-gate restart
-    if [ "$manifest_shm_abi_complete" -eq 1 ]; then
-      start_shm_abi_domain_after_install
-    else
-      ensure_position_publisher_after_backend
-      /etc/init.d/v5-wcs-status-publisher restart
-      /etc/init.d/v5-state-publisher restart
-      /etc/init.d/v5-ui-relay restart
+    if cpu_policy_manifest_touched; then
+      apply_cpu_policy_after_install
     fi
+    parameter_table_transaction_complete
+    restart_runtime_event_dag
+    wait_publisher_actual_barrier
     /etc/init.d/v5-touch-diagnostics restart
     /etc/init.d/v5-remote-ssh restart
-    parameter_table_transaction_complete
-    /etc/init.d/v5-settings-actiond restart
   fi
   parameter_table_transaction_complete
 else

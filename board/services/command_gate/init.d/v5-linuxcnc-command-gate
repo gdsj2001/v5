@@ -49,7 +49,7 @@ MICROKERNEL_NON_RT_NICE=-5
 MANAGEMENT_NICE=15
 MANAGEMENT_IFACE=eth0
 ETHERCAT_IFACE=eth1
-ETHERCAT_CONFIG=/opt/8ax/v5/linuxcnc/hal/ethercat-conf-2ms.xml
+ETHERCAT_CONFIG=/opt/8ax/v5/linuxcnc/hal/ethercat-conf-1ms.xml
 ETHERCAT_LIFECYCLE_LIB=${V5_ETHERCAT_LIFECYCLE_LIB:-/usr/libexec/8ax/v5_ethercat_backend_lifecycle.sh}
 ETHERCAT_ATTACH_FAULT_BASELINE=/run/v5_ethercat_attach_fault_baseline
 
@@ -276,13 +276,23 @@ backend_readiness_require_transaction() {
     --expect-owner-start-ticks "$3"
 }
 
-arm_and_wait_backend_motion_ready() {
+arm_and_wait_backend_data_ready() {
   [ -x "$BACKEND_READINESS_PROBE" ] || {
     echo "backend readiness probe missing: $BACKEND_READINESS_PROBE" >&2
     return 1
   }
   : >"$BACKEND_READINESS_LOG" || return 1
-  if ! "$BACKEND_READINESS_PROBE" --arm --wait motion --timeout-ms 60000 \
+  if ! "$BACKEND_READINESS_PROBE" --arm --wait data --timeout-ms 60000 \
+      >"$BACKEND_READINESS_LOG" 2>&1; then
+    cat "$BACKEND_READINESS_LOG" >&2 2>/dev/null || true
+    return 1
+  fi
+  cat "$BACKEND_READINESS_LOG"
+}
+
+wait_backend_motion_ready() {
+  [ -x "$BACKEND_READINESS_PROBE" ] || return 1
+  if ! "$BACKEND_READINESS_PROBE" --wait motion --timeout-ms 120000 \
       >"$BACKEND_READINESS_LOG" 2>&1; then
     cat "$BACKEND_READINESS_LOG" >&2 2>/dev/null || true
     return 1
@@ -423,11 +433,24 @@ set_linuxcnc_realtime_affinity() {
     return 1
   }
   for pid in $pids; do
-    taskset -a -pc 0 "$pid" >>"$LINUXCNC_LOG" 2>&1 || {
-      for task in /proc/"$pid"/task/[0-9]*; do
-        [ -e "$task" ] || continue
-        taskset -pc 0 "${task##*/}" >>"$LINUXCNC_LOG" 2>&1 || return 1
-      done
+    realtime_threads=0
+    for task in /proc/"$pid"/task/[0-9]*; do
+      [ -e "$task" ] || continue
+      tid=${task##*/}
+      comm=$(cat "$task/comm" 2>/dev/null || true)
+      case "$comm" in
+        rtapi_app:T#*)
+          taskset -pc 0 "$tid" >>"$LINUXCNC_LOG" 2>&1 || return 1
+          realtime_threads=$((realtime_threads + 1))
+          ;;
+        *)
+          taskset -pc 1 "$tid" >>"$LINUXCNC_LOG" 2>&1 || return 1
+          ;;
+      esac
+    done
+    [ "$realtime_threads" -gt 0 ] || {
+      echo "LinuxCNC RTAPI process has no realtime servo thread" >&2
+      return 1
     }
   done
   set_ethercat_realtime_affinity || return 1
@@ -654,13 +677,18 @@ start_runtime_transaction() {
     rollback_runtime_start || echo "LinuxCNC runtime rollback incomplete" >&2
     return 1
   fi
-  if ! arm_and_wait_backend_motion_ready; then
-    echo "LinuxCNC runtime transaction failed at canonical backend readiness; rolling back" >&2
+  if ! arm_and_wait_backend_data_ready; then
+    echo "LinuxCNC runtime transaction failed at canonical backend data readiness; rolling back" >&2
     rollback_runtime_start || echo "LinuxCNC runtime rollback incomplete" >&2
     return 1
   fi
   if ! start_native_gate; then
     echo "LinuxCNC runtime transaction failed at native Command Gate; rolling back" >&2
+    rollback_runtime_start || echo "LinuxCNC runtime rollback incomplete" >&2
+    return 1
+  fi
+  if ! wait_backend_motion_ready; then
+    echo "LinuxCNC runtime transaction failed before drive-verified motion readiness; rolling back" >&2
     rollback_runtime_start || echo "LinuxCNC runtime rollback incomplete" >&2
     return 1
   fi

@@ -49,10 +49,10 @@ init	services/ui/init.d/v5-touch-diagnostics	/etc/init.d/v5-touch-diagnostics	07
 linuxcnc	linuxcnc/ini/v5_pulse.ini	/opt/8ax/v5/linuxcnc/ini/v5_pulse.ini	0644
 linuxcnc	linuxcnc/hal/v5_pulse.hal	/opt/8ax/v5/linuxcnc/hal/v5_pulse.hal	0644
 linuxcnc	linuxcnc/components/step_ip_v1_5.contract.json	/opt/8ax/v5/linuxcnc/components/step_ip_v1_5.contract.json	0644
-runtime_seed	linuxcnc/ini/v5_bus.ini	/opt/8ax/v5/linuxcnc/ini/v5_bus.ini	0644
+runtime_ini_cycle_merge	linuxcnc/ini/v5_bus.ini	/opt/8ax/v5/linuxcnc/ini/v5_bus.ini	0644
 linuxcnc	linuxcnc/ini/v5_local_shmem.nml	/opt/8ax/v5/linuxcnc/ini/v5_local_shmem.nml	0644
-linuxcnc	linuxcnc/hal/v5_bus_2ms.hal	/opt/8ax/v5/linuxcnc/hal/v5_bus_2ms.hal	0644
-linuxcnc	linuxcnc/hal/ethercat-conf-2ms.xml	/opt/8ax/v5/linuxcnc/hal/ethercat-conf-2ms.xml	0644
+linuxcnc	linuxcnc/hal/v5_bus_1ms.hal	/opt/8ax/v5/linuxcnc/hal/v5_bus_1ms.hal	0644
+linuxcnc	linuxcnc/hal/ethercat-conf-1ms.xml	/opt/8ax/v5/linuxcnc/hal/ethercat-conf-1ms.xml	0644
 runtime_seed	linuxcnc/runtime/var/position.txt	/opt/8ax/v5/linuxcnc/var/position.txt	0644
 runtime_seed	linuxcnc/runtime/var/tool.tbl	/opt/8ax/v5/linuxcnc/var/tool.tbl	0644
 runtime_seed	linuxcnc/runtime/var/linuxcnc.var	/opt/8ax/v5/linuxcnc/var/linuxcnc.var	0644
@@ -98,6 +98,7 @@ module	services/drive_profile/v5_drive_axis_zero.py	/usr/libexec/8ax/drive_profi
 module	services/drive_profile/v5_drive_bus_context.py	/usr/libexec/8ax/drive_profile/v5_drive_bus_context.py	0644
 module	services/drive_profile/v5_drive_bus_contract.py	/usr/libexec/8ax/drive_profile/v5_drive_bus_contract.py	0644
 module	services/drive_profile/v5_drive_transaction_identity.py	/usr/libexec/8ax/drive_profile/v5_drive_transaction_identity.py	0644
+module	services/drive_profile/v5_drive_boot_attestation.py	/usr/libexec/8ax/drive_profile/v5_drive_boot_attestation.py	0644
 module	services/drive_profile/v5_drive_boot_validation.py	/usr/libexec/8ax/drive_profile/v5_drive_boot_validation.py	0644
 module	services/drive_profile/v5_drive_health.py	/usr/libexec/8ax/drive_profile/v5_drive_health.py	0644
 module	services/drive_profile/v5_drive_parameter_table.py	/usr/libexec/8ax/drive_profile/v5_drive_parameter_table.py	0644

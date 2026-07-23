@@ -4,7 +4,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 MOTION_COMMAND = ROOT / "linuxcnc/src/emc/motion/command.c"
-BUS_HAL = ROOT / "board/linuxcnc/hal/v5_bus_2ms.hal"
+BUS_HAL = ROOT / "board/linuxcnc/hal/v5_bus_1ms.hal"
 
 
 def abort_block(text: str) -> str:

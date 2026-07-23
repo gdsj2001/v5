@@ -53,12 +53,16 @@ def validate_init(text: str) -> None:
 
     assert "BACKEND_READINESS_PROBE=/usr/libexec/8ax/v5_backend_readiness_probe" in text
     arm_wait = section(
-        text, "arm_and_wait_backend_motion_ready() {", "\nset_command_gate_affinity() {"
+        text, "arm_and_wait_backend_data_ready() {", "\nwait_backend_motion_ready() {"
     )
-    assert '"$BACKEND_READINESS_PROBE" --arm --wait motion --timeout-ms 60000' in arm_wait
-    assert "record_native_readiness_events" in arm_wait
+    assert '"$BACKEND_READINESS_PROBE" --arm --wait data --timeout-ms 60000' in arm_wait
     assert "ethercat" not in arm_wait
     assert "halcmd" not in arm_wait
+    motion_wait = section(
+        text, "wait_backend_motion_ready() {", "\nset_command_gate_affinity() {"
+    )
+    assert '"$BACKEND_READINESS_PROBE" --wait motion --timeout-ms 120000' in motion_wait
+    assert "record_native_readiness_events" in motion_wait
 
     stop_backend = section(text, "stop_backend() {", "\nstart_backend() {")
     assert stop_backend.index("halcmd stop") < stop_backend.index(
@@ -87,6 +91,21 @@ def validate_init(text: str) -> None:
     )
     assert "record_startup_event linuxcnc_spawned" in start_backend
 
+    rtapi_affinity = section(
+        text, "set_linuxcnc_realtime_affinity() {", "\nwait_linuxcnc_process_set() {"
+    )
+    cpu0_taskset = "taskset -pc " + str(0) + ' "$tid"'
+    for token in (
+        'comm=$(cat "$task/comm"',
+        "rtapi_app:T#*",
+        cpu0_taskset,
+        'taskset -pc 1 "$tid"',
+        'realtime_threads=$((realtime_threads + 1))',
+        'LinuxCNC RTAPI process has no realtime servo thread',
+    ):
+        assert token in rtapi_affinity
+    assert "taskset -a -pc " + str(0) not in rtapi_affinity
+
     start_gate = section(text, "start_gate() {", "\nrollback_runtime_start() {")
     assert "v5_linuxcncrsh_probe" in start_gate
     assert "record_startup_event linuxcncrsh_probe_ready" in start_gate
@@ -96,16 +115,19 @@ def validate_init(text: str) -> None:
     transaction = section(text, "start_runtime_transaction() {", '\ncase "${1:-}" in')
     assert transaction.index("start_backend") < transaction.index("start_gate")
     assert transaction.index("start_gate") < transaction.index(
-        "arm_and_wait_backend_motion_ready"
+        "arm_and_wait_backend_data_ready"
     )
-    assert transaction.index("arm_and_wait_backend_motion_ready") < transaction.index(
+    assert transaction.index("arm_and_wait_backend_data_ready") < transaction.index(
         "start_native_gate"
+    )
+    assert transaction.index("start_native_gate") < transaction.index(
+        "wait_backend_motion_ready"
     )
     assert "backend_readiness_require_transaction" in transaction
     identity_check = section(
         text,
         "backend_readiness_require_transaction() {",
-        "\narm_and_wait_backend_motion_ready() {",
+        "\narm_and_wait_backend_data_ready() {",
     )
     for token in (
         "generation",
@@ -116,7 +138,7 @@ def validate_init(text: str) -> None:
         "--expect-owner-start-ticks",
     ):
         assert token in identity_check
-    assert transaction.count("rollback_runtime_start") == 5
+    assert transaction.count("rollback_runtime_start") == 6
     assert text.count("    start_runtime_transaction") == 2
 
     assert "restart-native" not in text

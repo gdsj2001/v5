@@ -23,6 +23,7 @@ KNOWN_KINDS = {
     "linuxcnc",
     "runtime_seed",
     "runtime_seed_merge",
+    "runtime_ini_cycle_merge",
     "config",
     "gcode",
     "kernel_module",
