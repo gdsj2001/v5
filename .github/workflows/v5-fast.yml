@@ -24,6 +24,10 @@ jobs:
         with:
           fetch-depth: 2
           lfs: false
+          sparse-checkout: |
+            /*
+            !/linux/
+          sparse-checkout-cone-mode: false
 
       - name: Fetch push diff base
         if: github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000'
