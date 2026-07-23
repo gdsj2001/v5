@@ -114,6 +114,7 @@ target_include_directories(v5_lvgl_remote_display_delta_smoke PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 
+if(UNIX)
 add_executable(v5_lvgl_shell
     src/lv_font_zh_16.c
     src/v5_layout_icon_masks.c
@@ -261,6 +262,7 @@ add_executable(v5_program_page_double_click_smoke
     src/v5_v3_offset_page.c
     src/v5_ui_status_view.c
 )
+endif()
 
 add_library(v5_operator_error_status STATIC
     ../services/state_publisher/v5_native_operator_error_status.c
@@ -300,6 +302,7 @@ target_link_libraries(v5_ui_shell_operator_error_smoke PRIVATE
     v5_operator_error_status
 )
 
+if(UNIX)
 add_executable(v5_ui_shell_program_delete_smoke
     src/lv_font_zh_16.c
     src/v5_ui_shell_program_delete_smoke.c
@@ -328,6 +331,7 @@ target_link_libraries(v5_ui_shell_program_delete_smoke PRIVATE
     lvgl
     v5_button_visuals
 )
+endif()
 
 add_executable(v5_ui_first_frame_guard_smoke
     src/lv_font_zh_16.c
@@ -356,6 +360,7 @@ target_include_directories(v5_ui_page_cache_registry_smoke PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 
+if(UNIX)
 add_library(v5_status_shm_projection STATIC
     src/v5_status_shm_reader.c
     src/v5_bus_status_reader.c
@@ -372,10 +377,7 @@ add_library(v5_status_shm_projection STATIC
     ../services/command_gate/v5_native_modal_tool_status.c
 )
 
-target_link_libraries(v5_status_shm_projection PUBLIC v5_operator_error_status)
-if(NOT WIN32)
-    target_link_libraries(v5_status_shm_projection PUBLIC m)
-endif()
+target_link_libraries(v5_status_shm_projection PUBLIC v5_operator_error_status m)
 
 target_include_directories(v5_status_shm_projection PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
@@ -402,6 +404,14 @@ add_executable(v5_state_publisher_smoke
 
 target_link_libraries(v5_state_publisher_smoke PRIVATE v5_status_shm_projection)
 
+add_executable(v5_state_publisher
+    ../services/state_publisher/v5_state_publisher_main.c
+    src/v5_process_residency.c
+)
+
+target_link_libraries(v5_state_publisher PRIVATE v5_status_shm_projection)
+endif()
+
 add_executable(v5_state_publisher_cadence_smoke
     ../services/state_publisher/v5_state_publisher_cadence_smoke.c
 )
@@ -411,13 +421,6 @@ target_include_directories(v5_state_publisher_cadence_smoke PRIVATE
     "${V5_ROOT_DIR}/services/command_gate"
     "${V5_ROOT_DIR}/services/state_publisher"
 )
-
-add_executable(v5_state_publisher
-    ../services/state_publisher/v5_state_publisher_main.c
-    src/v5_process_residency.c
-)
-
-target_link_libraries(v5_state_publisher PRIVATE v5_status_shm_projection)
 
 add_library(v5_position_status_publisher_core STATIC
     ../services/state_publisher/v5_position_status_publisher_core.c
@@ -450,9 +453,11 @@ if(UNIX)
     )
 endif()
 
+if(UNIX)
 add_executable(v5_touch_diagnostics
     ../services/ui/v5_touch_diagnostics.c
 )
+endif()
 
 add_library(v5_command_gate_client STATIC
     ../services/command_gate/v5_command_gate.c
@@ -474,6 +479,7 @@ target_include_directories(v5_command_gate_client PUBLIC
     "${V5_ROOT_DIR}/services/command_gate"
 )
 
+if(UNIX)
 add_library(v5_command_gate_core STATIC
     src/v5_parameter_table.c
     src/v5_settings_parameter_store.c
@@ -520,9 +526,7 @@ target_include_directories(v5_command_gate_core PUBLIC
     "${V5_ROOT_DIR}/../linuxcnc/src/hal/user_comps"
 )
 
-target_link_libraries(v5_command_gate_core PUBLIC v5_command_gate_client v5_operator_error_status)
-if(NOT MSVC)
-    target_link_libraries(v5_command_gate_core PUBLIC m)
+target_link_libraries(v5_command_gate_core PUBLIC v5_command_gate_client v5_operator_error_status m)
 endif()
 
 
@@ -579,10 +583,7 @@ target_link_libraries(v5_program_commands PUBLIC
     v5_command_gate_client
 )
 
-
-
-
-
+if(UNIX)
 add_executable(v5_main_page_actions_smoke
     src/lv_font_zh_16.c
     src/v5_layout_icon_masks.c
@@ -721,6 +722,7 @@ target_compile_definitions(v5_main_page_smoke PRIVATE
 )
 
 target_link_libraries(v5_main_page_smoke PRIVATE lvgl v5_button_visuals v5_lvgl_clock v5_status_shm_projection v5_program_commands v5_command_gate_core v5_microkernel_contract Threads::Threads m)
+endif()
 
 add_executable(v5_ui_display_models_smoke
     src/v5_ui_display_models_smoke.c
@@ -739,6 +741,7 @@ if(NOT WIN32)
     target_link_libraries(v5_ui_display_models_smoke PRIVATE m)
 endif()
 
+if(UNIX)
 add_executable(v5_ui_shm_refresh_smoke
     src/v5_ui_shm_refresh_smoke.c
     src/v5_ui_model.c
@@ -752,8 +755,7 @@ target_include_directories(v5_ui_shm_refresh_smoke PRIVATE
 )
 
 target_link_libraries(v5_ui_shm_refresh_smoke PRIVATE v5_status_shm_projection)
-if(NOT WIN32)
-    target_link_libraries(v5_ui_shm_refresh_smoke PRIVATE m)
+target_link_libraries(v5_ui_shm_refresh_smoke PRIVATE m)
 endif()
 
 add_executable(v5_ui_shell_refresh_smoke
@@ -765,6 +767,30 @@ target_include_directories(v5_ui_shell_refresh_smoke PRIVATE
     "${V5_ROOT_DIR}/services/command_gate"
 )
 
+add_executable(v5_drive_write_window_smoke
+    ../services/command_gate/v5_drive_write_window.c
+    ../services/command_gate/v5_drive_write_window_smoke.c
+)
+
+target_link_libraries(v5_drive_write_window_smoke PRIVATE Threads::Threads)
+
+add_executable(v5_estop_clean_state_smoke
+    ../services/command_gate/v5_estop_clean_state.c
+    ../services/command_gate/v5_estop_clean_state_smoke.c
+)
+
+target_link_libraries(v5_estop_clean_state_smoke PRIVATE Threads::Threads)
+
+add_executable(v5_program_command_smoke
+    src/v5_program_command_smoke.c
+)
+
+target_link_libraries(v5_program_command_smoke PRIVATE
+    v5_program_commands
+    v5_linuxcncrsh_format
+)
+
+if(UNIX)
 add_executable(v5_command_gate_smoke
     ../services/command_gate/v5_command_gate_smoke.c
 )
@@ -835,20 +861,6 @@ add_executable(v5_command_gate_drive_window
 
 target_link_libraries(v5_command_gate_drive_window PRIVATE v5_command_gate_client)
 
-add_executable(v5_drive_write_window_smoke
-    ../services/command_gate/v5_drive_write_window.c
-    ../services/command_gate/v5_drive_write_window_smoke.c
-)
-
-target_link_libraries(v5_drive_write_window_smoke PRIVATE Threads::Threads)
-
-add_executable(v5_estop_clean_state_smoke
-    ../services/command_gate/v5_estop_clean_state.c
-    ../services/command_gate/v5_estop_clean_state_smoke.c
-)
-
-target_link_libraries(v5_estop_clean_state_smoke PRIVATE Threads::Threads)
-
 add_executable(v5_linuxcncrsh_golden_run
     ../services/command_gate/v5_linuxcncrsh_golden_run.c
 )
@@ -862,15 +874,6 @@ add_executable(v5_program_runtime_smoke
 target_link_libraries(v5_program_runtime_smoke PRIVATE
     v5_program_runtime
     v5_command_gate_client
-)
-
-add_executable(v5_program_command_smoke
-    src/v5_program_command_smoke.c
-)
-
-target_link_libraries(v5_program_command_smoke PRIVATE
-    v5_program_commands
-    v5_linuxcncrsh_format
 )
 
 add_executable(v5_command_wrappers_smoke
@@ -906,6 +909,7 @@ add_executable(v5_native_work_zero_smoke
 )
 
 target_link_libraries(v5_native_work_zero_smoke PRIVATE v5_command_gate_core m)
+endif()
 
 add_executable(v5_native_operator_error_status_smoke
     ../services/state_publisher/v5_native_operator_error_status_smoke.c
@@ -913,6 +917,7 @@ add_executable(v5_native_operator_error_status_smoke
 
 target_link_libraries(v5_native_operator_error_status_smoke PRIVATE v5_operator_error_status)
 
+if(UNIX)
 target_link_libraries(v5_command_wrappers_smoke PRIVATE
     v5_program_commands
     v5_command_gate_core
@@ -1003,6 +1008,7 @@ target_compile_definitions(v5_lvgl_shell PRIVATE
 )
 
 target_link_libraries(v5_lvgl_shell PRIVATE lvgl v5_button_visuals v5_lvgl_clock v5_status_shm_projection v5_microkernel_contract v5_program_commands v5_command_gate_client Threads::Threads m)
+endif()
 
 if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
     set(V5_LOCAL_REGRESSION_TARGETS)
@@ -1023,9 +1029,6 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
     v5_register_local_smoke(v5_microkernel_manifest_smoke architecture_contract lifeline_01_startup)
     v5_register_local_smoke(v5_position_status_publisher_smoke state_projection lifeline_01_startup lifeline_07_model_rtcp lifeline_08_axis_drive)
     v5_register_local_smoke(v5_state_publisher_cadence_smoke state_projection)
-    v5_register_local_smoke(v5_drive_write_window_smoke control lifeline_02_safety lifeline_08_axis_drive)
-    v5_register_local_smoke(v5_estop_clean_state_smoke control lifeline_02_safety)
-    v5_register_local_smoke(v5_program_command_smoke control lifeline_05_program)
     v5_register_local_smoke(v5_program_scene_producer_smoke state_projection lifeline_05_program lifeline_07_model_rtcp)
     v5_register_local_smoke(v5_coordinate_digits_smoke ui lifeline_10_ui_remote)
     v5_register_local_smoke(v5_lvgl_remote_display_delta_smoke ui lifeline_10_ui_remote)
@@ -1035,6 +1038,9 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
     v5_register_local_smoke(v5_ui_first_frame_guard_smoke ui lifeline_01_startup lifeline_10_ui_remote)
     v5_register_local_smoke(v5_ui_page_cache_registry_smoke ui lifeline_10_ui_remote)
     v5_register_local_smoke(v5_native_operator_error_status_smoke state_projection lifeline_02_safety lifeline_10_ui_remote)
+    v5_register_local_smoke(v5_drive_write_window_smoke control lifeline_02_safety lifeline_08_axis_drive)
+    v5_register_local_smoke(v5_estop_clean_state_smoke control lifeline_02_safety)
+    v5_register_local_smoke(v5_program_command_smoke control lifeline_05_program)
 
     if(UNIX)
         v5_register_local_smoke(v5_remote_ui_native_packer_smoke ui lifeline_10_ui_remote)
@@ -1069,6 +1075,7 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
     )
 endif()
 
+if(UNIX)
 # The deploy manifest is the single product-runtime inventory.  Derive the
 # aggregate ARM build target from every board/app binary row so build, deploy
 # and SD-card assembly cannot maintain separate executable lists. Recipe-owned
@@ -1128,3 +1135,4 @@ if(NOT V5_PRODUCT_RUNTIME_TARGETS)
 endif()
 
 add_custom_target(v5_product_runtime DEPENDS ${V5_PRODUCT_RUNTIME_TARGETS})
+endif()

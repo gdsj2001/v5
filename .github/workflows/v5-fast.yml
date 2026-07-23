@@ -1,0 +1,51 @@
+name: V5 Windows host gate
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v5-fast-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-host-gate:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out canonical source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          lfs: false
+
+      - name: Fetch push diff base
+        if: github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000'
+        shell: powershell
+        run: git fetch --no-tags --depth=1 origin ${{ github.event.before }}
+
+      - name: Install supported .NET SDKs
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.419
+            9.0.x
+
+      - name: Install supported Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify host gate fail-fast behavior
+        shell: powershell
+        run: ./board/tools/ci/run_v5_host_gate_smoke.ps1
+
+      - name: Run the canonical Windows host gate
+        shell: powershell
+        run: ./board/tools/ci/run_v5_host_gate.ps1 -DiffBase '${{ github.event.before }}'

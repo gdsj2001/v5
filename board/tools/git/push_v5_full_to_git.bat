@@ -53,7 +53,7 @@ if /i not "%CURRENT_BRANCH%"=="%BRANCH%" (
     goto :fail
 )
 
-echo [1/10] Fetching the current remote branch...
+echo [1/11] Fetching the current remote branch...
 git fetch %REMOTE% %BRANCH% || goto :fail
 
 git merge-base --is-ancestor %REMOTE%/%BRANCH% HEAD
@@ -63,7 +63,14 @@ if errorlevel 1 (
     goto :fail
 )
 
-echo [2/10] Sanitizing root outputs and staging canonical source...
+echo [2/11] Running the canonical Windows host gate...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%REPO%\board\tools\ci\run_v5_host_gate.ps1" -RepositoryRoot "%REPO%"
+if errorlevel 1 (
+    echo ERROR: Windows host gate failed; staging and push are blocked.
+    goto :fail
+)
+
+echo [3/11] Sanitizing root outputs and staging canonical source...
 echo Unregistered root files are preserved under repo_ignored before staging.
 call :stage_snapshot
 if errorlevel 1 goto :fail
@@ -101,14 +108,14 @@ powershell -NoProfile -Command ^
     "Write-Host 'Git recovery sentinels: OK.'"
 if errorlevel 1 goto :fail
 
-echo [3/10] Checking staged whitespace errors...
+echo [4/11] Checking staged whitespace errors...
 git --no-pager diff --cached --check
 if errorlevel 1 (
     echo ERROR: Staged whitespace validation failed.
     goto :fail
 )
 
-echo [4/10] Reviewing the full snapshot before commit and push...
+echo [5/11] Reviewing the full snapshot before commit and push...
 set "CHANGE_COUNT="
 for /f "delims=" %%C in ('powershell -NoProfile -Command "$files = @(& git diff --cached --name-only '%REMOTE%/%BRANCH%' --); if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; $files.Count"') do set "CHANGE_COUNT=%%C"
 if not defined CHANGE_COUNT (
@@ -135,24 +142,24 @@ if "!CHECK_ONLY!"=="1" (
 
 git diff --cached --quiet
 if errorlevel 1 (
-    echo [5/10] Creating a recovery snapshot commit...
+    echo [6/11] Creating a recovery snapshot commit...
     for /f "delims=" %%T in ('powershell -NoProfile -Command "Get-Date -Format yyyy-MM-dd_HH-mm-ss"') do set "STAMP=%%T"
     git commit -m "backup: full V5 snapshot !STAMP!" || goto :fail
 ) else (
-    echo [5/10] No uncommitted changes; using the current HEAD.
+    echo [6/11] No uncommitted changes; using the current HEAD.
 )
 
-echo [6/10] Uploading every reachable Git LFS object...
+echo [7/11] Uploading every reachable Git LFS object...
 git lfs push --all %REMOTE% %BRANCH% || goto :fail
 
-echo [7/10] Pushing %BRANCH% to %REMOTE%...
+echo [8/11] Pushing %BRANCH% to %REMOTE%...
 git push %REMOTE% %BRANCH% || goto :fail
 
-echo [8/10] Verifying the local Git and LFS object stores...
+echo [9/11] Verifying the local Git and LFS object stores...
 git fsck --full --strict --no-dangling || goto :fail
 git lfs fsck || goto :fail
 
-echo [9/10] Refreshing the remote reference...
+echo [10/11] Refreshing the remote reference...
 git fetch %REMOTE% %BRANCH% || goto :fail
 
 for /f "delims=" %%H in ('git rev-parse HEAD') do set "LOCAL_HEAD=%%H"
@@ -164,7 +171,7 @@ if /i not "%LOCAL_HEAD%"=="%REMOTE_HEAD%" (
     goto :fail
 )
 
-echo [10/10] Checking for files changed during the push...
+echo [11/11] Checking for files changed during the push...
 if not exist "%REPO%\AGENTS.md" (
     echo ERROR: AGENTS.md disappeared during the push.
     goto :fail

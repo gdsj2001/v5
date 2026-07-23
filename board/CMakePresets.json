@@ -1,0 +1,49 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "windows-ci",
+      "displayName": "V5 Windows host gate",
+      "description": "Clean Windows host build; Linux runtime and ARM product targets are not defined.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/../repo_ignored/windows_host_gate/windows-ci",
+      "cacheVariables": {
+        "BUILD_TESTING": "ON",
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "windows-ci",
+      "configurePreset": "windows-ci",
+      "jobs": 8
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "windows-ci",
+      "configurePreset": "windows-ci",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 4,
+        "noTestsAction": "error"
+      }
+    }
+  ]
+}
