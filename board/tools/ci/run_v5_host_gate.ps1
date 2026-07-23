@@ -330,6 +330,14 @@ try {
                     'test_*.py'
                 ) -WorkingDirectory $root
             }
+            foreach ($smoke in @(
+                'board/services/drive_profile/v5_drive_feedforward_recovery_smoke.py',
+                'board/services/drive_profile/v5_drive_feedforward_action_smoke.py'
+            )) {
+                Invoke-CheckedCommand -FilePath 'python' -Arguments @(
+                    $smoke
+                ) -WorkingDirectory $root
+            }
         }
 
         Invoke-Stage -Name 'winremote-security' -Action {

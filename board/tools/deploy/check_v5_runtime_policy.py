@@ -3235,6 +3235,8 @@ def check_product_runtime_closure_policy() -> int:
         "module\tservices/drive_profile/v5_drive_enable_window.py\t/usr/libexec/8ax/drive_profile/v5_drive_enable_window.py\t0644",
         "module\tservices/drive_profile/v5_drive_bus_apply_action.py\t/usr/libexec/8ax/drive_profile/v5_drive_bus_apply_action.py\t0644",
         "module\tservices/drive_profile/v5_drive_bus_reset_action.py\t/usr/libexec/8ax/drive_profile/v5_drive_bus_reset_action.py\t0644",
+        "module\tservices/drive_profile/v5_drive_feedforward_action.py\t/usr/libexec/8ax/drive_profile/v5_drive_feedforward_action.py\t0644",
+        "module\tservices/drive_profile/v5_drive_feedforward_recovery.py\t/usr/libexec/8ax/drive_profile/v5_drive_feedforward_recovery.py\t0644",
         "module\tservices/drive_profile/v5_drive_axis_zero.py\t/usr/libexec/8ax/drive_profile/v5_drive_axis_zero.py\t0644",
         "module\tservices/drive_profile/v5_drive_runtime_schema.py\t/usr/libexec/8ax/drive_profile/v5_drive_runtime_schema.py\t0644",
         "module\tservices/ui/v5_remote_ui_relay_access.py\t/usr/libexec/8ax/v5_remote_ui_relay_access.py\t0644",

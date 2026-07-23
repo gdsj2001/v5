@@ -138,6 +138,10 @@ from v5_drive_bus_apply_action import (
     run_set_drive,
 )
 
+from v5_drive_feedforward_action import (
+    run_velocity_feedforward_commission,
+)
+
 
 
 
@@ -213,7 +217,7 @@ def preload_resident_state() -> Dict[str, Any]:
 
 
 def result_path(action: str) -> Path:
-    names = {"scan": "drive_scan_result.json", "factory-reset": "drive_factory_reset_result.json", "read": "drive_read_result.json", "fault-reset": "drive_fault_reset_result.json", "set-drive": "drive_set_result.json", "boot-apply": "drive_boot_apply_result.json", "axis-zero": "settings_axis_zero_result.json"}
+    names = {"scan": "drive_scan_result.json", "factory-reset": "drive_factory_reset_result.json", "read": "drive_read_result.json", "fault-reset": "drive_fault_reset_result.json", "set-drive": "drive_set_result.json", "boot-apply": "drive_boot_apply_result.json", "axis-zero": "settings_axis_zero_result.json", "feedforward": "drive_feedforward_result.json"}
     return contract.RUN_DIR / names.get(action, "drive_action_result.json")
 
 
@@ -235,6 +239,8 @@ def run_action(action: str, timeout_s: float = 8.0, write_result_file: bool = Tr
         result = run_set_drive(timeout_s, request)
     elif action == "boot-apply":
         result = run_boot_drive_apply(timeout_s, request)
+    elif action == "feedforward":
+        result = run_velocity_feedforward_commission(timeout_s, request)
     else:
         result = {
             "ok": False,

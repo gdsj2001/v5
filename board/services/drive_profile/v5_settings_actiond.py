@@ -41,6 +41,10 @@ SOCKET_OWNER_NAME = "root"
 SOCKET_GROUP_NAME = "petalinux"
 DRIVE_WRITE_WINDOW_ACTIONS = frozenset({
     "drive_factory_reset",
+    "drive_velocity_feedforward_commission",
+})
+NON_CANCELLABLE_ACTIONS = frozenset({
+    "drive_velocity_feedforward_commission",
 })
 
 
@@ -284,10 +288,11 @@ def start_action_process(action: str, run_id: str, request: Dict[str, Any]) -> D
             "action": action,
             "run_id": run_id,
             "cancel_requested": False,
+            "cancel_allowed": action not in NON_CANCELLABLE_ACTIONS,
         })
     set_last_status(
         action, run_id, spec, True, axis_hint=axis_hint,
-        state="running", cancel_allowed=True)
+        state="running", cancel_allowed=action not in NON_CANCELLABLE_ACTIONS)
     append_event({
         "event": "started",
         "action": action,
@@ -343,6 +348,14 @@ def cancel_action_process(run_id: str) -> Dict[str, Any]:
                 "code": "SETTINGS_ACTION_RUN_ID_MISMATCH",
                 "run_id": run_id,
                 "active_run_id": str(active_job.get("run_id") or ""),
+            }
+        if not bool(active_job.get("cancel_allowed", True)):
+            return {
+                "ok": False,
+                "accepted": False,
+                "code": "SETTINGS_ACTION_CANCEL_NOT_ALLOWED",
+                "run_id": run_id,
+                "action": str(active_job.get("action") or ""),
             }
         if active_job.get("cancel_requested"):
             return {"ok": True, "accepted": True, "code": "SETTINGS_ACTION_CANCEL_ALREADY_REQUESTED", "run_id": run_id}

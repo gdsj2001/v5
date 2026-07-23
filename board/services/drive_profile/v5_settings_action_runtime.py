@@ -37,6 +37,7 @@ ACTIONS: Dict[str, Dict[str, Any]] = {
     "drive_parameter_read": {"owner": "drive_profile", "result_path": str(v5_drive_bus_action.result_path("read")), "handler": "drive", "drive_action": "read"},
     "drive_fault_reset": {"owner": "drive_profile", "result_path": str(v5_drive_bus_action.result_path("fault-reset")), "handler": "drive", "drive_action": "fault-reset"},
     "drive_set_parameters": {"owner": "drive_profile", "result_path": str(v5_drive_bus_action.result_path("set-drive")), "handler": "drive", "drive_action": "set-drive"},
+    "drive_velocity_feedforward_commission": {"owner": "drive_profile", "result_path": str(v5_drive_bus_action.result_path("feedforward")), "handler": "drive", "drive_action": "feedforward"},
     "settings_axis_zero": {"owner": "drive_profile", "result_path": str(v5_drive_bus_action.result_path("axis-zero")), "handler": "drive", "drive_action": "axis-zero"},
     "settings_save_and_restart": {"owner": "settings_restart", "result_path": "/run/8ax_v5_product_ui/settings_save_restart_result.json", "handler": "restart"},
 }
