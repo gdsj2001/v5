@@ -31,7 +31,11 @@ int main(void)
         frame.following_error[axis] = frame.mcs[axis] - frame.cmd_mcs[axis];
         frame.display_digits[axis] = 3U;
     }
-    frame.display_scene.flags = V5_STATUS_SCENE_FLAG_VALID | V5_STATUS_SCENE_FLAG_PROGRAM;
+    frame.display_scene.flags =
+        V5_STATUS_SCENE_FLAG_VALID |
+        V5_STATUS_SCENE_FLAG_PROGRAM |
+        V5_STATUS_SCENE_FLAG_TOOL_TIP_CONTOUR_ERROR;
+    frame.display_scene.tool_tip_contour_error = 0.125;
     frame.display_scene.native_generation = 5ULL;
     frame.display_scene.view_generation = 1ULL;
     frame.display_scene.fit_generation = 1ULL;
@@ -49,6 +53,8 @@ int main(void)
         status.display_scene->points[1].x != 30.0f) return 1;
     v5_coordinate_panel_from_status(&status, &panel);
     if (strcmp(panel.lines[0].mcs_text, "+00001.250") != 0) return 2;
+    if (!panel.tool_tip_contour_error_valid ||
+        strcmp(panel.tool_tip_contour_error_text, "+00000.125") != 0) return 5;
     v5_remote_metrics_display_text(&status, cpu0, sizeof(cpu0), cpu1, sizeof(cpu1));
     if (strstr(cpu0, "21%") == 0 || strstr(cpu1, "31%") == 0) return 3;
     frame.display_scene.point_count = V5_STATUS_SCENE_POINT_COUNT + 1U;

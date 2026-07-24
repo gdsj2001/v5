@@ -10,8 +10,8 @@ extern "C" {
 
 #define V5_STATUS_SHM_PATH "/dev/shm/v3_status_shm"
 #define V5_STATUS_SHM_MAGIC 0x56355348u
-#define V5_STATUS_SHM_VERSION 3u
-#define V5_STATUS_SHM_FRAME_SIZE 7128u
+#define V5_STATUS_SHM_VERSION 4u
+#define V5_STATUS_SHM_FRAME_SIZE 7136u
 #define V5_STATUS_AXIS_COUNT 5u
 #define V5_STATUS_TRAJECTORY_POINT_COUNT 16u
 #define V5_STATUS_SCENE_POINT_COUNT 512u
@@ -72,6 +72,7 @@ enum {
     V5_STATUS_SCENE_FLAG_RTCP = 1u << 2,
     V5_STATUS_SCENE_FLAG_MODEL = 1u << 3,
     V5_STATUS_SCENE_FLAG_WCS = 1u << 4,
+    V5_STATUS_SCENE_FLAG_TOOL_TIP_CONTOUR_ERROR = 1u << 5,
     V5_STATUS_SCENE_FLAG_DIRTY_STATIC = 1u << 8,
     V5_STATUS_SCENE_FLAG_DIRTY_MODEL = 1u << 9,
     V5_STATUS_SCENE_FLAG_DIRTY_DYNAMIC = 1u << 10,
@@ -141,12 +142,15 @@ typedef struct V5StatusDisplayScene {
     uint8_t break_before[V5_STATUS_SCENE_POINT_COUNT];
     V5StatusSceneSegment segments[V5_STATUS_SCENE_SEGMENT_COUNT];
     V5StatusSceneMarker markers[V5_STATUS_SCENE_MARKER_COUNT];
+    double tool_tip_contour_error;
 } V5StatusDisplayScene;
 
 typedef char V5StatusDisplaySceneSizeMustMatchAbi[
-    sizeof(V5StatusDisplayScene) == 6168U ? 1 : -1];
+    sizeof(V5StatusDisplayScene) == 6176U ? 1 : -1];
 typedef char V5StatusDisplayScenePlaneOffsetMustMatchAbi[
     offsetof(V5StatusDisplayScene, plane) == 124U ? 1 : -1];
+typedef char V5StatusDisplaySceneContourErrorOffsetMustMatchAbi[
+    offsetof(V5StatusDisplayScene, tool_tip_contour_error) == 6168U ? 1 : -1];
 
 typedef struct V5StatusShmFrame {
     uint32_t magic;
@@ -202,6 +206,8 @@ typedef char V5StatusShmFollowingErrorOffsetMustMatchAbi[
     offsetof(V5StatusShmFrame, following_error) == 200U ? 1 : -1];
 typedef char V5StatusShmDisplayDigitsOffsetMustMatchAbi[
     offsetof(V5StatusShmFrame, display_digits) == 240U ? 1 : -1];
+typedef char V5StatusShmContourErrorOffsetMustMatchAbi[
+    offsetof(V5StatusShmFrame, display_scene.tool_tip_contour_error) == 7128U ? 1 : -1];
 
 void v5_status_shm_frame_init(V5StatusShmFrame *frame);
 int v5_status_shm_frame_copy(V5StatusShmFrame *dst, const V5StatusShmFrame *src);

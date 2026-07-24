@@ -22,6 +22,7 @@ from v5_status_shm_reader import (
     STATUS_SHM_PAYLOAD_OFFSET,
     STATUS_SHM_SCENE_BREAK_BEFORE_OFFSET,
     STATUS_SHM_SCENE_BUILD_COUNT_OFFSET,
+    STATUS_SHM_SCENE_CONTOUR_ERROR_OFFSET,
     STATUS_SHM_SCENE_FLAGS_OFFSET,
     STATUS_SHM_SCENE_MARKER_COUNT_OFFSET,
     STATUS_SHM_SCENE_MARKERS_OFFSET,
@@ -43,6 +44,8 @@ from v5_status_shm_reader import (
     STATUS_VALID_DISPLAY_SCENE,
     STATUS_VALID_MCS,
     STATUS_VALID_TRAJECTORY,
+    STATUS_SCENE_FLAG_TOOL_TIP_CONTOUR_ERROR,
+    STATUS_SHM_VERSION,
     V5StatusShmReader,
     status_shm_payload_valid,
 )
@@ -55,7 +58,7 @@ NOW_NS = 10_000_000_000
 def build_frame(
     *,
     seq: int = 2,
-    version: int = 3,
+    version: int = STATUS_SHM_VERSION,
     status_epoch: int = NOW_NS - 100_000_000,
     writer_identity: int = 17,
     source_acquired_ns: int = NOW_NS - 100_000_000,
@@ -71,6 +74,7 @@ def build_frame(
     scene_segment_count: int = 0,
     scene_marker_count: int = 0,
     scene_plane: int = 3,
+    contour_error: float | None = None,
 ) -> bytes:
     raw = bytearray(STATUS_SHM_FRAME_SIZE)
     struct.pack_into(
@@ -121,7 +125,13 @@ def build_frame(
             "<Q", raw, STATUS_SHM_SCENE_BUILD_COUNT_OFFSET, 1)
         struct.pack_into(
             "<Q", raw, STATUS_SHM_SCENE_PROJECT_COUNT_OFFSET, 1)
-        struct.pack_into("<I", raw, STATUS_SHM_SCENE_FLAGS_OFFSET, 1)
+        scene_flags = 1
+        if contour_error is not None:
+            scene_flags |= STATUS_SCENE_FLAG_TOOL_TIP_CONTOUR_ERROR
+            struct.pack_into(
+                "<d", raw, STATUS_SHM_SCENE_CONTOUR_ERROR_OFFSET,
+                contour_error)
+        struct.pack_into("<I", raw, STATUS_SHM_SCENE_FLAGS_OFFSET, scene_flags)
         struct.pack_into(
             "<I", raw, STATUS_SHM_SCENE_PLANE_OFFSET, scene_plane)
     crc = binascii.crc32(raw[:STATUS_SHM_SEQ_OFFSET])
@@ -170,6 +180,7 @@ def run_smoke() -> None:
             0.001, 0.001, 0.001, 0.0001, 0.0001)
         assert snapshot.following_error == (0.0,) * 5
         assert snapshot.display_digits == (3,) * 5
+        assert snapshot.tool_tip_contour_error is None
         assert snapshot.cpu0_percent == 12.5
         assert snapshot.cpu1_percent == 34.5
         assert snapshot.cpu_sample_generation == 7
@@ -262,6 +273,14 @@ def run_smoke() -> None:
             build_frame(
                 valid_mask=STATUS_VALID_CPU_USAGE |
                 STATUS_VALID_DISPLAY_SCENE,
+                contour_error=float("nan")),
+            build_frame(
+                valid_mask=STATUS_VALID_CPU_USAGE |
+                STATUS_VALID_DISPLAY_SCENE,
+                contour_error=-0.001),
+            build_frame(
+                valid_mask=STATUS_VALID_CPU_USAGE |
+                STATUS_VALID_DISPLAY_SCENE,
                 scene_plane=4),
         )
         for raw in payload_cases:
@@ -290,6 +309,20 @@ def run_smoke() -> None:
                 sampled_ns=NOW_NS - 100_000_000,
             ),
         )
+        write_frame(
+            path,
+            build_frame(
+                valid_mask=STATUS_VALID_CPU_USAGE |
+                STATUS_VALID_DISPLAY_SCENE,
+                contour_error=0.125))
+        contour_reader = V5StatusShmReader(
+            path, monotonic_ns=lambda: NOW_NS)
+        try:
+            contour_snapshot = contour_reader.read()
+            assert contour_snapshot is not None
+            assert contour_snapshot.tool_tip_contour_error == 0.125
+        finally:
+            contour_reader.close()
 
         write_frame(
             path,

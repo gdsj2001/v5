@@ -15,9 +15,9 @@ from typing import Callable
 
 DEFAULT_STATUS_SHM_PATH = "/dev/shm/v3_status_shm"
 STATUS_SHM_MAGIC = 0x56355348
-STATUS_SHM_VERSION = 3
-STATUS_SHM_FRAME_SIZE = 7128
-STATUS_SHM_PAYLOAD_SIZE = 7096
+STATUS_SHM_VERSION = 4
+STATUS_SHM_FRAME_SIZE = 7136
+STATUS_SHM_PAYLOAD_SIZE = 7104
 STATUS_SHM_SEQ_OFFSET = 24
 STATUS_SHM_CRC_OFFSET = 28
 STATUS_SHM_PAYLOAD_OFFSET = 32
@@ -50,6 +50,7 @@ STATUS_SHM_SCENE_POINTS_OFFSET = 1112
 STATUS_SHM_SCENE_BREAK_BEFORE_OFFSET = 5208
 STATUS_SHM_SCENE_SEGMENTS_OFFSET = 5720
 STATUS_SHM_SCENE_MARKERS_OFFSET = 6872
+STATUS_SHM_SCENE_CONTOUR_ERROR_OFFSET = 7128
 STATUS_SHM_TRAJECTORY_COUNT_OFFSET = 888
 STATUS_TRAJECTORY_POINT_COUNT = 16
 STATUS_SCENE_POINT_COUNT = 512
@@ -71,6 +72,7 @@ STATUS_KNOWN_VALID_MASK = (
     STATUS_VALID_CPU_USAGE | STATUS_VALID_DISPLAY_SCENE)
 STATUS_SCENE_FLAG_VALID = 1 << 0
 STATUS_SCENE_FLAG_MODEL = 1 << 3
+STATUS_SCENE_FLAG_TOOL_TIP_CONTOUR_ERROR = 1 << 5
 STATUS_SCENE_PLANE_3D = 3
 STATUS_SHM_READ_RETRIES = 3
 STATUS_SHM_MAX_AGE_NS = 5_000_000_000
@@ -87,6 +89,7 @@ class V5StatusShmSnapshot:
     unit_per_count: tuple[float, ...]
     following_error: tuple[float, ...]
     display_digits: tuple[int, ...]
+    tool_tip_contour_error: float | None
     cpu0_percent: float
     cpu1_percent: float
     cpu_sample_generation: int
@@ -222,6 +225,11 @@ def status_shm_payload_valid(raw: bytes) -> bool:
                     or not _finite_values(
                         raw, STATUS_SHM_SCENE_CHILD_CENTER_OFFSET, 3, "f")):
                 return False
+        if scene_flags & STATUS_SCENE_FLAG_TOOL_TIP_CONTOUR_ERROR:
+            contour_error = struct.unpack_from(
+                "<d", raw, STATUS_SHM_SCENE_CONTOUR_ERROR_OFFSET)[0]
+            if not math.isfinite(contour_error) or contour_error < 0.0:
+                return False
     return True
 
 
@@ -298,6 +306,12 @@ class V5StatusShmReader:
             "<5d", raw, STATUS_SHM_FOLLOWING_ERROR_OFFSET)
         display_digits = struct.unpack_from(
             "<5B", raw, STATUS_SHM_DISPLAY_DIGITS_OFFSET)
+        scene_flags = struct.unpack_from(
+            "<I", raw, STATUS_SHM_SCENE_FLAGS_OFFSET)[0]
+        tool_tip_contour_error = None
+        if scene_flags & STATUS_SCENE_FLAG_TOOL_TIP_CONTOUR_ERROR:
+            tool_tip_contour_error = struct.unpack_from(
+                "<d", raw, STATUS_SHM_SCENE_CONTOUR_ERROR_OFFSET)[0]
 
         cpu0_percent = struct.unpack_from("<d", raw, STATUS_SHM_CPU0_OFFSET)[0]
         cpu1_percent = struct.unpack_from("<d", raw, STATUS_SHM_CPU1_OFFSET)[0]
@@ -335,6 +349,7 @@ class V5StatusShmReader:
             unit_per_count=unit_per_count,
             following_error=following_error,
             display_digits=display_digits,
+            tool_tip_contour_error=tool_tip_contour_error,
             cpu0_percent=cpu0_percent,
             cpu1_percent=cpu1_percent,
             cpu_sample_generation=cpu_sample_generation,

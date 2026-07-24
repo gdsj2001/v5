@@ -196,6 +196,78 @@ def audit_retired_bus_cycle_cleanup(text: str) -> None:
         assert not (root / 'temp_parameter_snapshot').exists()
 
 
+def audit_retired_drive_tuning_cleanup(text: str) -> None:
+    transaction = section(
+        text,
+        'parameter_table_transaction_cleanup() {',
+        '\nmerge_runtime_seed_tsv() {',
+    )
+    cleanup = section(
+        text,
+        'cleanup_retired_drive_tuning_files() {',
+        '\ncleanup_retired_runtime_files() {',
+    )
+    for token in (
+        '/usr/libexec/8ax/drive_profile/v5_drive_feedforward_action.py',
+        '/usr/libexec/8ax/drive_profile/v5_drive_feedforward_recovery.py',
+        '/run/8ax_v5_drive_profile/drive_feedforward_result.json',
+        'velocity_feedforward_evidence',
+    ):
+        assert token in cleanup, 'RETIRED_DRIVE_TUNING_CLEANUP_MISSING:' + token
+
+    with tempfile.TemporaryDirectory() as raw_root:
+        root = Path(raw_root)
+        runtime = root / 'opt/8ax/phase0_bus5/settings_runtime.json'
+        action = (
+            root /
+            'usr/libexec/8ax/drive_profile/v5_drive_feedforward_action.py')
+        recovery = (
+            root /
+            'usr/libexec/8ax/drive_profile/v5_drive_feedforward_recovery.py')
+        result = (
+            root /
+            'run/8ax_v5_drive_profile/drive_feedforward_result.json')
+        for path in (runtime, action, recovery, result):
+            path.parent.mkdir(parents=True, exist_ok=True)
+        runtime.write_text(
+            '{"schema":"re.v3.settings_runtime.drive_only.v1",'
+            '"axes":[{"axis":"X","velocity_feedforward_evidence":'
+            '{"gain_after_reset_raw":0},"keep":{"value":7}}]}\n',
+            encoding='utf-8')
+        for path in (action, recovery, result):
+            path.write_text('retired\n', encoding='utf-8')
+        snapshot_root = root / 'temp_parameter_snapshot'
+        shell_root_result = subprocess.run(
+            ['sh', '-c', 'cd "$1" && pwd', 'sh', root.as_posix()],
+            check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        assert shell_root_result.returncode == 0, (
+            shell_root_result.stderr.decode(errors='replace'))
+        shell_root = shell_root_result.stdout.decode(
+            encoding='utf-8').strip()
+        script = (
+            'set -eu\n'
+            f'PYTHON_EXE={shlex.quote(Path(sys.executable).as_posix())}\n'
+            'python3() { "$PYTHON_EXE" "$@"; }\n'
+            f'parameter_table_snapshot_root={shlex.quote(snapshot_root.as_posix())}\n'
+            'parameter_table_transaction_dir=\n'
+            'parameter_table_transaction_entry=\n'
+            'parameter_table_transaction_active=0\n'
+            'parameter_table_transaction_count=0\n' +
+            transaction + '\n' + cleanup + '\n'
+            'cleanup_retired_drive_tuning_files ' +
+            shlex.quote(shell_root) + '\n'
+            'parameter_table_transaction_complete\n')
+        completed = subprocess.run(
+            ['sh'], input=script.encode('utf-8'), check=False,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        assert completed.returncode == 0, completed.stderr.decode(errors='replace')
+        migrated = runtime.read_text(encoding='utf-8')
+        assert 'velocity_feedforward_evidence' not in migrated
+        assert '"value": 7' in migrated
+        assert not action.exists() and not recovery.exists() and not result.exists()
+        assert not snapshot_root.exists()
+
+
 def audit_runtime_bus_ini_cycle_merge(text: str, manifest: str) -> None:
     merge = section(
         text,
@@ -258,6 +330,7 @@ def main() -> int:
     audit_state_upgrade(text)
     audit_parameter_table_merge_behavior(text)
     audit_retired_bus_cycle_cleanup(text)
+    audit_retired_drive_tuning_cleanup(text)
     audit_runtime_bus_ini_cycle_merge(text, manifest)
     for token in (
         'disable_unconditional_ethercat_autostart',
@@ -689,9 +762,10 @@ def main() -> int:
         'writer_identity == 0',
         'fnv1a(payload[:248])',
         'V5_STATE_ABI_READBACK_OK',
-        '0x56355348, 3, 7128, 7128, 7096',
+        '0x56355348, 4, 7136, 7136, 7104',
         'required_mask = (1 << 0) | (1 << 1) | (1 << 8)',
         'scene_generation == 0',
+        'scene_flags & (1 << 5)',
         'zlib.crc32(payload[32:], actual_crc)',
         'V5_SHM_ABI_ATOMIC_RESTART_OK scope=position,state,ui-relay',
     ):

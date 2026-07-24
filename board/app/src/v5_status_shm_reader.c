@@ -99,6 +99,10 @@ static int v5_status_shm_scene_payload_ok(const V5StatusDisplayScene *scene)
                 !isfinite(scene->child_center[i])) return 0;
         }
     }
+    if ((scene->flags &
+         V5_STATUS_SCENE_FLAG_TOOL_TIP_CONTOUR_ERROR) != 0U &&
+        (!isfinite(scene->tool_tip_contour_error) ||
+         scene->tool_tip_contour_error < 0.0)) return 0;
     return 1;
 }
 

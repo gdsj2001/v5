@@ -23,6 +23,8 @@ typedef struct V5CoordinatePanelLine {
 
 typedef struct V5CoordinatePanelSnapshot {
     V5CoordinatePanelLine lines[V5_COORDINATE_AXIS_COUNT];
+    int tool_tip_contour_error_valid;
+    char tool_tip_contour_error_text[V5_COORDINATE_TEXT_CAP];
     char modal_text[V5_COORDINATE_MODAL_TEXT_CAP];
     char spindle_speed_text[V5_COORDINATE_TEXT_CAP];
     char linear_velocity_text[V5_COORDINATE_TEXT_CAP];

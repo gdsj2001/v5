@@ -90,8 +90,6 @@ config	petalinux/project-spec/meta-user/recipes-apps/v5-base-overlay/files/rootf
 script	services/drive_profile/v5_drive_bus_action.py	/usr/libexec/8ax/drive_profile/v5_drive_bus_action.py	0755
 module	services/drive_profile/v5_drive_bus_apply_action.py	/usr/libexec/8ax/drive_profile/v5_drive_bus_apply_action.py	0644
 module	services/drive_profile/v5_drive_bus_reset_action.py	/usr/libexec/8ax/drive_profile/v5_drive_bus_reset_action.py	0644
-module	services/drive_profile/v5_drive_feedforward_action.py	/usr/libexec/8ax/drive_profile/v5_drive_feedforward_action.py	0644
-module	services/drive_profile/v5_drive_feedforward_recovery.py	/usr/libexec/8ax/drive_profile/v5_drive_feedforward_recovery.py	0644
 module	services/drive_profile/v5_active_model_descriptor.py	/usr/libexec/8ax/drive_profile/v5_active_model_descriptor.py	0644
 module	services/drive_profile/v5_command_gate_zero_client.py	/usr/libexec/8ax/drive_profile/v5_command_gate_zero_client.py	0644
 module	services/drive_profile/v5_drive_enable_window.py	/usr/libexec/8ax/drive_profile/v5_drive_enable_window.py	0644

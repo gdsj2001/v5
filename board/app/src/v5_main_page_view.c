@@ -142,13 +142,16 @@ int v5_main_page_create(V5MainPage *page, lv_obj_t *parent)
         page, 762, 218, 154, 53, v5_main_page_internal_feed_override_reset_event_cb);
     page->feed_override_slider = v5_main_page_internal_create_override_slider(page, 0, 762, 307, 142);
 
-    v5_main_page_internal_make_panel(page->root, 746, 342, 174, 188, 5, 24, 39);
+    v5_main_page_internal_make_panel(page->root, 746, 342, 174, 194, 5, 24, 39);
     v5_main_page_internal_make_label_ex(page->root, 754, 350, 158, 22, "跟随误差 mm/deg", 210, 220, 226, LV_TEXT_ALIGN_LEFT);
     for (i = 0; i < V5_MAIN_PAGE_AXIS_COUNT; ++i) {
         char text[16];
         snprintf(text, sizeof(text), "%s: --.---", axis_text[i]);
-        page->error_labels[i] = v5_main_page_internal_make_label_ex(page->root, 758, 378 + (int)i * 28, 150, 26, text, 238, 245, 248, LV_TEXT_ALIGN_LEFT);
+        page->error_labels[i] = v5_main_page_internal_make_label_ex(page->root, 758, 376 + (int)i * 26, 150, 24, text, 238, 245, 248, LV_TEXT_ALIGN_LEFT);
     }
+    page->contour_error_label = v5_main_page_internal_make_label_ex(
+        page->root, 758, 507, 150, 24, "DD: --.---",
+        28, 193, 238, LV_TEXT_ALIGN_LEFT);
     v5_main_page_internal_make_panel(page->root, 746, 540, 174, 60, 5, 24, 39);
     page->cpu0_label = v5_main_page_internal_make_label_ex(page->root, 754, 545, 158, 24, "cpu0  --%", 255, 86, 86, LV_TEXT_ALIGN_LEFT);
     page->cpu1_label = v5_main_page_internal_make_label_ex(page->root, 754, 571, 158, 24, "cpu1  --%", 42, 221, 128, LV_TEXT_ALIGN_LEFT);
@@ -182,6 +185,7 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
 {
     V5CoordinatePanelSnapshot panel;
     const V5ProgramRuntime *runtime = page && page->program_controller ? v5_program_controller_runtime(page->program_controller) : 0;
+    int panel_ready = 0;
     int pose_refresh_due = 0;
     int structure_refresh_due = 0;
     int runtime_has_program = runtime && v5_program_runtime_has_open_program(runtime);
@@ -216,6 +220,7 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
     }
     if ((refresh_flags & V5_MAIN_PAGE_REFRESH_COORDINATES) != 0U) {
         v5_coordinate_panel_from_status(status, &panel);
+        panel_ready = 1;
         v5_coordinate_digits_begin_update(&page->coordinate_digits);
         for (i = 0; i < V5_MAIN_PAGE_AXIS_COUNT; ++i) {
             const char display_axis = v5_main_page_internal_main_page_axis_display_char(page, i);
@@ -247,8 +252,27 @@ int v5_main_page_apply_status_flags(V5MainPage *page, const V5UiStatusView *stat
         }
         v5_coordinate_digits_end_update(&page->coordinate_digits);
     }
+    if (page->contour_error_label &&
+        (refresh_flags & (V5_MAIN_PAGE_REFRESH_COORDINATES |
+                          V5_MAIN_PAGE_REFRESH_SCENE |
+                          V5_MAIN_PAGE_REFRESH_POSE |
+                          V5_MAIN_PAGE_REFRESH_STRUCTURE)) != 0U) {
+        char contour_text[32];
+        if (!panel_ready) {
+            v5_coordinate_panel_from_status(status, &panel);
+            panel_ready = 1;
+        }
+        snprintf(
+            contour_text, sizeof(contour_text),
+            "DD: %s", panel.tool_tip_contour_error_text);
+        v5_main_page_internal_set_label_text_if_changed(
+            page->contour_error_label, contour_text);
+    }
     if ((refresh_flags & V5_MAIN_PAGE_REFRESH_RATES) != 0U) {
-        v5_coordinate_panel_from_status(status, &panel);
+        if (!panel_ready) {
+            v5_coordinate_panel_from_status(status, &panel);
+            panel_ready = 1;
+        }
         v5_main_page_internal_set_label_text_if_changed(
             page->spindle_speed_label, panel.spindle_speed_text);
         v5_main_page_internal_set_label_text_if_changed(

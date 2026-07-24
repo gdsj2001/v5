@@ -23,8 +23,10 @@ static void prepare_status(
     status->display_scene = scene;
     scene->flags = V5_STATUS_SCENE_FLAG_VALID | V5_STATUS_SCENE_FLAG_PROGRAM |
         V5_STATUS_SCENE_FLAG_MODEL | V5_STATUS_SCENE_FLAG_WCS |
+        V5_STATUS_SCENE_FLAG_TOOL_TIP_CONTOUR_ERROR |
         V5_STATUS_SCENE_FLAG_DIRTY_KNOWN |
         V5_STATUS_SCENE_FLAG_DIRTY_MASK;
+    scene->tool_tip_contour_error = 0.125;
     scene->native_generation = 7ULL;
     scene->view_generation = 1ULL;
     scene->fit_generation = 1ULL;
@@ -153,6 +155,8 @@ int main(void)
             V5_MAIN_PAGE_REFRESH_STRUCTURE)) return 4;
     if (page.toolpath_scene_generation != 1ULL || page.trajectory_point_count != 3U ||
         lv_obj_has_flag(page.trajectory_line, LV_OBJ_FLAG_HIDDEN) ||
+        !page.contour_error_label ||
+        strcmp(lv_label_get_text(page.contour_error_label), "DD: +00000.125") != 0 ||
         !page.toolpath_display_scene_valid ||
         page.toolpath_display_scene != &first_scene ||
         page.toolpath_display_scene->segment_count != 2U ||
@@ -226,6 +230,7 @@ int main(void)
     status.valid_mask &= ~V5_STATUS_VALID_DISPLAY_SCENE;
     if (!v5_main_page_apply_status_flags(&page, &status, V5_MAIN_PAGE_REFRESH_DYNAMIC) ||
         !lv_obj_has_flag(page.trajectory_line, LV_OBJ_FLAG_HIDDEN) ||
+        strcmp(lv_label_get_text(page.contour_error_label), "DD: --.---") != 0 ||
         page.toolpath_program_raster_valid) return 8;
     return 0;
 }

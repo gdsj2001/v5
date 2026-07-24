@@ -556,6 +556,10 @@ int main(void)
         first.point_count != 2U || first.segment_count == 0U || first.marker_count == 0U ||
         first.build_count != 1ULL || first.project_count != 1ULL ||
         first.rtcp_transform_count != 1ULL ||
+        (first.flags &
+         V5_STATUS_SCENE_FLAG_TOOL_TIP_CONTOUR_ERROR) == 0U ||
+        !isfinite(first.tool_tip_contour_error) ||
+        first.tool_tip_contour_error < 0.0 ||
         count_segments(&first, V5_STATUS_SCENE_SEGMENT_WCS_AXIS) != 3U ||
         count_markers(&first, V5_STATUS_SCENE_MARKER_WCS_ORIGIN) != 1U) return 1;
     for (repeat = 0U; repeat < 100U; ++repeat) {

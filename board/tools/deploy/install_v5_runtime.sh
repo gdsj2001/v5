@@ -1441,12 +1441,12 @@ last_error = "not_read"
 required_mask = (1 << 0) | (1 << 1) | (1 << 8) | (1 << 9)
 while time.monotonic() < deadline:
     try:
-        if path.stat().st_size != 7128:
+        if path.stat().st_size != 7136:
             raise RuntimeError("size")
         with path.open("rb") as handle:
-            with mmap.mmap(handle.fileno(), 7128, access=mmap.ACCESS_READ) as page:
+            with mmap.mmap(handle.fileno(), 7136, access=mmap.ACCESS_READ) as page:
                 before = struct.unpack_from("<I", page, 24)[0]
-                payload = page[:7128]
+                payload = page[:7136]
                 after = struct.unpack_from("<I", page, 24)[0]
         (magic, version, header_size, total_size, payload_size, _flags,
          sequence, expected_crc) = struct.unpack_from("<8I", payload, 0)
@@ -1463,13 +1463,14 @@ while time.monotonic() < deadline:
         cpu_time = struct.unpack_from("<Q", payload, 952)[0]
         scene_build = struct.unpack_from("<Q", payload, 1024)[0]
         scene_flags = struct.unpack_from("<I", payload, 1052)[0]
+        contour_error = struct.unpack_from("<d", payload, 7128)[0]
         age_ns = time.monotonic_ns() - source_time
         actual_crc = zlib.crc32(payload[:24])
         actual_crc = zlib.crc32(payload[32:], actual_crc) & 0xffffffff
         if before != after or sequence != before or sequence == 0 or sequence & 1:
             raise RuntimeError("seqlock")
         if (magic, version, header_size, total_size, payload_size) != (
-                0x56355348, 3, 7128, 7128, 7096):
+                0x56355348, 4, 7136, 7136, 7104):
             raise RuntimeError("header")
         if (valid_mask & required_mask) != required_mask:
             raise RuntimeError("valid_mask")
@@ -1478,6 +1479,9 @@ while time.monotonic() < deadline:
                 cpu_generation == 0 or cpu_time == 0 or
                 scene_build == 0 or not (scene_flags & 1)):
             raise RuntimeError("identity")
+        if scene_flags & (1 << 5) and (
+                not math.isfinite(contour_error) or contour_error < 0.0):
+            raise RuntimeError("contour_error")
         if (not all(value > 0.0 for value in unit_per_count) or
                 display_digits != (3, 3, 3, 3, 3) or
                 not all(value == value for value in following_error)):
@@ -1779,7 +1783,89 @@ cleanup_retired_bus_cycle_files() {
   done
 }
 
+cleanup_retired_drive_tuning_files() {
+  retired_root="${1:-}"
+  case "$retired_root" in
+    ""|/*) ;;
+    *)
+      echo "refusing unsafe retired drive tuning root: $retired_root" >&2
+      return 1
+      ;;
+  esac
+  settings_runtime="$retired_root/opt/8ax/phase0_bus5/settings_runtime.json"
+  if [ -f "$settings_runtime" ]; then
+    command -v python3 >/dev/null 2>&1 || {
+      echo "python3 required to migrate retired drive tuning evidence" >&2
+      return 1
+    }
+    parameter_table_transaction_snapshot "$settings_runtime" || return 1
+    python3 - "$settings_runtime" <<'PY'
+import json
+import os
+import stat
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+payload = json.loads(path.read_text(encoding="utf-8"))
+if payload.get("schema") != "re.v3.settings_runtime.drive_only.v1":
+    raise SystemExit("unexpected settings_runtime schema during retired drive tuning migration")
+if not isinstance(payload.get("axes"), list):
+    raise SystemExit("settings_runtime axes missing during retired drive tuning migration")
+
+removed = 0
+def migrate(node):
+    global removed
+    if isinstance(node, dict):
+        if "velocity_feedforward_evidence" in node:
+            del node["velocity_feedforward_evidence"]
+            removed += 1
+        for value in node.values():
+            migrate(value)
+    elif isinstance(node, list):
+        for value in node:
+            migrate(value)
+
+migrate(payload)
+if removed:
+    original = path.stat()
+    temporary = path.with_name(path.name + ".retired-drive-tuning.tmp")
+    try:
+        with temporary.open("w", encoding="utf-8", newline="\n") as stream:
+            json.dump(payload, stream, ensure_ascii=False, indent=2)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(temporary, stat.S_IMODE(original.st_mode))
+        os.replace(temporary, path)
+        try:
+            directory_fd = os.open(path.parent, os.O_RDONLY)
+        except OSError:
+            directory_fd = None
+        if directory_fd is not None:
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+print("retired drive tuning evidence removed=%d path=%s" % (removed, path))
+PY
+  fi
+  rm -f \
+    "$retired_root/usr/libexec/8ax/drive_profile/v5_drive_feedforward_action.py" \
+    "$retired_root/usr/libexec/8ax/drive_profile/v5_drive_feedforward_recovery.py" \
+    "$retired_root/run/8ax_v5_drive_profile/drive_feedforward_result.json"
+  rm -f \
+    "$retired_root/usr/libexec/8ax/drive_profile/__pycache__"/v5_drive_feedforward_action.*.pyc \
+    "$retired_root/usr/libexec/8ax/drive_profile/__pycache__"/v5_drive_feedforward_recovery.*.pyc
+}
+
 cleanup_retired_runtime_files() {
+  cleanup_retired_drive_tuning_files
   for retired_path in \
     /usr/libexec/8ax/v5_rtcp_status_publisher.py \
     /usr/libexec/8ax/v5_g53_geometry_memory_owner.py \
@@ -1862,6 +1948,7 @@ if [ "$apply" -eq 1 ]; then
   elif [ "$restart_scope" = "state" ]; then
     /etc/init.d/v5-state-publisher restart
   elif [ "$restart_scope" = "actiond" ]; then
+    cleanup_retired_drive_tuning_files
     [ "$manifest_drive_profiles" -eq 0 ] || install_runtime_drive_profiles
     parameter_table_transaction_complete
     /etc/init.d/v5-settings-actiond restart
@@ -1886,6 +1973,7 @@ if [ "$apply" -eq 1 ]; then
     restart_runtime_event_dag
     wait_publisher_actual_barrier
   elif [ "$restart_scope" = "settings" ]; then
+    cleanup_retired_drive_tuning_files
     [ "$manifest_drive_profiles" -eq 0 ] || install_runtime_drive_profiles
     parameter_table_transaction_complete
     restart_runtime_event_dag

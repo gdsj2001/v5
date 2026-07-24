@@ -76,6 +76,10 @@ static int display_scene_valid(const V5StatusDisplayScene *scene)
     for (i = 0U; i < scene->marker_count; ++i) {
         if (!isfinite(scene->markers[i].point.x) || !isfinite(scene->markers[i].point.y)) return 0;
     }
+    if ((scene->flags &
+         V5_STATUS_SCENE_FLAG_TOOL_TIP_CONTOUR_ERROR) != 0U &&
+        (!isfinite(scene->tool_tip_contour_error) ||
+         scene->tool_tip_contour_error < 0.0)) return 0;
     return 1;
 }
 

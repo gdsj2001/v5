@@ -1,5 +1,6 @@
 #include "v5_program_scene_producer.h"
 
+#include "v5_program_scene_contour.h"
 #include "v5_program_scene_projection.h"
 
 #include <math.h>
@@ -314,6 +315,8 @@ int v5_program_scene_producer_build(
     V5StatusDisplayScene previous_scene;
     double holder_end[V5_STATUS_AXIS_COUNT];
     double cmd_tip[V5_STATUS_AXIS_COUNT];
+    double actual_tip[V5_STATUS_AXIS_COUNT];
+    double tool_tip_contour_error = 0.0;
     double tool_length = 0.0;
     uint32_t model_id = 0U;
     uint32_t rtcp_enabled;
@@ -324,6 +327,7 @@ int v5_program_scene_producer_build(
     int fit_key_changed;
     int program_projected = 0;
     int tool_valid;
+    int tool_tip_contour_error_valid = 0;
     uint32_t dirty_flags;
     int previous_scene_valid;
     if (generation_out) *generation_out = 0ULL;
@@ -370,8 +374,19 @@ int v5_program_scene_producer_build(
     add_model_geometry_bounds(&candidate, producer, &model, model_id);
     memcpy(holder_end, sample->mcs, sizeof(holder_end));
     holder_end[2] -= tool_length;
+    memcpy(actual_tip, holder_end, sizeof(actual_tip));
     memcpy(cmd_tip, sample->cmd_mcs, sizeof(cmd_tip));
     cmd_tip[2] -= tool_length;
+    if ((sample->valid_mask & V5_STATUS_VALID_MCS) != 0U && tool_valid) {
+        tool_tip_contour_error_valid =
+            v5_program_scene_tool_tip_contour_error(
+                producer->base_points,
+                producer->request.break_before,
+                producer->static_point_count,
+                &producer->pose_matrix,
+                actual_tip,
+                &tool_tip_contour_error);
+    }
     if (sample->valid_mask & V5_STATUS_VALID_MCS) {
         v5_program_scene_bounds_add(
             &candidate, sample->mcs, producer->request.plane);
@@ -407,6 +422,12 @@ int v5_program_scene_producer_build(
         producer, sample, readback, &model,
         model_id, rtcp_enabled, model_valid,
         0U);
+    producer->scene.tool_tip_contour_error = 0.0;
+    if (tool_tip_contour_error_valid) {
+        producer->scene.tool_tip_contour_error = tool_tip_contour_error;
+        producer->scene.flags |=
+            V5_STATUS_SCENE_FLAG_TOOL_TIP_CONTOUR_ERROR;
+    }
     add_model_geometry_scene(producer, &model, model_id);
     if (sample->valid_mask & V5_STATUS_VALID_MCS) {
         v5_program_scene_add_dynamic_marker(

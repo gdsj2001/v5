@@ -32,6 +32,7 @@ endif()
 
 set(V5_PROGRAM_SCENE_PRODUCER_SOURCES
     ../services/state_publisher/v5_program_scene_producer.c
+    ../services/state_publisher/v5_program_scene_contour.c
     ../services/state_publisher/v5_program_scene_projection.c
     ../services/state_publisher/v5_program_scene_cache.c
     ../services/state_publisher/v5_program_scene_model.c
@@ -39,6 +40,21 @@ set(V5_PROGRAM_SCENE_PRODUCER_SOURCES
     ../services/state_publisher/v5_program_scene_model_bc.c
     ../services/state_publisher/v5_program_scene_ipc.c
 )
+
+add_executable(v5_program_scene_contour_smoke
+    src/v5_program_scene_contour_smoke.c
+    ../services/state_publisher/v5_program_scene_contour.c
+)
+
+target_include_directories(v5_program_scene_contour_smoke PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${V5_ROOT_DIR}/services/state_publisher"
+    "${V5_ROOT_DIR}/services/command_gate"
+)
+
+if(NOT WIN32)
+    target_link_libraries(v5_program_scene_contour_smoke PRIVATE m)
+endif()
 
 add_library(v5_button_visuals STATIC
     src/v5_button_visuals.c
@@ -1029,6 +1045,7 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
     v5_register_local_smoke(v5_microkernel_manifest_smoke architecture_contract lifeline_01_startup)
     v5_register_local_smoke(v5_position_status_publisher_smoke state_projection lifeline_01_startup lifeline_07_model_rtcp lifeline_08_axis_drive)
     v5_register_local_smoke(v5_state_publisher_cadence_smoke state_projection)
+    v5_register_local_smoke(v5_program_scene_contour_smoke state_projection lifeline_05_program lifeline_07_model_rtcp)
     v5_register_local_smoke(v5_program_scene_producer_smoke state_projection lifeline_05_program lifeline_07_model_rtcp)
     v5_register_local_smoke(v5_coordinate_digits_smoke ui lifeline_10_ui_remote)
     v5_register_local_smoke(v5_lvgl_remote_display_delta_smoke ui lifeline_10_ui_remote)

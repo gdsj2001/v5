@@ -124,6 +124,7 @@ SETTINGS_RUNTIME_WRITE_DROP_KEYS = frozenset({
     "runtime_scale_check_before",
     "status_frame",
     "updated_sections",
+    "velocity_feedforward_evidence",
 })
 
 class DriveActionError(RuntimeError):

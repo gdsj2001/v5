@@ -61,6 +61,9 @@ void v5_coordinate_panel_from_status(const V5UiStatusView *status, V5CoordinateP
         snprintf(panel->linear_velocity_text, sizeof(panel->linear_velocity_text), "--");
         snprintf(panel->feed_override_text, sizeof(panel->feed_override_text), "--");
         snprintf(panel->spindle_override_text, sizeof(panel->spindle_override_text), "--");
+        text_unavailable(
+            panel->tool_tip_contour_error_text,
+            sizeof(panel->tool_tip_contour_error_text));
         return;
     }
 
@@ -92,6 +95,24 @@ void v5_coordinate_panel_from_status(const V5UiStatusView *status, V5CoordinateP
         }
     }
 
+    panel->tool_tip_contour_error_valid =
+        (status->valid_mask & V5_STATUS_VALID_DISPLAY_SCENE) != 0U &&
+        status->display_scene &&
+        (status->display_scene->flags &
+         V5_STATUS_SCENE_FLAG_TOOL_TIP_CONTOUR_ERROR) != 0U &&
+        isfinite(status->display_scene->tool_tip_contour_error) &&
+        status->display_scene->tool_tip_contour_error >= 0.0;
+    if (panel->tool_tip_contour_error_valid) {
+        text_value(
+            panel->tool_tip_contour_error_text,
+            sizeof(panel->tool_tip_contour_error_text),
+            status->display_scene->tool_tip_contour_error,
+            3U);
+    } else {
+        text_unavailable(
+            panel->tool_tip_contour_error_text,
+            sizeof(panel->tool_tip_contour_error_text));
+    }
     snprintf(panel->modal_text, sizeof(panel->modal_text), "--");
     text_speed(panel->spindle_speed_text, sizeof(panel->spindle_speed_text), (status->valid_mask & V5_STATUS_VALID_SPINDLE_SPEED) != 0u, status->spindle_speed_rpm, "rpm");
     text_speed(panel->linear_velocity_text, sizeof(panel->linear_velocity_text), (status->valid_mask & V5_STATUS_VALID_LINEAR_VELOCITY) != 0u, status->linear_velocity_mm_per_min, "mm/min");

@@ -41,11 +41,8 @@ SOCKET_OWNER_NAME = "root"
 SOCKET_GROUP_NAME = "petalinux"
 DRIVE_WRITE_WINDOW_ACTIONS = frozenset({
     "drive_factory_reset",
-    "drive_velocity_feedforward_commission",
 })
-NON_CANCELLABLE_ACTIONS = frozenset({
-    "drive_velocity_feedforward_commission",
-})
+NON_CANCELLABLE_ACTIONS = frozenset()
 
 
 def secure_socket_permissions() -> None:

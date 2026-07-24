@@ -79,6 +79,7 @@ typedef struct V5MainPage {
     V5MainPageCoordinateTarget mcs_targets[V5_MAIN_PAGE_AXIS_COUNT];
     V5MainPageCoordinateTarget wcs_targets[V5_MAIN_PAGE_AXIS_COUNT];
     lv_obj_t *error_labels[V5_MAIN_PAGE_AXIS_COUNT];
+    lv_obj_t *contour_error_label;
     lv_obj_t *modal_label;
     lv_obj_t *wcs_header_label;
     lv_obj_t *spindle_speed_label;

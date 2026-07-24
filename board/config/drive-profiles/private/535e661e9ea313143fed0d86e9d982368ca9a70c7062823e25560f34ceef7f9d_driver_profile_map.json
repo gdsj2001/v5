@@ -1,6 +1,6 @@
 {
   "description": "Source-side editable private driver command map for one device DNA hash. Upload to the matching VPS private DNA directory before board download; this file is not a product runtime fallback. SV630N default encoder_bits is 18 and runtime derives count fields from the final bit; drive-owner fields may include absolute multi-turn/single-turn/absolute-position read commands, raw multi-turn counter modulus metadata, private static Crev trust for the current SV630N machine where no 0x608F object exists, and explicit drive count-domain command declarations.",
-  "generated_at": "2026-07-23T00:00:00Z",
+  "generated_at": "2026-07-24T00:00:00Z",
   "generated_by": "A1-Codex",
   "integrity_policy": {
     "active_mapping_must_reference_original_command_object": true,
@@ -11,7 +11,7 @@
   "intended_remote_path": "/opt/8ax-auth/storage/private/359764-535e661e9ea313143fed0d86e9d982368ca9a70c7062823e25560f34ceef7f9d/driver_profile_map.json",
   "map_role": "private",
   "map_scope": "private",
-  "map_version": "2026.07.23.sv630n-private-feedforward-commission.012",
+  "map_version": "2026.07.24.sv630n-private-default-tuning.013",
   "profiles": [
     {
       "commands": {
@@ -1467,134 +1467,6 @@
           },
           "verify_tolerance": 0,
           "write_value": null
-        },
-        "drive.read_velocity_feedforward_source": {
-          "access": "read",
-          "data_type": "uint16",
-          "notes": [
-            "SV630N user manual H05.19: value 1 selects internal velocity feedforward."
-          ],
-          "object": {
-            "index": "0x2005",
-            "name": "H05.19 velocity feedforward source",
-            "subindex": "0x14"
-          },
-          "priority": "P0",
-          "profile_id": "inovance_sv630n_ethercat_cia402_v1",
-          "required_for_motion_gate": false,
-          "requires_disabled": false,
-          "requires_no_motion": false,
-          "standard_command": "drive.read_velocity_feedforward_source",
-          "supported": true,
-          "timeout_ms": 800,
-          "unit": "enum"
-        },
-        "drive.read_velocity_feedforward_filter": {
-          "access": "read",
-          "data_type": "uint16",
-          "notes": [
-            "SV630N user manual H08.18; commissioning records this value but does not write it."
-          ],
-          "object": {
-            "index": "0x2008",
-            "name": "H08.18 velocity feedforward filter",
-            "subindex": "0x13"
-          },
-          "priority": "P0",
-          "profile_id": "inovance_sv630n_ethercat_cia402_v1",
-          "required_for_motion_gate": false,
-          "requires_disabled": false,
-          "requires_no_motion": false,
-          "standard_command": "drive.read_velocity_feedforward_filter",
-          "supported": true,
-          "timeout_ms": 800,
-          "unit": "0.01ms"
-        },
-        "drive.read_velocity_feedforward_gain": {
-          "access": "read",
-          "data_type": "uint16",
-          "notes": [
-            "SV630N user manual H08.19; raw unit is 0.1 percent."
-          ],
-          "object": {
-            "index": "0x2008",
-            "name": "H08.19 velocity feedforward gain",
-            "subindex": "0x14"
-          },
-          "priority": "P0",
-          "profile_id": "inovance_sv630n_ethercat_cia402_v1",
-          "required_for_motion_gate": false,
-          "requires_disabled": false,
-          "requires_no_motion": false,
-          "standard_command": "drive.read_velocity_feedforward_gain",
-          "supported": true,
-          "timeout_ms": 800,
-          "unit": "0.1percent"
-        },
-        "drive.write_velocity_feedforward_gain": {
-          "access": "write",
-          "data_type": "uint16",
-          "notes": [
-            "Only drive_velocity_feedforward_commission may write H08.19; one-axis step is limited to 10.0 percent."
-          ],
-          "object": {
-            "index": "0x2008",
-            "name": "H08.19 velocity feedforward gain",
-            "subindex": "0x14"
-          },
-          "priority": "P0",
-          "profile_id": "inovance_sv630n_ethercat_cia402_v1",
-          "required_for_motion_gate": false,
-          "requires_disabled": true,
-          "requires_no_motion": true,
-          "standard_command": "drive.write_velocity_feedforward_gain",
-          "supported": true,
-          "timeout_ms": 1000,
-          "unit": "0.1percent",
-          "value_source": "request.target_gain_raw"
-        },
-        "drive.read_communication_eeprom_policy": {
-          "access": "read",
-          "data_type": "uint16",
-          "notes": [
-            "SV630N H0E.01 at 0x200E:02; normal product value must be 0."
-          ],
-          "object": {
-            "index": "0x200E",
-            "name": "H0E.01 communication EEPROM policy",
-            "subindex": "0x02"
-          },
-          "priority": "P0",
-          "profile_id": "inovance_sv630n_ethercat_cia402_v1",
-          "required_for_motion_gate": false,
-          "requires_disabled": false,
-          "requires_no_motion": false,
-          "standard_command": "drive.read_communication_eeprom_policy",
-          "supported": true,
-          "timeout_ms": 800,
-          "unit": "enum"
-        },
-        "drive.write_communication_eeprom_policy": {
-          "access": "write",
-          "data_type": "uint16",
-          "notes": [
-            "Commissioning may write only 1 temporarily and must restore 0; values 2, 3 and 4 are forbidden."
-          ],
-          "object": {
-            "index": "0x200E",
-            "name": "H0E.01 communication EEPROM policy",
-            "subindex": "0x02"
-          },
-          "priority": "P0",
-          "profile_id": "inovance_sv630n_ethercat_cia402_v1",
-          "required_for_motion_gate": false,
-          "requires_disabled": true,
-          "requires_no_motion": true,
-          "standard_command": "drive.write_communication_eeprom_policy",
-          "supported": true,
-          "timeout_ms": 1000,
-          "unit": "enum",
-          "value_source": "commission_transaction_only"
         },
         "drive.software_reset": {
           "access": "write",
@@ -3429,134 +3301,6 @@
           "verify_tolerance": null,
           "write_value": 1
         },
-        "drive.read_velocity_feedforward_source": {
-          "access": "read",
-          "data_type": "uint16",
-          "notes": [
-            "SV630N user manual H05.19: value 1 selects internal velocity feedforward."
-          ],
-          "object": {
-            "index": "0x2005",
-            "name": "H05.19 velocity feedforward source",
-            "subindex": "0x14"
-          },
-          "priority": "P0",
-          "profile_id": "inovance_sv630n_18bit",
-          "required_for_motion_gate": false,
-          "requires_disabled": false,
-          "requires_no_motion": false,
-          "standard_command": "drive.read_velocity_feedforward_source",
-          "supported": true,
-          "timeout_ms": 800,
-          "unit": "enum"
-        },
-        "drive.read_velocity_feedforward_filter": {
-          "access": "read",
-          "data_type": "uint16",
-          "notes": [
-            "SV630N user manual H08.18; commissioning records this value but does not write it."
-          ],
-          "object": {
-            "index": "0x2008",
-            "name": "H08.18 velocity feedforward filter",
-            "subindex": "0x13"
-          },
-          "priority": "P0",
-          "profile_id": "inovance_sv630n_18bit",
-          "required_for_motion_gate": false,
-          "requires_disabled": false,
-          "requires_no_motion": false,
-          "standard_command": "drive.read_velocity_feedforward_filter",
-          "supported": true,
-          "timeout_ms": 800,
-          "unit": "0.01ms"
-        },
-        "drive.read_velocity_feedforward_gain": {
-          "access": "read",
-          "data_type": "uint16",
-          "notes": [
-            "SV630N user manual H08.19; raw unit is 0.1 percent."
-          ],
-          "object": {
-            "index": "0x2008",
-            "name": "H08.19 velocity feedforward gain",
-            "subindex": "0x14"
-          },
-          "priority": "P0",
-          "profile_id": "inovance_sv630n_18bit",
-          "required_for_motion_gate": false,
-          "requires_disabled": false,
-          "requires_no_motion": false,
-          "standard_command": "drive.read_velocity_feedforward_gain",
-          "supported": true,
-          "timeout_ms": 800,
-          "unit": "0.1percent"
-        },
-        "drive.write_velocity_feedforward_gain": {
-          "access": "write",
-          "data_type": "uint16",
-          "notes": [
-            "Only drive_velocity_feedforward_commission may write H08.19; one-axis step is limited to 10.0 percent."
-          ],
-          "object": {
-            "index": "0x2008",
-            "name": "H08.19 velocity feedforward gain",
-            "subindex": "0x14"
-          },
-          "priority": "P0",
-          "profile_id": "inovance_sv630n_18bit",
-          "required_for_motion_gate": false,
-          "requires_disabled": true,
-          "requires_no_motion": true,
-          "standard_command": "drive.write_velocity_feedforward_gain",
-          "supported": true,
-          "timeout_ms": 1000,
-          "unit": "0.1percent",
-          "value_source": "request.target_gain_raw"
-        },
-        "drive.read_communication_eeprom_policy": {
-          "access": "read",
-          "data_type": "uint16",
-          "notes": [
-            "SV630N H0E.01 at 0x200E:02; normal product value must be 0."
-          ],
-          "object": {
-            "index": "0x200E",
-            "name": "H0E.01 communication EEPROM policy",
-            "subindex": "0x02"
-          },
-          "priority": "P0",
-          "profile_id": "inovance_sv630n_18bit",
-          "required_for_motion_gate": false,
-          "requires_disabled": false,
-          "requires_no_motion": false,
-          "standard_command": "drive.read_communication_eeprom_policy",
-          "supported": true,
-          "timeout_ms": 800,
-          "unit": "enum"
-        },
-        "drive.write_communication_eeprom_policy": {
-          "access": "write",
-          "data_type": "uint16",
-          "notes": [
-            "Commissioning may write only 1 temporarily and must restore 0; values 2, 3 and 4 are forbidden."
-          ],
-          "object": {
-            "index": "0x200E",
-            "name": "H0E.01 communication EEPROM policy",
-            "subindex": "0x02"
-          },
-          "priority": "P0",
-          "profile_id": "inovance_sv630n_18bit",
-          "required_for_motion_gate": false,
-          "requires_disabled": true,
-          "requires_no_motion": true,
-          "standard_command": "drive.write_communication_eeprom_policy",
-          "supported": true,
-          "timeout_ms": 1000,
-          "unit": "enum",
-          "value_source": "commission_transaction_only"
-        },
         "drive.verify_position_basis": {
           "access": "unsupported",
           "basis_commit": {
@@ -3912,36 +3656,6 @@
       "priority": "P1",
       "required_for_motion_gate": false,
       "standard_command": "drive.software_reset"
-    },
-    {
-      "priority": "P0",
-      "required_for_motion_gate": false,
-      "standard_command": "drive.read_velocity_feedforward_source"
-    },
-    {
-      "priority": "P0",
-      "required_for_motion_gate": false,
-      "standard_command": "drive.read_velocity_feedforward_filter"
-    },
-    {
-      "priority": "P0",
-      "required_for_motion_gate": false,
-      "standard_command": "drive.read_velocity_feedforward_gain"
-    },
-    {
-      "priority": "P0",
-      "required_for_motion_gate": false,
-      "standard_command": "drive.write_velocity_feedforward_gain"
-    },
-    {
-      "priority": "P0",
-      "required_for_motion_gate": false,
-      "standard_command": "drive.read_communication_eeprom_policy"
-    },
-    {
-      "priority": "P0",
-      "required_for_motion_gate": false,
-      "standard_command": "drive.write_communication_eeprom_policy"
     },
     {
       "priority": "P0",

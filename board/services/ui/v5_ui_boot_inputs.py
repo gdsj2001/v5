@@ -40,7 +40,7 @@ POSITION_FMT, WCS_FMT, MODAL_FMT = (
     struct.Struct("<IIIIIIIIIiIIQ128sdIIIiIiIIi128sIII"),
 )
 POSITION_SEQ_OFFSET = 24
-STATE_FRAME_SIZE, STATE_PAYLOAD_SIZE, STATE_SEQ_OFFSET = 7128, 7096, 24
+STATE_FRAME_SIZE, STATE_PAYLOAD_SIZE, STATE_SEQ_OFFSET = 7136, 7104, 24
 STATE_TRAJECTORY_COUNT_OFFSET = 888
 STATE_SCENE_POINT_COUNT_OFFSET = 1056
 STATE_SCENE_SEGMENT_COUNT_OFFSET = 1060
@@ -310,7 +310,7 @@ def current_pre_ui_inputs(cache=None, unique=False, expected_ini=""):
             "<I", raw, STATE_SCENE_SEGMENT_COUNT_OFFSET)[0]
         scene_marker_count = struct.unpack_from(
             "<I", raw, STATE_SCENE_MARKER_COUNT_OFFSET)[0]
-        if header[:5] != (0x56355348, 3, STATE_FRAME_SIZE, STATE_FRAME_SIZE, STATE_PAYLOAD_SIZE) or header[7] != calc:
+        if header[:5] != (0x56355348, 4, STATE_FRAME_SIZE, STATE_FRAME_SIZE, STATE_PAYLOAD_SIZE) or header[7] != calc:
             raise ReadyError("State ABI/SeqLock/CRC mismatch")
         if not status_shm_payload_valid(raw):
             raise ReadyError("State typed payload contract invalid")

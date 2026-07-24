@@ -12,7 +12,6 @@ DRIVE_ACTION_TIMEOUTS: Dict[str, float] = {
     "read": 45.0,
     "fault-reset": 45.0,
     "factory-reset": 90.0,
-    "feedforward": 180.0,
     "set-drive": 180.0,
     "axis-zero": 20.0,
 }

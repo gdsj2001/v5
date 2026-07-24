@@ -141,6 +141,21 @@ def check_settings_runtime_schema_guard() -> int:
     except Exception as exc:
         print(f"SETTINGS_RUNTIME_GUARD_REJECTED_GOOD: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
+    migration_payload = {
+        "schema": module.SETTINGS_RUNTIME_SCHEMA,
+        "axes": [{
+            "axis": "X",
+            "velocity_feedforward_evidence": {"gain_after_reset_raw": 0},
+            "keep": {"value": 7},
+        }],
+    }
+    migrated = module.sanitize_settings_runtime_drive_only(migration_payload)
+    if (
+        "velocity_feedforward_evidence" in migrated["axes"][0]
+        or migrated["axes"][0].get("keep") != {"value": 7}
+    ):
+        print("SETTINGS_RUNTIME_RETIRED_DRIVE_TUNING_MIGRATION_FAILED", file=sys.stderr)
+        return 1
     try:
         module.validate_settings_runtime_drive_only(bad_payload)
     except module.DriveActionError:
@@ -150,6 +165,69 @@ def check_settings_runtime_schema_guard() -> int:
         return 1
     print("SETTINGS_RUNTIME_GUARD_ACCEPTED_FORBIDDEN_WCS", file=sys.stderr)
     return 1
+
+
+def check_retired_drive_tuning_chain() -> int:
+    drive_dir = ROOT / "services" / "drive_profile"
+    forbidden_files = (
+        drive_dir / "v5_drive_feedforward_action.py",
+        drive_dir / "v5_drive_feedforward_recovery.py",
+        drive_dir / "v5_drive_feedforward_action_smoke.py",
+        drive_dir / "v5_drive_feedforward_recovery_smoke.py",
+    )
+    for path in forbidden_files:
+        if path.exists():
+            print(
+                f"RETIRED_DRIVE_TUNING_FILE_SURVIVOR: {path.relative_to(ROOT)}",
+                file=sys.stderr,
+            )
+            return 1
+    forbidden_tokens = (
+        "drive_velocity_feedforward_commission",
+        "drive.read_velocity_feedforward_source",
+        "drive.read_velocity_feedforward_filter",
+        "drive.read_velocity_feedforward_gain",
+        "drive.write_velocity_feedforward_gain",
+        "drive.read_communication_eeprom_policy",
+        "drive.write_communication_eeprom_policy",
+    )
+    consumers = (
+        drive_dir / "v5_drive_bus_action.py",
+        drive_dir / "v5_settings_actiond.py",
+        drive_dir / "v5_settings_action_runtime.py",
+        drive_dir / "v5_settings_action_contract.py",
+        ROOT / "config" / "deploy" / "v5_runtime_deploy_manifest.tsv",
+        ROOT / "config" / "drive-profiles" / "public" / "driver_profile_map.json",
+        ROOT / "config" / "drive-profiles" / "private" /
+        "535e661e9ea313143fed0d86e9d982368ca9a70c7062823e25560f34ceef7f9d_driver_profile_map.json",
+        ROOT / "tools" / "ci" / "run_v5_host_gate.ps1",
+    )
+    for path in consumers:
+        text = path.read_text(encoding="utf-8", errors="strict")
+        for token in forbidden_tokens:
+            if token in text:
+                print(
+                    f"RETIRED_DRIVE_TUNING_TOKEN_SURVIVOR: "
+                    f"{path.relative_to(ROOT)}:{token}",
+                    file=sys.stderr,
+                )
+                return 1
+    installer = (
+        ROOT / "tools" / "deploy" / "install_v5_runtime.sh"
+    ).read_text(encoding="utf-8", errors="strict")
+    for required in (
+        "cleanup_retired_drive_tuning_files",
+        "/usr/libexec/8ax/drive_profile/v5_drive_feedforward_action.py",
+        "/usr/libexec/8ax/drive_profile/v5_drive_feedforward_recovery.py",
+        "velocity_feedforward_evidence",
+    ):
+        if required not in installer:
+            print(
+                f"RETIRED_DRIVE_TUNING_CLEANUP_MISSING: {required}",
+                file=sys.stderr,
+            )
+            return 1
+    return 0
 
 
 def check_remote_relay_access_control() -> int:
@@ -1446,7 +1524,7 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         print("ALL_SCOPE_CPU_POLICY_BEFORE_BACKEND_MISSING", file=sys.stderr)
         rc = 1
     barrier_call = "\n    wait_publisher_actual_barrier\n"
-    if installer_text.count(barrier_call) != 7:
+    if installer_text.count(barrier_call) != 8:
         print("PUBLISHER_ACTUAL_BARRIER_CALL_COUNT_INVALID", file=sys.stderr)
         rc = 1
     if installer_text.count("\n  wait_publisher_actual_barrier\n") != 1:
@@ -1469,7 +1547,7 @@ def check_linuxcnc_rtapi_affinity_owner() -> int:
         ("ethercat", 'elif [ "$restart_scope" = "ethercat" ]',
          'elif [ "$restart_scope" = "wcs" ]', True),
         ("wcs", 'elif [ "$restart_scope" = "wcs" ]',
-         'elif [ "$restart_scope" = "cpu_policy" ]', True),
+         'elif [ "$restart_scope" = "runtime_startup" ]', True),
         ("cpu_policy", 'elif [ "$restart_scope" = "cpu_policy" ]',
          'elif [ "$restart_scope" = "settings" ]', True),
         ("settings", 'elif [ "$restart_scope" = "settings" ]',
@@ -3235,8 +3313,6 @@ def check_product_runtime_closure_policy() -> int:
         "module\tservices/drive_profile/v5_drive_enable_window.py\t/usr/libexec/8ax/drive_profile/v5_drive_enable_window.py\t0644",
         "module\tservices/drive_profile/v5_drive_bus_apply_action.py\t/usr/libexec/8ax/drive_profile/v5_drive_bus_apply_action.py\t0644",
         "module\tservices/drive_profile/v5_drive_bus_reset_action.py\t/usr/libexec/8ax/drive_profile/v5_drive_bus_reset_action.py\t0644",
-        "module\tservices/drive_profile/v5_drive_feedforward_action.py\t/usr/libexec/8ax/drive_profile/v5_drive_feedforward_action.py\t0644",
-        "module\tservices/drive_profile/v5_drive_feedforward_recovery.py\t/usr/libexec/8ax/drive_profile/v5_drive_feedforward_recovery.py\t0644",
         "module\tservices/drive_profile/v5_drive_axis_zero.py\t/usr/libexec/8ax/drive_profile/v5_drive_axis_zero.py\t0644",
         "module\tservices/drive_profile/v5_drive_runtime_schema.py\t/usr/libexec/8ax/drive_profile/v5_drive_runtime_schema.py\t0644",
         "module\tservices/ui/v5_remote_ui_relay_access.py\t/usr/libexec/8ax/v5_remote_ui_relay_access.py\t0644",
@@ -3386,7 +3462,7 @@ def check_product_runtime_closure_policy() -> int:
         'rtapi_app:T#*)',
         '/usr/bin/taskset -pc 1 "$tid"',
         "Cpus_allowed_list:",
-        "  pin_userspace_housekeeping_to_cpu1\n",
+        "  if ! pin_userspace_housekeeping_to_cpu1; then",
         '"$COMMAND_GATE" start >>"$LOGFILE" 2>&1 &',
         '"$ACTIOND" start >>"$LOGFILE" 2>&1 &',
         'start_publishers_after_data_ready >>"$LOGFILE" 2>&1 &',
@@ -3506,6 +3582,7 @@ def main() -> int:
         check_ethercat_device_permission_policy() |
         check_tcf_retirement_policy() |
         check_settings_runtime_schema_guard() |
+        check_retired_drive_tuning_chain() |
         check_settings_actiond_socket_policy() |
         check_remote_relay_access_control() |
         check_cc_golden_model_specific_motion() |
