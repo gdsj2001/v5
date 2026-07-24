@@ -99,6 +99,10 @@ int main(void)
     char program_source_sha256[65];
     int ok;
 
+    if (V5_PROGRAM_RUNTIME_MAX_GCODE_BYTES != 64u * 1024u * 1024u) {
+        return 23;
+    }
+
     if (!v5_program_runtime_write_input(path)) {
         return 1;
     }

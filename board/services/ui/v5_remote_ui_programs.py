@@ -12,7 +12,7 @@ from pathlib import Path
 
 PROGRAM_SCHEMA_PREFIX = "v5.remote_program"
 DEFAULT_PROGRAM_ROOT = Path("/opt/8ax/v5/gcode/golden")
-MAX_GCODE_BYTES = 2 * 1024 * 1024
+MAX_GCODE_BYTES = 64 * 1024 * 1024
 MAX_EDIT_BYTES = 1024 * 1024
 SUPPORTED_EXTENSIONS = frozenset({".ngc", ".nc", ".tap", ".gcode"})
 
@@ -80,7 +80,7 @@ class ProgramFileService:
         if not payload:
             raise ProgramApiError(400, "program_file_empty", "不能上传空的 G-code 文件。")
         if len(payload) > MAX_GCODE_BYTES:
-            raise ProgramApiError(413, "program_file_size_limit_exceeded", "G-code 文件超过板端 2 MiB 上限。")
+            raise ProgramApiError(413, "program_file_size_limit_exceeded", "G-code 文件超过板端 64 MiB 上限。")
         expected = expected_sha256.strip().lower()
         if len(expected) != 64 or any(ch not in "0123456789abcdef" for ch in expected):
             raise ProgramApiError(400, "program_sha256_invalid", "上传请求缺少有效的 SHA256。")

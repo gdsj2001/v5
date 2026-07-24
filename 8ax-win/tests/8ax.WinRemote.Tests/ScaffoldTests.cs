@@ -1061,6 +1061,8 @@ static void VerifyOperatorButtonsContract()
     Require(true, relayClient.Contains("remote/program/list", StringComparison.Ordinal), "relay client calls program list endpoint");
     Require(true, relayClient.Contains("remote/program/file", StringComparison.Ordinal), "relay client calls program file endpoint");
     Require(true, relayClient.Contains("overwrite=", StringComparison.Ordinal), "relay client sends overwrite flag");
+    Require(true, relayClient.Contains("MaxProgramFileBytes = 64L * 1024 * 1024", StringComparison.Ordinal), "gcode upload limit is 64 MiB");
+    Require(true, relayClient.Contains("64 MiB", StringComparison.Ordinal), "gcode upload limit message is 64 MiB");
     Require(true, relayClient.Contains("remote/ota/upgrade", StringComparison.Ordinal), "relay client calls OTA upgrade endpoint");
     Require(true, readme.Contains("GET /remote/diagnostics", StringComparison.Ordinal) && readme.Contains("diagnostic summary", StringComparison.Ordinal), "README documents read-log button");
     Require(true, readme.Contains("indented, wrapped", StringComparison.Ordinal), "README documents wrapped diagnostics display");

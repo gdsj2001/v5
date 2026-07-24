@@ -141,6 +141,12 @@ available to the board program list, which refreshes from the same directory.
 Any later program-open/run action must still go through the existing board
 UI/operator command path.
 
+The G-code upload and Program Open single-file limit is exactly `64 MiB`
+(`67,108,864 bytes`) across WinRemote, the relay Content-Length/body checks,
+the board file service, and the board program runtime. Empty files and files
+larger than that limit are rejected; the remote text-edit window keeps its
+separate smaller edit limit.
+
 The bottom `閹垫挸绱戠化鑽ょ埠G娴狅絿鐖渀 button opens a local-directory style board program
 window. It uses `GET /remote/program/list` to display the current board G-code
 files, `GET /remote/program/file?filename=<name>&content=1` to open a selected

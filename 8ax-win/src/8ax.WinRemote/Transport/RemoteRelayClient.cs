@@ -12,7 +12,7 @@ namespace EightAxis.WinRemote.Transport;
 
 public sealed class RemoteRelayClient : IRemoteTransport, IDisposable
 {
-    private const long MaxProgramFileBytes = 2L * 1024 * 1024;
+    private const long MaxProgramFileBytes = 64L * 1024 * 1024;
     private static readonly TimeSpan StreamConnectTimeout = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan InputConnectTimeout = TimeSpan.FromSeconds(2);
     private const string ClientTimeUnixMsHeader = "X-8ax-Client-Time-Unix-Ms";
@@ -121,7 +121,7 @@ public sealed class RemoteRelayClient : IRemoteTransport, IDisposable
         }
         if (contentLength > MaxProgramFileBytes)
         {
-            throw new ArgumentOutOfRangeException(nameof(contentLength), "G-code 文件超过板端 2 MiB 上限。");
+            throw new ArgumentOutOfRangeException(nameof(contentLength), "G-code 文件超过板端 64 MiB 上限。");
         }
         if (sha256.Length != 64 || sha256.Any(ch => !Uri.IsHexDigit(ch)))
         {

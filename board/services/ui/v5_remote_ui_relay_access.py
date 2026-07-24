@@ -327,7 +327,7 @@ class RemoteRelayAccessMixin:
             if content_length <= 0:
                 raise ProgramApiError(400, "program_file_empty", "不能上传空的 G-code 文件。")
             if content_length > MAX_GCODE_BYTES:
-                raise ProgramApiError(413, "program_file_size_limit_exceeded", "G-code 文件超过板端 2 MiB 上限。")
+                raise ProgramApiError(413, "program_file_size_limit_exceeded", "G-code 文件超过板端 64 MiB 上限。")
             payload = self.rfile.read(content_length)
             if len(payload) != content_length:
                 raise ProgramApiError(400, "program_upload_incomplete", "上传连接提前结束，板端未收到完整文件。")

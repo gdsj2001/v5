@@ -7,7 +7,7 @@
 #include <stddef.h>
 
 #define V5_PROGRAM_PREVIEW_POINT_COUNT 512u
-#define V5_PROGRAM_RUNTIME_MAX_GCODE_BYTES (2u * 1024u * 1024u)
+#define V5_PROGRAM_RUNTIME_MAX_GCODE_BYTES (64u * 1024u * 1024u)
 
 #ifdef __cplusplus
 extern "C" {

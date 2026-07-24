@@ -5,7 +5,12 @@ import hashlib
 import tempfile
 from pathlib import Path
 
-from v5_remote_ui_programs import MAX_EDIT_BYTES, ProgramApiError, ProgramFileService
+from v5_remote_ui_programs import (
+    MAX_EDIT_BYTES,
+    MAX_GCODE_BYTES,
+    ProgramApiError,
+    ProgramFileService,
+)
 
 
 def expect_error(code: str, action) -> None:
@@ -19,6 +24,7 @@ def expect_error(code: str, action) -> None:
 
 
 def main() -> int:
+    assert MAX_GCODE_BYTES == 64 * 1024 * 1024
     with tempfile.TemporaryDirectory(prefix="v5-remote-programs-") as temporary:
         root = Path(temporary) / "gcode" / "golden"
         service = ProgramFileService(root)
@@ -45,6 +51,31 @@ def main() -> int:
         expect_error("program_extension_not_allowed", lambda: service.stat_file("notes.txt"))
         expect_error("program_file_empty", lambda: service.upload("empty.ngc", b"", hashlib.sha256(b"").hexdigest(), overwrite=False))
         expect_error("program_sha256_mismatch", lambda: service.upload("bad.ngc", payload, "0" * 64, overwrite=False))
+
+        over_legacy_limit = b"G" * (2 * 1024 * 1024 + 1)
+        over_legacy_sha = hashlib.sha256(over_legacy_limit).hexdigest()
+        accepted_large = service.upload(
+            "over_legacy_limit.tap",
+            over_legacy_limit,
+            over_legacy_sha,
+            overwrite=False,
+        )
+        assert accepted_large["size_bytes"] == len(over_legacy_limit)
+        assert service.delete("over_legacy_limit.tap")["deleted"] is True
+
+        class OversizePayload:
+            def __len__(self) -> int:
+                return MAX_GCODE_BYTES + 1
+
+        expect_error(
+            "program_file_size_limit_exceeded",
+            lambda: service.upload(
+                "too_large.tap",
+                OversizePayload(),  # type: ignore[arg-type]
+                "0" * 64,
+                overwrite=False,
+            ),
+        )
 
         replacement = b"G1 X1\nM2\n"
         replacement_sha = hashlib.sha256(replacement).hexdigest()
